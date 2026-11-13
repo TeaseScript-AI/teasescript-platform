@@ -524,3 +524,39 @@ test("the host global at a position, the unknown the table admits: its instructi
     }
   assert.ok(judged > 0);
 });
+
+test("the host global at a position, where the run ends before its instruction's check: as today's run, in every mode", () => {
+  // each run fails at the producer (`[…][4]`, a list read past its end), whichever value the host global holds
+  for (const [source, producer, position] of [
+    // the run does not reach the command
+    ["let a = [1][4]\nopenUrl hostValue\nexit\n", "[1][4]", "url"],
+    // an earlier operand of the same command fails before the command checks the host global's value
+    [
+      'openUrl ["https://example.com"][4], alwaysButton: hostValue\nexit\n',
+      '["https://example.com"][4]',
+      "alwaysButton",
+    ],
+  ] as const) {
+    const files = [{ path: "main.tease", source }];
+    const takes = operandRules("openUrlStatement")![position]!.takes;
+    assert.ok(
+      DOMAIN.some((hostValue) => !takes.includes(kindOf(hostValue))),
+      source,
+    );
+    const today = compileProject(files, { globals: ["hostValue"] });
+    assert.ok(today.plan !== null, source);
+    const start = source.indexOf(producer);
+    for (const mode of HELD_MODES) {
+      const { plan } = mode.run(() =>
+        compileProjectWithBackend(files, { globals: ["hostValue"] }, CORE_BACKEND),
+      );
+      assert.ok(plan !== null, `${source} [${mode.name}]`);
+      for (const hostValue of DOMAIN) {
+        const at = `${source} [${mode.name}] with ${JSON.stringify(hostValue)}`;
+        const ran = runGlobals(plan, { hostValue });
+        assert.equal(ran.failure?.endsWith(`@${start}:${start + producer.length}`), true, at);
+        assert.deepEqual(ran, runGlobals(today.plan, { hostValue }), at);
+      }
+    }
+  }
+});
