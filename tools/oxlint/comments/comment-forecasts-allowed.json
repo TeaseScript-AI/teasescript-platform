@@ -1,10 +1,5 @@
 [
   {
-    "file": "src/type-inference/core/answers.ts",
-    "form": "until a package or stage",
-    "text": "until stage 3b"
-  },
-  {
     "file": "tests/helpers/type-core/stop/type-core-contract-knowledge.ts",
     "form": "until #N",
     "text": "until #1597"

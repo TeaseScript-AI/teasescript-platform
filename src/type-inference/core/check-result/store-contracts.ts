@@ -15,9 +15,10 @@ import { typePlan } from "../../../type-plans.js";
 import { lazyDefaultArgument } from "../../../lazy-defaults.js";
 import { type ValueKind, VALUE_KIND_NAMES } from "../../../value-kinds.js";
 import type { PlaceId, TypeTerm } from "../../graph.js";
-import { type Answers, type ValueAnswer, type AdmittedType, closedType } from "../answers.js";
+import { type Answers, type ValueAnswer, type AdmittedType } from "../answers.js";
 import { joinSteps } from "../budget.js";
 import {
+  closedType,
   ContractDescriptors,
   type ContractResult,
   levelProof,
