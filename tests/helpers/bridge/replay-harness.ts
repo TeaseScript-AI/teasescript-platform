@@ -313,7 +313,7 @@ const presented =
       ? { session, outcome: { kind: "staleAction", actionId: args["actionId"] } }
       : answer(session, args);
 
-export const ADAPTER_OPS = {
+const ADAPTER_OPS = {
   observeTime: (session, args) => {
     // EVIDENCE: validation: the host accepted `atMs` as a scene time (`ops/session.ts`).
     const atMs = args["atMs"] as number;
@@ -415,7 +415,7 @@ export const ADAPTER_OPS = {
 } satisfies Readonly<Record<string, AdapterCall>>;
 
 /** `ADAPTER_OPS` by op name, for a request whose op is a string: `undefined` for an op the oracle has no path for. */
-export function adapterCall(op: string): AdapterCall | undefined {
+function adapterCall(op: string): AdapterCall | undefined {
   const calls: Readonly<Record<string, AdapterCall>> = ADAPTER_OPS;
   return Object.hasOwn(calls, op) ? calls[op] : undefined;
 }
