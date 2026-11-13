@@ -703,10 +703,8 @@ export interface Answers {
  * past the work allowance or a read chain's depth the analysis stops proving, and statements nested past the nesting
  * limit are not proved at all; what a pass whose admission had settled found stays (else every unit is finished from a
  * fresh pass), every check it did not decide runs when the script runs, and one warning says so (`finished`).
- * `stopped`: the analysis stops at its start, as a question after an analysis that crossed the allowance stops it (the
- * candidate route).
  */
-export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit): Answers {
+export function analyseCore(request: CoreAnalysisRequest): Answers {
   const program = new CoreProgram(request);
   let analysed: { readonly pass: CorePass; readonly consumers: Consumers } | null = null;
   let rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map();
@@ -714,105 +712,103 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
   // #1275: the stores below a selection, their targets by the receivers each pass admits; new targets start the passes
   // again from no rejection, and targets a pass has used before are kept (no cycle of targets)
   let targets: StoreTargets = Retained.map("DefinitionIndex.storeTargets");
-  if (stopped !== undefined) program.work.stop(stopped);
-  else
-    try {
-      program.index();
-      // the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
-      // whose changing stores stay possibilities. A pass in which a decision stops is not settled either
-      // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-180): the next, from the same
-      // rejected set, starts with every stopped key stopped, once per rejected set; a decision stopping in that pass
-      // again stops the analysis, as the work allowance does
-      // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183)
-      let cycling: ReadonlySet<number> = new Set();
-      const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
-      const selecting = selectingStores(program);
-      const used = new Set<string>();
-      for (let last = false, restarted = false; ;) {
-        const [passRejected, passTargets] = [rejected, targets];
-        const pass = createPass(program, passRejected, stops, passTargets);
-        // (its targets' receivers are decided where they can stop: every place may, until they are, #1599)
-        pass.contract.targetsDecide = selecting.length > 0 && !last;
-        // (the targets the pass's admission gives, asked before its walk: new ones start the passes again, and a pass
-        // that stops before them settles nothing, its finishing path keying by them)
-        const asked: { next: StoreTargets | null } = { next: null };
-        const consumers = new Consumers(
-          pass,
-          rejected,
-          cycling,
-          last,
-          false,
-          restarted,
-          (admission, decide) => {
-            if (selecting.length === 0 || last) return true;
-            used.add(targetsText(targets));
-            const next = storeTargets(program, pass, admission, decide, selecting);
-            if (used.has(targetsText(next))) return true;
-            asked.next = next;
-            return false;
-          },
-          // (the pass's own inputs without its frozen keys, for the receiving closure's completion pass, #1526:
-          // nothing there is frozen, so nothing is unfrozen and no cache of it holds a frozen key's answer)
-          (): CompletionPass => {
-            const completing = createPass(program, passRejected, [], passTargets, true);
-            return {
-              pass: completing,
-              retargeted: (admission) =>
-                retargeted(program, completing, admission, selecting, passTargets),
-            };
-          },
-        );
-        analysed = { pass, consumers };
-        consumers.check();
-        if (consumers.stopped !== null) {
-          targets = asked.next ?? targets;
-          break;
-        }
-        const stoppedMore = pass.contract.stoppedCount > stops.length;
-        if (stoppedMore) {
-          program.work.charge("stopPasses");
-          stops = pass.contract.stoppedKeys();
-        }
-        if (asked.next !== null) {
-          program.work.charge("rejectPasses");
-          targets = asked.next;
-          rejected = new Map();
-          cycling = new Set();
-          sets.splice(0, sets.length, rejected);
-          restarted = stoppedMore;
-          continue;
-        }
-        if (stoppedMore) {
-          restarted = true;
-          continue;
-        }
-        restarted = false;
-        const now = consumers.admission.newlyRejected;
-        if (last || sameSet(now, rejected)) break;
-        program.work.charge("rejectPasses");
-        const repeated = sets.findIndex((set) => sameSet(set, now));
-        if (repeated >= 0) {
-          // the stores every set of the cycle rejects stay rejected, the others are its possibilities
-          const cycle = sets.slice(repeated);
-          const every = new Map<number, ReadonlySet<Key>>();
-          const some = new Set<number>();
-          for (const set of cycle)
-            for (const [uid, keys] of set)
-              if (cycle.every((other) => other.has(uid))) every.set(uid, keys);
-              else some.add(uid);
-          rejected = every;
-          cycling = some;
-          last = true;
-          continue;
-        }
-        rejected = now;
-        sets.push(rejected);
+  try {
+    program.index();
+    // the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
+    // whose changing stores stay possibilities. A pass in which a decision stops is not settled either
+    // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-180): the next, from the same
+    // rejected set, starts with every stopped key stopped, once per rejected set; a decision stopping in that pass
+    // again stops the analysis, as the work allowance does
+    // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183)
+    let cycling: ReadonlySet<number> = new Set();
+    const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
+    const selecting = selectingStores(program);
+    const used = new Set<string>();
+    for (let last = false, restarted = false; ;) {
+      const [passRejected, passTargets] = [rejected, targets];
+      const pass = createPass(program, passRejected, stops, passTargets);
+      // (its targets' receivers are decided where they can stop: every place may, until they are, #1599)
+      pass.contract.targetsDecide = selecting.length > 0 && !last;
+      // (the targets the pass's admission gives, asked before its walk: new ones start the passes again, and a pass
+      // that stops before them settles nothing, its finishing path keying by them)
+      const asked: { next: StoreTargets | null } = { next: null };
+      const consumers = new Consumers(
+        pass,
+        rejected,
+        cycling,
+        last,
+        false,
+        restarted,
+        (admission, decide) => {
+          if (selecting.length === 0 || last) return true;
+          used.add(targetsText(targets));
+          const next = storeTargets(program, pass, admission, decide, selecting);
+          if (used.has(targetsText(next))) return true;
+          asked.next = next;
+          return false;
+        },
+        // (the pass's own inputs without its frozen keys, for the receiving closure's completion pass, #1526:
+        // nothing there is frozen, so nothing is unfrozen and no cache of it holds a frozen key's answer)
+        (): CompletionPass => {
+          const completing = createPass(program, passRejected, [], passTargets, true);
+          return {
+            pass: completing,
+            retargeted: (admission) =>
+              retargeted(program, completing, admission, selecting, passTargets),
+          };
+        },
+      );
+      analysed = { pass, consumers };
+      consumers.check();
+      if (consumers.stopped !== null) {
+        targets = asked.next ?? targets;
+        break;
       }
-    } catch (error) {
-      // a stop in the setup or in a pass's own setup, outside the consumers' walk
-      if (!(error instanceof BudgetExhausted)) throw error;
-      program.work.stop(error.limit);
+      const stoppedMore = pass.contract.stoppedCount > stops.length;
+      if (stoppedMore) {
+        program.work.charge("stopPasses");
+        stops = pass.contract.stoppedKeys();
+      }
+      if (asked.next !== null) {
+        program.work.charge("rejectPasses");
+        targets = asked.next;
+        rejected = new Map();
+        cycling = new Set();
+        sets.splice(0, sets.length, rejected);
+        restarted = stoppedMore;
+        continue;
+      }
+      if (stoppedMore) {
+        restarted = true;
+        continue;
+      }
+      restarted = false;
+      const now = consumers.admission.newlyRejected;
+      if (last || sameSet(now, rejected)) break;
+      program.work.charge("rejectPasses");
+      const repeated = sets.findIndex((set) => sameSet(set, now));
+      if (repeated >= 0) {
+        // the stores every set of the cycle rejects stay rejected, the others are its possibilities
+        const cycle = sets.slice(repeated);
+        const every = new Map<number, ReadonlySet<Key>>();
+        const some = new Set<number>();
+        for (const set of cycle)
+          for (const [uid, keys] of set)
+            if (cycle.every((other) => other.has(uid))) every.set(uid, keys);
+            else some.add(uid);
+        rejected = every;
+        cycling = some;
+        last = true;
+        continue;
+      }
+      rejected = now;
+      sets.push(rejected);
     }
+  } catch (error) {
+    // a stop in the setup or in a pass's own setup, outside the consumers' walk
+    if (!(error instanceof BudgetExhausted)) throw error;
+    program.work.stop(error.limit);
+  }
   // the written types' own errors (V30 §13's union rule), from the declarations alone
   const written = writtenTypeErrors(request.files.map((file) => file.program));
   if (program.work.stopped !== null) return finished(program, analysed, rejected, targets, written);
