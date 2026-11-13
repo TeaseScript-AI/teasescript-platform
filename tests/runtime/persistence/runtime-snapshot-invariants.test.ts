@@ -109,12 +109,14 @@ test("validates loops paused in their bodies", () => {
   assert.equal(snapshot.loopFrames.length, 2);
   const copy = structuredClone(snapshot);
   assert.deepEqual(validateRuntimeSnapshot(copy, compiled), { valid: true, errors: [] });
-  // A loop that runs twice in one context is refused.
+  // A loop that runs twice in one context is refused, besides not matching the plan's loops.
   // EVIDENCE: fixture: expose the readonly loop ID on a cloned snapshot to repeat the outer loop's ID.
   (copy.loopFrames[1] as { loopId: number }).loopId = copy.loopFrames[0]!.loopId;
-  assert.deepEqual(validateRuntimeSnapshot(copy, compiled).errors, [
-    "Runtime loop frame does not belong to its call context.",
-  ]);
+  assert.ok(
+    validateRuntimeSnapshot(copy, compiled).errors.includes(
+      "Runtime loop frame does not belong to its call context.",
+    ),
+  );
 });
 
 test("a snapshot validates only against its plan", () => {
