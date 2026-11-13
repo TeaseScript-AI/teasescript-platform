@@ -148,7 +148,7 @@ decision scans unchanged.
 
 **A decider region holds paths as parent-linked step nodes.**
 
-**Rule.** A `regionOf` path in `admission/transfers.ts` is a `RegionPath` node one step below its parent, never an array
+**Rule.** A `regionOf` path in `admission/transfers/regions.ts` is a `RegionPath` node one step below its parent, never an array
 or text. `forEachPath` follows the decided path's rest node by node, each node remembers its path's distinct values, and
 `holdsWritten` reads the two facts recorded when the region is made. Path equality remains exactly the former text
 equality, because a step contains no dot; preserve the former region's charges to the unit.

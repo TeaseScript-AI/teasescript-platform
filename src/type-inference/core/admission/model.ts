@@ -439,7 +439,7 @@ export interface View {
 /**
  * One task of the store walk by its value, node and strip alone (`expand`), its own recipe: what it stands as at its
  * own path and the parts the walk takes below it, each a task of its own, whatever reached it. A walk (`stopsOf`) and
- * every transfer read over it (`admission/transfers.ts`) take a task's recipe once per pass.
+ * every transfer read over it (`admission/transfers/`) take a task's recipe once per pass.
  */
 export interface Expansion {
   readonly id: number;

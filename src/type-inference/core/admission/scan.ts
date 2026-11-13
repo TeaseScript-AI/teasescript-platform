@@ -43,7 +43,8 @@ import type {
   View,
 } from "./model.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
-import { deciderRoot, literalRoute, transferredDecider, writtenDecider } from "./transfers.js";
+import { deciderRoot, literalRoute, transferredDecider } from "./transfers/transferred-decider.js";
+import { writtenDecider } from "./transfers/written-decider.js";
 import {
   bodyOfRead,
   cellOfBody,

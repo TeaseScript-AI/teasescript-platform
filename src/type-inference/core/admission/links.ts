@@ -6,7 +6,7 @@ import type { Via } from "./model.js";
 import type { Reads } from "../inherited/reads.js";
 
 // The rules a decider reads of one operation and one value, shared by the stop scan (`scan.ts`) and the carriers'
-// transfers (`transfers.ts`): whether an operation gives an operand, whether a value runs, what snapshot it reads.
+// transfers (`transfers/`): whether an operation gives an operand, whether a value runs, what snapshot it reads.
 
 /**
  * Whether one operation gives the operand the walk took (`chosen`'s rule for a link), or `surely` gives it; its value

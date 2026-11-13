@@ -429,7 +429,7 @@ export class Solver {
   /**
    * How many times `forget` ran: within a pass a finished answer changes only there (`#finish` and `#solved` add keys
    * not yet kept), so a value derived outside the solver from its answers is current while this count is unchanged
-   * (#1444: the written-decider summary, `admission/transfers.ts`).
+   * (#1444: the written-decider summary, `admission/transfers/written-decider.ts`).
    */
   #forgets = 0;
   readonly #active = new Map<string, DemandNode>();

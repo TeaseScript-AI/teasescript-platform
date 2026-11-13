@@ -71,6 +71,7 @@ export const admissionFiles = (root) => [
   ...splitFiles(root, ADMISSION),
   ...folderFiles(root, `${CORE}/admission/landings`),
   ...folderFiles(root, `${CORE}/admission/literals`),
+  ...folderFiles(root, `${CORE}/admission/transfers`),
   ...folderFiles(root, `${CORE}/inherited`),
 ];
 
