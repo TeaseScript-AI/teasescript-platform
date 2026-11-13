@@ -477,14 +477,18 @@ test("the old line form and pure-move-check's side are refused by name, and a CR
   );
   assert.equal(crlf.status, 1, crlf.err);
   assert.match(crlf.out, /^declared: tools\/refs\.mjs:1: /mu);
-  const lone = r.run(
-    r.base,
-    "--declare",
-    r.json("lone", [
-      { file: "tools/refs.mjs", text: 'const lone = "/a/util.js";\rconst after = 1;', reason },
-    ]),
-  );
-  assert.equal(lone.status, 2);
+  // (neither by pure-move-check's text of the line, which holds the lone CR, nor by the part before it)
+  for (const text of [
+    'const lone = "/a/util.js";\rconst after = 1;',
+    'const lone = "/a/util.js";',
+  ]) {
+    const lone = r.run(
+      r.base,
+      "--declare",
+      r.json("lone", [{ file: "tools/refs.mjs", text, reason }]),
+    );
+    assert.equal(lone.status, 2, text);
+  }
 });
 
 test("the map derived from the change is the map passed for the same move", (t) => {
