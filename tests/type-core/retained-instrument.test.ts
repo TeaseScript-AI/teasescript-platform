@@ -822,3 +822,84 @@ test("the program's walk refuses an own accessor, whose result it does not see",
   ]);
   assert.deepEqual(steps, ["refused"]);
 });
+
+test("a made collection's writers are exactly the storing methods its runtime has", () => {
+  withRetainedRecorder(new RetainedInstrument(), () => {
+    const made = [
+      ["map", Retained.map<string, number>("T.writers"), Map.prototype],
+      ["set", Retained.set<string>("T.writers"), Set.prototype],
+      ["weakMap", Retained.weakMap<object, number>("T.writers"), WeakMap.prototype],
+      ["weakSet", Retained.weakSet<object>("T.writers"), WeakSet.prototype],
+    ] as const;
+    for (const [kind, collection, prototype] of made)
+      assert.deepEqual(
+        Object.getOwnPropertyNames(collection).sort(),
+        COLLECTION_METHODS[kind].stores.filter((name) => name in prototype).sort(),
+        kind,
+      );
+  });
+});
+
+test("a made map's upserts answer as the native ones do: the key the runtime takes, a symbol weak key included", () => {
+  const weakKey = Symbol("weak");
+  const sequence = (map: Upserting, weak: Upserting) => [
+    map.getOrInsertComputed(-0, (key) => (Object.is(key, -0) ? 1 : 0)),
+    map.getOrInsert(0, 5),
+    weak.getOrInsert(weakKey, 1),
+    weak.getOrInsert(weakKey, 2),
+    weak.getOrInsertComputed(weakKey, () => 3),
+  ];
+  const native = sequence(upserting(new Map()), upserting(new WeakMap()));
+  let instrumented: number[] = [];
+  withRetainedRecorder(new RetainedInstrument(), () => {
+    instrumented = sequence(
+      upserting(Retained.map<number, number>("T.nativeUpserts")),
+      upserting(Retained.weakMap<object, number>("T.nativeWeakUpserts")),
+    );
+  });
+  assert.deepEqual(instrumented, native);
+  assert.deepEqual(native, [0, 0, 1, 1, 1]);
+});
+
+test("a program map's upsert reads an entry it holds, and refuses only an insert", () => {
+  const program = upserting(new Map<string, number>([["k", 1]]));
+  const { steps } = stepped(() => [
+    () => Retained.program({ program }),
+    () => assert.equal(program.getOrInsert("k", 2), 1),
+    () =>
+      assert.equal(
+        program.getOrInsertComputed("k", () => 2),
+        1,
+      ),
+    () => program.getOrInsert("j", 2),
+  ]);
+  assert.deepEqual(steps, ["ok", "ok", "ok", "refused"]);
+});
+
+test("a record's field `__proto__`, which would set its prototype, is refused where it is written or given", () => {
+  let record: Record<string, unknown> | undefined;
+  const { steps } = stepped(() => [
+    () => (record = Retained.record<Record<string, unknown>>("T.proto", { n: 0 })),
+    () => (record!["__proto__"] = { n: 0 }),
+    () =>
+      Retained.record(
+        "T.protoGiven",
+        Object.defineProperty({}, "__proto__", {
+          value: { n: 0 },
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        }),
+      ),
+  ]);
+  assert.deepEqual(steps, ["ok", "refused", "refused"]);
+});
+
+test("a function's own accessor is refused where it is registered or the program reaches it", () => {
+  const getter = () => Object.defineProperty(() => 0, "lazy", { get: () => ({ n: 0 }) });
+  const { steps } = stepped(() => [
+    () => Retained.closure("T.getter", getter()),
+    () => Retained.program({ fn: getter() }),
+  ]);
+  assert.deepEqual(steps, ["refused", "refused"]);
+});

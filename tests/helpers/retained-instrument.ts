@@ -172,6 +172,11 @@ const PROGRAM_WRITERS = new Map<unknown, readonly string[]>(
 // (taken before any test runs: an ordinary object's brand, which no built-in with internal state has)
 const TO_STRING = Object.prototype.toString;
 
+/** A maker's kind with its article, for a refusal's text. */
+function article(kind: "record" | "arena" | "array"): string {
+  return kind === "record" ? "a" : "an";
+}
+
 /** An object or a function: what a collection's key or member can hold beyond itself. */
 function isReference(value: unknown): value is object {
   return (typeof value === "object" && value !== null) || typeof value === "function";
@@ -306,33 +311,38 @@ function hasUpserts(
   return "getOrInsert" in prototype && "getOrInsertComputed" in prototype;
 }
 
-/** A weak map's `has` for any key: `false` for one that is no object, as the native reader answers. */
-function weakHas(this: WeakKey, key: unknown): boolean {
-  return isReference(key) && WeakMap.prototype.has.call(this, key);
-}
+/** The native `getOrInsertComputed` of maps and of weak maps, where the runtime has it. */
+const MAP_UPSERT = hasUpserts(Map.prototype) ? Map.prototype.getOrInsertComputed : null;
+const WEAK_MAP_UPSERT = hasUpserts(WeakMap.prototype)
+  ? WeakMap.prototype.getOrInsertComputed
+  : null;
 
 /**
- * A map's `getOrInsert` and `getOrInsertComputed` (#1072 review round 11), where the runtime has them: an entry it
- * lacks is stored through the map's own `set`, so it is checked as any store is, and the native method then reads it.
+ * A map's `getOrInsert` and `getOrInsertComputed` (#1072 review rounds 11 and 12), where the runtime has them. The
+ * native `getOrInsertComputed` decides whether the entry is new and under which key, and calls back only then: the
+ * entry is checked inside that callback, as the map's own `set` checks one, and observed after it is stored.
  */
-function upserts(
-  has: (this: WeakKey, key: unknown) => boolean,
-  set: (this: WeakKey, key: unknown, value: unknown) => WeakKey,
-  prototype: Map<unknown, unknown> | WeakMap<WeakKey, unknown>,
-): Readonly<Record<string, Method>> {
-  if (!hasUpserts(prototype)) return {};
-  const native = prototype;
+function upserts(native: GetOrInsertComputed | null): Readonly<Record<string, Method>> {
+  if (native === null) return {};
+  function upsert<V>(holder: WeakKey, key: unknown, make: (key: unknown) => V): V {
+    const made = MADE.get(holder)!;
+    const inserted: (readonly [unknown, V])[] = [];
+    const computed: (this: WeakKey, key: unknown, compute: (key: unknown) => V) => V = native!;
+    const value = computed.call(holder, key, (canonical) => {
+      const given = make(canonical);
+      made.instrument.stored(made, canonical, given, true);
+      inserted.push([canonical, given]);
+      return given;
+    });
+    for (const [stored, given] of inserted) WATCHERS.get(holder)?.(stored, given);
+    return value;
+  }
   return {
     getOrInsert<V>(this: WeakKey, key: unknown, value: V): V {
-      if (!has.call(this, key)) set.call(this, key, value);
-      const read: (this: WeakKey, key: unknown, value: V) => V = native.getOrInsert;
-      return read.call(this, key, value);
+      return upsert(this, key, () => value);
     },
     getOrInsertComputed<V>(this: WeakKey, key: unknown, compute: (key: unknown) => V): V {
-      if (!has.call(this, key)) set.call(this, key, compute(key));
-      const read: (this: WeakKey, key: unknown, compute: (key: unknown) => V) => V =
-        native.getOrInsertComputed;
-      return read.call(this, key, compute);
+      return upsert(this, key, compute);
     },
   };
 }
@@ -344,8 +354,8 @@ function upserts(
 const COLLECTION_WRITERS: Readonly<
   Record<"map" | "set" | "weakMap" | "weakSet", Readonly<Record<string, Method>>>
 > = {
-  map: { set: mapSet, ...upserts(Map.prototype.has, mapSet, Map.prototype) },
-  weakMap: { set: weakMapSet, ...upserts(weakHas, weakMapSet, WeakMap.prototype) },
+  map: { set: mapSet, ...upserts(MAP_UPSERT) },
+  weakMap: { set: weakMapSet, ...upserts(WEAK_MAP_UPSERT) },
   set: {
     add(this: WeakKey, value: unknown): WeakKey {
       const made = MADE.get(this)!;
@@ -449,6 +459,13 @@ export class RetainedInstrument implements RetainedRecorder {
    * `fn`'s own data properties' values (a frozen function's, fixed from its registration), but its `prototype`: the
    * template its calls make instances from (a generator's is no plain object), which the freeze keeps in place.
    */
+  /** A function's own accessor, refused where it is registered or walked: its getter's result is not seen. */
+  #refuseAccessors<T extends object>(fn: T, label: string): void {
+    for (const key of Reflect.ownKeys(fn))
+      if (!("value" in Object.getOwnPropertyDescriptor(fn, key)!))
+        this.#refuse(`an accessor \`${String(key)}\` of ${label}`);
+  }
+
   #ownValues<T extends object>(fn: T): unknown[] {
     return Reflect.ownKeys(fn).flatMap((key) => {
       const descriptor = Object.getOwnPropertyDescriptor(fn, key)!;
@@ -523,6 +540,7 @@ export class RetainedInstrument implements RetainedRecorder {
   public closure<T extends object>(name: string, fn: T): void {
     this.#registered.add(fn);
     Object.freeze(fn);
+    this.#refuseAccessors(fn, `function ${name}`);
     for (const value of this.#ownValues(fn)) this.#admit(value, `function ${name}`, false);
     this.#functions.push([name, fn]);
     this.#exercise(`function ${name}`);
@@ -560,6 +578,7 @@ export class RetainedInstrument implements RetainedRecorder {
       // as a registered function's is: admitted as registered, it is not walked again where it is stored)
       if (typeof value === "function") {
         Object.freeze(value);
+        this.#refuseAccessors(value, "a function the indexed program reaches");
         stack.push(...this.#ownValues(value));
         continue;
       }
@@ -585,12 +604,22 @@ export class RetainedInstrument implements RetainedRecorder {
       const writers = PROGRAM_WRITERS.get(prototype);
       if (writers !== undefined) {
         // (non-configurable and read-only, as a made collection's: none falls back to the native writer)
+        const refused = (writer: string): never =>
+          this.#raise(
+            `a write to the indexed program's collection (\`${writer}\`) at ${siteOf(new Error().stack)}`,
+          );
+        // (an upsert only reads an entry the map holds: the native method calls back, and so refuses, only to insert)
+        const upsert = prototype === Map.prototype ? MAP_UPSERT : null;
+        const held = value;
         for (const writer of writers)
           Object.defineProperty(value, writer, {
-            value: (): never =>
-              this.#raise(
-                `a write to the indexed program's collection (\`${writer}\`) at ${siteOf(new Error().stack)}`,
-              ),
+            value:
+              upsert !== null && writer.startsWith("getOrInsert")
+                ? <V>(key: unknown): V => {
+                    const read: (this: WeakKey, key: unknown, compute: () => V) => V = upsert;
+                    return read.call(held, key, () => refused(writer));
+                  }
+                : (): never => refused(writer),
             writable: false,
             configurable: false,
           });
@@ -688,18 +717,23 @@ export class RetainedInstrument implements RetainedRecorder {
     const prototype: unknown = Object.getPrototypeOf(given);
     if (kind === "record" ? !PLAIN.has(prototype) : prototype !== Array.prototype)
       this.#raise(
-        `${name}: a ${kind} is made from ${kind === "record" ? "an object" : "an array"} of another prototype`,
+        `${name}: ${article(kind)} ${kind} is made from ${kind === "record" ? "an object" : "an array"} of another prototype`,
       );
     for (const key of Reflect.ownKeys(given)) {
       if (kind !== "record" && key === "length") continue;
+      // (the copy assigns each field, and an assignment there sets the copy's prototype instead)
+      if (key === "__proto__")
+        this.#raise(`${name}: a field \`__proto__\` in what ${article(kind)} ${kind} is made from`);
       const descriptor = Object.getOwnPropertyDescriptor(given, key)!;
       if (!("value" in descriptor))
-        this.#raise(`${name}: an accessor \`${String(key)}\` in what a ${kind} is made from`);
+        this.#raise(
+          `${name}: an accessor \`${String(key)}\` in what ${article(kind)} ${kind} is made from`,
+        );
       if (kind !== "record" && (typeof key !== "string" || !INDEX.test(key)))
         this.#raise(`${name}: a field \`${String(key)}\` of what an ${kind} is made from`);
       if (!descriptor.writable || !descriptor.enumerable || !descriptor.configurable)
         this.#raise(
-          `${name}: a field \`${String(key)}\` of what a ${kind} is made from is not plain data`,
+          `${name}: a field \`${String(key)}\` of what ${article(kind)} ${kind} is made from is not plain data`,
         );
     }
     return retainedCopy(given);
@@ -732,6 +766,8 @@ export class RetainedInstrument implements RetainedRecorder {
     const write = <T extends object>(target: T, key: string | symbol, value: unknown): void => {
       if (kind === "record") {
         if (typeof key === "symbol") this.#raise(`${name}: a symbol field of a record`);
+        // (an assignment there runs the prototype's setter: the record's prototype changes, and no field is stored)
+        if (key === "__proto__") this.#raise(`${name}: a record's field \`__proto__\``);
       } else if (key === "length") {
         // EVIDENCE: invariant: an array's length is a number, which the native write checks.
         const length = value as number;
@@ -757,7 +793,9 @@ export class RetainedInstrument implements RetainedRecorder {
           !("value" in descriptor) &&
           (descriptor.get !== undefined || descriptor.set !== undefined)
         )
-          this.#raise(`${name}: an accessor \`${String(key)}\` defined on a ${kind}`);
+          this.#raise(
+            `${name}: an accessor \`${String(key)}\` defined on ${article(kind)} ${kind}`,
+          );
         write(target, key, descriptor.value);
         return Reflect.defineProperty(target, key, descriptor);
       },
@@ -766,8 +804,10 @@ export class RetainedInstrument implements RetainedRecorder {
         this.#outsideWrite(name);
         return Reflect.deleteProperty(target, key);
       },
-      setPrototypeOf: (): boolean => this.#raise(`${name}: a ${kind}'s prototype changed`),
-      preventExtensions: (): boolean => this.#raise(`${name}: a ${kind} made non-extensible`),
+      setPrototypeOf: (): boolean =>
+        this.#raise(`${name}: ${article(kind)} ${kind}'s prototype changed`),
+      preventExtensions: (): boolean =>
+        this.#raise(`${name}: ${article(kind)} ${kind} made non-extensible`),
     };
   }
 
