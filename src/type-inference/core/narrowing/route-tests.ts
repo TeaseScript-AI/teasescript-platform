@@ -48,7 +48,7 @@ interface Guarding {
  */
 interface ConditionFact {
   readonly text: string;
-  /** The tested read's refined location (N1's), where it is a stable path. */
+  /** The tested read's refined location (`locationOf`), where it is a stable path. */
   readonly location: string | null;
   readonly form: NarrowingForm;
   readonly from: number;
@@ -149,7 +149,10 @@ export interface Feasibility {
   readonly unentered: ReadonlySet<TreeBlock>;
   /** The statements that own such an arm. */
   readonly owners: readonly TreeStatement[];
-  /** Of `unentered`, the arms `#infeasible` proves no run enters (not `unavailable`): R2.2 item 4's arms. */
+  /**
+   * Of `unentered`, the arms `#infeasible` proves no run enters (not `unavailable`): those above which `entryHazards`
+   * marks nothing (r4-451).
+   */
   readonly infeasible: ReadonlySet<TreeBlock>;
   /** The bodies of the program's files: a promoting route stands in one (`NarrowingRoutes.#plain`). */
   readonly files: ReadonlySet<TreeBlock>;
@@ -159,8 +162,8 @@ export interface Feasibility {
    */
   readonly hazards: ReadonlyMap<number, readonly number[]>;
   /**
-   * `hazards` for an entry route (r4-451, R2.2 item 4): a statement inside an `infeasible` arm marks no statement above
-   * that arm; marks from its owner's own expressions, its entered arms and `unavailable` arms stay.
+   * `hazards` for an entry route (r4-451, under the program default): a statement inside an `infeasible` arm marks no
+   * statement above that arm; marks from its owner's own expressions, its entered arms and `unavailable` arms stay.
    */
   readonly entryHazards: ReadonlyMap<number, readonly number[]>;
   /**
@@ -177,7 +180,10 @@ interface OwnGuards {
   readonly reach: readonly number[];
 }
 
-/** The route rule's condition tests of one pass, each built on its first query; `NarrowingRoutes` extends it. */
+/**
+ * The route rule's condition tests of one pass, each built on its first query; `RouteCandidates` extends it, and
+ * through it `RouteEntries` and `NarrowingRoutes`.
+ */
 export class RouteTests {
   /** Per tested text, the `if`s and `while`s whose conditions test it (`#testing`), made on the first query. */
   #tested: Map<string, TreeStatement[]> | null = null;
@@ -212,13 +218,12 @@ export class RouteTests {
   }
 
   /**
-   * The tested-producer rule's one decision (V30 §13, the `call` warning; AD-1's "unless a check stands"): whether a
-   * check that removes `tag` from the text `text` stands, after `from`, on every route to the use at `node`. It holds
-   * only by the closed set of forms below; any other test form, arm, loop or way out counts as no check, and the route
-   * rule's error stands:
-   * - a test is N1's form (`testForms`) under `and`, `or`, `not` and parentheses (`#conditionFacts`);
-   * - the use is in an arm such a test guards from its start: an `if`'s `then` arm by its truth or its `else` arm by its
-   *   falsity, a `while`'s body by its truth;
+   * The tested-producer rule's one decision (V30 §13, the `call` warning; r4-444): whether a check that removes `tag`
+   * from the text `text` stands, after `from`, on every route to the use at `node`. It holds only by the closed set of
+   * forms below; any other test form, arm, loop or way out counts as no check, and the route rule's error stands:
+   * - a test is one of the narrowing forms (`testForms`) under `and`, `or`, `not` and parentheses (`#conditionFacts`);
+   * - the use is in an arm such a test guards from its start: an `if`'s `then` arm by its truth or its `else` arm by
+   *   its falsity, a `while`'s body by its truth;
    * - or it is in the test's own condition after it, where its truth (an `and`) or its falsity (an `or`) guards it;
    * - or it is after a statement of its block every route past which passed such a test, with no label between them
    *   (`#tests`).
@@ -265,9 +270,9 @@ export class RouteTests {
   /**
    * A text's tests of one offending kind, built once: the arms a test of the needed form guards from their start, and
    * the statements every route past which passed one: an `if` whose every live arm is guarded so, holds such a
-   * statement, or ends (`#ends`), with one arm not ending; a `while` whose falsity proves it and that no `break` leaves;
-   * and so on up through each `if` holding one. A loop or a `switch` holding one is not (a `break` or a `continue` may
-   * leave the body before it, and a loop's body may not run).
+   * statement, or ends (`#ends`), with one arm not ending; a `while` whose falsity proves it and that no `break`
+   * leaves; and so on up through each `if` holding one. A loop or a `switch` holding one is not (a `break` or a
+   * `continue` may leave the body before it, and a loop's body may not run).
    */
   #tests(text: string, tag: ItemTag): TextTests {
     this.#work.charge("indexSteps");
@@ -329,8 +334,8 @@ export class RouteTests {
 
   /**
    * The blocks that end on every route through them, found once bottom-up: one holding a statement that leaves
-   * (`ENDING`) or an `if` every live arm of which ends; never by a loop or a `switch`. And per block its labels' indexes
-   * (a `goto`'s way in).
+   * (`ENDING`) or an `if` every live arm of which ends; never by a loop or a `switch`. And per block its labels'
+   * indexes (a `goto`'s way in).
    */
   #ends(): Endings {
     this.#work.charge("indexSteps");
@@ -443,13 +448,13 @@ export class RouteTests {
   }
 
   /**
-   * The route rule's default (Sol's F2 on #1937, then Codex r6 and r7; the lead's ruling, narrowed by #1938): whether a
-   * live `if` arm of the program's admitted callables is infeasible by entry narrowing (N1's forms over the core's
-   * items, `#infeasible`) or has a stopped tested read. Where one is, `NarrowingRoutes.required` promotes only routes
-   * through arms runs enter (`feasibility`), by a certificate its own value proves; every other use keeps the warning.
-   * An uncalled function contributes no live arm. An arm it does not prove counts as feasible: a comparison that is
-   * constant outside N1's forms (`o.k == 1`), a loop's exit, a `switch` case, another location's test. One answer per
-   * program, from the `if`s `#testing` finds once.
+   * The route rule's default (#1937, narrowed by #1938): whether a live `if` arm of the program's admitted callables is
+   * one `#infeasible` does not answer `feasible`: infeasible by entry narrowing (the narrowing forms over the core's
+   * items), or a tested read's answer missing (`unavailable`). Where one is, `NarrowingRoutes.required` promotes only
+   * routes through arms runs enter (`feasibility`), by a certificate its own value proves; every other use keeps the
+   * warning. An uncalled function contributes no live arm. An arm it does not prove counts as feasible: a comparison
+   * that is constant outside the narrowing forms (`o.k == 1`), a loop's exit, a `switch` case, another location's test.
+   * One answer per program, from the `if`s `#testing` finds once.
    */
   protected *holdsInfeasible(): Work<boolean> {
     this.#work.charge("eventSteps");
@@ -559,12 +564,12 @@ export class RouteTests {
   }
 
   /**
-   * Whether an `if`'s arm or a `while`'s body is one no run enters (`infeasible`): a test of its condition (N1's form, `atEntry`) whose
-   * narrowing removes every kind its read holds at the condition. `unavailable`, which blocks the route rule's promotion
-   * (Sol's final F1 on #1937, the lead's ruling), where a tested read's answer is missing: a stopped decision's (the
-   * `budget` reason), an `unknown` without the `external` reason (admission lacking items, #2009, #2011), or empty.
-   * `feasible` where the kinds are known and the narrowing leaves some, or the read is external data: an `unknown` with
-   * the `external` reason is an answer, a value of any kind, so the arm is entered. One answer per arm.
+   * Whether an `if`'s arm or a `while`'s body is one no run enters (`infeasible`): a test of its condition (a narrowing
+   * form, `atEntry`) whose narrowing removes every kind its read holds at the condition. `unavailable`, which blocks
+   * the route rule's promotion (#1937), where a tested read's answer is missing: a stopped decision's (the `budget`
+   * reason), an `unknown` without the `external` reason (admission lacking items, #2009, #2011), or empty. `feasible`
+   * where the kinds are known and the narrowing leaves some, or the read is external data: an `unknown` with the
+   * `external` reason is an answer, a value of any kind, so the arm is entered. One answer per arm.
    */
   *#infeasible(arm: TreeBlock): Work<ArmFeasibility> {
     this.#work.charge("eventSteps");
@@ -619,10 +624,10 @@ export class RouteTests {
   }
 
   /**
-   * An `if`'s or a `while`'s condition's tests as facts (N1's forms, `testForms`), found once per statement by one walk
-   * of the condition: each test's form where it holds, guarding the rest of an `and` and, through every `and` above it,
-   * the `then` arm or the loop's body; its form where it fails, guarding the rest of an `or` and, through every `or`
-   * above it, the `else` arm or the way past; a `not` swaps the two.
+   * An `if`'s or a `while`'s condition's tests as facts (the narrowing forms, `testForms`), found once per statement by
+   * one walk of the condition: each test's form where it holds, guarding the rest of an `and` and, through every `and`
+   * above it, the `then` arm or the loop's body; its form where it fails, guarding the rest of an `or` and, through
+   * every `or` above it, the `else` arm or the way past; a `not` swaps the two.
    */
   #conditionFacts(statement: TreeStatement): ConditionFacts | null {
     this.#work.charge("exactQueries");
@@ -727,7 +732,7 @@ export class RouteTests {
     return chain.length > 0 && chain[0]!.block === body ? chain : [{ block: body, index: -1 }];
   }
 
-  /** A statement's places from its callable's body down to it. */
+  /** `#up` for the classes that extend this one. */
   protected placesOf(statement: TreeStatement): Place[] {
     this.#work.charge("eventSteps");
     return this.#up(statement);

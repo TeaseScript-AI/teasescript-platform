@@ -3,7 +3,7 @@ import { compileChild, runCompileTask, type CompileTask } from "../../../compile
 import { isEmptyLiteral, isNonEmptyLiteral, staticNumber } from "../../../static-evaluation.js";
 import { conditionShape } from "../../narrowing-shapes.js";
 
-// P7: what literals decide: a condition's value, a non-null operand, a count or index, and how often a body runs.
+// What literals decide: a condition's value, a non-null operand, a count or index, and how often a body runs.
 
 export const NON_NULL_LITERALS: ReadonlySet<Expression["kind"]> = new Set([
   "numberLiteral",
@@ -18,7 +18,7 @@ export const NON_NULL_LITERALS: ReadonlySet<Expression["kind"]> = new Set([
 ]);
 
 /**
- * P7: the value a condition always has by its literals, as the type check reads conditions (`conditionShape`): a
+ * The value a condition always has by its literals, as the type check reads conditions (`conditionShape`): a
  * boolean literal, `not` of one, or `and` and `or` that their literal operands decide; `null` when a run decides it.
  */
 export function literalTruth(
@@ -69,22 +69,22 @@ function* literalTruthTask(
   return value;
 }
 
-/** P7: a `repeat` count or a list index that its literals give, as the type check folds a count, or `null`. */
+/** A `repeat` count or a list index that its literals give, as the type check folds a count, or `null`. */
 export function literalCount(expression: Expression): number | null {
   return staticNumber(expression) ?? null;
 }
 
-/** P7: how often a body runs by its literals: never, exactly once, at least once, or `null` when a run decides. */
+/** How often a body runs by its literals: never, exactly once, at least once, or `null` when a run decides. */
 export type LiteralRounds = "none" | "one" | "some" | null;
 
-/** P7: the rounds of a `repeat` whose count its literals give. */
+/** The rounds of a `repeat` whose count its literals give. */
 export function literalRounds(count: Expression): LiteralRounds {
   const value = literalCount(count);
   if (value === null) return null;
   return value <= 0 ? "none" : value === 1 ? "one" : value > 1 ? "some" : null;
 }
 
-/** P7: the rounds of a `for` over a literal collection or a range of constant numbers, as the type check reads it. */
+/** The rounds of a `for` over a literal collection or a range of constant numbers, as the type check reads it. */
 export function literalCollectionRounds(iterable: Expression): LiteralRounds {
   return isEmptyLiteral(iterable) ? "none" : isNonEmptyLiteral(iterable) ? "some" : null;
 }

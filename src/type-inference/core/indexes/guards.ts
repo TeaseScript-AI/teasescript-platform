@@ -27,17 +27,16 @@ import { siteKey, stepName, type CoreProgram } from "../program.js";
 import { amend, Retained } from "../retained/retained.js";
 
 /*
- * The guard index of the coarse core (checkpoint 9, §3.2): a read of key k is guarded inside a branch
- * of its own callable whose condition tests k or a path holding k (a null comparison, a type test or a comparison
- * `<`, `<=`, `>`, `>=`, at a truth position: through `and`, `or` and `not`; a `switch` on it), in the code after a
- * branch that tests it and always leaves (the way past the test is a branch entry of its own), and in the right operand
- * of an `and` or `or` whose left operand tests it. Guards are indexed per tested key, as definitions are: a read asks
- * its key and each prefix, a binary search each, never a root's other keys and never an `and` chain's other tests.
- * Stage 3b's narrowing definitions (§13, S10) join this index: built on their first read, once per program
- * (`NarrowingIndex`, N1 and N2's lists, and the statements with N3's shared layer, `StatementTree`), and asked per pass
- * through `narrowings` (N2 with N5, N3).
- * A read in a stored value takes its narrowing where it holds (`Values`, S10 part 2b); every other read still takes a
- * test as a guard until its consumer reads the narrowings (part 2c).
+ * The guard index of the type core: a read of key k is guarded inside a branch of its own callable whose condition
+ * tests k or a path holding k (a null comparison, a type test or a comparison `<`, `<=`, `>`, `>=`, at a truth
+ * position: through `and`, `or` and `not`; a `switch` on it), in the code after a branch that tests it and always
+ * leaves (the way past the test is a branch entry of its own), and in the right operand of an `and` or `or` whose left
+ * operand tests it. Guards are indexed per tested key, as definitions are: a read asks its key and each prefix, a
+ * binary search each, never a root's other keys and never an `and` chain's other tests. The narrowing definitions join
+ * this index: built on their first read, once per program (`NarrowingIndex`: the definitions per refined location and
+ * the invalidation lists, with the statements and the route query's shared layer, `StatementTree`), and asked per pass
+ * through `narrowings` (the events that end a narrowing, with the stores that preserve it, `NarrowingEvents`; the
+ * routes, `NarrowingRoutes`). A read in a stored value takes its narrowing where it holds (`Values`).
  */
 
 /** A list of guard regions sorted by where they start, with the running maximum of where they end. */
@@ -89,13 +88,13 @@ export class GuardIndex {
   readonly #operands = Retained.map<Key, Map<number, Regions<OperandRegion>>>(
     "GuardIndex.#operands",
   );
-  /** Per tested key, the callables its operand regions stand in (W40). */
+  /** Per tested key, the callables its operand regions stand in. */
   readonly #operandCallables = Retained.map<Key, Set<Callable | null>>(
     "GuardIndex.#operandCallables",
   );
-  /** G3 3b: the tested keys (`narrowed`), as a trie. */
+  /** The tested keys, as a trie (`narrowed`). */
   readonly #tested: KeyTrie;
-  /** The keys with a tested key strictly below them: a copy of one carries its read as a mark (§3.2). */
+  /** The keys with a tested key strictly below them: a copy of one carries its read as a mark. */
   readonly belowTested = Retained.set<Key>("GuardIndex.belowTested");
   /** Per key, the tested keys strictly below it, and the guard regions of those keys once asked (`guardedBelow`). */
   readonly #testedUnder = Retained.map<Key, Key[]>("GuardIndex.#testedUnder");
@@ -106,8 +105,8 @@ export class GuardIndex {
     { readonly branches: Map<Callable | null, Nest>; readonly operands: Map<number, Nest> }
   >("GuardIndex.#nests");
   /**
-   * The tested keys q below each key, per relative path q, and the longest such path (§8); by place, the operand
-   * regions; and the nests' count: what it fills on its first question, in a record (#1072 1b).
+   * The tested keys q below each key, per relative path q, and the longest such path; by place, the operand regions;
+   * and the nests' count: what it fills on its first question, in a record (#1072 1b).
    */
   readonly #lazy = Retained.record<{
     testedRelative: Map<string, Set<Key>> | null;
@@ -191,20 +190,23 @@ export class GuardIndex {
   }
 
   /**
-   * Stage 3b's narrowing definitions and invalidations (§13), built on their first read and charged then: an analysis,
-   * or a finishing pass after a stop, that reads none pays for none; the program's, shared by every later
-   * read, so no demand's own work (S3 §5).
+   * The narrowing definitions and invalidations, built on their first read and charged then: an analysis, or a
+   * finishing pass after a stop, that reads none pays for none; the program's, shared by every later read, so no
+   * demand's own work (`work.shared`).
    */
   public get narrowing(): NarrowingIndex {
     return (this.#narrowing ??= this.program.work.shared(() => NarrowingIndex.of(this.program)));
   }
 
-  /** Stage 3b's statements with N3's shared layer (`narrowing`'s). */
+  /** The statement tree with the route query's shared layer (`narrowing`'s). */
   public get statements(): StatementTree {
     return this.narrowing.statements;
   }
 
-  /** Stage 3b's queries of this pass (§13): N2's events with N5's preserving stores, and N3's routes. */
+  /**
+   * The narrowing queries of the pass this index belongs to, which every caller gives (`pass.guards.narrowings(pass)`),
+   * made on the first call: the events that end a narrowing, with the stores that preserve it, and the routes.
+   */
   public narrowings(pass: CorePass): {
     readonly events: NarrowingEvents;
     readonly routes: NarrowingRoutes;
@@ -218,10 +220,10 @@ export class GuardIndex {
   }
 
   /**
-   * §3.2 at a read of `key` in `node`: the paths below `key`, relative to it, of the tested keys whose guard regions
+   * At a read of `key` in `node`: the paths below `key`, relative to it, of the tested keys whose guard regions
    * hold the node, each only where no shorter one of them holds it (that one marks every path below it already). Per
    * key, the regions of every tested key below it, laminar: a binary search, a jump to the innermost region holding the
-   * node, and the regions holding that one, never each tested key in turn (Codex r21 B1).
+   * node, and the regions holding that one, never each tested key in turn.
    */
   public guardedBelow(key: Key, node: FlowNode): readonly string[] {
     return this.#below(key, node, null)!;
@@ -231,7 +233,7 @@ export class GuardIndex {
    * `guardedBelow`, or `null` where `asked` holds this read's group already: the reads it answers alike, the key's
    * tested record and per laminar nest of it (a callable's branches, a file's operands) the innermost region holding
    * the node, whose chain is the answer. So a holder's compilation asks one answer once per group of its reads, n
-   * copies under n tests n paths, not n² (Astra r2 B3); a read in a nest that is not laminar is asked by itself.
+   * copies under n tests n paths, not n²; a read in a nest that is not laminar is asked by itself.
    */
   public guardedBelowOnce(key: Key, node: FlowNode, asked: Set<string>): readonly string[] | null {
     return this.#below(key, node, asked);
@@ -293,7 +295,7 @@ export class GuardIndex {
 
   /**
    * `guardedBelow` at a value's read below its property and element projections (as `guardedRead`), once per read and
-   * pass: every caller asking of one read shares its answer (Codex r22 F4).
+   * pass: every caller asking of one read shares its answer.
    */
   public guardedBelowRead(value: PlaceId): readonly string[] {
     const known = this.#belowReads.get(value);
@@ -449,8 +451,8 @@ export class GuardIndex {
   }
 
   /**
-   * The key a tested operand is or holds (§3.2 "a path holding k"): an identifier, or a property or element read below
-   * one (`box.left`: the key `box.left`; a path the places do not resolve: the whole variable).
+   * The key a tested operand is or holds (the header's "a path holding k"): an identifier, or a property or element
+   * read below one (`box.left`: the key `box.left`; a path the places do not resolve: the whole variable).
    */
   #testedKey(file: number, expression: Expression): Key | undefined {
     const program = this.program;
@@ -497,7 +499,7 @@ export class GuardIndex {
   }
 
   /**
-   * §3.2: a test at a truth position of an `and`/`or`'s left operand guards the code after it up to the end of
+   * A test at a truth position of an `and`/`or`'s left operand guards the code after it up to the end of
    * the outermost `and`/`or` in whose left operand it stands. One walk of each outermost logical tree, with an explicit
    * stack: a test is one region per key it tests. The operands of any other expression are no truth positions: a
    * logical below one is a tree of its own.
@@ -578,7 +580,10 @@ export class GuardIndex {
     }
   }
 
-  /** Whether the last of a sorted list starting at most at `at` begins a region reaching `at`: a binary search. */
+  /**
+   * Whether some region of a sorted list that starts by `at` reaches `at`: a binary search, then the running maximum of
+   * their ends.
+   */
   public encloses<T>(regions: Regions<T>, start: (entry: T) => number, at: number): boolean {
     let low = 0;
     let high = regions.list.length;
@@ -612,21 +617,21 @@ export class GuardIndex {
   }
 
   /**
-   * Whether a read of `key` at `node` is guarded (§3.2, per path): a test of the key or of a prefix guards a branch of
-   * the node's own callable that dominates the node, or an operand region holds the node: a binary search per key asked,
+   * Whether a read of `key` at `node` is guarded, per path: a test of the key or of a prefix guards a branch of the
+   * node's own callable that dominates the node, or an operand region holds the node: a binary search per key asked,
    * the key and each prefix; a choice's selection step as the record key it reads.
    */
   public narrowed(key: Key, node: FlowNode): boolean {
     const program = this.program;
     if (!program.reached(node)) return false;
-    // (G3 stage 1: a wrapper's key is its cursor, and no test names a key of a wrapper's binding: `wrapperShape`)
+    // (a wrapper's key is its cursor, and no test names a key of a wrapper's binding: `wrapperShape`)
     if (isCursor(key)) {
       const place = keyPlace(key);
       if (this.untested(program.occurrenceOf.get(place) ?? place)) return false;
       throw new Error(`The key cursor '${key}' was asked of a tested binding's guards.`);
     }
     const asked = recordKey(key);
-    // (G3 3b: the tested keys at or above it, by one walk of its steps; an untested one guards nothing)
+    // (the tested keys at or above it, by one walk of its steps; an untested one guards nothing)
     for (const tested of this.#tested.above(asked, true)) {
       program.work.charge("eventSteps");
       const branches = this.#branches.get(tested)?.get(program.callableAt(node));
@@ -663,7 +668,7 @@ export class GuardIndex {
     return !this.belowTested.has(root) && !this.#branches.has(root) && !this.#operands.has(root);
   }
 
-  /** Whether a branch a test of exactly `key` guards in a reached node's own callable holds it (§3.2). */
+  /** Whether a branch a test of exactly `key` guards in a reached node's own callable holds it. */
   public branchHolds(key: Key, node: FlowNode): boolean {
     const program = this.program;
     if (!program.reached(node)) return false;
@@ -674,7 +679,10 @@ export class GuardIndex {
     );
   }
 
-  /** Every branch a test guards: its tested key, the callable it stands in, and its entry (W34's copy forest). */
+  /**
+   * Every branch a test guards: its tested key, the callable it stands in, and its entry (the exact path's copy
+   * forest).
+   */
   public *branchRegions(): Generator<{
     readonly key: Key;
     readonly callable: Callable | null;
@@ -685,7 +693,7 @@ export class GuardIndex {
         for (const entry of regions.list) yield { key, callable, entry };
   }
 
-  /** Every tested key's operand regions in each file, sorted by where they start (W34's copy forest). */
+  /** Every tested key's operand regions in each file, sorted by where they start (the exact path's copy forest). */
   public *operandRegions(): Generator<{
     readonly key: Key;
     readonly file: number;
@@ -696,7 +704,7 @@ export class GuardIndex {
   }
 
   /**
-   * Whether an operand region of a test of some key of the place holds a node (W34: a copy read there may carry
+   * Whether an operand region of a test of some key of the place holds a node (a copy read there may carry
    * a mark of its source, which `narrowed` then asks at the read's path): a binary search in the place's regions,
    * merged once from the per-key ones, never a scan of the place's tested paths.
    */
@@ -746,7 +754,7 @@ export class GuardIndex {
 
   /**
    * Whether a value is read under a guard of its key: the read below its property and element projections, at the path
-   * `rest` read further (§3.2).
+   * `rest` read further.
    */
   public guardedRead(value: PlaceId, rest: readonly string[] = []): boolean {
     return this.guardedReadAt(value, pathText(rest));
@@ -765,7 +773,7 @@ export class GuardIndex {
     const binding = program.occurrenceOf.get(current);
     const node = program.occNode.get(current);
     if (binding === undefined || node === undefined || node === null) return false;
-    // (a binding no test names guards no read of it, at whatever path: no key made, G3 stage 1)
+    // (a binding no test names guards no read of it, at whatever path: no key made)
     if (this.untested(binding)) return false;
     return this.narrowed(keyBelowText(keyOf(binding, steps.reverse()), restText), node);
   }
@@ -782,7 +790,7 @@ export class GuardIndex {
   }
 
   /**
-   * Every step of a tested key's path: a read at a path none of them is on is marked (§3.2) as one at any other such
+   * Every step of a tested key's path: a read at a path none of them is on is marked as one at any other such
    * path, so a selection answers an absent property by one of these alike (`selectionPieces`, #1278).
    */
   public testedSteps(): ReadonlySet<string> {

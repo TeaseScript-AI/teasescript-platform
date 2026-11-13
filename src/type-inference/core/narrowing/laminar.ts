@@ -1,12 +1,11 @@
-// Intervals that nest or lie apart, for the innermost one holding a point (`Laminar`): the narrowing index's and the
-// statement tree's.
+// Intervals that nest or lie apart, for the innermost one holding a point (`Laminar`).
 import { type WorkLedger } from "../budget.js";
 import { mapped, sorted, each, steps } from "../charged-iteration.js";
 
 /**
  * Intervals that nest or lie apart, sorted by where they start (the longer first, and at one interval in the order
  * given), each linked to the nearest one holding it, with skew-binary jumps up that chain (Myers): the innermost one
- * holding a point is a binary search and a logarithmic climb (as the guard index's nests, §3.2).
+ * holding a point is a binary search and a logarithmic climb (as the guard index's nests).
  */
 export class Laminar<T> {
   readonly starts: readonly number[];

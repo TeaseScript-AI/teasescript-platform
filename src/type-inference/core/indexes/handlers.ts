@@ -4,11 +4,11 @@ import type { CoreProgram } from "../program.js";
 import { Retained } from "../retained/retained.js";
 
 /*
- * The handler index of the coarse core (checkpoint 9, §6.4 H1–H9, F24, §8): which keys a timer, media or
- * button block may store (its own code and every callable it may run), and for each callable whether a block may have
- * been registered before a node runs: a registration in the callable earlier in its text, a call or file transfer
- * into a callable that registers (H9, H6), the callable entered where a block may have run, a file with a label, or a
- * loop that holds a registration. Two worklists over the call sites and file transfers, each edge once.
+ * The handler index of the type core: which keys a timer, media or button block may store (its own code and every
+ * callable it may run), and for each callable whether a block may have been registered before a node runs: a
+ * registration in the callable earlier in its text, a call or file transfer into a callable that registers, the
+ * callable entered where a block may have run, a callable a block may run, a file with a label, or a loop that holds a
+ * registration. Two worklists over the call sites and file transfers, each edge once.
  */
 
 /** A callable's registration facts. */
@@ -21,18 +21,20 @@ interface Registrations {
   readonly loops: Set<FlowNode>;
   /** It may run after a registration elsewhere: entered where a block may have run. */
   mayRunAfter: boolean;
+  /** The first of `events`, or `Infinity` when there is none. */
   first: number;
 }
 
 const offsetOf = (node: FlowNode): number => node.span?.start.offset ?? -1;
 
 export class HandlerIndex {
-  /** The keys with a definition in block code (F24's handler stores). */
+  /** The keys with a live definition in block code. */
   readonly #handlerKeys = Retained.set<Key>("HandlerIndex.#handlerKeys");
   /** The keys above one: a prefix of a handler store's key. */
   readonly #handlerAbove = Retained.set<Key>("HandlerIndex.#handlerAbove");
+  /** Each callable's registration facts. */
   readonly #facts = Retained.map<Callable, Registrations>("HandlerIndex.#facts");
-  /** G3 3b: `#handlerKeys` as a trie (`handlerTouches`). */
+  /** `#handlerKeys` as a trie (`handlerTouches`). */
   readonly #handled: KeyTrie;
 
   public constructor(
@@ -88,7 +90,7 @@ export class HandlerIndex {
       if (into === undefined) callers.set(to, [[from, at]]);
       else into.push([from, at]);
     };
-    // only a call that can run registers (G1(b)), as only a transfer that can run does
+    // only a call that can run registers, as only a transfer that can run does
     for (const site of flow.sites) {
       if (site.callIn.dead) continue;
       const caller = flow.callableOf(site.caller);
@@ -99,7 +101,7 @@ export class HandlerIndex {
       const from = flow.callableOf(jump.node.region);
       if (from !== null) for (const file of jump.files) edge(from, jump.node, file);
     }
-    // H9, H6: a callable that calls or goes to a registering callable registers, at that call or transfer (whose
+    // a callable that calls or goes to a registering callable registers, at that call or transfer (whose
     // `end` returns to the transferring file's caller)
     const queue = flow.callables.filter((callable) => this.#facts.get(callable)!.registers);
     while (queue.length > 0) {
@@ -142,17 +144,17 @@ export class HandlerIndex {
       }
   }
 
-  /** Whether the key, a prefix or a key below it has a store in block code (F24): a lookup per step of its path. */
+  /** Whether the key, a prefix or a key below it has a store in block code: a lookup per step of its path. */
   public handlerTouches(key: Key): boolean {
     this.program.work.charge("eventSteps");
-    // (G3 3b: a handler store at a prefix, by one walk of the key's steps)
+    // (a handler store at a prefix, by one walk of the key's steps)
     return (
       this.#handlerKeys.has(key) || this.#handlerAbove.has(key) || this.#handled.any(key, false)
     );
   }
 
   /**
-   * Whether a block may have been registered before `node` runs (X7): its callable may run after a registration, has a
+   * Whether a block may have been registered before `node` runs: its callable may run after a registration, has a
    * label (a file) or is block code, a loop around the node holds a registration, or a registration event lies
    * earlier in the callable's text.
    */

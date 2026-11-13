@@ -19,33 +19,33 @@ import { countIn, lowerBound } from "./statement-tree.js";
 import type { Work } from "../solver.js";
 
 /*
- * N2 and N5 of stage 3b (checkpoint 9): whether a narrowing definition G still answers a read
- * at n. X1, X4, X5 and X6 as §3 writes them, X7 as its flat veto, taken over G's dependency keys with N2's events: each
- * dependency key's own events (the location's key with the keys below it, each prefix's own definitions, each index or
- * key variable's), the call sites where an owner of one of them, or a callable holding an invalidation of a collection
- * of the path, lies outside its activation, and the invalidation lists of the path's collections. Another narrowing is
- * never an event. Every event is counted in intervals of the dominator walk by binary search in those existing lists,
- * never in a copy per (key × node). N5: for a read inside a loop that does not enclose G, and between G and the read, a
- * **preserving store** to the refined location itself is no event: a store whose value keeps its kinds within G's
- * filtered kinds. That value is the store's own value demand (`ExactPath.defVal`), whose reads of a component location
- * take their G (`Values`) and so ask this test again: the stores whose values depend on one another are one component
- * of the solver, solved from bottom (no items: every store preserving) to its greatest fixpoint and published only when
- * stable. A location's stores (its candidates, sorted) carry one tree of union demands, each node the kinds of its
- * range's values, whatever kind set asks: a query over a range checks O(log c) nodes, and a lost fact re-runs only the
- * nodes above its store and their readers.
+ * Whether a narrowing definition G still answers a read at n (r4-403): the exact path's conditions as `exact-path.ts`
+ * writes them (both live, one nearest boundary, the read's loops, no event between) and its handler veto, taken over
+ * G's dependency keys with their events: each dependency key's own events (the location's key with the keys below it,
+ * each prefix's own definitions, each index or key variable's), the call sites where an owner of one of them, or a
+ * callable holding an invalidation of a collection of the path, lies outside its activation, and the invalidation lists
+ * of the path's collections. Another narrowing is never an event. Every event is counted in intervals of the dominator
+ * walk by binary search in those existing lists, never in a copy per (key × node). For a read inside a loop that does
+ * not enclose G, and between G and the read, a **preserving store** to the refined location itself is no event
+ * (r4-129): a store whose value keeps its kinds within G's filtered kinds. That value is the store's own value demand
+ * (`ExactPath.defVal`), whose reads of a component location take their G (`Values`) and so ask this test again: the
+ * stores whose values depend on one another are one component of the solver, solved from bottom (no items: every store
+ * preserving) to its greatest fixpoint and published only when stable. A location's stores (its candidates, sorted)
+ * carry one tree of union demands, each node the kinds of its range's values, whatever kind set asks: a query over a
+ * range checks O(log c) nodes, and a lost fact re-runs only the nodes above its store and their readers.
  */
 
-/** An event list of G with the word a first event in it gives (§3.4). */
+/** An event list of G with the word a first event in it gives. */
 interface EventList {
   readonly positions: readonly number[];
   readonly word: ContextWord;
-  /** The location key's own list, whose candidates N5 decides. */
+  /** The location key's own list, whose candidates the preserving test decides. */
   readonly own: boolean;
 }
 
 /**
- * What G's lists answer in a range set before N5 (`NarrowingEvents.#static`): the first event's position and word, the
- * own list's events no candidate is counted in, and the own list's ranges that hold candidates.
+ * What G's lists answer in a range set before the preserving test (`NarrowingEvents.#static`): the first event's
+ * position and word, the own list's events no candidate is counted in, and the own list's ranges that hold candidates.
  */
 interface StaticEvents {
   readonly ranges: readonly PositionRange[];
@@ -55,7 +55,7 @@ interface StaticEvents {
   readonly owned: readonly PositionRange[];
 }
 
-/** A refined location's stores (N5's candidates), by dominator position, with their positions. */
+/** A refined location's stores (the preserving test's candidates), by dominator position, with their positions. */
 interface Candidates {
   readonly positions: readonly number[];
   readonly stores: readonly Definition[];
@@ -103,18 +103,21 @@ function without(
 }
 
 export class NarrowingEvents {
-  /** Per collection key, whether a callable ordinary code may run outside its activation holds an invalidation (N2). */
+  /** Per collection key, whether a callable ordinary code may run outside its activation holds an invalidation. */
   readonly #outside = new Map<Key, boolean>();
-  /** Per key, its assignments by the refined location they store, made on the key's first question (N5's candidates). */
+  /**
+   * Per key, its assignments by the refined location they store, made on the key's first question (the preserving
+   * test's candidates).
+   */
   readonly #stored = new Map<Key, ReadonlyMap<string, readonly Definition[]>>();
-  /** Per refined location, its candidates by dominator position, sorted (N5). */
+  /** Per refined location, its candidates by dominator position, sorted. */
   readonly #candidates = new Map<string, Candidates>();
-  /** Per key (and per key with its descendants), its definitions' text offsets by file (an operand region's X6). */
+  /** Per key (and per key with its descendants), its definitions' text offsets by file (an operand region's events). */
   readonly #text = new Map<string, ReadonlyMap<number, readonly number[]>>();
   /** Per narrowing, the word of its condition's window (`#inWindow`), and its lists' static answers per range set. */
   readonly #windowWords = new Map<Narrowing, ContextWord | null>();
   readonly #statics = new Map<Narrowing, Map<number, Map<number, StaticEvents[]>>>();
-  /** Per narrowing, its event lists (X6's, by position), made once; per key, its prefixes' keys with definitions. */
+  /** Per narrowing, its event lists (by position), made once; per key, its prefixes' keys with definitions. */
   readonly #eventsOf = new Map<Narrowing, readonly EventList[]>();
   readonly #prefixesOf = new Map<Key, readonly Key[]>();
   /** Per loop head, its loop. */
@@ -133,10 +136,12 @@ export class NarrowingEvents {
   }
 
   /**
-   * N2: whether G answers a read at `node`, or the word of the first condition that fails: X1 (`dead-code`), X4
-   * (`label`, `call`), X5 with N5 (`loop`), X6 with N5 (the first event's word), X7 (`handler`); a path through a
-   * reference (a speaker, a handle, a value holding one) is never narrowed (N8, F19a: `unmodelled`). `kinds` are G's
-   * filtered kinds, which N5's preserving test needs; without them no store is preserving.
+   * Whether G answers a read at `node` (r4-403), or the word of the first condition that fails: both live
+   * (`dead-code`), G dominating the read (`branch`), one nearest boundary (`label`, `call`), no event in a loop around
+   * the read that does not enclose G (`loop`), no event between G and the read (the first event's word), preserving
+   * stores aside in both, and no block's interference (`handler`); a path through a reference (a speaker, a handle, a
+   * value holding one) is never narrowed (`unmodelled`). `kinds` are G's filtered kinds, which the preserving test
+   * needs; without them no store is preserving.
    */
   public *holds(
     g: Narrowing,
@@ -145,16 +150,17 @@ export class NarrowingEvents {
   ): Work<ContextWord | null> {
     this.#work.charge("exactQueries");
     const { program } = this.pass;
-    if (!program.live(node) || !program.live(g.node)) return "dead-code"; // X1
+    if (!program.live(node) || !program.live(g.node)) return "dead-code";
     if (yield* this.pass.contract.refReceiver(g.key)) return "unmodelled";
     if (g.region !== null) return this.#inOperand(g, node);
     if (!program.dom.dominates(g.node, node)) return "branch";
     const boundary = program.dom.edom(node);
     if (program.dom.edom(g.node) !== boundary)
-      return boundary?.statement?.kind === "labelStatement" ? "label" : "call"; // X4
+      return boundary?.statement?.kind === "labelStatement" ? "label" : "call";
     const events = this.#events(g);
-    // X5 with N5: every event of a dependency key inside a loop around the read that does not enclose G; the code of
-    // the loops it passes holds no event and no breaking store, so X6 asks its span without it
+    // the loops: every event of a dependency key inside a loop around the read that does not enclose G, preserving
+    // stores aside; the code of the loops it passes holds no event and no breaking store, so the events between ask
+    // their span without it
     const passed: PositionRange[] = [];
     for (const head of each(program.work, "eventSteps", node.loops)) {
       if (holds(program.work, "eventSteps", g.node.loops, head)) continue;
@@ -164,23 +170,24 @@ export class NarrowingEvents {
       if ((yield* this.#first(g, events, inside, kinds, loop)) !== null) return "loop";
       for (const range of each(program.work, "eventSteps", inside)) passed.push(range);
     }
-    // X6 with N5: the events after the test, in the rest of its condition, then strictly after G and not after the read
+    // the events between, preserving stores aside: the events after the test, in the rest of its condition, then
+    // strictly after G and not after the read
     const before = this.#inWindow(g);
     if (before !== null) return before;
     const span = without(this.pass.lists.spanBetween(g.node, node), passed, program.work);
     const word = yield* this.#first(g, events, span, kinds);
     if (word !== null) return word;
-    // X7: block code, and the flat veto of a handler store with a registration before the read
+    // block code, and the handler veto: a handler store with a registration before the read
     if (program.blockReachable(node)) return "handler";
     if (this.#touched(g) && this.#registered(node)) return "handler";
     return null;
   }
 
   /**
-   * N2 in an operand region: the region is one expression's, which the read stands in, so X4 and X5 hold with its
-   * test's, no store stands between them, and X6's events are its calls, adds, removals and invalidations completed
-   * between the test's end and the read, left to right (a call after its arguments): each list's text offsets in that
-   * range, a binary search each.
+   * `holds` in an operand region: the region is one expression's, which the read stands in, so the read has its test's
+   * boundary and loops, no store stands between them, and the events between are its calls, adds, removals and
+   * invalidations completed between the test's end and the read, left to right (a call after its arguments): each
+   * list's text offsets in that range, a binary search each.
    */
   #inOperand(g: Narrowing, node: FlowNode): ContextWord | null {
     this.#work.charge("eventSteps");
@@ -190,7 +197,7 @@ export class NarrowingEvents {
     if (node.file !== region.file || at < region.start || at > region.end) return "branch";
     const boundary = program.dom.edom(node);
     if (program.dom.edom(g.node) !== boundary)
-      return boundary?.statement?.kind === "labelStatement" ? "label" : "call"; // X4
+      return boundary?.statement?.kind === "labelStatement" ? "label" : "call";
     const word = this.#textEvent(g, region.file, region.start, at);
     if (word !== null) return word;
     if (program.blockReachable(node)) return "handler";
@@ -198,7 +205,7 @@ export class NarrowingEvents {
     return null;
   }
 
-  /** X6 in G's condition after its test (`#textEvent`), once per G. */
+  /** The events in G's condition after its test (`#textEvent`), once per G. */
   #inWindow(g: Narrowing): ContextWord | null {
     this.#work.charge("eventSteps");
     const known = this.#windowWords.get(g);
@@ -254,7 +261,7 @@ export class NarrowingEvents {
   }
 
   /**
-   * What `holds` reads of G at `node` (S10 part 2b, the value classes' environment), as one text: what makes G's items
+   * What `holds` reads of G at `node` (the value classes' environment), as one text: what makes G's items
    * (its location, form and element steps, and its input's exact-path signature, `readSignature`), G's own and the
    * read's places among G's event lists (each one's dominator interval's two ends, as `aliasSignature` cuts them: the
    * events of every span between them), their loops, boundaries and liveness, G's window's word, and the read's block
@@ -301,7 +308,7 @@ export class NarrowingEvents {
 
   /**
    * A key's live definitions outside block code (with `below`, its descendants' too) by where their sites end, per
-   * file, sorted: the order an expression completes them in (an operand region's X6).
+   * file, sorted: the order an expression completes them in (an operand region's events).
    */
   #texts(key: Key, below: boolean): ReadonlyMap<number, readonly number[]> {
     this.#work.charge("eventSteps");
@@ -333,7 +340,8 @@ export class NarrowingEvents {
   #inside(loop: FlowLoop): readonly PositionRange[] {
     this.#work.charge("eventSteps");
     const { program, lists } = this.pass;
-    // (a loop entered at its head, or at its body where P7 runs the body before the head: whichever dominates)
+    // (a loop entered at its head, or at its body where the graph runs the body before the head, by a literal count or
+    // collection: whichever dominates)
     const entry =
       program.reached(loop.body) && program.dom.dominates(loop.body, loop.head)
         ? loop.body
@@ -341,7 +349,7 @@ export class NarrowingEvents {
     const ranges: PositionRange[] = [[program.position(entry), program.position(entry)]];
     if (!program.reached(loop.exit))
       ranges.push([program.position(entry) + 1, program.positionEnd(entry)]);
-    // (X6's span is at most two ranges)
+    // (the span between is at most two ranges)
     else
       for (const range of each(program.work, "eventSteps", lists.spanBetween(entry, loop.exit)))
         ranges.push(range);
@@ -349,8 +357,8 @@ export class NarrowingEvents {
   }
 
   /**
-   * G's prefixes' keys that hold a definition or a loop's add (the definitions' `stored` trie), the parent first: one walk
-   * of G's key's steps down that trie, once per key, as the trie's own texts (#1640; G3 3b, as `reachingDef`). A prefix
+   * G's prefixes' keys that hold a definition or a loop's add (the definitions' `stored` trie), the parent first: one
+   * walk of G's key's steps down that trie, once per key, as the trie's own texts (#1640, as `reachingDef`). A prefix
    * with none has no event and no text, so it adds nothing to G's lists.
    */
   #prefixes(g: Narrowing): readonly Key[] {
@@ -363,7 +371,7 @@ export class NarrowingEvents {
   }
 
   /**
-   * G's event lists (N2), once per G: its dependency keys' own events, the call sites under the owner rule, the
+   * G's event lists, once per G: its dependency keys' own events, the call sites under the owner rule, the
    * invalidations.
    */
   #events(g: Narrowing): readonly EventList[] {
@@ -394,8 +402,9 @@ export class NarrowingEvents {
   }
 
   /**
-   * X6's owner rule over G's dependency keys: another callable stores the key, a prefix or a key below, or an index
-   * variable; or a callable ordinary code may run, other than a collection's activation, holds an invalidation of it (N2).
+   * The owner rule over G's dependency keys (`DefinitionIndex.ownedAway`): another callable stores the key, a prefix or
+   * a key below, or an index variable; or a callable ordinary code may run, other than a collection's activation,
+   * holds an invalidation of it.
    */
   #ownedAway(g: Narrowing): boolean {
     this.#work.charge("ownerSteps");
@@ -430,14 +439,19 @@ export class NarrowingEvents {
     return outside;
   }
 
-  /** X7's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged. */
+  /**
+   * The handler veto's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged.
+   */
   #registered(node: FlowNode): boolean {
     this.#work.charge("eventSteps");
     this.#work.charge("eventSteps", node.loops.length);
     return this.pass.handlers.afterSomeCreation(node);
   }
 
-  /** X7's handler-store predicate over G's dependency keys, a block holding an invalidation of a collection included. */
+  /**
+   * The handler veto's handler-store predicate over G's dependency keys, a block holding an invalidation of a
+   * collection included.
+   */
   #touched(g: Narrowing): boolean {
     this.#work.charge("eventSteps");
     const { handlers } = this.pass;
@@ -456,10 +470,10 @@ export class NarrowingEvents {
 
   /**
    * The word of G's first event in `ranges` that is no preserving store, or `null`: the lists' events (`#static`), and
-   * which candidates preserve `kinds`, which N5 alone decides and only where the other events leave the word open:
-   * then one query of the candidates in the own list's ranges (before the first call site where one comes first: the
-   * own list wins a tie), the same set of nodes whatever the values. For X5 (`loop`) any event fails G, and the query is
-   * the loop's one union (`#inLoop`).
+   * which candidates preserve `kinds`, which the preserving test alone decides and only where the other events leave
+   * the word open: then one query of the candidates in the own list's ranges (before the first call site where one
+   * comes first: the own list wins a tie), the same set of nodes whatever the values. For a loop (`loop`) any event
+   * fails G, and the query is the loop's one union (`#inLoop`).
    */
   *#first(
     g: Narrowing,
@@ -489,9 +503,9 @@ export class NarrowingEvents {
   }
 
   /**
-   * `#first` before N5: per list two binary searches per range, and for the own list (`candidates`: where N5 decides
-   * its stores), where its count exceeds its candidates', a binary search over its ranks for the first event no
-   * candidate is. Once per (G, range set): it rests on the program alone.
+   * `#first` before the preserving test: per list two binary searches per range, and for the own list (`candidates`:
+   * where the preserving test decides its stores), where its count exceeds its candidates', a binary search over its
+   * ranks for the first event no candidate is. Once per (G, range set): it rests on the program alone.
    */
   #static(
     g: Narrowing,
@@ -523,7 +537,7 @@ export class NarrowingEvents {
         return entry;
     let at = Infinity;
     let word: ContextWord | null = null;
-    // the own list's ranges that hold candidates, which only N5 decides
+    // the own list's ranges that hold candidates, which only the preserving test decides
     const owned: PositionRange[] = [];
     for (const list of each(work, "eventSteps", events))
       for (const [low, high] of each(work, "eventSteps", ranges)) {
@@ -559,8 +573,8 @@ export class NarrowingEvents {
   }
 
   /**
-   * The kinds of G's location's candidates inside a loop's code (X5's N5 query), one demand per (location, loop): the
-   * reads inside the loop ask one answer, which changes only when the loop's union does.
+   * The kinds of G's location's candidates inside a loop's code (the loop's preserving query), one demand per
+   * (location, loop): the reads inside the loop ask one answer, which changes only when the loop's union does.
    */
   *#inLoop(g: Narrowing, loop: FlowLoop, ranges: readonly PositionRange[]): Work<readonly Item[]> {
     this.#work.charge("eventSteps");
@@ -599,7 +613,7 @@ export class NarrowingEvents {
     return yield* this.#inLoop(g, loop, this.#inside(loop));
   }
 
-  /** G's location's candidates (N5): its stores (`#storesOf`) by dominator position, with their positions, once. */
+  /** G's location's candidates: its stores (`#storesOf`) by dominator position, with their positions, once. */
   #candidatesOf(g: Narrowing): Candidates {
     this.#work.charge("indexSteps");
     const known = this.#candidates.get(g.location);
@@ -623,7 +637,7 @@ export class NarrowingEvents {
   }
 
   /**
-   * The kinds G's location's candidates in `ranges` hold (N5): each range's candidates as the O(log c) canonical nodes
+   * The kinds G's location's candidates in `ranges` hold: each range's candidates as the O(log c) canonical nodes
    * of the location's union tree, with an explicit stack.
    */
   *#unionIn(g: Narrowing, ranges: readonly PositionRange[]): Work<readonly Item[]> {
