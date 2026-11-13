@@ -581,15 +581,33 @@ test("a maker refuses what its copy would not keep: another prototype, a field t
   assert.deepEqual(steps, ["refused", "refused", "refused", "ok"]);
 });
 
-test("a registered function's own properties are frozen at its registration", () => {
-  const fn = Object.assign(() => 1, { cache: 0 });
+test("a registered function's own properties are frozen at its registration, the plain data they hold at the switch", () => {
+  const fn = Object.assign(() => 1, { cache: 0, held: { n: 0 } });
   const { steps } = stepped(() => [
-    () => Retained.closure("T.cached", fn),
+    () => {
+      Retained.closure("T.cached", fn);
+      fn.held.n = 1;
+    },
     () => (fn.cache = 1),
     () => Object.assign(fn, { added: 1 }),
+    () => (fn.held.n = 2),
+    () =>
+      Retained.closure(
+        "T.native",
+        Object.assign(() => 1, { memo: new Map() }),
+      ),
   ]);
-  assert.deepEqual(steps, ["ok", "frozen", "frozen"]);
-  assert.equal(fn.cache, 0);
+  assert.deepEqual(steps, ["ok", "frozen", "frozen", "frozen", "refused"]);
+  assert.deepEqual([fn.cache, fn.held.n], [0, 1]);
+});
+
+test("a record's field named `length` is a field like any other: what it holds is sealed at the switch", () => {
+  let record: { length: { n: number } } | undefined;
+  const { steps } = stepped(() => [
+    () => (record = Retained.record("T.length", { length: { n: 0 } })),
+    () => (record!.length.n = 1),
+  ]);
+  assert.deepEqual(steps, ["ok", "frozen"]);
 });
 
 class ProgramPart {
