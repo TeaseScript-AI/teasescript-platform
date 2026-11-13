@@ -48,15 +48,22 @@ function random(seed: number): (bound: number) => number {
   };
 }
 
-/** Two records of each leaf kind that are equal and two that are not, as separate objects. */
+/**
+ * Every leaf kind as separate objects: each kind with fields as two records that differ, the camera view (which has
+ * none) once, and a duration twice more as an equal pair.
+ */
 const LEAVES: readonly SerializableRuntimeValue[] = [
   { kind: "duration", milliseconds: 2000 },
   { kind: "duration", milliseconds: 2000 },
   { kind: "duration", milliseconds: -0 },
   { kind: "calendarDuration", months: 1, days: 2, milliseconds: 3 },
+  { kind: "calendarDuration", months: 1, days: 3, milliseconds: 3 },
   { kind: "angle", degrees: 90 },
+  { kind: "angle", degrees: 45 },
   { kind: "date", year: 2026, month: 10, day: 4 },
+  { kind: "date", year: 2026, month: 10, day: 5 },
   { kind: "time", hour: 14, minute: 30, second: 0, millisecond: 5 },
+  { kind: "time", hour: 14, minute: 30, second: 1, millisecond: 5 },
   {
     kind: "datetime",
     year: 2026,
@@ -67,18 +74,35 @@ const LEAVES: readonly SerializableRuntimeValue[] = [
     second: 3,
     millisecond: 4,
   },
+  {
+    kind: "datetime",
+    year: 2026,
+    month: 10,
+    day: 4,
+    hour: 1,
+    minute: 2,
+    second: 3,
+    millisecond: 5,
+  },
   { kind: "absoluteDateTime", epochMilliseconds: 0 },
+  { kind: "absoluteDateTime", epochMilliseconds: 1 },
   { kind: "script", path: "rooms/a.tease" },
+  { kind: "script", path: "rooms/b.tease" },
   { kind: "regex", source: "x+", flags: "i" },
   { kind: "regex", source: "x+", flags: "" },
   { kind: "range", start: 1, end: 3, inclusive: true },
   { kind: "range", start: 1, end: 3, inclusive: false },
   { kind: "speakerReference", speakerId: 0, identifier: "anna" },
+  { kind: "speakerReference", speakerId: 1, identifier: "bea" },
   { kind: "timerHandle", timerId: 1 },
+  { kind: "timerHandle", timerId: 2 },
   { kind: "mediaHandle", mediaId: 1 },
+  { kind: "mediaHandle", mediaId: 2 },
   { kind: "cameraView" },
   { kind: "permanentButtonHandle", buttonId: 2 },
+  { kind: "permanentButtonHandle", buttonId: 3 },
   { kind: "messageHandle", messageId: 3 },
+  { kind: "messageHandle", messageId: 4 },
 ];
 
 /** Texts with a surrogate pair, a lone surrogate, integer-like names and a name longer than an exact set key. */
@@ -265,7 +289,7 @@ test("sets add, find, remove and clear members as today's sets do", () => {
 
 /**
  * Two lists whose keys (46 long, so hashed) differ but share one cyrb53 hash: the second member of a hashed key's bucket
- * (found by a birthday search over three code units, review round 1 of #2684).
+ * (found by a birthday search over three code units).
  */
 const COLLIDING: readonly [SerializableRuntimeValue, SerializableRuntimeValue] = [
   { kind: "list", items: [`a\u5059\u375aa${"b".repeat(36)}`] },

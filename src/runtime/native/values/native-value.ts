@@ -77,13 +77,13 @@ export class NativeDict {
 
 /**
  * Unique members by `==`, in insertion order. Only `native-set.ts` changes `items` and `membership`: its operations
- * keep `membership`, once built, an exact index of `items`, and `appendUniqueMember` fills a new set before its index
+ * keep `membership`, once built, an exact index of `items`, and `appendToUnindexedSet` fills a new set before its index
  * exists. A member is never changed in place.
  */
 export class NativeSet {
   public readonly kind = "set";
   public readonly items: NativeValue[] = [];
-  /** The index of `items`, built at the first operation that needs it; `null` until then. */
+  /** The index of `items`, built at the first operation that needs it; `null` until then and after a clear. */
   public membership: NativeSetMembership | null = null;
 }
 
@@ -93,7 +93,7 @@ export class NativeSet {
  */
 export interface NativeSetMembership {
   readonly scalars: Set<SerializableRuntimeScalar>;
-  readonly records: Map<string, NativeValue[]>;
+  readonly keyed: Map<string, NativeValue[]>;
 }
 
 /** A list, object, dict or set: a value that holds others. */
