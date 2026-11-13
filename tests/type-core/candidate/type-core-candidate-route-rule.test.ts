@@ -6,7 +6,9 @@ import test from "node:test";
 import { analyseCore } from "../../../src/type-inference/core/answers.js";
 import { withTestDemandAllowance } from "../../../src/type-inference/core/budget.js";
 import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
-import { derive, evaluate, syntaxOf } from "../../helpers/type-core-derived.js";
+import { syntaxOf } from "../../helpers/type-core/derived/type-core-derived.js";
+import { derive } from "../../helpers/type-core/derived/type-core-derived-checks.js";
+import { evaluate } from "../../helpers/type-core/derived/type-core-derived-runs.js";
 import { runGlobals } from "../../helpers/type-core-route.js";
 import { candidate, inBothOrders } from "../../helpers/type-core/type-core-candidate-setup.js";
 

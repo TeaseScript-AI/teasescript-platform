@@ -1,14 +1,12 @@
-import { globMatches, isPathGlob } from "../../../src/project-paths.js";
-import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
+import { globMatches, isPathGlob } from "../../../../src/project-paths.js";
+import type { SerializableRuntimeValue } from "../../../../src/runtime/values/serializable-values.js";
 import {
-  type CheckEvent,
   type DerivedContent,
   type DerivedStore,
-  evaluate,
-  type PredictedRun,
   type Syntax,
   Underivable,
-} from "../type-core-derived.js";
+} from "./type-core-derived.js";
+import { type CheckEvent, evaluate, type PredictedRun } from "./type-core-derived-runs.js";
 
 /*
  * The derived oracle's runs across files (#2488's step 1c): a run evaluates the entry file by the rules (`evaluate`);

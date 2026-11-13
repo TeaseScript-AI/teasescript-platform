@@ -6,13 +6,13 @@ import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime
 import { planText } from "./plan-checks.js";
 import type { CompactRecord } from "./type-core-records.js";
 import {
-  defaultSites,
   derivedText,
   repairsRecord,
   type DerivedContent,
   type DerivedStore,
-  type PredictedRun,
-} from "./type-core-derived.js";
+} from "./type-core/derived/type-core-derived.js";
+import { defaultSites } from "./type-core/derived/type-core-derived-defaults.js";
+import { type PredictedRun } from "./type-core/derived/type-core-derived-runs.js";
 
 // The candidate route's plan and runs as the derived oracle compares them (S6-CARRIERS).
 

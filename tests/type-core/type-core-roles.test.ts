@@ -8,7 +8,9 @@ import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../../src/type-inference/core/program.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
-import { derive, evaluate, syntaxOf } from "../helpers/type-core-derived.js";
+import { syntaxOf } from "../helpers/type-core/derived/type-core-derived.js";
+import { derive } from "../helpers/type-core/derived/type-core-derived-checks.js";
+import { evaluate } from "../helpers/type-core/derived/type-core-derived-runs.js";
 import { recordDifferences, recordOf } from "../helpers/type-core-records.js";
 import {
   assignments,
