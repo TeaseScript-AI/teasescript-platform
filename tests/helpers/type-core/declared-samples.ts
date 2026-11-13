@@ -271,7 +271,8 @@ export const DECLARED_REFUSALS: readonly {
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
   },
-  // (a duration literal the plan does not store, and a unit's or an angle's amount of no number: today TSV043)
+  // (a duration literal the plan does not store, an amount of no number, and a known amount no run can hold: today
+  // TSV043, the overflow TSV050)
   {
     row: "durationLiteral",
     position: "a calendar amount of no whole months",

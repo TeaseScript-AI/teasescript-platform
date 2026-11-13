@@ -1,6 +1,7 @@
 // Durations, unit expressions and angles on the candidate route (#2657, step 2d of #2488): a literal the plan stores
-// publishes, any other is refused at the literal; a unit's or an angle's amount publishes where it holds only numbers and
-// today's checker knows no value of it that it refuses, and is refused at the unit or the angle otherwise.
+// publishes, any other is refused at the literal or gets today's error; a unit's or an angle's amount publishes where the
+// core shows it to be a number, or it is an external value the evaluator checks as it runs, and today's checker knows no
+// value of it that it refuses; any other amount is refused at the unit or the angle.
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -64,8 +65,9 @@ const UNITS: readonly (readonly [string, string])[] = [
 ];
 
 /**
- * The amounts before a unit (prelude, amount): numbers written in place, known through a variable or not, the host
- * global, typed ingresses, and values of other kinds, by each origin the slice holds.
+ * The amounts before a unit (prelude, amount): numbers written in place and through a variable, also reassigned; values
+ * of other kinds; the host global, directly and through a variable; typed ingresses; an `otherwise`; a variable's
+ * element and property; a literal's element, its `get` and a missing one; a `fromJson` value; a property stored later.
  */
 const AMOUNTS: readonly (readonly [string, string])[] = [
   ["", "(2)"],

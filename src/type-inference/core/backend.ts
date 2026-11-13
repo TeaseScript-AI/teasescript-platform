@@ -276,14 +276,16 @@ export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: 
 };
 
 /**
- * Whether a unit's or an angle's amount holds only numbers (`UNIT_AMOUNT`), as the admitted set with a refusing
- * default: each kind the core gives it is one `UNIT_AMOUNT` takes; a read of a place whose type is written or decided
- * holds that type's kinds (a typed ingress's read is the unknown its store's check stands for); an unknown is admitted
- * only of an external origin, as the host global itself or a direct read of a place whose type is undecided, beside the
- * evaluator's check; a missing property is no value there, its read fails first. Any other unknown (one an element, a
- * call or an operation carries, a stop's) is not shown to be a number. So the route declines what today's checker plans
- * where only a narrowing or an `otherwise` shows the amount a number: a read of `n: integer?` under `n != null`,
- * `(n otherwise 1) s`; the core gives no read its narrowing (`OccurrenceAnswer.narrowing`).
+ * Whether the route admits a unit's or an angle's amount: one the core shows to be a number (`UNIT_AMOUNT`), or an
+ * external value the evaluator checks as it runs. Each item the core gives the amount is refused unless its kind is one
+ * `UNIT_AMOUNT` takes, or it is an unknown of no reason but a missing property (no value there: its read fails first),
+ * or an unknown of an external origin only, read as the host global itself or through a read of a variable or of a
+ * path below it (`answer.place`) whose admitted type is undecided or holds only kinds `UNIT_AMOUNT` takes (a typed
+ * ingress's read is the unknown its store's check stands for). Any other unknown (one a literal's element, a call or an
+ * operation carries, a stop's) is not shown to be a number. An amount with no answer has no item and is admitted. So
+ * the route declines what today's checker plans where only a narrowing or an `otherwise` shows the amount a number: a
+ * read of `n: integer?` under `n != null`, `(n otherwise 1) s`; the core gives no read its narrowing
+ * (`OccurrenceAnswer.narrowing`).
  */
 function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression): boolean {
   const answer = answers.at(nodeOf(answers, index, amount));
@@ -355,8 +357,9 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
             what: "this speaker property",
           };
       }
-  // a unit or angle expression whose amount may hold no number (`UNIT_AMOUNT`), which the language calls wrong; an
-  // amount whose known value gives no duration or angle is refused by the check result (`knownAmountRefused`)
+  // a unit or angle expression whose amount the core does not show to be a number, other than an external value the
+  // evaluator checks as it runs (`amountAdmitted`); a known amount whose step no run can hold is refused by the check
+  // result (`knownAmountRefused`)
   for (const unit of index.units)
     if (!amountAdmitted(answers, index, unit.operand))
       return {
