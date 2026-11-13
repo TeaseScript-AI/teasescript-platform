@@ -23,10 +23,10 @@ import type { CompactRecord } from "../../helpers/type-core-records.js";
  * file's start or a block's body (the accepted record's r4-451). The rows are the design's sources and their answers by
  * the text: `error` where some route into the use has no check and the rule proves it; `no-error` where every route has
  * one (the warning may stay), or where no proof of the error is possible (a block that may repair, X7; a check inside a
- * block's body, #2506); `warning` where a route has no check but r4-451's certificate proves no error (a passed
- * compound holds the variable): no error, and the warning with its check; `check` where the text asks the error and the
- * rule leaves the warning (a named give-up, or a program the route rule's default holds): a check stands, the warning or
- * the error.
+ * block's body, #2506); `warning` where a route has no check but the rule proves no error (a passed compound holds the
+ * variable, r4-451's certificate; or, in a program the route rule's default holds, R2.2 does not prove a run reaches
+ * the use that way): no error, and the warning with its check; `check` where the text asks the error and the rule
+ * leaves the warning (a named give-up): a check stands, the warning or the error.
  */
 
 interface Row {
@@ -52,14 +52,17 @@ const ROWS: readonly Row[] = readFileSync(
     return row;
   });
 
-/** The diagnostics of a record at a file's line (1-based) of the row's sources. */
+/** The diagnostics and the checks of a record at a file's line (1-based) of the row's sources. */
 function atLine(row: Row, record: CompactRecord, path: string, line: number) {
   const lines = row.files.find((file) => file.path === path)!.lines;
   const start = lines.slice(0, line - 1).reduce((sum, text) => sum + text.length + 1, 0);
   const end = start + lines[line - 1]!.length;
-  return record.diagnostics.filter(
-    (d) => d.site.file === path && d.site.offset >= start && d.site.offset < end,
-  );
+  const at = (site: { readonly file: string; readonly offset: number }): boolean =>
+    site.file === path && site.offset >= start && site.offset < end;
+  return {
+    found: record.diagnostics.filter((d) => at(d.site)),
+    checks: record.checks.filter((c) => at(c.site)),
+  };
 }
 
 test("each design row gives its answer by the text in the four modes: the error, no error, or a check that stands", () => {
@@ -78,7 +81,7 @@ test("each design row gives its answer by the text in the four modes: the error,
         wrong.push(`${row.name}: the modes differ`);
     const record = records[0]!;
     for (const { path, line } of row.watch) {
-      const found = atLine(row, record, path, line);
+      const { found, checks } = atLine(row, record, path, line);
       const errors = found.filter((d) => d.class === "compile-error");
       const required = errors.filter((d) => d.requiredCheck !== undefined);
       const fits =
@@ -93,10 +96,14 @@ test("each design row gives its answer by the text in the four modes: the error,
           : row.expect === "no-error"
             ? errors.length === 0
             : row.expect === "warning"
-              ? errors.length === 0 && found.some((d) => d.class === "warning-runtime-check")
+              ? errors.length === 0 &&
+                found.some((d) => d.class === "warning-runtime-check") &&
+                checks.length > 0
               : errors.length > 0 || found.some((d) => d.class === "warning-runtime-check");
       if (!fits)
-        wrong.push(`${row.name} (${row.expect}) at ${path}:${line}: ${JSON.stringify(found)}`);
+        wrong.push(
+          `${row.name} (${row.expect}) at ${path}:${line}: ${JSON.stringify({ found, checks })}`,
+        );
     }
   }
   assert.deepEqual(wrong, []);
@@ -137,6 +144,12 @@ test("a loop's earlier round, source to runtime on the candidate route", () => {
       "check",
     ],
     ["a test in the loop's header", program("for x in [n != null, true]", use), "check"],
+    // (an arm no run enters holds the program default; the loop is reached and the round stands at it, R2.2)
+    [
+      "under the program default",
+      `let n: integer? = 1\nif n == null { say "never" }\nrepeat 2 {\n${use}\n  n = null\n}\nexit\n`,
+      "error",
+    ],
   ];
   for (const [name, source, expected] of rows) {
     const result = compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);
