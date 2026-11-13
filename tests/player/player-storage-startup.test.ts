@@ -19,7 +19,7 @@ import {
   type SerializableRuntimeValue,
 } from "../../src/index.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
-import { AMSTERDAM, utc } from "../helpers/temporal-fixtures.js";
+import { AMSTERDAM, utc } from "../helpers/runtime/temporal-fixtures.js";
 import { onHost, hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
 import {
   playerRuntimeSnapshot,

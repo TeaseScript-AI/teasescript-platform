@@ -111,7 +111,7 @@ expected_release=(
   chatgpt-project-agent-tools-linux-x64.tar.gz
   setup-chatgpt-project-agent.sh
 )
-mapfile -t actual_release < <(find "$release" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort)
+mapfile -t actual_release < <(find "$release" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
 if tar -tzf "$release/chatgpt-project-agent-tools-linux-x64.tar.gz" | grep -F 'SYSTEM-PROMPT' >/dev/null; then
   printf 'test-chatgpt-project-agent: FAIL: system prompt entered the tools archive\n' >&2
   exit 1

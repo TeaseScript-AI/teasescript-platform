@@ -26,7 +26,7 @@ import type {
   RuntimeScriptStorageEntrySnapshot,
   SerializableRuntimeValue,
 } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { inProcessBackend } from "../helpers/player/worker-topology.js";

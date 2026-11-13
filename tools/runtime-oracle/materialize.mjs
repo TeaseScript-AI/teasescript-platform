@@ -291,7 +291,7 @@ async function seal({ seal: commit, label, seam, out }) {
   return out;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   try {
     const options = parse(process.argv.slice(2));
     if (options.seal !== null) console.log(await seal(options));

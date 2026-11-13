@@ -16,7 +16,7 @@ import { observeTime } from "../../../src/runtime/operations/observe-time.js";
 import { updateInteraction } from "../../../src/runtime/operations/update-interaction.js";
 import type { RuntimeSnapshot } from "../../../src/runtime/snapshot/state.js";
 import type { RuntimeFormStateSnapshot } from "../../../src/runtime/actions/model.js";
-import { formSummaryOf } from "../../../src/runtime/actions/form.js";
+import { formSummaryOf } from "../../../src/runtime/actions/form/submission.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../../src/temporal.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 import { runUntilExit } from "../../helpers/run-until-exit.js";

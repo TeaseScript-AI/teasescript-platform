@@ -120,7 +120,11 @@ snapshot for comparing two analyses of the same sources.
 
 - **The switch:** one change makes the constraint backend the compiler's backend in place of the legacy backend, and
   a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's. The
-  switch needs the [shadow gate](TESTING.md#the-switchs-shadow-gate) green.
+  switch needs (owner, 2026-11-13): every construct of the language covered by the constraint backend; the whole test
+  suite, and every converted script that the legacy backend compiles correctly, passing with it as the compiler's
+  backend; #1526's decision 2 met: no plan that lets a value through unchecked, and every remaining case re-assessed
+  ([`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md#coarse-type-core-bounds)); and its speed measured in a browser on the
+  largest script.
 
 ## Performance boundary
 
@@ -163,8 +167,8 @@ execute instructions without duplicating operation logic. `src/runtime/snapshot/
 constants; `snapshot-construction.ts` builds fresh snapshots and copies captured ones; `snapshot-validation.ts`
 captures a snapshot from outside the engine and orders its whole-snapshot validation, with the call, loop, and
 continuation invariants in `frame-validation.ts` and prepared temporaries in `prepared-temporary-validation.ts`; and
-`record-collection.ts` drops the records nothing reaches. The internal `src/runtime/actions/action-validation.ts`
-module owns pending-action, settlement, pacing-gate, and handoff validation.
+`record-collection.ts` drops the records nothing reaches. The internal `src/runtime/actions/validation/`
+folder owns pending-action, settlement, pacing-gate, and handoff validation.
 `src/runtime/session.ts` owns the engine-owned runtime session, which runs those operations and the engine on state it
 keeps private ([`RUNTIME.md`](RUNTIME.md#runtime-sessions)).
 `src/runtime/engine.ts` owns execution orchestration and the exhaustive instruction dispatch, which hands instruction

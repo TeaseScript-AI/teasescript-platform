@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-  # A manual run of a branch's tip, such as the three runs on one head that `tools/measure-test-files.mjs --from-ci`
+  # A manual run of a branch's tip, such as the three runs on one head that `tools/test-runner/measure-test-files.mjs --from-ci`
   # needs (a re-run replaces a run's artifacts): `gh workflow run ci.yml --ref <branch>`.
   workflow_dispatch:
 
@@ -19,9 +19,9 @@ concurrency:
 
 jobs:
   # The check runs as three jobs side by side (#1638, #1978): each installs and builds, then runs one third of the
-  # compiled tests (`--shard=i/3`, shared out by measured seconds, `tools/test-shards.mjs`); check-3 also runs the
+  # compiled tests (`--shard=i/3`, shared out by measured seconds, `tools/test-runner/test-shards.mjs`); check-3 also runs the
   # checks before the tests (`check:pretest`), once. Together they run what `npm run check` runs; `check`, the required
-  # check, passes only where all three passed. `tools/measure-test-files.mjs --from-ci` finds the test jobs by their
+  # check, passes only where all three passed. `tools/test-runner/measure-test-files.mjs --from-ci` finds the test jobs by their
   # step named "Build and run tests…" and the pre-test checks by "Check source before the tests": keep those names.
   check-1:
     runs-on: ubuntu-24.04
@@ -58,7 +58,7 @@ jobs:
         env:
           PR: ${{ github.event.pull_request.number }}
         run: node tools/repository-checks/regression-cases.mjs --base "$(git rev-parse HEAD^1)" --pr "$PR"
-      # each test file's seconds, which `tools/measure-test-files.mjs --from-ci` makes the shards' weights from
+      # each test file's seconds, which `tools/test-runner/measure-test-files.mjs --from-ci` makes the shards' weights from
       - name: Keep each test file's seconds
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -88,7 +88,7 @@ jobs:
           BUILD_SOURCEMAPS: "0"
           TEST_FILE_SECONDS: ${{ runner.temp }}/test-file-seconds.json
         run: npm test -- --shard=2/3
-      # each test file's seconds, which `tools/measure-test-files.mjs --from-ci` makes the shards' weights from
+      # each test file's seconds, which `tools/test-runner/measure-test-files.mjs --from-ci` makes the shards' weights from
       - name: Keep each test file's seconds
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -151,7 +151,7 @@ jobs:
           BUILD_SOURCEMAPS: "0"
           TEST_FILE_SECONDS: ${{ runner.temp }}/test-file-seconds.json
         run: npm test -- --shard=3/3
-      # each test file's seconds, which `tools/measure-test-files.mjs --from-ci` makes the shards' weights from
+      # each test file's seconds, which `tools/test-runner/measure-test-files.mjs --from-ci` makes the shards' weights from
       - name: Keep each test file's seconds
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

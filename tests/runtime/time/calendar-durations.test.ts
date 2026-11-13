@@ -15,7 +15,7 @@ import type { TemporalContext } from "../../../src/temporal.js";
 import { assertCheckpointRejected } from "../../helpers/checkpoint-rejection.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
-import { AMSTERDAM } from "../../helpers/temporal-fixtures.js";
+import { AMSTERDAM } from "../../helpers/runtime/temporal-fixtures.js";
 
 /** Hides a value's type and value from the compiler, so a check reaches the runtime. */
 const DYNAMIC = "function dynamic(value) {\n    return value\n}\n";

@@ -23,7 +23,7 @@ import {
 import { conversionCategory } from "../method-categories.js";
 import { stepName } from "../program.js";
 import type { Work } from "../solver.js";
-import { stands } from "./fresh.js";
+import { stands } from "./stores/fresh.js";
 import { LITERALS, unsettledItem } from "./kinds.js";
 import { readKey } from "./names.js";
 import { placelessCells, syntaxRead } from "./syntax.js";

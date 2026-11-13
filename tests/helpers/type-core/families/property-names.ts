@@ -1,4 +1,4 @@
-// pins for tests/type-core/type-core-work-c.test.ts: main's growth per doubling of the listing chains, as bounds | line /^\s*main: \{ total: \d/u
+// pins for tests/type-core/work/type-core-work-c.test.ts: main's growth per doubling of the listing chains, as bounds | line /^\s*main: \{ total: \d/u
 import type { SourceFile } from "../../type-core-analysis.js";
 import { type WorkFamily, rows, lines, fields, main } from "./builders.js";
 

@@ -23,7 +23,7 @@ import {
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../../../src/temporal.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
-import { AMSTERDAM, utc } from "../../helpers/temporal-fixtures.js";
+import { AMSTERDAM, utc } from "../../helpers/runtime/temporal-fixtures.js";
 
 /** 18:00 in Amsterdam on Sunday 4 October 2026. */
 const START = utc("2026-10-04T16:00:00");

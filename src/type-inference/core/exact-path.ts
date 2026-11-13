@@ -43,6 +43,7 @@ import {
 import type { IndexNode } from "./contract.js";
 import type { Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";
+import { amend, Retained } from "./retained/retained.js";
 
 /*
  * The exact path of the coarse core (checkpoint 9): a read of key k at node n is answered from one
@@ -149,6 +150,12 @@ class NestedSpans<T> {
     spans: readonly Span<T>[],
     private readonly work: WorkLedger,
   ) {
+    Retained.owner(this, "NestedSpans", (nested) => ({
+      start: nested.#start,
+      end: nested.#end,
+      item: nested.#item,
+      jumps: nested.#jumps,
+    }));
     const sorted = [...spans].sort((x, y) => x.start - y.start || y.end - x.end);
     work.charge("exactQueries", sortCost(sorted.length));
     const parent: number[] = [];
@@ -252,11 +259,12 @@ function exitsOf(
   program: CorePass["program"],
 ): Map<PlaceId, Map<Callable | null, PlacedExits>> {
   const work = program.work;
-  const out = new Map<PlaceId, Map<Callable | null, PlacedExits>>();
+  const out = Retained.map<PlaceId, Map<Callable | null, PlacedExits>>("ExactPath.copies.exits");
   for (const exit of exits) {
     work.charge("exactQueries");
     let byCallable = out.get(exit.source);
-    if (byCallable === undefined) out.set(exit.source, (byCallable = new Map()));
+    if (byCallable === undefined)
+      out.set(exit.source, (byCallable = Retained.map("ExactPath.copies.exits[]")));
     const callable = program.callableAt(exit.read);
     const entry = byCallable.get(callable);
     if (entry === undefined) byCallable.set(callable, { links: [exit], positions: [], runEnd: [] });
@@ -278,25 +286,33 @@ function exitsOf(
 }
 
 export class ExactPath {
-  readonly #memo = new Map<string, ExactAnswer>();
-  #copies: CopyForest | null = null;
-  /** Per source, its copies whose reads are reached, per callable (built once). */
-  #bySource: Map<PlaceId, Map<Callable | null, CopyLink[]>> | null = null;
+  readonly #memo = Retained.map<string, ExactAnswer>("ExactPath.#memo");
+  /** #1072 1b, a record: its copies' forest, and per source its copies whose reads are reached, per callable (built once). */
+  readonly #built = Retained.record<{
+    copies: CopyForest | null;
+    bySource: Map<PlaceId, Map<Callable | null, CopyLink[]>> | null;
+  }>("ExactPath.built", { copies: null, bySource: null });
   /** Per source and callable, those copies' intervals of the walk, nested (built as asked). */
-  readonly #sourceSpans = new Map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>();
+  readonly #sourceSpans = Retained.map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>(
+    "ExactPath.#sourceSpans",
+  );
   /** The route of each definition's value at a path, recorded as it is answered (S3 §1). */
-  readonly #defRoutes = new Map<string, ReadRoute>();
+  readonly #defRoutes = Retained.map<string, ReadRoute>("ExactPath.#defRoutes");
   /** Per add, its place in its run of adds of one class (`#repeatOf`): the run's third add, and its own position. */
-  readonly #runs = new Map<
+  readonly #runs = Retained.map<
     Definition,
     { readonly third: Definition | null; readonly at: number }
-  >();
+  >("ExactPath.#runs");
   /** Per tested key, its guarded exits, nested (built once its callables have been asked as often as it has exits). */
-  readonly #exitSpans = new Map<Key, NestedSpans<number> | null>();
+  readonly #exitSpans = Retained.map<Key, NestedSpans<number> | null>("ExactPath.#exitSpans");
   /** Per tested key whose guarded exits are not built: its exits in its callables, and the callables asked so far. */
-  readonly #exitBudget = new Map<Key, { readonly exits: number; asked: number }>();
+  readonly #exitBudget = Retained.map<Key, { readonly exits: number; asked: number }>(
+    "ExactPath.#exitBudget",
+  );
 
-  public constructor(readonly pass: CorePass) {}
+  public constructor(readonly pass: CorePass) {
+    Retained.owner(this, "ExactPath");
+  }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
   get #work(): WorkLedger {
@@ -397,10 +413,10 @@ export class ExactPath {
    * at a path are spans of their anchors, indexed per path the same way.
    */
   #forest(): CopyForest {
-    if (this.#copies !== null) return this.#copies;
+    if (this.#built.copies !== null) return this.#built.copies;
     const { program, definitions, guards } = this.pass;
     const work = program.work;
-    const links = new Map<number, CopyLink>();
+    const links = Retained.map<number, CopyLink>("ExactPath.copies.links");
     for (const list of [...definitions.byKey.values(), ...definitions.cellDefs.values()])
       for (const d of list) {
         work.charge("exactQueries");
@@ -531,7 +547,7 @@ export class ExactPath {
         else list.push(root);
       }
     for (const list of [...tops.values(), ...loose.values()]) walk(list);
-    const anchorsOf = new Map<PlaceId, CopyAnchor[]>();
+    const anchorsOf = Retained.map<PlaceId, CopyAnchor[]>("ExactPath.copies.anchorsOf");
     for (const [uid, anchor] of anchors) {
       const owner = links.get(uid);
       const placed: CopyAnchor = {
@@ -545,12 +561,14 @@ export class ExactPath {
     }
     // the keys below each source, by their path and every prefix of it: as places, and as the spans of the anchors of
     // a source with one anchor, or per tree the sources with several (their anchors nested once per source)
-    const at = new Map<string, Set<PlaceId>>();
-    const below = new Map<string, Set<PlaceId>>();
-    const atSpans = new Map<string, Span<CopyAnchor>[]>();
-    const belowSpans = new Map<string, Span<CopyAnchor>[]>();
-    const atSeveral = new Map<string, Map<number, Set<PlaceId>>>();
-    const belowSeveral = new Map<string, Map<number, Set<PlaceId>>>();
+    const at = Retained.map<string, Set<PlaceId>>("ExactPath.copies.at");
+    const below = Retained.map<string, Set<PlaceId>>("ExactPath.copies.below");
+    const atSpans = Retained.map<string, Span<CopyAnchor>[]>("ExactPath.copies.atSpans");
+    const belowSpans = Retained.map<string, Span<CopyAnchor>[]>("ExactPath.copies.belowSpans");
+    const atSeveral = Retained.map<string, Map<number, Set<PlaceId>>>("ExactPath.copies.atSeveral");
+    const belowSeveral = Retained.map<string, Map<number, Set<PlaceId>>>(
+      "ExactPath.copies.belowSeveral",
+    );
     const treesOf = new Map<PlaceId, ReadonlySet<number>>();
     // the trees a source's anchors stand in; beyond a few, every tree (`-1`)
     const treesOfPlace = (place: PlaceId, own: readonly CopyAnchor[]): ReadonlySet<number> => {
@@ -571,7 +589,7 @@ export class ExactPath {
     ): void => {
       work.charge("exactQueries");
       const set = places.get(path);
-      if (set === undefined) places.set(path, new Set([place]));
+      if (set === undefined) places.set(path, Retained.set("ExactPath.copies.places[]", [place]));
       else if (set.has(place)) return;
       else set.add(place);
       const own = anchorsOf.get(place) ?? [];
@@ -585,12 +603,14 @@ export class ExactPath {
       }
       // per tree its sources; a source whose anchors stand in more than a few trees under every tree (`-1`)
       let byTree = several.get(path);
-      if (byTree === undefined) several.set(path, (byTree = new Map()));
+      if (byTree === undefined)
+        several.set(path, (byTree = Retained.map("ExactPath.copies.several[]")));
       const inTrees = treesOfPlace(place, own);
       for (const tree of inTrees) {
         work.charge("exactQueries");
         const inTree = byTree.get(tree);
-        if (inTree === undefined) byTree.set(tree, new Set([place]));
+        if (inTree === undefined)
+          byTree.set(tree, Retained.set("ExactPath.copies.several[][]", [place]));
         else inTree.add(place);
       }
     };
@@ -631,18 +651,21 @@ export class ExactPath {
       }
     // the copies each tested key's branches hold: the branches merged into their outermost intervals per callable, and
     // per interval the runs of the copies of the key's place in it, once per place and interval whatever key tests it
-    const markPlaces = new Map<string, Set<PlaceId>>();
+    const markPlaces = Retained.map<string, Set<PlaceId>>("ExactPath.copies.markPlaces");
     for (const { key } of guards.branchRegions()) {
       work.charge("exactQueries");
       const path = keptPathText(this.#work, key);
       const places = markPlaces.get(path);
-      if (places === undefined) markPlaces.set(path, new Set([keyPlace(key)]));
+      if (places === undefined)
+        markPlaces.set(path, Retained.set("ExactPath.copies.markPlaces[]", [keyPlace(key)]));
       else places.add(keyPlace(key));
     }
-    const markSpans = new Map<string, Span<number>[]>();
+    const markSpans = Retained.map<string, Span<number>[]>("ExactPath.copies.markSpans");
     const runs = new Map<string, readonly Span<number>[]>();
     // a source with several anchors is asked at the read, by its own nested anchors, per tree
-    const markSeveral = new Map<string, Map<number, Set<PlaceId>>>();
+    const markSeveral = Retained.map<string, Map<number, Set<PlaceId>>>(
+      "ExactPath.copies.markSeveral",
+    );
     const register = (key: Key, callable: number, low: number, high: number): void => {
       if ((markPlaces.get(keyPathText(key))?.size ?? 0) <= FEW_PLACES) return;
       const place = keyPlace(key);
@@ -650,11 +673,13 @@ export class ExactPath {
       if (own.length > FEW_ANCHORS) {
         const path = keptPathText(this.#work, key);
         let byTree = markSeveral.get(path);
-        if (byTree === undefined) markSeveral.set(path, (byTree = new Map()));
+        if (byTree === undefined)
+          markSeveral.set(path, (byTree = Retained.map("ExactPath.copies.markSeveral[]")));
         for (const tree of treesOfPlace(place, own)) {
           work.charge("exactQueries");
           const inTree = byTree.get(tree);
-          if (inTree === undefined) byTree.set(tree, new Set([place]));
+          if (inTree === undefined)
+            byTree.set(tree, Retained.set("ExactPath.copies.markSeveral[][]", [place]));
           else inTree.add(place);
         }
         return;
@@ -683,7 +708,7 @@ export class ExactPath {
       const path = keptPathText(this.#work, key);
       const list = markSpans.get(path);
       if (list === undefined) markSpans.set(path, [...found]);
-      // (one by one, as every append here: `found` holds at most seven spans, `tests/type-core/type-core-native.test.ts`)
+      // (one by one, as every append here: `found` holds at most seven spans, `type-core-native.test.ts`)
       else for (const span of found) list.push(span);
     };
     let open: { key: Key; callable: number; low: number; high: number } | null = null;
@@ -729,7 +754,7 @@ export class ExactPath {
               : index;
         }
       }
-    const operandSpans = new Map<string, Span<number>[]>();
+    const operandSpans = Retained.map<string, Span<number>[]>("ExactPath.copies.operandSpans");
     for (const { key, file, regions } of guards.operandRegions()) {
       const entry = byOffset.get(keyPlace(key))?.get(file);
       if (entry === undefined) continue;
@@ -757,7 +782,8 @@ export class ExactPath {
         }
       }
     }
-    this.#copies = {
+    amend(this);
+    this.#built.copies = {
       links,
       at,
       below,
@@ -766,16 +792,16 @@ export class ExactPath {
       atSeveral,
       belowSeveral,
       anchorsOf,
-      placesBuilt: new Map(),
+      placesBuilt: Retained.map("ExactPath.copies.placesBuilt"),
       markPlaces,
       markSeveral,
       markSpans,
       operandSpans,
       exits: exitsOf(exitSet, program),
-      anchorsBuilt: new Map(),
-      marksBuilt: new Map(),
+      anchorsBuilt: Retained.map("ExactPath.copies.anchorsBuilt"),
+      marksBuilt: Retained.map("ExactPath.copies.marksBuilt"),
     };
-    return this.#copies;
+    return this.#built.copies;
   }
 
   /** The first index of a sorted list whose value is at least `value`: a binary search. */
@@ -990,7 +1016,13 @@ export class ExactPath {
         this.pass.program.work.charge("exactQueries");
         exits += forest.exits.get(keyPlace(key))?.get(callable)?.links.length ?? 0;
       }
-      this.#exitBudget.set(key, (budget = { exits, asked: 0 }));
+      this.#exitBudget.set(
+        key,
+        (budget = Retained.record<{ readonly exits: number; asked: number }>(
+          "ExactPath.#exitBudget[]",
+          { exits, asked: 0 },
+        )),
+      );
     }
     budget.asked += callables.size;
     if (budget.asked <= budget.exits) return undefined;
@@ -1054,28 +1086,32 @@ export class ExactPath {
     const known = this.#sourceSpans.get(source)?.get(callable);
     if (known !== undefined) return known;
     const { program } = this.pass;
-    if (this.#bySource === null) {
-      const bySource = new Map<PlaceId, Map<Callable | null, CopyLink[]>>();
+    if (this.#built.bySource === null) {
+      const bySource = Retained.map<PlaceId, Map<Callable | null, CopyLink[]>>(
+        "ExactPath.built.bySource",
+      );
       for (const link of forest.links.values()) {
         if (!program.reached(link.read)) continue;
         program.work.charge("exactQueries");
         let byCallable = bySource.get(link.source);
-        if (byCallable === undefined) bySource.set(link.source, (byCallable = new Map()));
+        if (byCallable === undefined)
+          bySource.set(link.source, (byCallable = Retained.map("ExactPath.built.bySource[]")));
         const at = program.callableAt(link.read);
         const list = byCallable.get(at);
         if (list === undefined) byCallable.set(at, [link]);
         else list.push(link);
       }
-      this.#bySource = bySource;
+      this.#built.bySource = bySource;
     }
-    const links = this.#bySource.get(source)?.get(callable);
+    const links = this.#built.bySource.get(source)?.get(callable);
     if (links === undefined) return null;
     const nested = new NestedSpans(
       links.map((link) => ({ start: link.enter, end: link.exit, item: link })),
       program.work,
     );
     let byCallable = this.#sourceSpans.get(source);
-    if (byCallable === undefined) this.#sourceSpans.set(source, (byCallable = new Map()));
+    if (byCallable === undefined)
+      this.#sourceSpans.set(source, (byCallable = Retained.map("ExactPath.#sourceSpans[]")));
     byCallable.set(callable, nested);
     return nested;
   }

@@ -893,10 +893,10 @@
   "tooling": {
     "tools/runtime-oracle/admission.mjs": "811b477c40ee90492dbf2d1ceddc6a1bef38f16adab59c8a1100677b3d1f8410",
     "tools/runtime-oracle/closure.mjs": "0b29873d99955477def1adfac8bce7cf8f87cbbc09d9d1da6feff960625cd943",
-    "tools/runtime-oracle/compare.mjs": "e19dcbfaf12fa7731c858341ad3674e76b9d08d95b8e7fdabd12f62af42b7a86",
-    "tools/runtime-oracle/materialize.mjs": "e1782ef3b629aeee43aa4b884ed53d060f9aebe037c284c38e819ee757904d51",
+    "tools/runtime-oracle/compare.mjs": "4908685a52dcff12f81081c9bdd2b13f399dbc8e504078f4c6bdded7622829ba",
+    "tools/runtime-oracle/materialize.mjs": "e977e194b2140ce24aad0d1e28c314c8fadbca0be26a48debf65605623f33d9c",
     "tools/runtime-oracle/run.mjs": "fb5b7b46e1545d5a4a5ed7d1539fc755a5c6bef999918d0b5612a1c356dc5af1",
-    "tools/benchmark-runtime.mjs": "e2ad5274c2c8b0cb6ac8aadc2d6b3ee3dd091293ab6a11433aea29d87cfbf1f6"
+    "tools/benchmark-runtime.mjs": "9fb35807be173352dcd5b1945eb7fe1086b0e3547d9f7aef17c7382f2982fc31"
   },
   "cases": {
     "file": "tools/runtime-oracle/cases.json",

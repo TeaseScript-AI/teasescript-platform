@@ -19,7 +19,7 @@ import { interactionStringFits } from "./interaction-limits.js";
 import { IMAGE_ANSWER_TRANSCRIPT_TEXT, IMAGE_SKIP_TEXT } from "./image-input.js";
 import type { InteractionChoiceOption } from "./plan/model.js";
 import type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
-import { submitForm } from "./runtime/actions/form.js";
+import { submitForm } from "./runtime/actions/form/submission.js";
 import type {
   InteractionResultValue,
   RuntimeInteractionActionSnapshot,

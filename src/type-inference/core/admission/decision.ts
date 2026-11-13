@@ -22,6 +22,7 @@ import {
   type Rest,
 } from "../contract/key-ids.js";
 import { withoutEmpty } from "../exact-path.js";
+import { readNow } from "../inherited/reads.js";
 import { marked } from "../indexes/guards.js";
 import { ingressLeaves, writerKey, type Item, type ItemTag } from "../items.js";
 import { addRest, aliasKeyAt, covers } from "./classes.js";
@@ -40,6 +41,7 @@ import {
 import { inheritance, landedBelow } from "./landings/inheritance.js";
 import type { Alias, Candidate, Decided, DecidedAt, Decision, Inputs } from "./model.js";
 import { permittedAt } from "./permitted.js";
+import { dictStepsRead, spellsValues } from "./structure.js";
 import { inputsAt, inputsOf, scanAt } from "./scan.js";
 import { compareKeys, stopsOf, writtenSource } from "./walk.js";
 
@@ -656,13 +658,25 @@ function concreteSite(
 function isClean(admission: Admission, at: At): boolean {
   // (a cursor's path walked as its span, one step at a time: a wrapper's own cell that copies a written binding lands
   // below its place's own key, A4, G3 stage 1)
-  return (
+  if (
     admission.dirty.along(
       at.root,
       at.path ?? spanRef(admission.pass.contract, keyIdPath(at.key)),
       true,
-    ).length === 0
-  );
+    ).length > 0
+  )
+    return false;
+  // (#2378: a dict's values list below its own level is the dict's elements, where A4's copies land: walked as the
+  // dict's path too, its `values` steps read by their owners' contracts, `dictStepsRead`)
+  if (!spellsValues(admission, at.key)) return true;
+  const steps = keyStepsIn(admission.pass.contract, at.key);
+  const read = readNow(dictStepsRead(admission, at.key));
+  const dropped = (read?.dropped ?? []).filter((index) => index < steps.length - 1);
+  if (dropped.length === 0) return true;
+  const path: string[] = [];
+  for (let index = 0; index < steps.length; index += 1)
+    if (!dropped.includes(index)) path.push(steps.at(index)!);
+  return admission.dirty.along(at.root, path, true).length === 0;
 }
 
 /** `openAbove` of a decided path in its identity. */

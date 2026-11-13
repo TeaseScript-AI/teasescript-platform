@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { compileSourceWithBackend, type CompilationResult } from "../../../src/compiler.js";
 import type { InstructionPlan, TypePlan } from "../../../src/plan/model.js";
 import { run } from "../../../src/runtime/engine.js";
+import { completeAction } from "../../../src/runtime/operations/complete-action.js";
 import { type SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
@@ -61,6 +62,45 @@ export function inBothOrdersAs<R, T>(run: () => R, project: (result: R) => T): r
 export function runWith(plan: InstructionPlan, hostValue: SerializableRuntimeValue) {
   const { said, ...ran } = runSited(plan, hostValue);
   return { ...ran, says: said.map(({ text }) => text) };
+}
+
+/**
+ * `runWith`'s run, with each `askChoice` it waits at answered by its button `button`, as the Player selects one: its
+ * status, messages and failure at its end, or at a wait for anything else.
+ */
+export function answeredWith(
+  plan: InstructionPlan,
+  hostValue: SerializableRuntimeValue,
+  button: number,
+) {
+  let result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } }));
+  const events = [...result.events];
+  for (
+    let action = result.snapshot.foregroundAction;
+    result.snapshot.status === "waiting" &&
+    action?.kind === "interaction" &&
+    action.ui.kind === "choice";
+    action = result.snapshot.foregroundAction
+  ) {
+    const answered = completeAction(plan, result.snapshot, {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: action.interactionKind,
+      payload: { kind: "selectedOption", optionIndex: button },
+    });
+    assert.equal(answered.outcome.kind, "completed", JSON.stringify(answered.outcome));
+    result = run(plan, answered.snapshot);
+    events.push(...answered.events, ...result.events);
+  }
+  const failure = events.find((event) => event.kind === "runtimeFailure");
+  return {
+    status: result.snapshot.status,
+    says: events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    failure:
+      failure?.kind === "runtimeFailure"
+        ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
+        : null,
+  };
 }
 
 /** `runWith`'s run, each message with the offset its statement starts at: an effect's place in the source. */

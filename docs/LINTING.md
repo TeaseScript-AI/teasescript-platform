@@ -6,6 +6,12 @@ TypeScript and JavaScript source, tests, playground code, and tooling, including
 `<script>` blocks of `.vue` files.
 Dependency, build, coverage, and Git directories are excluded. `npm run check` includes lint and rule fixtures.
 
+`npm run lint` also runs the repository's own checks (`tools/oxlint/run.mjs`), each in a folder by what it reads. A
+check of what comments say goes in `tools/oxlint/comments/`, beside the lists it reads. A check over the type
+analysis's code (`src/type-inference/core/`) or its test helpers goes in `tools/oxlint/type-core/`; a check over the
+compiler outside the type analysis (none exists yet) starts a folder of its own. A check of the lint configuration
+stays in `tools/oxlint/`. Any other check starts a subject folder beside these, not in `tools/oxlint/` itself.
+
 ## Correctness category
 
 Oxlint's `correctness` category is on. Two of its rules are off, because every site the code has is deliberate:
@@ -58,6 +64,18 @@ of 8 to 20, and 46 s with them and the waiting-list check below at a load of 6 t
 about 1.7 GB in each. Inside `tools/check-changed.mjs`, beside its other checks, the lint step took 113 s with these
 rules, and 70 s without them in another run at a similar load. The pre-push check runs lint as CI does.
 
+## Names in JavaScript files
+
+No `tsconfig.json` includes a JavaScript file, so no compiler sees a name such a file reads and does not bind. On every
+`.js`, `.jsx`, `.mjs` and `.cjs` file, `no-undef` refuses a name that is neither declared, imported, nor one of the
+language's or Node's globals (`env.builtin`, `env.node`), as `FILE:LINE:COL: 'name' is not defined`. An ES module
+(`.mjs`, and `.js` or `.jsx` under the root `package.json`'s `"type": "module"`) has none of the five names Node's
+CommonJS wrapper defines, so there `no-restricted-globals` refuses `exports`, `require`, `module`, `__filename` and
+`__dirname` unless the file binds them. `tools/player-firefox-camera.mjs` and `tools/player-preview-checks.mjs` may
+also read the browser globals their override names, each such read sitting in a function the tool hands to the page,
+which runs in the browser; the lint does not check where such a read sits. A later tool that hands functions to a page
+joins that override by name, with the names its page functions read.
+
 ## Waiting lists
 
 An `overrides` entry whose rules are all off (`"allow"`, `"off"` or `0`, oxlint's `AllowWarnDeny`) is a waiting list:
@@ -71,7 +89,7 @@ configuration and stops oxlint and the check by that signal; the next run remove
 
 ## Comment forecasts
 
-`tools/oxlint/check-comment-forecasts.mjs` refuses a comment that forecasts later work, in the forms
+`tools/oxlint/comments/check-comment-forecasts.mjs` refuses a comment that forecasts later work, in the forms
 [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead) lists (its
 `FORECASTS` table); a citation of a repository record passes. The old design record (TABLE) is not in the repository,
 so it cites nothing: in every file Git lists except the check's own test, a line that names it as a whole word and
@@ -91,7 +109,7 @@ as a whole number, in a section list right after a repository document's name on
 repository. Any other section number is refused in every file
 Git lists except `docs/`, whose documents number their own sections; `src/`, whose comments #2209 rewrites;
 `tests/fixtures/type-core/cells.jsonl`, whose section numbers are cell ids in recorded data whose bytes `MANIFEST.md`
-fixes; `tools/oxlint/comment-declarations-waiting.json`, which quotes comments word for word, its section numbers only
+fixes; `tools/oxlint/comments/comment-declarations-waiting.json`, which quotes comments word for word, its section numbers only
 `src/`'s, and shrinks with #2209; and the check's test. The check proves the form, not that the section exists or
 carries the sentence's claim. A research label (a `LABEL` of the check: `C9`, `W34`, `S6-CARRIERS`) has a row in the
 record's glossary (its `README.md`, "Labels") where it stands in a comment under `src/type-inference/core/` or in
@@ -110,7 +128,7 @@ bare `r4.N`, read as the revision rule reads it, and the record's name with anot
 
 ## Comment declarations
 
-`tools/oxlint/check-comment-declarations.mjs` refuses a backticked name in a comment that names nothing the repository
+`tools/oxlint/comments/check-comment-declarations.mjs` refuses a backticked name in a comment that names nothing the repository
 declares or reads: it proves only that the name exists somewhere, not that it names what the comment's site means.
 `comment-external-names.json` declares names no file can, each with its kind and source; that list may grow. It also
 refuses a `/**` docblock that does not stand directly on its declaration (a blank line, another block or comment between,
@@ -132,7 +150,54 @@ checked outside dictionary types, including test helpers and mutation callbacks.
 Runtime `typeof`, descriptor/prototype inspection, property omission, and partial static analyses are legitimate
 techniques. Lint does not require schema dependencies, forbid every reflective operation, or determine whether a
 boundary validation is sufficient. `Reflect.get` and `Reflect.apply` require a specific justification because they
-bypass ordinary typed property access or invocation.
+bypass ordinary typed property access or invocation. Type inference is the exception: see the next section.
+
+## Retained state in type inference
+
+`tools/oxlint/type-core/check-retained-state.mjs` holds the code side of the frozen retained-state regime (docs/TESTING.md,
+"Frozen retained state"), which catches a write to retained state that the type core makes by ordinary code, across
+runs, in test mode; it does not claim to resist code written to get around it (#1072 R33).
+
+Its widest rule closes the meta-object layer: in every file of `src/type-inference/`, the core files its other lines
+leave out included, a property changes only by assignment or by a kind's own method (#1072 R30, R34). Refused there:
+
+- `Object`, but as `Object.freeze`, `hasOwn`, `keys`, `values`, `entries`, `fromEntries`, `assign` or `is`: another
+  member, an alias (`const O = Object`) and a computed member (`Object[name]`) are refused;
+- `Reflect`, `globalThis`, `Function` and `eval`;
+- the `delete` operator;
+- `.prototype`, `__proto__` and `.constructor`, as a member, a computed key or a destructured name;
+- `defineProperty`, `defineProperties`, `__defineGetter__` and `__defineSetter__`, by name anywhere;
+- a constructor's `return <value>`.
+
+The retained API's own folder (`core/retained/`), which makes the makers' copy, is outside it.
+
+The check reads the program `tsconfig.json` defines: each file of `src/type-inference/` and `tests/helpers/` it compiles,
+a module reached only through another included. A `Retained` call is the one the checker resolves to the API's
+declaration, however it is spelled (#1072 Amendment 4). Its other lines:
+
+- a native `Map`, `Set`, `WeakMap` or `WeakSet`, found by the constructor the checker resolves, is not kept where the
+  instrument cannot reach it (a class field, a module's mutable variable, a parameter property);
+- a private field is `readonly` and either made by a maker or given by its class's `hidden` (`Retained.owner`, or
+  `Retained.programPart` in the program's own files);
+- a `Retained.closure` registration stands right below its comment naming what the function captures (#1072 R26);
+- a `catch` handles only type inference's own errors, and a `finally` completes normally (#1072 R60). Each `instanceof`
+  test of a `catch` binding names a class declared under `src/type-inference/` that extends `Error` directly. The block
+  ends in `throw <binding>`, or returns, yields, breaks, continues or throws another error only inside such a test's
+  consequent or after a top-level guard `if (!(<binding> instanceof C …)) throw <binding>;` (#1072 R67: a consumer that
+  stops at a `yield` closes the generator before its rethrow). A `finally` holds no `yield`, `return`, `break`,
+  `continue` or `throw`. The solver's step catch and the budget's forward their error, as `yield*` does, and are listed
+  by name. So V8's error at a write to frozen data is never handled in type inference while it leaves as the pending
+  error; a later error can replace it, which no line here sees (R68; docs/TESTING.md, "Frozen retained state", what is
+  not covered). The instrument's own refusals are counted where they are raised;
+- an `accessor` field is refused (#1072 R67): its value sits in a private slot that neither the private-field line nor
+  the instrument's lock of an owner sees.
+
+What these reach (a descriptor, a prototype, an integrity level, a deletion) could change a locked owner's field or a
+retained collection's writer unseen by the instrument, or make a frozen run compute what production does not. Only
+`src/type-inference/` and the tests import the core. The tests and `tests/helpers/` hold retained owners and use this
+layer on purpose, to observe the core (`type-core-held-host.ts` defines accessors on an owner to watch its reads); they
+are outside the rule, which reads only type inference. A type-inference author who needs a refused form takes it to the
+coordinator; there is no waiting list and no local disable.
 
 ## Evidence and exceptions
 

@@ -1,0 +1,381 @@
+import type { PlaceId, SourceSite } from "../../../graph.js";
+import { concrete, isExternal, isOpaque } from "../../admission.js";
+import { joinParts, joinSteps, keepText } from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { MEMBER_KINDS, presenceSteps, REFERENCE, type PresenceStep } from "../../contract.js";
+import { labelBelow, labelRoot } from "../../contract/labels.js";
+import { keyOf, keyPath, keyPlace, type Key } from "../../definitions.js";
+import { withoutEmpty } from "../../exact-path.js";
+import type { FlowNode } from "../../flow-graph.js";
+import {
+  firstWriter,
+  makeItem,
+  REASON,
+  type Item,
+  type ItemTag,
+  type Writer,
+} from "../../items.js";
+import { described } from "../../messages.js";
+import { propertyName } from "../../program.js";
+import { offendingKinds, type ContextDetail, type DiagnosticRule } from "../../result.js";
+import { error } from "../reports/diagnostics.js";
+import { defaultNull } from "./fallbacks.js";
+import { finishingKeyRead } from "../finishing.js";
+import { hasMethod } from "../kinds.js";
+import type { Offending } from "../model.js";
+import {
+  keyLabel,
+  ownSpan,
+  quietKinds,
+  receiverKinds,
+  shownLabel,
+  unlistedObject,
+} from "../names.js";
+import {
+  leftOutBy,
+  nullWarning,
+  obligation,
+  propertiesOf,
+  type Owner,
+} from "../reports/warnings.js";
+
+// C5a–c, F19a: a method's or a member's receiver, and the receiver of every store through a member and every add.
+
+/** C5a, C5b, F19a: a method call's receiver, `get` and `clear` as any other; ADR 1.5's null default first. */
+export function methodReceiver(
+  walk: Consumers,
+  site: SourceSite,
+  node: FlowNode,
+  receiver: PlaceId,
+  name: string,
+): void {
+  // §3.3: a receiver that is never null and has the method (a reference's method is F19a's)
+  const quiet = quietKinds(walk, receiver);
+  if (
+    quiet !== null &&
+    quiet.every((tag) => tag !== "null" && !REFERENCE.has(tag) && hasMethod(tag, name))
+  ) {
+    walk.skip(receiver);
+    return;
+  }
+  const kinds = receiverKinds(walk, receiver, node);
+  const label = shownLabel(walk, keyLabel(walk, receiver));
+  // C9: the receiver's external data brings its boundary checks, whichever member check follows; a domain's those the
+  // member check's warning owns
+  const send = walk.boundariesBefore(kinds, () => {
+    const text = label();
+    return obligation(
+      "null-check",
+      ownSpan(walk, receiver, site),
+      text,
+      ["non-null"],
+      `check that ${text} is a value with .${name} before the call`,
+    );
+  });
+  defaultNull(walk, receiver, node, site, `.${name}()`, "call");
+  const leftOut = memberChecks(
+    walk,
+    site,
+    label,
+    kinds,
+    (tag) => hasMethod(tag, name),
+    `.${name}()`,
+    "call",
+    () => walk.pass.program.textAt(ownSpan(walk, receiver, site)),
+    `.${name}()`,
+    [],
+    receiver,
+  );
+  send(leftOut);
+}
+
+/**
+ * C5a–c, F19a, §4: a member access's receiver kinds at the whole access's span (§3.4). An error when every kind is
+ * definite and null, or definite and without the member; else one warning and member obligation per offending kind:
+ * a possible null, each kind without the member, each reference, an unknown receiver (its `on` names the kinds that
+ * have the member, A7), and the `extra` ones (an object without the property, an object's own selection). An
+ * `extra` one is the property's own answer at the access and explains its unknown kind, which an unknown receiver is
+ * too: that receiver owes no second warning there, and its own absence is its own access's (#1469). Gives which receiver
+ * items a stop's discharge left out with their owners (`leftOutBy`, #1448): the receiver's unknown items are owned by
+ * its one unknown warning, or by the `extra` one that stands for it.
+ */
+export function memberChecks(
+  walk: Consumers,
+  site: SourceSite,
+  label: () => string,
+  kinds: readonly Item[],
+  takes: (tag: ItemTag) => boolean,
+  what: string,
+  use: "read" | "call" | "store",
+  receiver: () => string,
+  member: string,
+  extra: readonly Offending[] = [],
+  receiverPlace?: PlaceId,
+  elements?: readonly ItemTag[],
+): (item: Item) => boolean {
+  // (the rule names the receiver's text, a label's where it is one: made where the error or a warning first names it)
+  let named:
+    { readonly rule: DiagnosticRule; readonly detail: ContextDetail["receiver"] } | undefined;
+  const ruled = (): NonNullable<typeof named> => {
+    if (named !== undefined) return named;
+    const text = receiver();
+    return (named = {
+      rule: {
+        rule: "member",
+        receiver: text,
+        member,
+        use,
+        ...(elements === undefined ? {} : { elements }),
+      },
+      detail: {
+        text,
+        kinds: kinds.map((item) => item.tag),
+        member: member.replace(/^\.|\(\)$/g, ""),
+      },
+    });
+  };
+  const nulls = kinds.filter((item) => item.tag === "null");
+  const others = kinds.filter((item) => item.tag !== "null");
+  const lacking = others.filter(
+    (item) => concrete(item) && !REFERENCE.has(item.tag) && !takes(item.tag),
+  );
+  const definite = (items: readonly Item[]): boolean =>
+    items.length > 0 && items.length === kinds.length && items.every((item) => item.cert === "def");
+  if (definite(nulls) || definite(lacking)) {
+    error(
+      walk,
+      "member-read",
+      site,
+      ruled().rule,
+      (definite(nulls) ? nulls : lacking).map((item) => item.tag),
+    );
+    return () => false;
+  }
+  const has = `has ${what} before the ${use}`;
+  const offending: Offending[] = [
+    ...nulls.slice(0, 1).map((item): Offending => [item, `is not null before the ${use}`]),
+    ...offendingKinds(lacking).map(({ item }): Offending => [item, has]),
+    // F19a: a reference's member is the runtime's, `unmodelled` first (§3.4)
+    ...offendingKinds(others.filter((item) => REFERENCE.has(item.tag))).map(
+      ({ item }): Offending => [{ ...item, context: "unmodelled" }, has],
+    ),
+  ];
+  const unknown = others.filter((item) => isOpaque(item) || isExternal(item));
+  const unknownEntry = (extra.length === 0 ? unknown.slice(0, 1) : []).map((item): Offending => {
+    // the kinds that have the member in words: `an object`, `text (string) or a list`
+    const takers = MEMBER_KINDS.filter((kind) => takes(kind));
+    return [
+      item,
+      `is ${takers.length === 0 ? "a value" : described(takers)} with ${what} before the ${use}`,
+    ];
+  });
+  offending.push(...unknownEntry);
+  // (a reference's members are the runtime's: a speaker or handle is a kind a test narrows to, with no fallback)
+  const having = others.filter((item) => REFERENCE.has(item.tag) || takes(item.tag));
+  const owners: Owner[] = [];
+  for (const [index, entry] of [...offending, ...extra].entries()) {
+    const [item, on] = entry;
+    const text = label();
+    const made = nullWarning(
+      walk,
+      "member-read",
+      site,
+      item,
+      `check that ${text} ${on}`,
+      text,
+      ruled().rule,
+      having,
+      ["non-null"],
+      ruled().detail,
+      receiverPlace,
+    );
+    if (walk.finishing && (entry === unknownEntry[0] || index >= offending.length))
+      owners.push([made, () => unknown]);
+  }
+  return leftOutBy(walk, owners);
+}
+
+/**
+ * C5c for a store: whether the receiver's sources have the property, once per receiver key and property: `none` (every
+ * known source lacks it), `some`, `all`; the sources are those the contract reads at the property's path, and the
+ * earliest literal that lacks it, where the store's error points (ADR 1.4); and whether one gives an unknown there, which
+ * an object the analysis cannot list gives at every property (#1436).
+ */
+function propertyPresence(
+  walk: Consumers,
+  receiver: Key,
+  property: string,
+): {
+  readonly state: "none" | "some" | "all";
+  readonly literal: Writer | null;
+  readonly unknown: boolean;
+} {
+  const { program, contract } = walk.pass;
+  const memoKey = joinParts(receiver, property);
+  const known = walk.presence.get(memoKey);
+  if (known !== undefined) return known;
+  const path = keyPath(receiver);
+  let lacks = false;
+  let has = false;
+  let unknown = false;
+  let literal: Writer | null = null;
+  // the state after a source, or after a run of them read in order (`presenceSteps`)
+  const take = (step: PresenceStep): void => {
+    lacks = (step.mask & 1) !== 0;
+    has = (step.mask & 2) !== 0;
+    unknown ||= step.unknown;
+    literal = firstWriter(literal, step.literal);
+  };
+  const see = (items: readonly Item[]): void =>
+    take(presenceSteps(items)[(lacks ? 1 : 0) | (has ? 2 : 0)]!);
+  for (let length = path.length; length >= 0 && !(lacks && has); length -= 1) {
+    program.work.charge("checks");
+    const stored = contract.prefixStores(keyOf(keyPlace(receiver), path.slice(0, length)));
+    const below = joinSteps(path.slice(length), [property]);
+    for (const entry of stored.list)
+      if (!(lacks && has)) see(walk.run(contract.entryAt(entry, below)));
+    if (lacks && has) break;
+    // (the prefix's layers' sources in order, as their summary's steps, #1466; each by itself where it declines)
+    const state = (lacks ? 1 : 0) | (has ? 2 : 0);
+    const after = contract.summaryPresence(stored, below, state, (work) => walk.run(work));
+    if (after !== null) take(after);
+    else
+      for (const sub of contract.relevantSubs(stored, below))
+        if (!(lacks && has)) see(walk.run(contract.subAt(sub.key, below)));
+  }
+  const presence = { state: lacks ? (has ? "some" : "none") : "all", literal, unknown } as const;
+  keepText(program.work, memoKey.length);
+  walk.presence.set(memoKey, presence);
+  return presence;
+}
+
+/** Every store through a member and every add: its receiver (C5a–c, F19a). */
+export function receivers(walk: Consumers): void {
+  const { program, definitions, values } = walk.pass;
+  walk.enter(2);
+  for (const d of walk.order(
+    definitions.storeDefs.filter(
+      (found) => found.recv !== null && (found.kind === "whole" || found.kind === "add"),
+    ),
+  )) {
+    if (!walk.runs(d.site)) continue;
+    walk.reading = d.prep ?? d.node;
+    const receiver = withoutEmpty(
+      walk.finishing
+        ? finishingKeyRead(walk, d.recv!, d.prep ?? d.node)
+        : walk.run(values.keyItems(d.recv!, d.prep ?? d.node), () =>
+            walk.pass.contract.contractOf(d.recv!),
+          ),
+    );
+    const owner = d.into === undefined ? undefined : program.projOf.get(d.into)?.owner;
+    // §3.4: the whole member or element access, including a mutator's call.
+    const at = d.into !== undefined ? ownSpan(walk, d.into, d.site) : d.site;
+    const recvPath = keyPath(d.recv!);
+    const label = shownLabel(
+      walk,
+      owner !== undefined
+        ? keyLabel(walk, owner)
+        : recvPath.reduce(
+            (above, step) => labelBelow(above, propertyName(step)),
+            labelRoot(walk.pass.contract, d.place),
+          ),
+    );
+    // C9: the receiver's external data brings its boundary checks, whichever member check follows
+    for (const item of receiver)
+      walk.admission.boundaryFor(item, () => {
+        const text = label();
+        return obligation(
+          "null-check",
+          at,
+          text,
+          ["non-null"],
+          `check that ${text} accepts the store`,
+        );
+      });
+    // what the store needs of its receiver: a property store an object, an element store a list or a dict, an add
+    // its method (C5b: `x.missing = 2` with x a whole number fails at runtime)
+    const property = d.kind === "whole" ? (d.path.at(-1) ?? null) : null;
+    const method =
+      d.kind === "add"
+        ? d.how === "element"
+          ? "add"
+          : d.how === "elements"
+            ? "addAll"
+            : undefined
+        : undefined;
+    const takes = (tag: ItemTag): boolean =>
+      d.kind === "add"
+        ? method === undefined || hasMethod(tag, method)
+        : property === "element"
+          ? tag === "list" || tag === "dict"
+          : tag === "object";
+    const what =
+      d.kind === "add"
+        ? `.${method}()`
+        : property === "element"
+          ? "an element store"
+          : `a store of .${property === null ? property : propertyName(property)}`;
+    // D1: the receiver in its own text, and the member as the access writes it
+    const receiverText =
+      owner !== undefined ? () => program.textAt(ownSpan(walk, owner, d.site)) : label;
+    const member =
+      d.kind === "add"
+        ? `.${method ?? "add"}()`
+        : property === "element"
+          ? "[i]"
+          : `.${property === null ? "" : propertyName(property)}`;
+    // C5c, ADR 1.4: a store of a property into objects: every known source lacks it, an error at the literal; some
+    // lacks it, its member obligation; every source has it, nothing
+    const extra: Offending[] = [];
+    if (
+      property !== null &&
+      property !== "element" &&
+      receiver.some((item) => item.tag === "object")
+    ) {
+      const presence = propertyPresence(walk, d.recv!, property);
+      const alone = receiver.every((item) => item.tag === "object");
+      // never an error under a guard of the receiver (§3.2)
+      if (presence.state === "none" && alone && !receiver.some((item) => item.guarded === true)) {
+        error(
+          walk,
+          "member-read",
+          presence.literal ?? d.site,
+          {
+            rule: "absent",
+            receiver: receiverText(),
+            property: propertyName(property),
+            store: presence.literal === null ? null : at,
+            properties: [...propertiesOf(walk, { key: d.recv! })],
+          },
+          [],
+        );
+        continue;
+      }
+      // (every source the contract reads has it, but an unknown there may be one an object the analysis cannot list
+      // lacks, as the read's: ADR 1.8, #1436)
+      const unlisted =
+        presence.state === "all" && presence.unknown && owner !== undefined
+          ? unlistedObject(walk, owner, { node: d.prep ?? d.node, kinds: receiver })
+          : null;
+      if (presence.state !== "all" || unlisted !== null)
+        extra.push([
+          unlisted ??
+            makeItem("unknown", null, { reasons: REASON.missing, context: "missing", cert: "pos" }),
+          `has .${propertyName(property)} before the store`,
+        ]);
+    }
+    memberChecks(
+      walk,
+      at,
+      label,
+      receiver,
+      takes,
+      what,
+      "store",
+      receiverText,
+      member,
+      extra,
+      owner,
+    );
+  }
+}

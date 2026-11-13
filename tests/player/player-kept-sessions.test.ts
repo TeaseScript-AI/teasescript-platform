@@ -23,7 +23,7 @@ import {
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import { interpreterEventProblem, type InterpreterEvent } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 
 // The session the Player keeps for a script (PLAYER-UI "Session start and user activation"): what is read back from
 // browser storage is checked before a session is restored from it, the store keeps one session per scope with its

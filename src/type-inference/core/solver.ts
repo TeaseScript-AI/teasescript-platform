@@ -16,6 +16,7 @@ import {
   type Inclusion,
 } from "./contract/contributions.js";
 import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } from "./items.js";
+import { retainedRecorder } from "./retained/retained.js";
 
 /*
  * The demand solver of the coarse core (checkpoint 9; the port plan's S3 note §1). A demand is one answer the
@@ -244,6 +245,11 @@ interface Frame {
   readonly trace: FlowSink | null;
 }
 
+/** Test-only: a run's identity as the retained-state recorder hears it, made before its demand's factory runs. */
+interface RunMark {
+  readonly started: true;
+}
+
 interface Rerun {
   readonly solving: Solving;
   readonly member: DemandNode;
@@ -423,7 +429,7 @@ export class Solver {
   /**
    * How many times `forget` ran: within a pass a finished answer changes only there (`#finish` and `#solved` add keys
    * not yet kept), so a value derived outside the solver from its answers is current while this count is unchanged
-   * (#1444: the written-decider summary, `admission/transfers.ts`).
+   * (#1444: the written-decider summary, `admission/transfers/written-decider.ts`).
    */
   #forgets = 0;
   readonly #active = new Map<string, DemandNode>();
@@ -437,6 +443,13 @@ export class Solver {
   readonly #work: WorkLedger;
   readonly #scope: ItemScope;
   readonly #seam: SolverSeam | null = activeSeam;
+  /** Test-only: the retained-state recorder, told the current run (`retained/retained.ts`); `null` in production. */
+  readonly #retained = retainedRecorder();
+  /**
+   * Test-only: each frame's run, as the recorder was told it before its demand's factory ran (`#started`); made only
+   * with a recorder.
+   */
+  readonly #runOf: WeakMap<Frame, RunMark> | null = this.#retained === null ? null : new WeakMap();
   /** The order of demands' keys at one site and kind (`canonical`): the pass's, a cursor's by its logical text. */
   names: ((a: string, b: string) => number) | null = null;
   /** Test-only seam: a component's names as another pass replays them (`exportNames`). */
@@ -478,7 +491,15 @@ export class Solver {
   public run<T>(work: Work<T>): T {
     if (this.#running) throw new Error("The solver is already running a top-level demand.");
     // after a stop the analysis only finishes (D4 a′): no demand is computed, each answered as it finished or `STOPPED`
-    if (this.#work.stopped !== null) return this.#stoppedRun(work);
+    // (a top-level computation is a run of its own; a stopped one's generators run outside the frames)
+    this.#retained?.run({});
+    if (this.#work.stopped !== null) {
+      try {
+        return this.#stoppedRun(work);
+      } finally {
+        this.#retained?.run(null);
+      }
+    }
     this.#running = true;
     const results: T[] = [];
     const top = (function* (): Work<readonly Item[]> {
@@ -505,6 +526,7 @@ export class Solver {
       throw error;
     } finally {
       this.#running = false;
+      this.#retained?.run(null);
     }
     if (results.length !== 1) throw new Error("A top-level demand did not finish.");
     return results[0]!;
@@ -807,6 +829,22 @@ export class Solver {
     return flow;
   }
 
+  /**
+   * Test-only: a demand's run starts before its factory (`make`) runs, whose code is the run's too; `null` without a
+   * recorder, which then makes nothing.
+   */
+  #starting(): RunMark | null {
+    if (this.#retained === null) return null;
+    const run: RunMark = { started: true };
+    this.#retained.run(run);
+    return run;
+  }
+
+  /** Test-only: `frame` runs as the run `#starting` began. */
+  #started(frame: Frame, run: RunMark | null): void {
+    if (run !== null) this.#runOf?.set(frame, run);
+  }
+
   /** Runs frames, and solves the components they close, until `base` returns. */
   #drive(base: Frame): void {
     const frames = this.#frames;
@@ -816,10 +854,14 @@ export class Solver {
       if (this.#limit !== null && this.#work.own > this.#limit) throw new DemandExhausted();
       const solving = this.#solving.at(-1);
       if (solving !== undefined && solving.depth === frames.length) {
+        // (a component's step, its decisions included, is the solving's run; a rerun's code runs in its own frame)
+        this.#retained?.run(solving);
         this.#step(solving);
         continue;
       }
       const frame = frames.at(-1)!;
+      // (the frame's step is its run's, and so is its finish below: its decision's choice and answer)
+      this.#retained?.run(this.#runOf?.get(frame) ?? frame);
       const step = this.#advance(frame, frame.inline, frame.pending ?? []);
       frame.pending = undefined;
       this.#work.charge("yields");
@@ -868,7 +910,9 @@ export class Solver {
         trace: null,
       };
       this.#active.set(demand.key, created);
+      const run = this.#starting();
       const pushed = this.#frame(created, demand.make(), created.index, null);
+      this.#started(pushed, run);
       this.#stack.push(created);
       this.#frames.push(pushed);
       return;
@@ -1008,7 +1052,10 @@ export class Solver {
       this.#work.charge("sccReruns");
       const rerun: Rerun = { solving, member, reads: new Set() };
       this.#reruns.push(rerun);
-      this.#frames.push(this.#frame(null, member.demand.make(), solving.component.index, rerun));
+      const run = this.#starting();
+      const pushed = this.#frame(null, member.demand.make(), solving.component.index, rerun);
+      this.#started(pushed, run);
+      this.#frames.push(pushed);
       return;
     }
   }

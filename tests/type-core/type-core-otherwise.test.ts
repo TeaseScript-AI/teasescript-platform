@@ -161,206 +161,207 @@ function c10Record(source: string): string {
     .trimEnd();
 }
 
+// (each cell's record in the four modes; the first group errs at the fallback where main ran it at runtime: a written
+// or retained `T?` of one non-null family, as for `= 1`, at a root, an element, a dict's value, a nested literal, a
+// parameter, a copy and an `otherwise` chain, and `get`'s default; the second group: the controls)
+const cells: readonly (readonly [string, string, string])[] = [
+  [
+    "otherwise/host-one-family",
+    'let input: integer? = hostValue\nlet result = input otherwise "bad"\nsay result',
+    "compile-error | written-target@22:W written-target@61:E | copy-type:input[integer,null] copy-typeB:input[integer,null]",
+  ],
+  [
+    "otherwise/host-number-wrong",
+    'let input: number? = hostValue\nlet result = input otherwise "bad"\nsay result',
+    "compile-error | written-target@21:W written-target@60:E | copy-type:input[number,null] copy-typeB:input[number,null]",
+  ],
+  [
+    "otherwise/non-null-written",
+    'let input: integer = hostValue\nlet result = input otherwise "bad"\nsay result',
+    "compile-error | written-target@21:W written-target@60:E | copy-type:input[integer] copy-typeB:input[integer]",
+  ],
+  [
+    "otherwise/copy-retained",
+    'let a: integer? = hostValue\nlet b = a\nlet result = b otherwise "bad"\nsay result',
+    "compile-error | written-target@18:W written-target@63:E | copy-type:a[integer,null] copy-typeB:a[integer,null]",
+  ],
+  [
+    "otherwise/mixed-known-host",
+    'let choice = askBoolean "?"\nlet input: integer? = 1\nif choice { input = hostValue }\nlet result = input otherwise "bad"\nsay result',
+    "compile-error | written-target@72:W written-target@113:E | copy-type:input[integer,null] copy-typeB:input[integer,null]",
+  ],
+  [
+    "otherwise/element",
+    'let xs: integer?[] = hostValue\nlet result = xs[0] otherwise "bad"\nsay result',
+    "compile-error | written-target@21:W written-target@21:W written-target@60:E | copy-type:xs[list] copy-type:xs.element[integer,null] copy-typeB:xs[list]",
+  ],
+  [
+    "otherwise/dict-value",
+    'let d: integer? dict = hostValue\nlet result = d["a"] otherwise "bad"\nsay result',
+    'compile-error | written-target@23:W written-target@23:W integer-use@48:W written-target@63:E | copy-type:d[dict] copy-type:d.entry[integer,null] copy-typeB:d[dict] integer-check:"a"[integer]',
+  ],
+  [
+    "otherwise/nested-literal",
+    'let input: integer[]? = hostValue\nlet result = input otherwise ["bad"]\nsay result',
+    "compile-error | written-target@24:W written-target@24:W written-target@47:W written-target@47:W written-target@64:E | copy-type:input[list,null] copy-type:input.element[integer] copy-typeB:input[list,null] copy-type:result.element[integer] copy-type:result.element[integer]",
+  ],
+  [
+    "otherwise/parameter",
+    'function use(input: integer?) { say input otherwise "bad" }\nuse(hostValue)',
+    "compile-error | written-target@52:E written-target@64:W | copy-type:use.input[integer,null] copy-typeB:use.input[integer,null]",
+  ],
+  [
+    "otherwise/chain",
+    'let a: integer? = hostValue\nlet b: integer? = hostValue\nlet result = a otherwise b otherwise "bad"\nsay result',
+    "compile-error | written-target@18:W written-target@46:W written-target@93:E | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-type:b[integer,null] copy-typeB:b[integer,null]",
+  ],
+  [
+    "otherwise/call-result",
+    'function f(v): integer? {\n  return v\n}\nlet result = f(hostValue) otherwise "bad"\nsay result',
+    "compile-error | written-target@35:W written-target@75:E | copy-type:f.result[integer,null] copy-typeB:f.v[unknown]",
+  ],
+  [
+    "narrowed/not-null",
+    'let n: integer? = hostValue\nif n != null { say n otherwise "bad" }',
+    "compile-error | written-target@18:W written-target@59:E | copy-type:n[integer,null] copy-typeB:n[integer,null]",
+  ],
+  // (a `null` read has no element: it contributes no family, so the list's still decides, Codex r4 on #1824)
+  [
+    "chain/null-read-first",
+    'let a = null\nlet b: integer[]? = hostValue\nsay a otherwise b otherwise ["bad"]',
+    "compile-error | written-target@33:W written-target@33:W written-target@72:E | copy-type:b[list,null] copy-type:b.element[integer] copy-typeB:b[list,null]",
+  ],
+  [
+    "chain/three",
+    'let a: integer? = hostValue\nlet b: integer? = hostValue\nlet c: integer? = hostValue\nlet result = a otherwise b otherwise c otherwise "bad"\nsay result',
+    "compile-error | written-target@18:W written-target@46:W written-target@74:W written-target@133:E | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-type:b[integer,null] copy-typeB:b[integer,null] copy-type:c[integer,null] copy-typeB:c[integer,null]",
+  ],
+  [
+    "chain/null-only-link",
+    'let a: integer? = hostValue\nlet b: integer? = null\nlet result = a otherwise b otherwise "bad"\nsay result',
+    "compile-error | written-target@18:W written-target@88:E | copy-type:a[integer,null] copy-typeB:a[integer,null]",
+  ],
+  [
+    "chain/null-link",
+    'let a: integer? = hostValue\nlet result = a otherwise null otherwise "bad"\nsay result',
+    "compile-error | written-target@18:W written-target@68:E | copy-type:a[integer,null] copy-typeB:a[integer,null]",
+  ],
+  [
+    "chain/known-link",
+    'let a: integer? = hostValue\nlet result = a otherwise 1 otherwise "bad"\nsay result',
+    "compile-error | written-target@18:W written-target@65:E | copy-type:a[integer,null] copy-typeB:a[integer,null]",
+  ],
+  [
+    "get/host-element",
+    'let xs: integer[] = hostValue\nlet result = xs.get(0, default: "bad")\nsay result',
+    "compile-error | written-target@20:W written-target@20:W integer-use@50:W operator@50:W written-target@62:E | copy-type:xs[list] copy-type:xs.element[integer] copy-typeB:xs[list] integer-check:0[integer] operand:0[string]",
+  ],
+  [
+    "otherwise/host-fitting",
+    "let input: integer? = hostValue\nlet result = input otherwise 2\nsay result",
+    "warning-runtime-check | written-target@22:W | copy-type:input[integer,null] copy-typeB:input[integer,null]",
+  ],
+  [
+    "otherwise/host-number-family",
+    "let input: number? = hostValue\nlet result = input otherwise 1\nsay result",
+    "warning-runtime-check | written-target@21:W | copy-type:input[number,null] copy-typeB:input[number,null]",
+  ],
+  [
+    "otherwise/known-only-null",
+    'let input: integer? = null\nlet result = input otherwise "bad"\nsay result',
+    "valid |  |",
+  ],
+  [
+    "otherwise/known-integer",
+    'let input: integer? = 1\nlet result = input otherwise "bad"\nsay result',
+    "compile-error | static@43:W written-target@53:E |",
+  ],
+  [
+    "otherwise/parameter-known",
+    'function use(input: integer?) { say input otherwise "bad" }\nuse(1)',
+    "compile-error | static@42:W written-target@52:E |",
+  ],
+  [
+    "otherwise/receiving-union",
+    'let input: integer? = hostValue\nlet result: integer | string = input otherwise "bad"\nsay result',
+    "warning-runtime-check | written-target@22:W | copy-type:input[integer,null] copy-typeB:input[integer,null]",
+  ],
+  [
+    "otherwise/two-families",
+    "let input: integer | string | null = hostValue\nlet result = input otherwise true\nsay result",
+    "warning-runtime-check | written-target@37:W | copy-type:input[integer,string,null] copy-typeB:input[integer,string,null]",
+  ],
+  [
+    "otherwise/unwritten",
+    'let input = hostValue\nlet result = input otherwise "bad"\nsay result',
+    "warning-runtime-check | written-target@35:W | copy-typeB:input[unknown] copy-type:result[string]",
+  ],
+  // (Codex r1's N1 on #1824: a read the test proves only `null` takes no family)
+  [
+    "narrowed/is-null",
+    'let n: integer? = hostValue\nif n is null { say n otherwise "bad" }',
+    "warning-runtime-check | written-target@18:W | copy-type:n[integer,null] copy-typeB:n[integer,null]",
+  ],
+  [
+    "otherwise/call-result-fitting",
+    "function f(v): integer? {\n  return v\n}\nlet result = f(hostValue) otherwise 2\nsay result",
+    "warning-runtime-check | written-target@35:W | copy-type:f.result[integer,null] copy-typeB:f.v[unknown]",
+  ],
+  [
+    "chain/null-read-first-fitting",
+    "let a = null\nlet b: integer[]? = hostValue\nsay a otherwise b otherwise [2]",
+    "warning-runtime-check | written-target@33:W written-target@33:W | copy-type:b[list,null] copy-type:b.element[integer] copy-typeB:b[list,null]",
+  ],
+  // (a known value that may be null, unwritten: its own possible kinds decide, a warning; asking a domain here would
+  // make the requirement definite, the eligibility guard keeps it possible, Astra r2's N1 on #1824)
+  [
+    "otherwise/known-or-null",
+    'let choice = askBoolean "?"\nlet a = 1\nif choice { a = null }\nsay a otherwise "bad"',
+    'warning-runtime-check | written-target@77:W | copy-type:"bad"[integer,number]',
+  ],
+  [
+    "chain/unknown-link",
+    'let a: integer? = hostValue\nlet b = hostValue\nlet result = a otherwise b otherwise "bad"\nsay result',
+    "warning-runtime-check | written-target@18:W written-target@59:W written-target@71:W | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-typeB:b[unknown] copy-type:result[integer,string] copy-type:b[integer,number]",
+  ],
+  [
+    "chain/two-family-links",
+    "let a: integer? = hostValue\nlet b: string? = hostValue\nlet result = a otherwise b otherwise true\nsay result",
+    "warning-runtime-check | written-target@18:W written-target@45:W written-target@80:W | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-type:b[string,null] copy-typeB:b[string,null] copy-type:b[integer,number]",
+  ],
+  [
+    "chain/fitting",
+    "let a: integer? = hostValue\nlet b: integer? = hostValue\nlet result = a otherwise b otherwise 3\nsay result",
+    "warning-runtime-check | written-target@18:W written-target@46:W | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-type:b[integer,null] copy-typeB:b[integer,null]",
+  ],
+  [
+    "get/host-fitting",
+    "let xs: integer[] = hostValue\nlet result = xs.get(0, default: 2)\nsay result",
+    "warning-runtime-check | written-target@20:W written-target@20:W integer-use@50:W operator@50:W | copy-type:xs[list] copy-type:xs.element[integer] copy-typeB:xs[list] integer-check:0[integer] operand:0[string]",
+  ],
+  [
+    "get/unwritten",
+    'let xs = hostValue\nlet result = xs.get(0, default: "bad")\nsay result',
+    "warning-runtime-check | written-target@32:W member-read@32:W integer-use@39:W operator@39:W | copy-typeB:xs[unknown] copy-type:result[string] null-check:xs[non-null] integer-check:0[integer] operand:0[string]",
+  ],
+  [
+    "get/known",
+    'let xs = [1, 2]\nlet result = xs.get(0, default: "bad")\nsay result',
+    "compile-error | written-target@48:E |",
+  ],
+  [
+    "load/default",
+    'let input: integer = load("x", default: "bad")\nsay input',
+    "compile-error | written-target@40:E | copy-typeB:input[integer]",
+  ],
+  [
+    "parse/default",
+    'let input: integer = fromJson("1", default: "bad")\nsay input',
+    "compile-error | written-target@44:E | copy-typeB:input[integer]",
+  ],
+];
+
 test("C10 takes a fallback's family from its value's domain where the read cannot", () => {
-  // (each cell's record in the four modes; the first group errs at the fallback where main ran it at runtime: a written
-  // or retained `T?` of one non-null family, as for `= 1`, at a root, an element, a dict's value, a nested literal, a
-  // parameter, a copy and an `otherwise` chain, and `get`'s default; the second group: the controls)
-  const cells: readonly (readonly [string, string, string])[] = [
-    [
-      "otherwise/host-one-family",
-      'let input: integer? = hostValue\nlet result = input otherwise "bad"\nsay result',
-      "compile-error | written-target@22:W written-target@61:E | copy-type:input[integer,null] copy-typeB:input[integer,null]",
-    ],
-    [
-      "otherwise/host-number-wrong",
-      'let input: number? = hostValue\nlet result = input otherwise "bad"\nsay result',
-      "compile-error | written-target@21:W written-target@60:E | copy-type:input[number,null] copy-typeB:input[number,null]",
-    ],
-    [
-      "otherwise/non-null-written",
-      'let input: integer = hostValue\nlet result = input otherwise "bad"\nsay result',
-      "compile-error | written-target@21:W written-target@60:E | copy-type:input[integer] copy-typeB:input[integer]",
-    ],
-    [
-      "otherwise/copy-retained",
-      'let a: integer? = hostValue\nlet b = a\nlet result = b otherwise "bad"\nsay result',
-      "compile-error | written-target@18:W written-target@63:E | copy-type:a[integer,null] copy-typeB:a[integer,null]",
-    ],
-    [
-      "otherwise/mixed-known-host",
-      'let choice = askBoolean "?"\nlet input: integer? = 1\nif choice { input = hostValue }\nlet result = input otherwise "bad"\nsay result',
-      "compile-error | written-target@72:W written-target@113:E | copy-type:input[integer,null] copy-typeB:input[integer,null]",
-    ],
-    [
-      "otherwise/element",
-      'let xs: integer?[] = hostValue\nlet result = xs[0] otherwise "bad"\nsay result',
-      "compile-error | written-target@21:W written-target@21:W written-target@60:E | copy-type:xs[list] copy-type:xs.element[integer,null] copy-typeB:xs[list]",
-    ],
-    [
-      "otherwise/dict-value",
-      'let d: integer? dict = hostValue\nlet result = d["a"] otherwise "bad"\nsay result',
-      'compile-error | written-target@23:W written-target@23:W integer-use@48:W written-target@63:E | copy-type:d[dict] copy-type:d.entry[integer,null] copy-typeB:d[dict] integer-check:"a"[integer]',
-    ],
-    [
-      "otherwise/nested-literal",
-      'let input: integer[]? = hostValue\nlet result = input otherwise ["bad"]\nsay result',
-      "compile-error | written-target@24:W written-target@24:W written-target@47:W written-target@47:W written-target@64:E | copy-type:input[list,null] copy-type:input.element[integer] copy-typeB:input[list,null] copy-type:result.element[integer] copy-type:result.element[integer]",
-    ],
-    [
-      "otherwise/parameter",
-      'function use(input: integer?) { say input otherwise "bad" }\nuse(hostValue)',
-      "compile-error | written-target@52:E written-target@64:W | copy-type:use.input[integer,null] copy-typeB:use.input[integer,null]",
-    ],
-    [
-      "otherwise/chain",
-      'let a: integer? = hostValue\nlet b: integer? = hostValue\nlet result = a otherwise b otherwise "bad"\nsay result',
-      "compile-error | written-target@18:W written-target@46:W written-target@93:E | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-type:b[integer,null] copy-typeB:b[integer,null]",
-    ],
-    [
-      "otherwise/call-result",
-      'function f(v): integer? {\n  return v\n}\nlet result = f(hostValue) otherwise "bad"\nsay result',
-      "compile-error | written-target@35:W written-target@75:E | copy-type:f.result[integer,null] copy-typeB:f.v[unknown]",
-    ],
-    [
-      "narrowed/not-null",
-      'let n: integer? = hostValue\nif n != null { say n otherwise "bad" }',
-      "compile-error | written-target@18:W written-target@59:E | copy-type:n[integer,null] copy-typeB:n[integer,null]",
-    ],
-    // (a `null` read has no element: it contributes no family, so the list's still decides, Codex r4 on #1824)
-    [
-      "chain/null-read-first",
-      'let a = null\nlet b: integer[]? = hostValue\nsay a otherwise b otherwise ["bad"]',
-      "compile-error | written-target@33:W written-target@33:W written-target@72:E | copy-type:b[list,null] copy-type:b.element[integer] copy-typeB:b[list,null]",
-    ],
-    [
-      "chain/three",
-      'let a: integer? = hostValue\nlet b: integer? = hostValue\nlet c: integer? = hostValue\nlet result = a otherwise b otherwise c otherwise "bad"\nsay result',
-      "compile-error | written-target@18:W written-target@46:W written-target@74:W written-target@133:E | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-type:b[integer,null] copy-typeB:b[integer,null] copy-type:c[integer,null] copy-typeB:c[integer,null]",
-    ],
-    [
-      "chain/null-only-link",
-      'let a: integer? = hostValue\nlet b: integer? = null\nlet result = a otherwise b otherwise "bad"\nsay result',
-      "compile-error | written-target@18:W written-target@88:E | copy-type:a[integer,null] copy-typeB:a[integer,null]",
-    ],
-    [
-      "chain/null-link",
-      'let a: integer? = hostValue\nlet result = a otherwise null otherwise "bad"\nsay result',
-      "compile-error | written-target@18:W written-target@68:E | copy-type:a[integer,null] copy-typeB:a[integer,null]",
-    ],
-    [
-      "chain/known-link",
-      'let a: integer? = hostValue\nlet result = a otherwise 1 otherwise "bad"\nsay result',
-      "compile-error | written-target@18:W written-target@65:E | copy-type:a[integer,null] copy-typeB:a[integer,null]",
-    ],
-    [
-      "get/host-element",
-      'let xs: integer[] = hostValue\nlet result = xs.get(0, default: "bad")\nsay result',
-      "compile-error | written-target@20:W written-target@20:W integer-use@50:W operator@50:W written-target@62:E | copy-type:xs[list] copy-type:xs.element[integer] copy-typeB:xs[list] integer-check:0[integer] operand:0[string]",
-    ],
-    [
-      "otherwise/host-fitting",
-      "let input: integer? = hostValue\nlet result = input otherwise 2\nsay result",
-      "warning-runtime-check | written-target@22:W | copy-type:input[integer,null] copy-typeB:input[integer,null]",
-    ],
-    [
-      "otherwise/host-number-family",
-      "let input: number? = hostValue\nlet result = input otherwise 1\nsay result",
-      "warning-runtime-check | written-target@21:W | copy-type:input[number,null] copy-typeB:input[number,null]",
-    ],
-    [
-      "otherwise/known-only-null",
-      'let input: integer? = null\nlet result = input otherwise "bad"\nsay result',
-      "valid |  |",
-    ],
-    [
-      "otherwise/known-integer",
-      'let input: integer? = 1\nlet result = input otherwise "bad"\nsay result',
-      "compile-error | static@43:W written-target@53:E |",
-    ],
-    [
-      "otherwise/parameter-known",
-      'function use(input: integer?) { say input otherwise "bad" }\nuse(1)',
-      "compile-error | static@42:W written-target@52:E |",
-    ],
-    [
-      "otherwise/receiving-union",
-      'let input: integer? = hostValue\nlet result: integer | string = input otherwise "bad"\nsay result',
-      "warning-runtime-check | written-target@22:W | copy-type:input[integer,null] copy-typeB:input[integer,null]",
-    ],
-    [
-      "otherwise/two-families",
-      "let input: integer | string | null = hostValue\nlet result = input otherwise true\nsay result",
-      "warning-runtime-check | written-target@37:W | copy-type:input[integer,string,null] copy-typeB:input[integer,string,null]",
-    ],
-    [
-      "otherwise/unwritten",
-      'let input = hostValue\nlet result = input otherwise "bad"\nsay result',
-      "warning-runtime-check | written-target@35:W | copy-typeB:input[unknown] copy-type:result[string]",
-    ],
-    // (Codex r1's N1 on #1824: a read the test proves only `null` takes no family)
-    [
-      "narrowed/is-null",
-      'let n: integer? = hostValue\nif n is null { say n otherwise "bad" }',
-      "warning-runtime-check | written-target@18:W | copy-type:n[integer,null] copy-typeB:n[integer,null]",
-    ],
-    [
-      "otherwise/call-result-fitting",
-      "function f(v): integer? {\n  return v\n}\nlet result = f(hostValue) otherwise 2\nsay result",
-      "warning-runtime-check | written-target@35:W | copy-type:f.result[integer,null] copy-typeB:f.v[unknown]",
-    ],
-    [
-      "chain/null-read-first-fitting",
-      "let a = null\nlet b: integer[]? = hostValue\nsay a otherwise b otherwise [2]",
-      "warning-runtime-check | written-target@33:W written-target@33:W | copy-type:b[list,null] copy-type:b.element[integer] copy-typeB:b[list,null]",
-    ],
-    // (a known value that may be null, unwritten: its own possible kinds decide, a warning; asking a domain here would
-    // make the requirement definite, the eligibility guard keeps it possible, Astra r2's N1 on #1824)
-    [
-      "otherwise/known-or-null",
-      'let choice = askBoolean "?"\nlet a = 1\nif choice { a = null }\nsay a otherwise "bad"',
-      'warning-runtime-check | written-target@77:W | copy-type:"bad"[integer,number]',
-    ],
-    [
-      "chain/unknown-link",
-      'let a: integer? = hostValue\nlet b = hostValue\nlet result = a otherwise b otherwise "bad"\nsay result',
-      "warning-runtime-check | written-target@18:W written-target@59:W written-target@71:W | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-typeB:b[unknown] copy-type:result[integer,string] copy-type:b[integer,number]",
-    ],
-    [
-      "chain/two-family-links",
-      "let a: integer? = hostValue\nlet b: string? = hostValue\nlet result = a otherwise b otherwise true\nsay result",
-      "warning-runtime-check | written-target@18:W written-target@45:W written-target@80:W | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-type:b[string,null] copy-typeB:b[string,null] copy-type:b[integer,number]",
-    ],
-    [
-      "chain/fitting",
-      "let a: integer? = hostValue\nlet b: integer? = hostValue\nlet result = a otherwise b otherwise 3\nsay result",
-      "warning-runtime-check | written-target@18:W written-target@46:W | copy-type:a[integer,null] copy-typeB:a[integer,null] copy-type:b[integer,null] copy-typeB:b[integer,null]",
-    ],
-    [
-      "get/host-fitting",
-      "let xs: integer[] = hostValue\nlet result = xs.get(0, default: 2)\nsay result",
-      "warning-runtime-check | written-target@20:W written-target@20:W integer-use@50:W operator@50:W | copy-type:xs[list] copy-type:xs.element[integer] copy-typeB:xs[list] integer-check:0[integer] operand:0[string]",
-    ],
-    [
-      "get/unwritten",
-      'let xs = hostValue\nlet result = xs.get(0, default: "bad")\nsay result',
-      "warning-runtime-check | written-target@32:W member-read@32:W integer-use@39:W operator@39:W | copy-typeB:xs[unknown] copy-type:result[string] null-check:xs[non-null] integer-check:0[integer] operand:0[string]",
-    ],
-    [
-      "get/known",
-      'let xs = [1, 2]\nlet result = xs.get(0, default: "bad")\nsay result',
-      "compile-error | written-target@48:E |",
-    ],
-    [
-      "load/default",
-      'let input: integer = load("x", default: "bad")\nsay input',
-      "compile-error | written-target@40:E | copy-typeB:input[integer]",
-    ],
-    [
-      "parse/default",
-      'let input: integer = fromJson("1", default: "bad")\nsay input',
-      "compile-error | written-target@44:E | copy-typeB:input[integer]",
-    ],
-  ];
   for (const mode of MODES)
     for (const [name, body, expected] of cells)
       assert.equal(

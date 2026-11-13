@@ -10,7 +10,7 @@
  * is made from a block's code but a loop's own, nor by a computed or glob target, nor by a file's `call`.
  */
 import type { Expression } from "../../../ast.js";
-import type { WorkLedger } from "../budget.js";
+import { keepText, type WorkLedger } from "../budget.js";
 import { each, holds, sorted, steps } from "../charged-iteration.js";
 import type { Definition, Key } from "../definitions.js";
 import type { FlowNode, FlowRegion } from "../flow-graph.js";
@@ -19,8 +19,8 @@ import type { Work } from "../solver.js";
 import { peel } from "./narrowings.js";
 import { RouteCandidates, type Candidate, type Candidates } from "./route-candidates.js";
 import { CALL, RouteHolding } from "./route-holding.js";
-import type { Place } from "./route-tests.js";
-import type { TreeBlock, TreeStatement } from "./statement-tree.js";
+import type { Feasibility, Place } from "./route-tests.js";
+import { countIn, type TreeBlock, type TreeStatement } from "./statement-tree.js";
 
 /**
  * Where a segment ends: a place from a callable's body down; `own`, the last place's statement is on the route (the
@@ -44,7 +44,7 @@ export interface RouteWriter {
 }
 
 /** A way into code: its block, the index its code starts at, and a loop's statement, whose header a round evaluates. */
-interface Entry {
+export interface Entry {
   readonly block: TreeBlock;
   readonly start: number;
   readonly header: TreeStatement | null;
@@ -78,6 +78,10 @@ export abstract class RouteEntries extends RouteCandidates {
   #files: Set<TreeBlock> | null = null;
   /** Per key, the entries that carry a `null` and the writer that seeded each. */
   readonly #carried = new Map<Key, ReadonlyMap<Entry, Definition>>();
+  /** Under the program default, per loop or label statement, whether a run is proved to reach it (R2.2 item 1). */
+  readonly #reaches = new Map<TreeStatement, boolean>();
+  /** Under the program default, per store list and name, the jumps its stores' stretches hold (`#held`). */
+  readonly #jumpsHeld = new Map<ReadonlyMap<TreeBlock, Candidates>, Map<string, readonly Jump[]>>();
   /** Which statements hold a variable (r4-451). */
   protected readonly holding: RouteHolding = new RouteHolding(
     this.pass.program.work,
@@ -91,7 +95,19 @@ export abstract class RouteEntries extends RouteCandidates {
    * The nearest certified store D′ before a jump's point, in the jump's own body, whose route reaches it with nothing
    * between holding the variable (the jump's seed), or `null`.
    */
-  protected abstract seedAt(key: Key, name: string, point: EntryPoint): Work<Definition | null>;
+  protected abstract seedAt(
+    key: Key,
+    name: string,
+    point: EntryPoint,
+    into: Entry,
+  ): Work<Definition | null>;
+
+  /**
+   * In a program the default holds, the arms its corridors pass through none of (`RouteTests.feasibility`), set by the
+   * first `required` there (`NarrowingRoutes`); `null` elsewhere, where every route query is main's. Under it an entry
+   * route is taken only by R2.2 (`standsAt`, `reached`), and its relation carries no entry on (r4-451).
+   */
+  protected feasible: Feasibility | null = null;
 
   /** The candidates a seed may be, by body: the key's stores (`seedAt`'s). */
   protected abstract seedLists(key: Key): Work<readonly ReadonlyMap<TreeBlock, Candidates>[]>;
@@ -129,6 +145,120 @@ export abstract class RouteEntries extends RouteCandidates {
     return writer === null ? null : { writer, block: null };
   }
 
+  /**
+   * R2.2 under the program default (r4-451): whether a run is proved to reach the entry and, after it, a node at
+   * `chain`: the entry a loop or a label (never a file or a block's body) a run reaches (`#reached`), the node standing
+   * at it (`clear`). Outside the default, true; callers ask it only under the default.
+   */
+  protected standsAt(entry: Entry, node: FlowNode, chain: readonly Place[]): boolean {
+    this.#work.charge("eventSteps");
+    const feasible = this.feasible;
+    if (feasible === null) return true;
+    const at = entry.header ?? (entry.start > 0 ? entry.block.statements[entry.start - 1]! : null);
+    return (
+      at !== null &&
+      this.#reached(feasible, at) &&
+      this.clear(feasible, feasible.entryHazards, node, chain, at)
+    );
+  }
+
+  /**
+   * R2.2 item 1: a loop statement that stands where a route may promote (`clear` from the program's start), or a label
+   * in the top level of the file the session starts in with nothing before it a route may not pass. One answer per
+   * entry statement.
+   */
+  #reached(feasible: Feasibility, at: TreeStatement): boolean {
+    this.#work.charge("eventSteps");
+    const known = this.#reaches.get(at);
+    if (known !== undefined) return known;
+    const { program } = this.pass;
+    const site = { file: at.file, start: at.start, end: at.end };
+    let answer = false;
+    if (at.loop !== null) {
+      // (the node control reaches just before the loop, and the loop's own place)
+      const before = program.flow.placeOf(site);
+      answer =
+        before !== null &&
+        before !== undefined &&
+        this.clear(feasible, feasible.entryHazards, before, this.placesOf(at), null);
+    } else {
+      const node = program.flow.statementAt(site);
+      const before = node === undefined ? null : program.dom.idom(node);
+      answer =
+        feasible.files.has(at.block) &&
+        before !== null &&
+        program.dom.edom(before) === null &&
+        countIn(this.#work, feasible.entryHazards.get(at.block.id) ?? [], 0, at.index) === 0;
+    }
+    this.#reaches.set(at, answer);
+    return answer;
+  }
+
+  /**
+   * Whether, in a program the default holds, a node at `chain` stands where a route may promote (#1938): at the program's
+   * start (`at` `null`, `NarrowingRoutes.#plain`) or at the entry statement `at` (R2.2 items 2 and 3). Its chain starts
+   * in a file's body and, after `at`, passes it (after a label, into a loop's body); its boundary is none or `at`'s
+   * label; no arm on it is one a run is not proved to enter, none a loop's body but `at`'s own; no statement of it holds
+   * a call in its own expressions (`headed`); and before it in each block nothing a route may not pass (`hazards`),
+   * counted after `at` in `at`'s block.
+   */
+  protected clear(
+    feasible: Feasibility,
+    hazards: ReadonlyMap<number, readonly number[]>,
+    node: FlowNode,
+    chain: readonly Place[],
+    at: TreeStatement | null,
+  ): boolean {
+    this.#work.charge("eventSteps");
+    const { unentered, files, headed } = feasible;
+    if (chain.length === 0 || !files.has(chain[0]!.block)) return false;
+    const boundary = this.pass.program.dom.edom(node);
+    const label =
+      at === null || at.loop !== null
+        ? null
+        : (this.pass.program.flow.statementAt({ file: at.file, start: at.start, end: at.end }) ??
+          null);
+    if (boundary !== null && (label === null || boundary !== label)) return false;
+    let level = at === null ? -1 : chain.length;
+    if (at !== null) {
+      let index = 0;
+      for (const _ of steps(this.#work, "eventSteps", () => index < chain.length)) {
+        if (chain[index]!.block === at.block) {
+          level = index;
+          break;
+        }
+        index += 1;
+      }
+      if (level === chain.length) return false;
+      const here = chain[level]!.index;
+      if (
+        at.loop === null
+          ? here <= at.index
+          : here !== at.index || chain[level + 1]?.block !== at.arms[0]
+      )
+        return false;
+    }
+    let index = 0;
+    for (const _ of steps(this.#work, "eventSteps", () => index < chain.length)) {
+      const place = chain[index]!;
+      const owner = place.block.owner;
+      if (
+        unentered.has(place.block) ||
+        (owner !== null && owner.loop !== null && owner !== at) ||
+        (place.index >= 0 && headed.has(place.block.statements[place.index]!)) ||
+        countIn(
+          this.#work,
+          hazards.get(place.block.id) ?? [],
+          index === level ? at!.index + 1 : 0,
+          place.index,
+        ) > 0
+      )
+        return false;
+      index += 1;
+    }
+    return true;
+  }
+
   /** A use's point: its place, its own statement on the route. */
   protected pointOf(node: FlowNode): EntryPoint | null {
     this.#work.charge("eventSteps");
@@ -155,15 +285,20 @@ export abstract class RouteEntries extends RouteCandidates {
     point: EntryPoint,
   ): Work<Definition | "body" | null> {
     this.#work.charge("eventSteps");
-    const carried = yield* this.#relation(key, name);
+    // (under the program default, the relation only once the use stands at an entry, R2.2)
+    const fallback = this.feasible !== null;
+    let carried = fallback ? null : yield* this.#relation(key, name);
     const calls = this.pass.definitions.ownedAway(key);
     let level = point.chain.length;
     for (const _ of steps(this.#work, "eventSteps", () => level > 0)) {
       level -= 1;
       const entry = this.#nearest(point.chain, level);
-      const writer = entry === null ? undefined : carried.get(entry);
-      if (writer !== undefined && this.#open(name, calls, entry!, level, point)) return writer;
+      if (entry === null || (fallback && !this.standsAt(entry, point.node, point.chain))) continue;
+      carried ??= yield* this.#relation(key, name);
+      const writer = carried.get(entry);
+      if (writer !== undefined && this.#open(name, calls, entry, level, point)) return writer;
     }
+    if (fallback) return null;
     const root = point.chain[0]!.block;
     const handler = this.pass.program.handlerOf(point.node);
     return handler !== null &&
@@ -272,12 +407,13 @@ export abstract class RouteEntries extends RouteCandidates {
     const queue: Entry[] = [];
     for (const jump of each(this.#work, "eventSteps", yield* this.#tries(key, name, calls))) {
       if (carried.has(jump.into)) continue;
-      const writer = yield* this.seedAt(key, name, jump.point);
+      const writer = yield* this.seedAt(key, name, jump.point, jump.into);
       if (writer === null) continue;
       carried.set(jump.into, writer);
       queue.push(jump.into);
     }
-    let next = 0;
+    // (under the program default, a seed alone: R2.2 states one entry, so no entry carries on)
+    let next = this.feasible === null ? 0 : queue.length;
     for (const _ of steps(this.#work, "eventSteps", () => next < queue.length)) {
       const entry = queue[next]!;
       next += 1;
@@ -302,6 +438,22 @@ export abstract class RouteEntries extends RouteCandidates {
     const { byBody } = this.#jumpIndex();
     // (a program without jumps: no store's search, no stretch)
     if (byBody.size === 0) return [];
+    if (this.feasible !== null) {
+      // (under the program default, every jump a store's stretch holds, the same for each key of a list, `seedAt`
+      // certifying its writer: a writer it finds reaches its jump with nothing holding the variable between, so its
+      // stretch holds that jump and it would be tried here)
+      const seen = new Set<Jump>();
+      const tried: Jump[] = [];
+      for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
+        for (const jump of each(this.#work, "eventSteps", this.#held(lists, name, calls, byBody)))
+          if (!seen.has(jump)) {
+            seen.add(jump);
+            tried.push(jump);
+          }
+      // (the relation tries the seeds in source order, which its first-reached-first rule reads, and the lists' jumps
+      // come merged per list, not across them: T_k log T_k charged per key, T_k its jumps tried)
+      return sorted(this.#work, "eventSteps", tried, (a, b) => a.order - b.order);
+    }
     // (the key's stores in bodies that make a jump: each list's bodies or the jumps' bodies, whichever are fewer)
     const starts: Candidate[] = [];
     for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
@@ -350,6 +502,57 @@ export abstract class RouteEntries extends RouteCandidates {
       }
     }
     return sorted(this.#work, "eventSteps", tried, (a, b) => a.order - b.order);
+  }
+
+  /**
+   * Under the program default, the jumps any store of a list holds in its stretch, uncertified (as `#tries` finds them
+   * outside it), made once per list, name and `calls`: a prefix's whole stores serve each of its keys alike, so many
+   * keys of one record never scan or certify its stores again.
+   */
+  #held(
+    lists: ReadonlyMap<TreeBlock, Candidates>,
+    name: string,
+    calls: boolean,
+    byBody: ReadonlyMap<TreeBlock, readonly Jump[]>,
+  ): readonly Jump[] {
+    this.#work.charge("eventSteps");
+    const memo = `${name}${calls ? "\0calls" : ""}`;
+    const byName = this.#jumpsHeld.get(lists);
+    const known = byName?.get(memo);
+    if (known !== undefined) return known;
+    const stretches = new Map<TreeBlock, { from: number; to: number }[]>();
+    for (const [body, jumps] of each(this.#work, "eventSteps", byBody))
+      for (const start of each(this.#work, "eventSteps", lists.get(body)?.list ?? [])) {
+        const stretch = { from: start.start, to: this.#cut(name, calls, start.chain) };
+        const first = this.#after(jumps, stretch.from, 0);
+        if (first >= jumps.length || jumps[first]!.point.at >= stretch.to) continue;
+        const list = stretches.get(body);
+        if (list === undefined) stretches.set(body, [stretch]);
+        else list.push(stretch);
+      }
+    const made: Jump[] = [];
+    for (const [body, known] of each(this.#work, "eventSteps", stretches)) {
+      const jumps = byBody.get(body)!;
+      // (the merge needs the stretches by start, which this sort gives whatever order the lists come in: |L| log |L|
+      // charged, once per list, name and `calls`, never per key)
+      sorted(this.#work, "eventSteps", known, (a, b) => a.from - b.from);
+      let low = 0;
+      for (const { from, to } of each(this.#work, "eventSteps", known)) {
+        low = this.#after(jumps, from, low);
+        for (const _ of steps(
+          this.#work,
+          "eventSteps",
+          () => low < jumps.length && jumps[low]!.point.at < to,
+        )) {
+          made.push(jumps[low]!);
+          low += 1;
+        }
+      }
+    }
+    keepText(this.#work, memo.length);
+    if (byName === undefined) this.#jumpsHeld.set(lists, new Map([[memo, made]]));
+    else byName.set(memo, made);
+    return made;
   }
 
   /** The index of the first jump of a body's `jumps` from `low` on past offset `from` (a binary search). */
@@ -461,7 +664,7 @@ export abstract class RouteEntries extends RouteCandidates {
     if (this.#jumps !== null) return this.#jumps;
     const { program } = this.pass;
     const flow = program.flow;
-    const list: Jump[] = [];
+    let list: Jump[] = [];
     // a jump made by block code is none, but a loop's own inside a block's body
     const outside = (node: FlowNode): boolean => {
       this.#work.charge("indexSteps");
@@ -549,6 +752,14 @@ export abstract class RouteEntries extends RouteCandidates {
       list,
       (a, b) => a.point.node.file - b.point.node.file || a.point.at - b.point.at,
     );
+    // (under the program default, only the jumps that stand at the loop or label they enter a run reaches, R2.2: the
+    // same for every key, so each key's relation tries no other)
+    if (this.feasible !== null) {
+      const standing: Jump[] = [];
+      for (const jump of each(this.#work, "indexSteps", list))
+        if (this.standsAt(jump.into, jump.point.node, jump.point.chain)) standing.push(jump);
+      list = standing;
+    }
     const begun = new Map<Entry, { readonly jump: Jump; readonly level: number }[]>();
     let order = 0;
     for (const jump of each(this.#work, "indexSteps", list)) {

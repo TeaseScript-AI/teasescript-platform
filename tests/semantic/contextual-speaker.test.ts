@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileProject, compileSource, type ProjectSourceFile } from "../../src/compiler.js";
 import { runValidSource } from "../helpers/run-valid-source.js";
 import { sayTexts } from "../helpers/runtime-events.js";
-import { Story } from "../helpers/story-session.js";
+import { Story } from "../helpers/runtime/story-session.js";
 
 const VERA = 'speaker vera {\n    title: "Mistress"\n    font: "Georgia"\n}';
 const NO_SPEAKER_AT_RUNTIME =

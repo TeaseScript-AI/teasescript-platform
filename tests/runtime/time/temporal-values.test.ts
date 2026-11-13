@@ -16,7 +16,7 @@ import type { TemporalContext } from "../../../src/temporal.js";
 import { assertCheckpointRejected } from "../../helpers/checkpoint-rejection.js";
 import { compileSource } from "../../../src/compiler.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
-import { AMSTERDAM } from "../../helpers/temporal-fixtures.js";
+import { AMSTERDAM } from "../../helpers/runtime/temporal-fixtures.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
 import { createFreshRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-construction.js";
 
