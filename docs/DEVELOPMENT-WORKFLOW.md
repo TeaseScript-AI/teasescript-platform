@@ -333,8 +333,8 @@ coordinator decides it (owner, 2026-11-10). Of its differences from the legacy t
 pull request of it (owner, 2026-11-13): a value let through unchecked (#1526's condition 1, in
 [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md#coarse-type-core-bounds)), a crash, a compile error for code the language text
 (V30, the ADRs) does not call wrong, or a run that differs from what the language text says. A hang is a crash, and so
-is work the route does not charge, since only a charge lets the work budget end it. A wrong compile error counts on a
-source the base route planned; a source the base route refused (`CandidateOutsideSlice`, [Static type
+is work the route does not charge, since only a charge lets the work budget end it; a wrong compile error counts on a
+source the base route planned, and a source the base route refused (`CandidateOutsideSlice`, [Static type
 analysis](ARCHITECTURE.md#static-type-analysis)) and the head rejects with a compile error is filed as an issue with the
 number of converted scripts (makers' scripts converted to TeaseScript, kept outside the repository) it reaches. A
 refusal on the route stays only where it keeps a part of the analysis that is not right yet away from sources, never to
