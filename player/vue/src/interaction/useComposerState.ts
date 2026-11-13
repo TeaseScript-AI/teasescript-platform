@@ -19,7 +19,7 @@ import {
  */
 
 /** Which slot the field shows. */
-export type ComposerTenant =
+type ComposerTenant =
   | { readonly kind: "chat" }
   | { readonly kind: "form"; readonly actionId: number; readonly fieldId: string }
   | { readonly kind: "temporal"; readonly actionId: number }
@@ -173,7 +173,7 @@ interface LockSlot {
 }
 
 /** The outcome of Enter in the lock's password. */
-export type LockEntry =
+type LockEntry =
   | { readonly kind: "empty" }
   | { readonly kind: "repeat" }
   | { readonly kind: "match"; readonly password: string }

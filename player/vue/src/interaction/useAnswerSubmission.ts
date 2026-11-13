@@ -43,7 +43,7 @@ import { presentedForm, type FormUpdates } from "./useFormUpdates.js";
  */
 
 /** What an answer was given with, which decides what a refusal puts back. */
-export type AnswerOrigin =
+type AnswerOrigin =
   | "chat"
   | "temporal"
   | "formSubmit"
@@ -57,10 +57,10 @@ export type AnswerOrigin =
   | "url";
 
 /** How far an answer went: accepted locally, past its painted frame, handed to the session, settled. */
-export type AnswerStage = "accepted" | "fenced" | "posted" | "settled";
+type AnswerStage = "accepted" | "fenced" | "posted" | "settled";
 
 /** The answer's line in the chat as the shared rule predicts it, until the runtime's own replaces it. */
-export interface PredictedAnswer {
+interface PredictedAnswer {
   readonly text: string;
   readonly responseKind?: "choice" | "button" | "form";
   /** A submitted form's lines, as the runtime's summary of the same answers shows them. */
