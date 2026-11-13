@@ -15,7 +15,6 @@ import {
   type SerializableRuntimeValue,
 } from "../../values/serializable-values.js";
 import {
-  type Instruction,
   type InteractionChoiceOption,
   type InstructionPlan,
   type PlanSourceLocation,
@@ -34,6 +33,8 @@ import {
   positiveSafeInteger,
   nonNegativeSafeInteger,
   hasExactKeys,
+} from "../../snapshot/state.js";
+import {
   runtimeTemporaryValue,
   silentInteraction,
   valuelessInteraction,
@@ -477,29 +478,6 @@ function imageRequestFields(
   )
     return null;
   return { question, hint, allowCamera, allowFile, allowSkip, types, mime };
-}
-
-/**
- * Whether the image request of `instruction` may be skipped: its UI says so, or for a prepared request, the request its
- * temporary keeps while it is open and until its result is taken.
- */
-export function imageRequestAllowsSkip(
-  instruction: Extract<Instruction, { kind: "interaction" }>,
-  temporaries: unknown,
-): boolean {
-  if (!("preparedUi" in instruction))
-    return instruction.ui.kind === "image" && instruction.ui.allowSkip;
-  if (instruction.preparedUi.kind !== "image" || !Array.isArray(temporaries)) return false;
-  const request = runtimeTemporaryValue(temporaries, instruction.preparedUi.requestTemporary);
-  return (
-    isPlainRecord(request) &&
-    request.kind === "object" &&
-    Array.isArray(request.properties) &&
-    request.properties.some(
-      (property: unknown) =>
-        isPlainRecord(property) && property.name === "allowSkip" && property.value === true,
-    )
-  );
 }
 
 function textList(value: unknown): readonly string[] | null | undefined {

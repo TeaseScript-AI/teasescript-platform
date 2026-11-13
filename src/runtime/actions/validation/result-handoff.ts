@@ -24,6 +24,8 @@ import {
   positiveSafeInteger,
   nonNegativeSafeInteger,
   hasExactKeys,
+} from "../../snapshot/state.js";
+import {
   lockOutcomeFits,
   sameItems,
   runtimeTemporaryValue,
@@ -31,12 +33,8 @@ import {
   isImageReference,
   isTemporalAnswer,
 } from "./shared-checks.js";
-import {
-  preparedChoiceOptions,
-  snapshotTemporalContextAt,
-  imageRequestAllowsSkip,
-} from "./interaction-actions.js";
-import { validElapsedResult, sameCanonicalSettlementResult } from "./settlements.js";
+import { preparedChoiceOptions, snapshotTemporalContextAt } from "./interaction-actions.js";
+import { validElapsedResult } from "./settlements.js";
 
 export function validateInteractionResultHandoffState(
   snapshot: Record<string, unknown>,
@@ -436,5 +434,48 @@ function validInteractionResultForInstruction(
     interactionStringFits(result) &&
     !result.includes("\r") &&
     interactionStringHasNonWhitespace(result)
+  );
+}
+
+function sameCanonicalSettlementResult(destination: unknown, result: unknown): boolean {
+  if (typeof destination === "number" || typeof result === "number") {
+    return (
+      typeof destination === "number" &&
+      typeof result === "number" &&
+      Object.is(destination, result)
+    );
+  }
+  if (isFormResult(destination) || isFormResult(result)) {
+    return (
+      isFormResult(destination) && isFormResult(result) && serializableEquals(destination, result)
+    );
+  }
+  return (
+    isInteractionChoiceValue(destination) &&
+    isInteractionChoiceValue(result) &&
+    serializableEquals(destination, result)
+  );
+}
+
+/**
+ * Whether the image request of `instruction` may be skipped: its UI says so, or for a prepared request, the request its
+ * temporary keeps while it is open and until its result is taken.
+ */
+function imageRequestAllowsSkip(
+  instruction: Extract<Instruction, { kind: "interaction" }>,
+  temporaries: unknown,
+): boolean {
+  if (!("preparedUi" in instruction))
+    return instruction.ui.kind === "image" && instruction.ui.allowSkip;
+  if (instruction.preparedUi.kind !== "image" || !Array.isArray(temporaries)) return false;
+  const request = runtimeTemporaryValue(temporaries, instruction.preparedUi.requestTemporary);
+  return (
+    isPlainRecord(request) &&
+    request.kind === "object" &&
+    Array.isArray(request.properties) &&
+    request.properties.some(
+      (property: unknown) =>
+        isPlainRecord(property) && property.name === "allowSkip" && property.value === true,
+    )
   );
 }

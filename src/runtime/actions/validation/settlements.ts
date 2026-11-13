@@ -12,6 +12,7 @@ import {
 } from "../../../interaction-limits.js";
 import { CAPTURE_UNAVAILABLE_REASONS, fileStoreOperation, isLockOutcome } from "../model.js";
 import { isFormUi } from "../form/ui-state.js";
+import { validFormResult } from "../form/submission.js";
 import { IMAGE_ANSWER_TRANSCRIPT_TEXT, IMAGE_SKIP_TEXT } from "../../../image-input.js";
 import { holdsStoredFile } from "../../host-data/stored-files.js";
 import { isSha256Hex } from "../../values/sha256.js";
@@ -23,21 +24,20 @@ import {
   positiveSafeInteger,
   nonNegativeSafeInteger,
   hasExactKeys,
+} from "../../snapshot/state.js";
+import {
   lockOutcomeFits,
   transcriptless,
   valuelessInteraction,
   elapsedInteraction,
   isInteractionKind,
-  isFormResult,
   isImageReference,
   isTemporalAnswerKind,
   isTemporalAnswer,
 } from "./shared-checks.js";
-import { validMediaWaitOutcome } from "./foreground-kinds.js";
 import {
   validInteractionUiShape,
   interactionUiEqual,
-  settlementMatchesPresentedUi,
   preparedUiFitsPresentedUi,
 } from "./interaction-ui.js";
 
@@ -374,7 +374,7 @@ function validSettlementKindData(
   if (
     !isInteractionKind(interactionKind) ||
     !validInteractionUiShape(interactionKind, settlement.ui) ||
-    !settlementMatchesPresentedUi(settlement)
+    !settlementFitsPresentedUi(settlement)
   )
     return false;
   let resultValid: boolean;
@@ -402,7 +402,7 @@ function validSettlementKindData(
       Number.isFinite(settlement.result) &&
       !Object.is(settlement.result, -0);
   } else if (settlement.interactionKind === "form") {
-    // `settlementMatchesPresentedUi` checked the answers against the recorded form above.
+    // `settlementFitsPresentedUi` checked the answers against the recorded form above.
     resultValid = true;
   } else if (settlement.interactionKind === "image") {
     // A skip of a request that allowed it returns `null`, with the skip control's text as the transcript.
@@ -423,7 +423,7 @@ function validSettlementKindData(
       !/[\r\n\u2028\u2029]/u.test(settlement.transcriptText) &&
       interactionStringHasNonWhitespace(settlement.transcriptText);
   } else {
-    // The recorded UI offered the result; `settlementMatchesPresentedUi` checked that above.
+    // The recorded UI offered the result; `settlementFitsPresentedUi` checked that above.
     resultValid =
       isInteractionChoiceValue(settlement.result) &&
       (typeof settlement.result !== "string" || interactionStringFits(settlement.result));
@@ -560,26 +560,6 @@ export function validElapsedResult(
   );
 }
 
-export function sameCanonicalSettlementResult(destination: unknown, result: unknown): boolean {
-  if (typeof destination === "number" || typeof result === "number") {
-    return (
-      typeof destination === "number" &&
-      typeof result === "number" &&
-      Object.is(destination, result)
-    );
-  }
-  if (isFormResult(destination) || isFormResult(result)) {
-    return (
-      isFormResult(destination) && isFormResult(result) && serializableEquals(destination, result)
-    );
-  }
-  return (
-    isInteractionChoiceValue(destination) &&
-    isInteractionChoiceValue(result) &&
-    serializableEquals(destination, result)
-  );
-}
-
 function validSettlementProvenance(
   settlement: Record<string, unknown>,
   plan: InstructionPlan,
@@ -618,4 +598,59 @@ function validSettlementProvenance(
     ? continuationInstruction <
         (plan.files[fileOfInstruction(plan, owningInstruction)]?.rootEndInstruction ?? 0)
     : continuationInstruction < definition.endInstruction;
+}
+
+/**
+ * For a button, a form or a choice, whether the settled transcript and result are what the recorded UI offered. The
+ * settlement carries that UI because the instruction's prepared temporaries are cleared after completion and may be
+ * prepared anew by a later run. The other kinds' UIs offer no answer to match: a text, password, popup, URL or export
+ * UI none at all, and a number's `integer`, a temporal UI's `temporalKind` and an image's `allowSkip` only bound the
+ * result, which `validSettlementKindData` checks with it.
+ */
+function settlementFitsPresentedUi(settlement: Record<string, unknown>): boolean {
+  const ui = settlement.ui;
+  if (!isPlainRecord(ui)) return false;
+  if (ui.kind === "button")
+    return (
+      settlement.transcriptText ===
+      (settlement.settlementKind === "timedOut" ? null : ui.buttonLabel)
+    );
+  if (ui.kind === "form")
+    return (
+      isFormUi(ui) &&
+      validFormResult(
+        ui,
+        settlement.result,
+        settlement.transcriptText,
+        settlement.shownOptions,
+        settlement.temporalPresentation,
+        settlement.settlementKind === "timedOut",
+      )
+    );
+  if (ui.kind !== "choice") return true;
+  const result = settlement.result;
+  if (!isInteractionChoiceValue(result)) return false;
+  return (
+    Array.isArray(ui.options) &&
+    ui.options.some(
+      (option) =>
+        isPlainRecord(option) &&
+        option.text === settlement.transcriptText &&
+        isInteractionChoiceValue(option.value) &&
+        serializableEquals(option.value, result),
+    )
+  );
+}
+
+/** An async play's wait ends with its load result; a blocking play's wait ends with its media. */
+function validMediaWaitOutcome(
+  settlement: Record<string, unknown>,
+  plan: InstructionPlan,
+): boolean {
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return false;
+  const owner = plan.instructions[settlement.owningInstruction];
+  if (owner?.kind !== "playMedia") return false;
+  return owner.async
+    ? settlement.outcome === "loaded" || settlement.outcome === "failed"
+    : settlement.outcome !== "loaded";
 }

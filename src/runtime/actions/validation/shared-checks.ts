@@ -1,6 +1,7 @@
-// The checks and predicates every restore check of pending actions shares: session times, safe integers, exact keys,
-// canonical arrays, the interaction kinds' predicates, whether a lock outcome fits its call (`lockOutcomeFits`), item
-// equality (`sameItems`), and a runtime temporary's value (`runtimeTemporaryValue`).
+// The predicates the restore checks of pending actions share: which interaction kinds give a value or a transcript line,
+// whether an answer is well formed, whether a lock outcome fits its call (`lockOutcomeFits`), item equality
+// (`sameItems`), and a runtime temporary's value (`runtimeTemporaryValue`). `operations/complete-action.ts` reads
+// `isInteractionKind` too.
 
 import { isInteractionChoiceValue } from "../../../choice-values.js";
 import {
@@ -18,61 +19,6 @@ import {
 } from "../../../plan/model.js";
 import { interactionStringFits } from "../../../interaction-limits.js";
 import { isPlainRecord } from "../../values/plain-data.js";
-
-const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
-
-export function validSessionTime(value: unknown): value is number {
-  return (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    value >= 0 &&
-    value <= MAX_RUNTIME_SESSION_TIME_MS
-  );
-}
-
-export function positiveSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && typeof value === "number" && value >= 1;
-}
-
-export function hasEventSequenceCapacity(value: unknown, count: number): boolean {
-  return positiveSafeInteger(value) && value <= Number.MAX_SAFE_INTEGER - count;
-}
-
-export function nonNegativeSafeInteger(value: unknown): value is number {
-  // EVIDENCE: validation: Number.isSafeInteger establishes the numeric value before comparison.
-  return Number.isSafeInteger(value) && (value as number) >= 0;
-}
-
-export function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value);
-  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
-}
-
-/**
- * A persisted runtime array must preserve its complete own-key shape through
- * JSON serialization. Array indexes and `length` are canonical; custom own
- * properties would be silently omitted by JSON.stringify.
- */
-export function isCanonicalJsonArray(value: unknown): value is unknown[] {
-  if (!Array.isArray(value)) return false;
-
-  for (let index = 0; index < value.length; index += 1) {
-    if (!Object.hasOwn(value, index)) return false;
-  }
-
-  for (const key of Reflect.ownKeys(value)) {
-    if (key === "length") continue;
-    if (typeof key !== "string" || !isCanonicalArrayIndexKey(key, value.length)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function isCanonicalArrayIndexKey(key: string, length: number): boolean {
-  const index = Number(key);
-  return Number.isSafeInteger(index) && index >= 0 && index < length && String(index) === key;
-}
 
 /**
  * Whether a lock step's outcome fits its call: an encrypt call locks, a decrypt call opens, and a file call keeps

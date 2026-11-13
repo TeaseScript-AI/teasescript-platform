@@ -22,17 +22,12 @@ import {
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../../../interaction-limits.js";
 import { formShapeFits } from "../form/materialize.js";
-import { isFormUi, validFormUi } from "../form/ui-state.js";
-import { validFormResult } from "../form/submission.js";
+import { validFormUi } from "../form/ui-state.js";
 import { validImageRequestFields } from "../../../image-input.js";
 import { recordValidationTestWork } from "../../../validation-testing.js";
 import { isPlainRecord } from "../../values/plain-data.js";
-import {
-  nonNegativeSafeInteger,
-  hasExactKeys,
-  silentInteraction,
-  isTemporalAnswerKind,
-} from "./shared-checks.js";
+import { nonNegativeSafeInteger, hasExactKeys } from "../../snapshot/state.js";
+import { silentInteraction, isTemporalAnswerKind } from "./shared-checks.js";
 
 export function accessibleNameEqual(
   expected: import("../../../plan/model.js").InteractionAccessibleName,
@@ -299,45 +294,6 @@ export function choiceOptionsEqual(
       candidate.background === option.background
     );
   });
-}
-
-/**
- * The settled transcript and result must be what the recorded UI offered. The settlement carries that UI because the
- * instruction's prepared temporaries are cleared after completion and may be prepared anew by a later run.
- */
-export function settlementMatchesPresentedUi(settlement: Record<string, unknown>): boolean {
-  const ui = settlement.ui;
-  if (!isPlainRecord(ui)) return false;
-  if (ui.kind === "button")
-    return (
-      settlement.transcriptText ===
-      (settlement.settlementKind === "timedOut" ? null : ui.buttonLabel)
-    );
-  if (ui.kind === "form")
-    return (
-      isFormUi(ui) &&
-      validFormResult(
-        ui,
-        settlement.result,
-        settlement.transcriptText,
-        settlement.shownOptions,
-        settlement.temporalPresentation,
-        settlement.settlementKind === "timedOut",
-      )
-    );
-  if (ui.kind !== "choice") return true;
-  const result = settlement.result;
-  if (!isInteractionChoiceValue(result)) return false;
-  return (
-    Array.isArray(ui.options) &&
-    ui.options.some(
-      (option) =>
-        isPlainRecord(option) &&
-        option.text === settlement.transcriptText &&
-        isInteractionChoiceValue(option.value) &&
-        serializableEquals(option.value, result),
-    )
-  );
 }
 
 /**

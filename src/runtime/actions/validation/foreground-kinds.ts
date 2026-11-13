@@ -21,7 +21,7 @@ import {
   positiveSafeInteger,
   nonNegativeSafeInteger,
   hasExactKeys,
-} from "./shared-checks.js";
+} from "../../snapshot/state.js";
 
 /**
  * A pending step of a lock, for its instruction's call. An encrypt call's lock dialog asks for the openers the player
@@ -316,19 +316,6 @@ export function validCaptureAction(
     validSessionTime(snapshot.currentSessionTimeMs) &&
     action.createdAtMs <= snapshot.currentSessionTimeMs
   );
-}
-
-/** An async play's wait ends with its load result; a blocking play's wait ends with its media. */
-export function validMediaWaitOutcome(
-  settlement: Record<string, unknown>,
-  plan: InstructionPlan,
-): boolean {
-  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return false;
-  const owner = plan.instructions[settlement.owningInstruction];
-  if (owner?.kind !== "playMedia") return false;
-  return owner.async
-    ? settlement.outcome === "loaded" || settlement.outcome === "failed"
-    : settlement.outcome !== "loaded";
 }
 
 /**

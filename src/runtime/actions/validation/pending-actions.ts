@@ -15,11 +15,10 @@ import { isPlainRecord } from "../../values/plain-data.js";
 import {
   validSessionTime,
   positiveSafeInteger,
-  hasEventSequenceCapacity,
   nonNegativeSafeInteger,
   hasExactKeys,
   isCanonicalJsonArray,
-} from "./shared-checks.js";
+} from "../../snapshot/state.js";
 import {
   validLockAction,
   validFileStoreAction,
@@ -360,4 +359,8 @@ function validForegroundActionOwnership(
     contextHoldsInstruction(plan, context, owningInstruction) &&
     contextHoldsInstruction(plan, context, continuationInstruction)
   );
+}
+
+function hasEventSequenceCapacity(value: unknown, count: number): boolean {
+  return positiveSafeInteger(value) && value <= Number.MAX_SAFE_INTEGER - count;
 }
