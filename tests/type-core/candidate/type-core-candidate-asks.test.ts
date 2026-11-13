@@ -310,25 +310,31 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
     'let m: string? = hostValue\nif m != null {\n  exit\n}\nfor x in [m otherwise m] {\n  let r = askBoolean("q", prefill: x)\n}\nexit\n',
   ])
     refusedAsToday(source, "TSV039", `this ask: ${askOf(source)}`);
-  // a written type only `null` fills, wherever the value goes from it: the prefill is computed, so the ask is refused
-  // (the slice takes the written type since #2488's step 1½)
-  for (const [written, prefill] of [
-    ["null", "m"],
-    ["null", "[m][0]"],
-    ["null", "m otherwise m"],
-    ["null", "[[m]][0][0]"],
-    ["null", "[m].get(0, default: null)"],
-    ["null?", "m otherwise m"],
-    ["null[]", "[m[0]][0]"],
-  ] as const) {
-    const source = `let m: ${written} = hostValue\nlet r = askText("q", prefill: ${prefill})\nexit\n`;
-    refusedAsToday(source, "TSV039", `this ask: ${askOf(source)}`);
-  }
-  for (const source of [
+  // a written type only `null` fills, wherever the value goes from it: the slice takes no such type (the lead's R44)
+  for (const [written, at, prefill] of [
+    ["null", "null", "m"],
+    ["null", "null", "[m][0]"],
+    ["null", "null", "m otherwise m"],
+    ["null", "null", "[[m]][0][0]"],
+    ["null", "null", "[m].get(0, default: null)"],
+    ["null?", "null?", "m otherwise m"],
+    ["null[]", "null", "[m[0]][0]"],
+  ] as const)
+    refusedAsToday(
+      `let m: ${written} = hostValue\nlet r = askText("q", prefill: ${prefill})\nexit\n`,
+      "TSV039",
+      `this written type: ${at}`,
+    );
+  refusedAsToday(
     'let m: null = hostValue\nlet p = m otherwise m\nlet r = askInteger("q", prefill: p)\nexit\n',
+    "TSV039",
+    "this written type: null",
+  );
+  refusedAsToday(
     'let m: null = hostValue\nfor x in [m otherwise m] {\n  let r = askBoolean("q", prefill: x)\n}\nexit\n',
-  ])
-    refusedAsToday(source, "TSV039", `this ask: ${askOf(source)}`);
+    "TSV039",
+    "this written type: null",
+  );
   // text at an ask of another kind, blank or not (blank text is none to the runtime)
   for (const ask of ["askNumber", "askInteger", "askDate", "askTime", "askDateTime", "askBoolean"])
     for (const [prelude, prefill] of [
@@ -366,28 +372,81 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       );
 });
 
-test("a choice of more buttons than a request shows: today's TSV029, and the route refuses it at the ask (#2488's step 1½)", () => {
+test("a choice's buttons, counted as today's checker counts them by each option's origin: more than a request shows, or none, is today's TSV029 and the route's refusal", () => {
   // (no operand or field of its own: the count of the buttons, `MAX_INTERACTION_OPTION_ENTRIES`, which today's checker
-  // checks of the options as a whole and the route counts alike after the analysis)
-  const buttons = Array.from({ length: MAX_INTERACTION_OPTION_ENTRIES + 1 }, (_, at) => at + 1);
-  const source = `let r = askChoice [${buttons.join(", ")}]\nexit\n`;
-  const current = today(source);
-  assert.equal(current.plan, null);
-  assert.ok(current.errors.includes("TSV029"), current.errors.join(" "));
-  for (const mode of HELD_MODES)
+  // checks of the options as a whole and the route counts alike after the analysis; a choice of none, every option a
+  // list written without elements, the same)
+  const max = MAX_INTERACTION_OPTION_ENTRIES;
+  const list = (length: number) => `[${Array.from({ length }, (_, at) => at + 1).join(", ")}]`;
+  const ask = (source: string) =>
+    source.slice(source.indexOf("askChoice"), source.indexOf("\n", source.indexOf("askChoice")));
+  const judged = (source: string) => {
+    const current = today(source);
+    if (current.plan !== null) {
+      asToday(source);
+      return "plans";
+    }
+    assert.deepEqual(current.errors, ["TSV029"], source.slice(0, 60));
+    const what = /askChoice \[\](, \[\])*\n/u.test(source)
+      ? "a choice without buttons"
+      : "a choice of more buttons than it shows";
+    for (const mode of HELD_MODES)
+      assert.deepEqual(route(source, mode), { refused: `${what}: ${ask(source)}` }, mode.name);
+    return "refused";
+  };
+  // a list written in place counts its elements
+  assert.deepEqual(
+    [0, max - 1, max, max + 1].map((length) => judged(`let r = askChoice ${list(length)}\nexit\n`)),
+    ["refused", "plans", "plans", "refused"],
+  );
+  assert.equal(judged("let r = askChoice [], []\nexit\n"), "refused");
+  // after a list of 0, 4,094, 4,095 or 4,096 elements, an option of each origin: one button where its kinds are known,
+  // none a collection, beside `null`; none where it is `null` or unknown
+  for (const [prelude, option, counted] of [
+    ["", "0", true],
+    ["let n = 1\n", "n", true],
+    ["let m: integer = hostValue\n", "m", true],
+    ["let m: integer? = hostValue\n", "m", true],
+    ["let m: integer = hostValue\nlet w = m\n", "w", true],
+    ["", "null", false],
+    ["", "hostValue", false],
+  ] as const)
     assert.deepEqual(
-      route(source, mode),
-      {
-        refused: `a choice of more buttons than it shows: ${source.slice(source.indexOf("askChoice"), source.indexOf("\n"))}`,
-      },
-      mode.name,
+      [0, max - 2, max - 1, max].map((length) =>
+        judged(`${prelude}let r = askChoice ${list(length)}, ${option}\nexit\n`),
+      ),
+      ["plans", "plans", "plans", counted ? "refused" : "plans"],
+      `${prelude}${option}`,
     );
-  // a list written in place counts its elements, and each other known option one: one more option is too many
-  const split = `let n = 1\nlet r = askChoice [${buttons.slice(1).join(", ")}], n\nexit\n`;
-  assert.equal(today(split).plan, null);
-  for (const mode of HELD_MODES) assert.ok("refused" in route(split, mode), mode.name);
-  // one fewer is a choice today's checker takes, and the route's run waits as today's does
-  asToday(`let r = askChoice [${buttons.slice(1).join(", ")}]\nexit\n`);
+});
+
+test("a labelled option's list elements and choice objects, and a computed choice object's text: today's compile error, the route's refusal at the operand", () => {
+  // (a labelled button returns its label, so an element shows; a choice object's text shows, a computed one's too)
+  for (const [source, code, operand] of [
+    ['let r = askChoice a: [{text: "t", value: 1}]', "TSV029", '{text: "t", value: 1}'],
+    ['let r = askChoice a: [{text: "t", n: 1}]', "TSV029", '{text: "t", n: 1}'],
+    ['let r = askChoice a: [{background: "red"}]', "TSV029", '{background: "red"}'],
+    ["let r = askChoice a: [[1]]", "TSV029", "[1]"],
+    ['let r = askChoice a: [{text: "t", background: "nope"}]', "TSV029", '"nope"'],
+    ["let r = askChoice a: [{text: [1]}]", "TSV040", "[1]"],
+    ["let m: dict = hostValue\nlet r = askChoice a: [m]", "TSV029", "m"],
+    ["let o = {text: [1]}\nlet r = askChoice a: o", "TSV040", "o"],
+    ["let o = {text: [1], value: 1}\nlet r = askChoice o", "TSV040", "o"],
+    ["let o = [{text: [1], value: 1}]\nlet r = askChoice o", "TSV040", "o"],
+    ["let o = {text: [1], value: 1}\nlet r = askChoice [o]", "TSV040", "o"],
+  ] as const)
+    refusedAsToday(
+      `${source}\nexit\n`,
+      code,
+      `an operand its instruction does not take: ${operand}`,
+    );
+  // a text that may show, or that the script cannot know, is the runtime's to check, as today
+  for (const source of [
+    'let r = askChoice a: [{text: "t"}]',
+    "let o = {text: hostValue}\nlet r = askChoice a: o",
+    'let o = {text: "t", value: 1}\nlet r = askChoice o',
+  ])
+    asToday(`${source}\nexit\n`);
 });
 
 test("an ask refuses a request's value after saying its question, as today's runtime does", () => {

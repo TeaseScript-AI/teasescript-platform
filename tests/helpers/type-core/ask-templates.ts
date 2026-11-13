@@ -36,6 +36,7 @@ export const ASK_OPERANDS: Readonly<Record<string, readonly string[]>> = {
   "askChoice.option": ["let r = askChoice hostValue"],
   "askChoice.element": ["let r = askChoice [hostValue]"],
   "askChoice.label": ["let r = askChoice a: hostValue"],
+  "askChoice.labelledElement": ["let r = askChoice a: [hostValue]"],
   "askChoice.background": ['let r = askChoice {text: "t", background: hostValue}'],
   "askChoice.text": ["let r = askChoice {text: hostValue, value: 1}"],
 };
