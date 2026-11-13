@@ -81,10 +81,27 @@ export function sourceShape(
       return partOf(sourceShape(at.object, statements, seen), at.property.name);
     case "indexExpression":
       return partOf(sourceShape(at.object, statements, seen), "element");
-    case "binaryExpression":
-      return at.operator === "otherwise"
-        ? combine([sourceShape(at.left, statements, seen), sourceShape(at.right, statements, seen)])
+    case "binaryExpression": {
+      if (at.operator === "otherwise")
+        return combine([
+          sourceShape(at.left, statements, seen),
+          sourceShape(at.right, statements, seen),
+        ]);
+      // (`+` of a list and a list or a value of no source structure: a list of the elements either side carries; any
+      // other operation carries none)
+      if (at.operator !== "+") return null;
+      const sides = [
+        sourceShape(at.left, statements, seen),
+        sourceShape(at.right, statements, seen),
+      ];
+      return sides.some((side) => side?.kind === "list") &&
+        sides.every((side) => side === null || side.kind === "list")
+        ? {
+            kind: "list",
+            element: combine(sides.map((side) => (side?.kind === "list" ? side.element : null))),
+          }
         : null;
+    }
     case "callExpression": {
       const callee = unwrap(at.callee);
       if (callee.kind === "identifier" && callee.name === "fromJson") {

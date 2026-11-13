@@ -40,19 +40,19 @@ const CASES: readonly Composite[] = [
   },
   {
     name: "a closed expression as an open list's element",
-    files: ["let xs = [1, -hostValue]\n"],
+    files: ["let xs = [1, set[hostValue]]\n"],
     outer: "listLiteral",
-    inner: "unaryExpression",
+    inner: "setLiteral",
     file: 0,
-    at: "-hostValue",
+    at: "set[hostValue]",
   },
   {
     name: "a closed expression as an open call's argument",
-    files: ["let text = toJson(-1)\n"],
+    files: ["let text = toJson(set[1])\n"],
     outer: "callExpression",
-    inner: "unaryExpression",
+    inner: "setLiteral",
     file: 0,
-    at: "-1",
+    at: "set[1]",
   },
   {
     name: "a closed expression two open constructs deep",
@@ -80,44 +80,44 @@ const CASES: readonly Composite[] = [
   },
   {
     name: "a closed expression as a command's only operand",
-    files: ["showImage -hostValue\n"],
+    files: ["showImage set[hostValue]\n"],
     outer: "showImageStatement",
-    inner: "unaryExpression",
+    inner: "setLiteral",
     file: 0,
-    at: "-hostValue",
+    at: "set[hostValue]",
   },
   {
     name: "a closed expression as a say's pacing",
-    files: ['say "a", -hostValue\n'],
+    files: ['say "a", set[hostValue]\n'],
     outer: "sayStatement",
-    inner: "unaryExpression",
+    inner: "setLiteral",
     file: 0,
-    at: "-hostValue",
+    at: "set[hostValue]",
   },
   {
     name: "the first of two closed constructs in source order, the later one deeper",
-    files: ["let a = [-1, [2 s]]\n"],
+    files: ["let a = [set[1], [2 s]]\n"],
     outer: "listLiteral",
-    inner: "unaryExpression",
+    inner: "setLiteral",
     file: 0,
-    at: "-1",
+    at: "set[1]",
   },
   {
     // (wider than the engine's argument count: a list of children is never spread into arguments)
     name: "a closed element after 150,000 open ones",
-    files: [`let xs = [${"0, ".repeat(150_000)}-hostValue]\n`],
+    files: [`let xs = [${"0, ".repeat(150_000)}set[hostValue]]\n`],
     outer: "listLiteral",
-    inner: "unaryExpression",
+    inner: "setLiteral",
     file: 0,
-    at: "-hostValue",
+    at: "set[hostValue]",
   },
   {
     name: "a closed statement in a later file after an open file",
-    files: ["let a = hostValue\n", "let b = 1\nlet c = -b\n"],
+    files: ["let a = hostValue\n", "let b = 1\nlet c = set[b]\n"],
     outer: "letStatement",
-    inner: "unaryExpression",
+    inner: "setLiteral",
     file: 1,
-    at: "-b",
+    at: "set[b]",
   },
 ];
 
@@ -177,7 +177,7 @@ interface Condition {
 
 /**
  * The inventory of the open rows' own conditions, with those of the predicates they call (`annotationOutside`,
- * `nullTest`, `sliceCall`, `sliceMethod`): a source for each operand, comparison and unwrapping that, weakened, would
+ * `sliceCall`, `sliceMethod`): a source for each operand, comparison and unwrapping that, weakened, would
  * admit a refused source (`tools/slice-conditions.json` lists them with their mutants). Every other open row has none
  * (`UNCONDITIONAL`); the inventory test below keeps the two lists equal to the table's open rows.
  */
@@ -323,27 +323,6 @@ const CONDITIONS: readonly Condition[] = [
     what: "this member or element read",
   },
   {
-    row: "binaryExpression",
-    condition: "`otherwise` or a null test",
-    source: "let n = hostValue + 1",
-    at: "hostValue + 1",
-    what: "this binary expression",
-  },
-  {
-    row: "binaryExpression",
-    condition: "a comparison is a null test only with a `null` side",
-    source: "let b = hostValue == 1",
-    at: "hostValue == 1",
-    what: "this binary expression",
-  },
-  {
-    row: "binaryExpression",
-    condition: "a null test is `==` or `!=`",
-    source: "let b = hostValue < null",
-    at: "hostValue < null",
-    what: "this binary expression",
-  },
-  {
     row: "typeTestExpression",
     condition: "a written type of the slice",
     source: "let b = hostValue is integer | string",
@@ -374,9 +353,9 @@ const CONDITIONS: readonly Condition[] = [
   {
     row: "callExpression",
     condition: "a method's receiver is walked",
-    source: "let n = [hostValue + 1].get(0, default: 1)",
-    at: "hostValue + 1",
-    what: "this binary expression",
+    source: "let n = [set[hostValue]].get(0, default: 1)",
+    at: "set[hostValue]",
+    what: "this set literal",
   },
   {
     row: "callExpression",
@@ -578,9 +557,9 @@ const CONDITIONS: readonly Condition[] = [
   {
     row: "gotoStatement",
     condition: "the path is walked",
-    source: "goto script(-hostValue)",
-    at: "-hostValue",
-    what: "this unary expression",
+    source: "goto script(set[hostValue])",
+    at: "set[hostValue]",
+    what: "this set literal",
   },
   {
     row: "interactionExpression",
@@ -684,9 +663,9 @@ const CONDITIONS: readonly Condition[] = [
   {
     row: "interactionExpression",
     condition: "its parts are walked",
-    source: "let r = askText(-hostValue)",
-    at: "-hostValue",
-    what: "this unary expression",
+    source: "let r = askText(set[hostValue])",
+    at: "set[hostValue]",
+    what: "this set literal",
   },
 ];
 
@@ -716,6 +695,8 @@ const UNCONDITIONAL: readonly SyntaxKind[] = [
   "parenthesizedExpression",
   "indexExpression",
   "rangeExpression",
+  "unaryExpression",
+  "binaryExpression",
 ];
 
 test("every open row is in the condition inventory or has no condition of its own", () => {

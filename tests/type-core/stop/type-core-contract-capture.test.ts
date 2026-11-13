@@ -483,23 +483,22 @@ test("the candidate route's decline and the capture's skip read one syntax rule"
   const programs: readonly (readonly [string, boolean])[] = [
     ['let a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nsay "AFTER"\nexit\n', true],
     ['let a = {f: [[1]], g: ["s"]}\nlet b = a\nb = hostValue\nexit\n', true],
-    // (the narrowing's own test is inside since #1073 PR 2 phase 2; another comparison is not)
+    // (a type test and every comparison are inside; a type test's written type is the slice's)
     [
       'let a = {f: [[1]]}\nlet b = a\nif hostValue is integer {say "x"}\nb.f = hostValue\nexit\n',
       true,
     ],
-    ['let a = {f: [[1]]}\nlet b = a\nif hostValue < 1 {say "x"}\nb.f = hostValue\nexit\n', false],
-    // (its operand walked, its written type the slice's, and only `null` the other side of `==` or `!=`)
+    ['let a = {f: [[1]]}\nlet b = a\nif hostValue < 1 {say "x"}\nb.f = hostValue\nexit\n', true],
     [
       'let a = {f: [[1]]}\nlet b = a\nif (hostValue < 1) is boolean {say "x"}\nb.f = hostValue\nexit\n',
-      false,
+      true,
     ],
     [
       'let a = {f: [[1]]}\nlet b = a\nif hostValue is integer | string {say "x"}\nb.f = hostValue\nexit\n',
       false,
     ],
     [
-      'let a = {f: [[1]]}\nlet b = a\nif hostValue < null {say "x"}\nb.f = hostValue\nexit\n',
+      'let a = {f: [[1]]}\nlet b = a\nif hostValue < 1 {say "x"}\nlet s = set[1]\nb.f = hostValue\nexit\n',
       false,
     ],
     // (a default written as `null`, and a member of a literal that is no object, are outside by their shape; an object
@@ -537,10 +536,10 @@ test("the candidate route's decline and the capture's skip read one syntax rule"
 });
 
 test("outside the slice's syntax the capture requests nothing and charges nothing", () => {
-  // (a program the route declines by its syntax: the analysis is main's, no extraction phase at any allowance and no
-  // contract, also where a store's value is cyclic, which the capture would follow to the slice's depth)
+  // (a program the route declines by its syntax, at its set literal: the analysis is main's, no extraction phase at any
+  // allowance and no contract, also where a store's value is cyclic, which the capture would follow to the slice's depth)
   const source =
-    'let typed:integer[]=[1]\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\nif hostValue < 1 {a=b}\nb=a\nb.q=a\nc=b\nlet out={p:c}\nexit\n';
+    'let typed:integer[]=[1]\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\nif hostValue < 1 {a=b}\nb=a\nb.q=a\nc=b\nlet out={p:c}\nlet s=set[1]\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
   assert.notEqual(outsideSyntax(request.files, new Set(GLOBALS)), null);
   for (const mode of HELD_MODES) {

@@ -52,7 +52,8 @@ export type Discharge =
         | "fallback"
         | "typed-ingress"
         | "iteration"
-        | "argument";
+        | "argument"
+        | "operator";
       /** The obligation's site, `start:end`: the use, or the ingress. */
       readonly site: string;
     };
@@ -347,6 +348,7 @@ export function expressions(statements: readonly Statement[]): Expression[] {
       walk(expression.key);
       if (expression.defaultValue !== null) walk(expression.defaultValue);
     } else if (expression.kind === "parenthesizedExpression") walk(expression.expression);
+    else if (expression.kind === "unaryExpression") walk(expression.operand);
     else if (expression.kind === "indexExpression") {
       walk(expression.object);
       walk(expression.index);

@@ -41,7 +41,10 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
     "let o = {n: 1}\no.n = hostValue",
     "hostValue.n = 1",
   ],
-  ifStatement: ['if hostValue == null {\n  say "y"\n} else {\n  say "n"\n}'],
+  ifStatement: [
+    'if hostValue == null {\n  say "y"\n} else {\n  say "n"\n}',
+    'if hostValue {\n  say "y"\n}',
+  ],
   repeatStatement: ['repeat hostValue {\n  say "r"\n}'],
   forStatement: ["for item in hostValue {\n  say item\n}"],
   expressionStatement: ["toJson(hostValue)"],
@@ -59,11 +62,29 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
   propertyAccessExpression: ["let o = {n: hostValue}\nlet x: integer = o.n", "let x = hostValue.n"],
   indexExpression: ["let xs = [1, 2]\nlet x = xs[hostValue]", "let x = hostValue[0]"],
   rangeExpression: ["for i in 1..hostValue {\n  say i\n}", "for i in hostValue..3 {\n  say i\n}"],
+  // each operand of each operator; `and` and `or` of comparisons, as an unknown operand there is today's error
   binaryExpression: [
     "let x: integer = hostValue otherwise 1",
     "let a: integer? = null\nlet x: integer = a otherwise hostValue",
     "let b = hostValue == null",
     "let b = null != hostValue",
+    ...["+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!="].flatMap((operator) => [
+      `let x = hostValue ${operator} 2`,
+      `let x = 2 ${operator} hostValue`,
+    ]),
+    'let t = "a" + hostValue',
+    "let xs = [1] + hostValue",
+    "let x: integer = hostValue * 2",
+    ...["and", "or"].flatMap((operator) => [
+      `let b = hostValue == 1 ${operator} true`,
+      `let b = true ${operator} hostValue == 2`,
+    ]),
+  ],
+  unaryExpression: [
+    "let x = -hostValue",
+    "let x = +hostValue",
+    "let b = not hostValue",
+    "let x: integer = -hostValue",
   ],
   typeTestExpression: ["let b = hostValue is integer"],
   callExpression: [
