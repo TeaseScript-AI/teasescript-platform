@@ -11,11 +11,19 @@ capabilities work.
 **Required**
 
 - applicable `AGENTS.md`, repository `README-FIRST.md`, and the assigned issue or pull request;
-- `docs/DEVELOPMENT-WORKFLOW.md` and the task documents selected by `README-FIRST.md`;
+- in `docs/DEVELOPMENT-WORKFLOW.md`: "Guiding principle", "Requirement authority and review proportionality" with
+  "KISS, pragmatic YAGNI, and DRY", "Review finding classes", "Proportional review lenses", "Blocking evidence" and
+  "Proportional repair and owner escalation", "Execution discipline", "Normal flow" and "Verification";
+- the task documents selected by `README-FIRST.md`;
 - only the relevant topic documents, accepted decisions, code, and tests selected by the start route.
 
 **Conditional**
 
+- in `docs/DEVELOPMENT-WORKFLOW.md`, the sections of the work the task does: "Issue sizing" for an issue; "Review
+  routes" with "Roles", "Choosing the route", "The plan", "Design rounds", "Evidence", "Builder messages and READY" and
+  "Pull requests and rebases" for a coordinated pull request; "Review convergence", "Review rounds" and "The final
+  review" for a review or its repair; "Merge" for a merge; "Test expectations by change type" with `docs/TESTING.md`;
+  "Documentation ownership" with `docs/DOCUMENTATION-OWNERSHIP.md`; "Capability-specific execution" with `docs/agents/`;
 - `PUBLICATION-CONSTRAINED.md` only after a concrete normal-publication failure or restriction is verified;
 - `CURRENT-DESIGN.md`, `PHASE-STATUS.md`, security documents, and other topic sources when the task requires them.
 

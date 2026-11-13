@@ -1,30 +1,43 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { ROUTE } from "./reading-route-size.mjs";
+import { entryOf, ROUTE, sectionsOf } from "./reading-route-size.mjs";
 import { isolateGit } from "./fixture-git.mjs";
 
 isolateGit();
 
 const tool = fileURLToPath(new URL("./reading-route-size.mjs", import.meta.url));
 const root = fileURLToPath(new URL("..", import.meta.url));
-const listed = [
-  ...ROUTE.everyTask,
-  ...ROUTE.whenNeeded.map((document) => document.path),
-  ...ROUTE.notRead.map((document) => document.path),
-];
+const routed = [...ROUTE.everyTask, ...ROUTE.whenNeeded].map(entryOf);
+const listed = [...routed, ...ROUTE.notRead].map((entry) => entryOf(entry).path);
 
-test("every document the route lists exists in this checkout", () => {
+test("every document and section the route lists exists in this checkout", () => {
   assert.deepEqual(
     listed.filter((path) => !existsSync(join(root, path))),
     [],
     "listed in ROUTE (tools/reading-route-size.mjs) but missing",
   );
+  assert.deepEqual(
+    routed
+      .filter((entry) => entry.sections !== undefined)
+      .flatMap(
+        (entry) => sectionsOf(readFileSync(join(root, entry.path), "utf8"), entry.sections).missing,
+      ),
+    [],
+    "a section listed in ROUTE but no heading of its document",
+  );
+});
+
+test("a section runs from its heading to the next heading of any level, and a fence hides headings", () => {
+  const text = "# Top\nintro\n## A\na1\n### B\nb1\n```\n## not a heading\n```\n## C ##\nc1";
+  assert.deepEqual(sectionsOf(text, ["A", "C"]), { text: "## A\na1\n## C ##\nc1", missing: [] });
+  assert.equal(sectionsOf(text, ["B"]).text, "### B\nb1\n```\n## not a heading\n```");
+  assert.deepEqual(sectionsOf(text, ["not a heading", "D"]).missing, ["not a heading", "D"]);
 });
 
 /** A repository holding `files` (path → text or Buffer) in one commit; its directory and that commit. */
@@ -51,11 +64,28 @@ function run(directory, args = []) {
   return { status: result.status, out: result.stdout + result.stderr };
 }
 
-/** Every routed document, each one character long. */
-const allRouted = () =>
-  Object.fromEntries(
-    [...ROUTE.everyTask, ...ROUTE.whenNeeded.map((document) => document.path)].map((p) => [p, "a"]),
-  );
+/** Every routed document: one character long, or holding each section an entry names as `## name` over `a`. */
+const allRouted = () => {
+  const files = {};
+  for (const entry of routed)
+    if (entry.sections === undefined) files[entry.path] ??= "a";
+    else
+      files[entry.path] =
+        `${files[entry.path] ?? ""}${entry.sections.map((name) => `## ${name}\na\n`).join("")}`;
+  return files;
+};
+
+/** The size `allRouted()` gives an entry: one, or its sections' lines joined by newlines. */
+const routedSize = (entry) =>
+  entry.sections === undefined
+    ? 1
+    : [...entry.sections.map((name) => `## ${name}\na`).join("\n")].length;
+
+/** The total `allRouted()` gives the every-task entries but `skip`. */
+const routedTotal = (...skip) =>
+  ROUTE.everyTask
+    .filter((entry) => !skip.includes(entry))
+    .reduce((total, entry) => total + routedSize(entryOf(entry)), 0);
 
 /** The size column (and the difference column, when present) of the line ending in `name`. */
 function columns(out, name) {
@@ -71,7 +101,7 @@ test(
   { timeout: 30_000 },
   () => {
     const [first, second] = ROUTE.everyTask;
-    const conditional = ROUTE.whenNeeded[0].path;
+    const conditional = ROUTE.whenNeeded.find((entry) => entry.sections === undefined).path;
     const { directory } = repository({
       ...allRouted(),
       [first]: "﻿é😀\n", // a byte-order mark, a two-byte and a four-byte character, a newline: 4 code points
@@ -83,7 +113,7 @@ test(
       assert.equal(status, 0, out);
       assert.deepEqual(columns(out, first), ["4"]);
       assert.deepEqual(columns(out, second), ["1"]);
-      assert.deepEqual(columns(out, "total"), [String(4 + ROUTE.everyTask.length - 1)]);
+      assert.deepEqual(columns(out, "total"), [String(4 + routedTotal(first))]);
       assert.deepEqual(columns(out, conditional).slice(0, 1), ["1000"]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -106,7 +136,7 @@ test(
       assert.deepEqual(columns(out, first), ["3", "+2"]);
       assert.deepEqual(columns(out, second), ["2", "new"]);
       assert.deepEqual(columns(out, ROUTE.everyTask[2]), ["1", "0"]);
-      assert.deepEqual(columns(out, "total"), [String(ROUTE.everyTask.length + 3), "+4"]);
+      assert.deepEqual(columns(out, "total"), [String(routedTotal(first, second) + 3 + 2), "+4"]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -125,7 +155,40 @@ test(
       const { status, out } = run(directory);
       assert.equal(status, 1, out);
       assert.match(out, new RegExp(`missing  ${absent.replaceAll(".", "\\.")}`, "u"));
-      assert.deepEqual(columns(out, "total"), [String(ROUTE.everyTask.length - 1)]);
+      assert.deepEqual(columns(out, "total"), [String(routedTotal(absent))]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a sectioned entry counts only its sections, and a section missing at the revision is named and exits 1",
+  { timeout: 30_000 },
+  () => {
+    const entry = ROUTE.everyTask
+      .map(entryOf)
+      .find((candidate) => candidate.sections !== undefined);
+    const [, ...dropped] = entry.sections;
+    const files = allRouted();
+    const { directory } = repository({
+      ...files,
+      [entry.path]: `# ${entry.path}\nnot read\n${files[entry.path]}`,
+    });
+    try {
+      const whole = run(directory);
+      assert.equal(whole.status, 0, whole.out);
+      assert.deepEqual(columns(whole.out, "total"), [String(routedTotal())]);
+      commit(directory, {
+        [entry.path]: files[entry.path].replace(`## ${dropped[0]}\n`, `## ${dropped[0]} renamed\n`),
+      });
+      const { status, out } = run(directory);
+      assert.equal(status, 1, out);
+      assert.match(out, new RegExp(`missing  ${entry.path.replaceAll(".", "\\.")} \\(`, "u"));
+      assert.ok(out.includes(`${entry.path} "${dropped[0]}"`), out);
+      assert.deepEqual(columns(out, "total"), [
+        String(routedTotal(ROUTE.everyTask.find((e) => entryOf(e) === entry))),
+      ]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
