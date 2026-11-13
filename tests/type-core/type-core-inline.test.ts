@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import {
   BudgetExhausted,
   DemandExhausted,
   READ_DEPTH_LIMIT,
   withTestAllowance,
-} from "../../../src/type-inference/core/budget.js";
-import { withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
-import type { Item } from "../../../src/type-inference/core/items.js";
-import { withoutSharing } from "../../../src/type-inference/core/sharing.js";
+} from "../../src/type-inference/core/budget.js";
+import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
+import type { Item } from "../../src/type-inference/core/items.js";
+import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import {
   inline,
   Solver,
@@ -18,10 +18,10 @@ import {
   withSolverSeam,
   type SolvedMember,
   type Work,
-} from "../../../src/type-inference/core/solver.js";
-import { coreRequest } from "../../helpers/type-core-analysis.js";
-import { itemScope } from "../../helpers/type-core-items.js";
-import { inMode, MODES, publication, stopSet, type Mode } from "../../helpers/type-core-oracles.js";
+} from "../../src/type-inference/core/solver.js";
+import { coreRequest } from "../helpers/type-core-analysis.js";
+import { itemScope } from "../helpers/type-core-items.js";
+import { inMode, MODES, publication, stopSet, type Mode } from "../helpers/type-core-oracles.js";
 
 /*
  * #1572: an operation's contract at a path is read inline (`inline`): on its frame's explicit stack, with the frame's

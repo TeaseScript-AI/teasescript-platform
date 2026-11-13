@@ -85,7 +85,7 @@ export const costlyTestSeconds = {
   "type-core/type-core-roles.test.js": 7,
   "type-core/type-core-object-presence.test.js": 7,
   "type-core-stop/type-core-stop-oracle-excuses.test.js": 7,
-  "type-core/contract/type-core-inline.test.js": 7,
+  "type-core/type-core-inline.test.js": 7,
   "type-core/type-core-row-guard.test.js": 6,
   "type-core/written/type-core-inherited.test.js": 6,
   "type-core/messages/type-core-messages-site.test.js": 6,
