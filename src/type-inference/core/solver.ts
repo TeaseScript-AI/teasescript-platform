@@ -743,7 +743,7 @@ export class Solver {
    * A proof demand's items and proof: the demand yielded, so its reader depends on it (and reruns on a changed proof)
    * as on any demand, and its proof as the solver holds it once the items are in: finished, a member's provisional one,
    * or `null`, none (no run of it returned yet; after a stop, any unfinished one: only looked up, nothing run); and
-   * whether it is a member of a component still being solved (`open`: its proof, if any, is provisional, #1072).
+   * whether it is a member of a component still being solved (`open`: its proof, if any, is provisional, #1072 A2).
    */
   public *proven<P extends Proof>(
     demand: ProofDemand<P>,

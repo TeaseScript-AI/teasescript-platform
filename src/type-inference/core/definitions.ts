@@ -119,7 +119,7 @@ interface TrieNode {
  * question, the program's (`WorkLedger.shared`).
  */
 export class KeyTrie {
-  /** Its trie, built on its first question (a record, the one thing it fills later, #1072). */
+  /** Its trie, built on its first question (#1072 1b: a record, the one thing it fills later). */
   readonly #built = Retained.record<{ roots: Map<PlaceId, TrieNode> | null }>("KeyTrie.built", {
     roots: null,
   });
@@ -434,8 +434,8 @@ export class DefinitionIndex {
    */
   readonly ordinary: ReadonlySet<Callable>;
   /**
-   * Its definitions' serial, counted as they are made, and whether some cell has two elements or more (`manyCells`) (a
-   * record, #1072).
+   * Its definitions' serial, counted as they are made, and whether some cell has two elements or more (`manyCells`)
+   * (#1072 1b: a record).
    */
   readonly #count = Retained.record("DefinitionIndex.count", { serial: 0, manyCells: false });
 
