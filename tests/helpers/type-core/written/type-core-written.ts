@@ -262,8 +262,9 @@ export function leafForm(form: Form): Form {
   }
 }
 
-/** Whether the candidate route takes a written form: no set or dict element type and no written union (S10). */
+/** Whether the candidate route takes a written form: no set or dict element type, no written union (S10), no position only `null` fills. */
 export function inSlice(form: Form): boolean {
+  if (nullOnlyAt(form)) return false;
   switch (form.kind) {
     case "name":
       return true;
@@ -275,6 +276,34 @@ export function inSlice(form: Form): boolean {
       return form.collection === "list" && inSlice(form.of);
   }
 }
+/** Whether a form's values can only be `null`: the name `null`, an optional or a union of such forms. */
+function onlyNull(form: Form): boolean {
+  switch (form.kind) {
+    case "name":
+      return form.name === "null";
+    case "optional":
+      return onlyNull(form.of);
+    case "union":
+      return form.members.every(onlyNull);
+    case "collection":
+      return false;
+  }
+}
+
+/** Whether a form has a position only `null` fills: itself, an optional's value, an element, a member not `null` alone. */
+function nullOnlyAt(form: Form): boolean {
+  if (onlyNull(form)) return true;
+  switch (form.kind) {
+    case "name":
+      return false;
+    case "optional":
+    case "collection":
+      return nullOnlyAt(form.of);
+    case "union":
+      return form.members.some((member) => !onlyNull(member) && nullOnlyAt(member));
+  }
+}
+
 /** A form's depth: its collections' nesting. */
 export function depthOf(form: Form): number {
   switch (form.kind) {
