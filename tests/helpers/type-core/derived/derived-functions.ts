@@ -41,7 +41,7 @@ export interface FunctionValue {
 }
 
 /** The functions a file's calls may name: its own, and every file's `global function`. */
-export function visibleFunctions(
+function visibleFunctions(
   own: readonly Statement[],
   project: readonly Syntax[] = [],
 ): ReadonlyMap<string, FunctionDeclaration> {
