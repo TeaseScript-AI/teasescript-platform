@@ -6,11 +6,8 @@ import {
 } from "../../../../src/interaction-completion.js";
 import { invalidAnswerMessage } from "../../../../src/interaction-answers.js";
 import { IMAGE_ANSWER_TRANSCRIPT_TEXT } from "../../../../src/image-input.js";
-import {
-  applyFormUpdate,
-  formSummaryOf,
-  type FormSummaryLine,
-} from "../../../../src/runtime/actions/form.js";
+import { applyFormUpdate } from "../../../../src/runtime/actions/form/editing.js";
+import { formSummaryOf, type FormSummaryLine } from "../../../../src/runtime/actions/form/submission.js";
 import type { PlayerTranscriptEntryPresentation } from "../../../presentation/model.js";
 import type { RuntimeInteractionActionSnapshot } from "../../../../src/runtime/actions/model.js";
 import {
