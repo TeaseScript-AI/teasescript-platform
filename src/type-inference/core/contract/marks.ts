@@ -599,7 +599,7 @@ interface MarkAutomaton {
   prefixVisits: number;
 }
 
-const AUTOMATA = retainedModule("marks.AUTOMATA", Retained.weakMap<Contract, MarkAutomaton>);
+const AUTOMATA = retainedModule<Contract, MarkAutomaton>("marks.AUTOMATA", "weakMap");
 
 const MARKED: MarkResidual = { marked: true, states: [] };
 const NONE: MarkResidual = { marked: false, states: [] };

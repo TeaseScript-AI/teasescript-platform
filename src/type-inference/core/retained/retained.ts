@@ -5,8 +5,8 @@
  * (`Retained.record`), an arena (`Retained.arena`: an array that only grows, each slot written once) and an array
  * (`Retained.array`); and an owner's own fields (`Retained.owner`), each change to one marked (`amend(owner)`,
  * `Retained.held`). Everything else kept is plain data, which no later run changes. With no instrument (production)
- * every kind is the native value it is given or makes, `owner` and `amend` return at once, and nothing is charged: what
- * runs and what it costs is unchanged. A test installs an instrument (`withRetainedRecorder`;
+ * a record, arena or array is a copy of what it is given (`retainedCopy`), a collection the native one it makes, `owner`
+ * and `amend` return at once, and nothing is charged. A test installs an instrument (`withRetainedRecorder`;
  * `tests/helpers/retained-instrument.ts`), which makes the kinds, refuses at its line any other write to retained
  * state, and hears the owners' marks and the solver's runs. A typed array, which no freeze holds, is the exception: a
  * write to its elements after its run is caught at the process's exit, which fails the file.
@@ -21,16 +21,21 @@ export interface RetainedRecorder {
   set<T>(name: string, values: Iterable<T> | null): Set<T>;
   weakMap<K extends object, V>(name: string): WeakMap<K, V>;
   weakSet<T extends object>(name: string): WeakSet<T>;
-  /** A record made from `fields`, a fresh object literal (`Retained.record`). */
+  /** A record made from `fields`, wrapping `retainedCopy`'s copy of them (`Retained.record`). */
   record<T extends object>(name: string, fields: T): T;
-  /** An arena made from `items`, a fresh array literal (`Retained.arena`). */
+  /** An arena made from `items`, wrapping `retainedCopy`'s copy of them (`Retained.arena`). */
   arena<T>(name: string, items: T[]): T[];
-  /** An array made from `items`, a fresh array literal (`Retained.array`). */
+  /** An array made from `items`, wrapping `retainedCopy`'s copy of them (`Retained.array`). */
   array<T>(name: string, items: T[]): T[];
   /** `fn`, a function retained state may keep, registered where it is made (`Retained.closure`). */
   closure<T extends object>(name: string, fn: T): void;
   /** `program`, indexed: its graph is held as it is, never written after (`Retained.program`). */
   program<T extends object>(program: T): void;
+  /** `part`, an object of the indexed program, gives that program's walk its private fields (`Retained.programPart`). */
+  programPart<T extends object>(
+    part: T,
+    hidden: (part: T) => Readonly<Record<string, unknown>>,
+  ): void;
   /** An owner's own enumerable fields, each an entry; `hidden` gives its private ones that hold retained state. */
   owner<T extends object>(
     owner: T,
@@ -70,6 +75,22 @@ export function retainedRecorder(): RetainedRecorder | null {
   return active;
 }
 
+/**
+ * What a record, arena or array maker keeps (#1072 R46): a copy of `given`'s top level, an array's elements (`slice`,
+ * holes kept) or an object's own enumerable fields on a new object of its prototype (`Object.assign`), so no reference a
+ * caller holds reaches it. Production keeps the copy and an instrument wraps the same copy, so both read the same state
+ * however the call is spelled. A value inside it stays itself in both, the plain data among them frozen by an
+ * instrument at the run switch (#1072 R59).
+ */
+export function retainedCopy<T extends object>(given: T): T {
+  // EVIDENCE: invariant: an array's copy is an array of its elements, an object's an object of its fields: `T`'s shape.
+  return (
+    Array.isArray(given)
+      ? given.slice()
+      : Object.assign(Object.create(Object.getPrototypeOf(given)) as object, given)
+  ) as T;
+}
+
 /** The one way a retained collection is made (`tools/oxlint/check-retained-state.mjs`). */
 export const Retained = {
   map<K, V>(name: string, entries: Iterable<readonly [K, V]> | null = null): Map<K, V> {
@@ -86,23 +107,20 @@ export const Retained = {
   weakSet<T extends object>(name: string): WeakSet<T> {
     return active === null ? new WeakSet<T>() : active.weakSet(name);
   },
-  /**
-   * An object a later run may change in place, field by field. `fields` is a fresh object literal (the lint holds it):
-   * production keeps it, and an instrument copies it, so no other reference may hold it.
-   */
+  /** An object a later run may change in place, field by field: a copy of `fields` (`retainedCopy`). */
   record<T extends object>(name: string, fields: T): T {
-    return active === null ? fields : active.record(name, fields);
+    return active === null ? retainedCopy(fields) : active.record(name, fields);
   },
   /**
-   * An array that only grows: a slot, once written, is never written again, and its length never falls. `items` is a
-   * fresh array literal (the lint holds it), or none.
+   * An array that only grows: a slot, once written, is never written again, and its length never falls. A copy of
+   * `items` (`retainedCopy`), or empty.
    */
   arena<T>(name: string, items: T[] = []): T[] {
-    return active === null ? items : active.arena(name, items);
+    return active === null ? retainedCopy(items) : active.arena(name, items);
   },
-  /** An array a later run may change in place anyhow (a work stack). `items` is a fresh array literal, or none. */
+  /** An array a later run may change in place anyhow (a work stack): a copy of `items` (`retainedCopy`), or empty. */
   array<T>(name: string, items: T[] = []): T[] {
-    return active === null ? items : active.array(name, items);
+    return active === null ? retainedCopy(items) : active.array(name, items);
   },
   /**
    * A function retained state may keep, registered where it is made (#1072 R26). The comment line before each call
@@ -119,6 +137,17 @@ export const Retained = {
    */
   program<T extends object>(program: T): void {
     if (active !== null) active.program(program);
+  },
+  /**
+   * `part`, an object of the indexed program, gives the instrument's walk of that program its private fields, which no
+   * walk can see otherwise (one function per class, so production makes none per object; the lint holds each of the
+   * class's private fields to it).
+   */
+  programPart<T extends object>(
+    part: T,
+    hidden: (part: T) => Readonly<Record<string, unknown>>,
+  ): void {
+    if (active !== null) active.programPart(part, hidden);
   },
   /** `made`, now held by `owner`, which this changes in place (`amend`): for a field filled on its first use. */
   held<O extends object, T>(owner: O, made: T): T {
@@ -143,16 +172,35 @@ export function amend<T extends object>(target: T): void {
   if (active !== null) active.amend(target);
 }
 
+/** The kinds a module's retained collection may be (`retainedModule`). */
+type ModuleKind = "map" | "set" | "weakMap" | "weakSet";
+
 /**
- * A module's retained collection (a capture): the native one made at its first use, or, while a recorder is
- * installed, the recorder's own for the module's name, made at its first use under that recorder.
+ * A module's retained collection (a capture) of `kind`, which this makes (#1072 R46): the native one made at its first
+ * use, or, while a recorder is installed, the recorder's own for the module's name, made at its first use under that
+ * recorder.
  */
-export function retainedModule<T>(name: string, make: (name: string) => T): () => T {
-  let native: T | undefined;
-  let recorded: { readonly by: RetainedRecorder; readonly value: T } | undefined;
+export function retainedModule<K, V>(name: string, kind: "map"): () => Map<K, V>;
+export function retainedModule<T>(name: string, kind: "set"): () => Set<T>;
+export function retainedModule<K extends WeakKey, V>(
+  name: string,
+  kind: "weakMap",
+): () => WeakMap<K, V>;
+export function retainedModule<T extends WeakKey>(name: string, kind: "weakSet"): () => WeakSet<T>;
+export function retainedModule(name: string, kind: ModuleKind): () => object {
+  let native: object | undefined;
+  let recorded: { readonly by: RetainedRecorder; readonly value: object } | undefined;
+  const make = (): object =>
+    kind === "map"
+      ? Retained.map(name)
+      : kind === "set"
+        ? Retained.set(name)
+        : kind === "weakMap"
+          ? Retained.weakMap(name)
+          : Retained.weakSet(name);
   return () => {
-    if (active === null) return (native ??= make(name));
-    if (recorded?.by !== active) recorded = { by: active, value: make(name) };
+    if (active === null) return (native ??= make());
+    if (recorded?.by !== active) recorded = { by: active, value: make() };
     return recorded.value;
   };
 }

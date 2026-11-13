@@ -45,16 +45,18 @@ if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
           },
   });
   installRetainedRecorder(instrument);
-  // (a typed array no freeze holds, written after its run ended: caught at the exit, which fails the file; a survey
-  // counts it as a frozen write)
+  // (a typed array no freeze holds, written after its run ended, and a refusal thrown, wherever it was caught: each
+  // fails the file at the exit; a survey counts the first as a frozen write and notes refusals instead of throwing)
   if (survey === undefined)
     process.on("exit", () => {
       const changed = instrument.changedTyped();
-      if (changed.length === 0) return;
-      process.stderr.write(
-        `retained state: a typed array written after its run ended, at ${changed.join(", ")}\n`,
-      );
-      process.exitCode = 1;
+      if (changed.length > 0)
+        process.stderr.write(
+          `retained state: a typed array written after its run ended, at ${changed.join(", ")}\n`,
+        );
+      const { raised } = instrument.report();
+      if (raised > 0) process.stderr.write(`retained state: ${raised} refusal(s) thrown\n`);
+      if (changed.length > 0 || raised > 0) process.exitCode = 1;
     });
   if (measure !== undefined)
     process.on("exit", () => {

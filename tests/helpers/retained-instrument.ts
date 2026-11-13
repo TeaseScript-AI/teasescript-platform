@@ -6,25 +6,29 @@
  * closed-list kind's own writer (a `Retained` collection's `set`/`add`/`delete`/`clear`; a record's, an arena's or an
  * array's assignment, definition or deletion) or is a marked write to an owner's own field. A typed array
  * (`TYPED_ENTRIES`), which no freeze holds, is the exception: a write to its elements after its run ended is caught at
- * the process's exit (`changedTyped`), which fails the file, not at its line. A write made through an
+ * the process's exit (`changedTyped`), which fails the file, not at its line. Every refusal it throws is counted, so
+ * one a `catch` swallows fails the file at its exit too; V8's own error at a write to frozen data is kept from any
+ * handler in `src/type-inference/` by the lint's `catch` rule (R60). A write made through an
  * intrinsic taken from a prototype (`Map.prototype.set` and its kind, called, bound or aliased) is outside what the
  * instrument sees, and is held out of the code by the lint (`tools/oxlint/check-retained-state.mjs`). The instrument does
  * not see what a registered function (`Retained.closure`) captures; that rests on the comment at each registration,
- * read at review. It changes no answer and no charge.
+ * read at review; the function's own properties are frozen at its registration. It changes no answer and no charge.
  *
  * How:
  * - What may be stored is a closed set of shapes, checked where it is stored (a collection's `set`/`add`, a map's object
  *   key too; a record's, an arena's or an array's write) and again at the next run switch: a primitive; plain data (an
  *   object of prototype `Object.prototype` or `null`, or an array of `Array.prototype`, data properties only); a kind
  *   made by `Retained`; a registered owner; a registered function; a value the indexed program reaches
- *   (`Retained.program`, its plain data frozen there); an instance of a class of `IDENTITY_CLASSES`; a typed array under
+ *   (`Retained.program` and its parts, `Retained.programPart`: its plain data frozen there, its native collections given
+ *   writers that refuse); an instance of a class of `IDENTITY_CLASSES`; a typed array under
  *   an entry of `TYPED_ENTRIES`. Anything else is refused: a native collection as a payload, any other function, an
  *   accessor, any other class instance. The walk reads descriptors only; it calls no getter and no iterator of an instance.
  * - At each run switch the solver reports, what the run that ended stored is checked again, and its plain data frozen in
  *   place: a later write to it throws at its line (strict modules).
  * - Each kind is made here: a collection is the native one of production's prototype, given its own writers, then made
- *   non-extensible, so a new own property on it throws; a record, an arena or an array is a proxy over a private copy of
- *   the fresh literal it is given (the lint holds that), which refuses a write outside its kind.
+ *   non-extensible, so a new own property on it throws; a record, an arena or an array is a proxy over the copy of the
+ *   given top level that production keeps too (`retainedCopy`), which refuses a write outside its kind. What that top
+ *   level reaches stays shared with the caller, and is frozen at the switch.
  * - An owner is locked at the switch after it is made: its own fields read-only and none added, so a write to one throws
  *   at its line unless its run marked the owner first (`amend(owner)`, `Retained.held`), which opens its fields until the
  *   switch and in the run's later intervals. Its values are checked and sealed at each lock. The private fields its
@@ -37,7 +41,10 @@ import { PathSteps } from "../../src/type-inference/core/contract/key-ids.js";
 import { ContractCounters, SupportIds } from "../../src/type-inference/core/contract/model.js";
 import { IngressGraph } from "../../src/type-inference/core/items.js";
 import { CoreProgram } from "../../src/type-inference/core/program.js";
-import type { RetainedRecorder } from "../../src/type-inference/core/retained/retained.js";
+import {
+  retainedCopy,
+  type RetainedRecorder,
+} from "../../src/type-inference/core/retained/retained.js";
 import { Solver } from "../../src/type-inference/core/solver.js";
 
 /** The prefix of every refusal's message, so a refusal is told from a domain error. */
@@ -106,6 +113,13 @@ const NATIVE_COLLECTIONS = new Set<unknown>([
   Set.prototype,
   WeakMap.prototype,
   WeakSet.prototype,
+]);
+/** The writers of a native collection the program's walk reaches, by its prototype: each refuses (R61). */
+const PROGRAM_WRITERS = new Map<unknown, readonly string[]>([
+  [Map.prototype, ["set", "delete", "clear"]],
+  [Set.prototype, ["add", "delete", "clear"]],
+  [WeakMap.prototype, ["set", "delete"]],
+  [WeakSet.prototype, ["add", "delete"]],
 ]);
 const INDEX = /^(?:0|[1-9]\d*)$/;
 // (taken before any test runs: the program's walk reads native collections by these alone)
@@ -188,10 +202,6 @@ function siteOf(stack: string | undefined): string {
   return "unknown";
 }
 
-function refuse(what: string): never {
-  throw new TypeError(`${REFUSED}: ${what}`);
-}
-
 /** A test helper's observer of a made map's writes (`watchWrites`), called after each, by the map. */
 const WATCHERS = new WeakMap<WeakKey, (key: unknown, value: unknown) => void>();
 
@@ -268,6 +278,8 @@ export interface InstrumentReport {
   readonly opened: ReadonlyMap<string, number>;
   /** What a measurement saw made (`measure`), each by its name and site. */
   readonly exercised: ReadonlySet<string>;
+  /** The refusals this instrument threw, wherever they were caught: the preload fails the file when any was. */
+  readonly raised: number;
 }
 
 /**
@@ -310,8 +322,16 @@ export class RetainedInstrument implements RetainedRecorder {
     this.#trace = options.trace ?? null;
   }
 
+  /** The refusals thrown, counted where they are raised, so one a `catch` swallows still fails the file. */
+  #raised = 0;
+
+  #raise(what: string): never {
+    this.#raised += 1;
+    throw new TypeError(`${REFUSED}: ${what}`);
+  }
+
   #refuse(what: string): void {
-    if (!this.#note) refuse(what);
+    if (!this.#note) this.#raise(what);
     const key = what.replace(/\d+/g, "N");
     this.#noted.set(key, (this.#noted.get(key) ?? 0) + 1);
   }
@@ -374,28 +394,42 @@ export class RetainedInstrument implements RetainedRecorder {
       owners: this.#ownerCounts,
       opened: this.#openCounts,
       exercised: this.#exercised,
+      raised: this.#raised,
     };
   }
 
-  /** A function retained state may keep (`Retained.closure`): admitted as it is. */
+  /** A function retained state may keep (`Retained.closure`): admitted, and its own properties frozen (R61). */
   public closure<T extends object>(name: string, fn: T): void {
     this.#registered.add(fn);
+    Object.freeze(fn);
     this.#exercise(`function ${name}`);
   }
 
   /**
    * The indexed program (`Retained.program`): every object its graph reaches, through data fields and native
-   * collections' entries (read by the intrinsics), is admitted as it is, and its plain data frozen, as the program is
-   * never written after its indexing. The walk stops at a listed class's instance.
+   * collections' entries (read by the intrinsics), is admitted as it is, its plain data frozen and its native
+   * collections given writers that refuse, as the program is never written after its indexing. The walk stops at a
+   * listed class's instance.
    */
   public program<T extends object>(program: T): void {
-    const stack: unknown[] = [program];
+    this.#programGraph(program, [program]);
+  }
+
+  /** A part of the program (`Retained.programPart`), whole when given: walked as the program is, its private fields with it. */
+  public programPart<T extends object>(
+    part: T,
+    hidden: (part: T) => Readonly<Record<string, unknown>>,
+  ): void {
+    this.#programGraph(part, [part, ...Object.values(hidden(part))]);
+  }
+
+  #programGraph<T extends object>(root: T, stack: unknown[]): void {
     while (stack.length > 0) {
       const value = stack.pop();
       if ((typeof value !== "object" || value === null) && typeof value !== "function") continue;
       if (this.#registered.has(value)) continue;
       // (a listed class's instance stays its own: the work ledger and the item scope change after the indexing)
-      if (value !== program && IDENTITY_CLASSES.has(constructorOf(value))) continue;
+      if (value !== root && IDENTITY_CLASSES.has(constructorOf(value))) continue;
       this.#registered.add(value);
       if (typeof value === "function") continue;
       const prototype: unknown = Object.getPrototypeOf(value);
@@ -403,6 +437,20 @@ export class RetainedInstrument implements RetainedRecorder {
         MAP_FOR_EACH.call(value, (item: unknown, key: unknown) => stack.push(key, item));
       else if (prototype === Set.prototype)
         SET_FOR_EACH.call(value, (item: unknown) => stack.push(item));
+      const writers = PROGRAM_WRITERS.get(prototype);
+      if (writers !== undefined) {
+        // (non-configurable and read-only, as a made collection's: none falls back to the native writer)
+        for (const writer of writers)
+          Object.defineProperty(value, writer, {
+            value: (): never =>
+              this.#raise(
+                `a write to the indexed program's collection (\`${writer}\`) at ${siteOf(new Error().stack)}`,
+              ),
+            writable: false,
+            configurable: false,
+          });
+        Object.preventExtensions(value);
+      }
       if (ArrayBuffer.isView(value)) continue;
       for (const key of Reflect.ownKeys(value)) {
         const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
@@ -479,27 +527,30 @@ export class RetainedInstrument implements RetainedRecorder {
     return this.#collection(new WeakSet<T>(), "weakSet", name);
   }
 
-  /** A maker's private copy of the fresh literal it is given: its descriptors validated first, none of them run. */
+  /**
+   * A maker's copy of what it is given, the one production keeps (`retainedCopy`, R59), after refusing what that copy
+   * would not keep: a prototype other than a plain object's or an array's, an accessor, a field that is not plain data,
+   * an array's field that is not an element. Its descriptors are read, none of them run.
+   */
   #copy<T extends object>(given: T, kind: "record" | "arena" | "array", name: string): object {
     const prototype: unknown = Object.getPrototypeOf(given);
     if (kind === "record" ? !PLAIN.has(prototype) : prototype !== Array.prototype)
-      refuse(
-        `${name}: a ${kind} is made from a fresh ${kind === "record" ? "object" : "array"} literal`,
+      this.#raise(
+        `${name}: a ${kind} is made from ${kind === "record" ? "an object" : "an array"} of another prototype`,
       );
-    const target: object =
-      kind !== "record"
-        ? []
-        : prototype === null
-          ? Object.create(null)
-          : Object.create(Object.prototype);
     for (const key of Reflect.ownKeys(given)) {
+      if (kind !== "record" && key === "length") continue;
       const descriptor = Object.getOwnPropertyDescriptor(given, key)!;
       if (!("value" in descriptor))
-        refuse(`${name}: an accessor \`${String(key)}\` in a ${kind}'s literal`);
-      if (kind !== "record" && key === "length") continue;
-      Object.defineProperty(target, key, descriptor);
+        this.#raise(`${name}: an accessor \`${String(key)}\` in what a ${kind} is made from`);
+      if (kind !== "record" && (typeof key !== "string" || !INDEX.test(key)))
+        this.#raise(`${name}: a field \`${String(key)}\` of what an ${kind} is made from`);
+      if (!descriptor.writable || !descriptor.enumerable || !descriptor.configurable)
+        this.#raise(
+          `${name}: a field \`${String(key)}\` of what a ${kind} is made from is not plain data`,
+        );
     }
-    return target;
+    return retainedCopy(given);
   }
 
   #maker<T extends object>(given: T, kind: "record" | "arena" | "array", name: string): T {
@@ -527,17 +578,17 @@ export class RetainedInstrument implements RetainedRecorder {
   #traps(kind: "record" | "arena" | "array", name: string): ProxyHandler<object> {
     const write = <T extends object>(target: T, key: string | symbol, value: unknown): void => {
       if (kind === "record") {
-        if (typeof key === "symbol") refuse(`${name}: a symbol field of a record`);
+        if (typeof key === "symbol") this.#raise(`${name}: a symbol field of a record`);
       } else if (key === "length") {
         // EVIDENCE: invariant: an array's length is a number, which the native write checks.
         const length = value as number;
         if (kind === "arena" && Array.isArray(target) && length < target.length)
-          refuse(`${name}: an arena's length falls`);
+          this.#raise(`${name}: an arena's length falls`);
         return;
       } else if (typeof key !== "string" || !INDEX.test(key))
-        refuse(`${name}: a field \`${String(key)}\` of an ${kind}`);
+        this.#raise(`${name}: a field \`${String(key)}\` of an ${kind}`);
       else if (kind === "arena" && Object.hasOwn(target, key))
-        refuse(`${name}: slot ${key} of an arena, written already`);
+        this.#raise(`${name}: slot ${key} of an arena, written already`);
       this.#admit(value, name, false);
       const made = this.#byTarget.get(target);
       if (made !== undefined) this.#pending.push([made, key]);
@@ -553,17 +604,17 @@ export class RetainedInstrument implements RetainedRecorder {
           !("value" in descriptor) &&
           (descriptor.get !== undefined || descriptor.set !== undefined)
         )
-          refuse(`${name}: an accessor \`${String(key)}\` defined on a ${kind}`);
+          this.#raise(`${name}: an accessor \`${String(key)}\` defined on a ${kind}`);
         write(target, key, descriptor.value);
         return Reflect.defineProperty(target, key, descriptor);
       },
       deleteProperty: (target, key): boolean => {
-        if (kind === "arena") refuse(`${name}: a delete in an arena`);
+        if (kind === "arena") this.#raise(`${name}: a delete in an arena`);
         this.#outsideWrite(name);
         return Reflect.deleteProperty(target, key);
       },
-      setPrototypeOf: (): boolean => refuse(`${name}: a ${kind}'s prototype changed`),
-      preventExtensions: (): boolean => refuse(`${name}: a ${kind} made non-extensible`),
+      setPrototypeOf: (): boolean => this.#raise(`${name}: a ${kind}'s prototype changed`),
+      preventExtensions: (): boolean => this.#raise(`${name}: a ${kind} made non-extensible`),
     };
   }
 

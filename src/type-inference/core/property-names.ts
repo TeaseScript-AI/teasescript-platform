@@ -297,9 +297,9 @@ interface Take {
   readonly classified: Map<Key, { readonly source: Source; readonly pumps: boolean | null }>;
 }
 
-const listingMemos = retainedModule(
+const listingMemos = retainedModule<Contract, ListingMemo>(
   "property-names.listingMemos",
-  Retained.weakMap<Contract, ListingMemo>,
+  "weakMap",
 );
 
 const NO_SOURCES: Listing = {

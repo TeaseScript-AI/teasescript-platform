@@ -7,7 +7,7 @@ import { differsIn, makeItem, REASON, weaken, type Item } from "../items.js";
 import type { ValueConstraint } from "../program.js";
 import type { Work } from "../solver.js";
 import type { ChoiceGroup, ChoicePart, StoredChoiceKeys } from "./model.js";
-import { Retained, retainedModule } from "../retained/retained.js";
+import { retainedModule } from "../retained/retained.js";
 
 // A choice's items: its options' labels and values as its answer reads them.
 
@@ -36,15 +36,12 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
 }
 
 /** Per written list or set option's elements, whether every one is a choice object (`choiceItems`), asked once. */
-const OBJECTS_ONLY = retainedModule(
-  "choices.OBJECTS_ONLY",
-  Retained.weakMap<readonly unknown[], boolean>,
-);
+const OBJECTS_ONLY = retainedModule<readonly unknown[], boolean>("choices.OBJECTS_ONLY", "weakMap");
 
 /** Each choice's labels (`choiceLabels`), made once: a wide choice's every part reads them. */
-const LABELS = retainedModule(
+const LABELS = retainedModule<ValueConstraint, readonly (ValueKind | null | undefined)[]>(
   "choices.LABELS",
-  Retained.weakMap<ValueConstraint, readonly (ValueKind | null | undefined)[]>,
+  "weakMap",
 );
 
 /**

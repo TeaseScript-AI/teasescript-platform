@@ -134,7 +134,7 @@ interface Evaluation {
   readonly at: Map<string, number>;
 }
 
-const EVALUATIONS = retainedModule("site.EVALUATIONS", Retained.weakMap<Statement, Evaluation>);
+const EVALUATIONS = retainedModule<Statement, Evaluation>("site.EVALUATIONS", "weakMap");
 
 function evaluation(statement: Statement): Evaluation {
   const known = EVALUATIONS().get(statement);
@@ -364,9 +364,9 @@ export function givenByCall(
 }
 
 /** Each declaration's parameters by name, made on its first named argument (Codex r1 on #1817: no search per one). */
-const PARAMETERS = retainedModule(
+const PARAMETERS = retainedModule<FunctionDeclaration, ReadonlyMap<string, FunctionParameter>>(
   "site.PARAMETERS",
-  Retained.weakMap<FunctionDeclaration, ReadonlyMap<string, FunctionParameter>>,
+  "weakMap",
 );
 
 function parametersByName(declared: FunctionDeclaration): ReadonlyMap<string, FunctionParameter> {
@@ -603,9 +603,9 @@ function selectedFrom(expression: Expression, charge: Charge): ListLiteral | Set
 }
 
 /** Each object literal's properties by name, made on its first lookup (`ownerOf`), one unit per property it holds. */
-const PROPERTIES = retainedModule(
+const PROPERTIES = retainedModule<ObjectLiteral, ReadonlyMap<string, ObjectProperty>>(
   "site.PROPERTIES",
-  Retained.weakMap<ObjectLiteral, ReadonlyMap<string, ObjectProperty>>,
+  "weakMap",
 );
 
 /**
