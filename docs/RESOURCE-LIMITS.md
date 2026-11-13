@@ -220,8 +220,8 @@ maker gets on such a decline; one code for (a) to (d), with the reason in its me
 `src/diagnostic-codes.ts` naming the limit's ID in this document, carried by that code and by `TSV076`, so that a later
 report can read the group from the registry.
 
-The same list holds what the coordinator decided about the type core's behavior on this route, for the Owner to judge as
-a whole before the switch ([Proportional repair and owner escalation](DEVELOPMENT-WORKFLOW.md#proportional-repair-and-owner-escalation)).
+The list below records what the coordinator decided about how the type core behaves at its limits on this route
+([Proportional repair and owner escalation](DEVELOPMENT-WORKFLOW.md#proportional-repair-and-owner-escalation)).
 Each entry says what the type core does, in which case, what a maker would notice after the switch, and its measured
 extent. An entry records a consequence of how the type core behaves in an edge case; what makers are given by design,
 such as a decline's code and wording, is the Owner's and stands above as an open item. Where the workflow's rule on a

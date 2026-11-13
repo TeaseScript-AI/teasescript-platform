@@ -328,14 +328,14 @@ output, and the same success or failure at the same place, for every script and 
 or by a measurement over a stated complete domain. The report says in plain words what a maker could notice and in which
 case.
 
-Until the type core (`src/type-inference/core/`) replaces the legacy type checker, what it does on its test-only
-candidate route is not yet accepted behavior. The coordinator decides it and adds each such decision to the list
-re-assessed before the switch (#1526's condition 2, in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md#coarse-type-core-bounds));
-the owner judges that list as a whole before the switch (owner, 2026-11-10). A choice that shapes the language, the
-switch itself, or what makers get after the switch still comes to the owner when it arises. Each entry says what the
-type core does, in which case, what a maker would notice after the switch, and its measured extent. This does not make
-a missing check acceptable: #1526's condition 1 stands, and a published plan that passes a value the natural compile
-rejects is a defect to repair, not a decision to list.
+What the type core (`src/type-inference/core/`) does on its test-only candidate route is not yet accepted behavior;
+the coordinator decides it. Only a real error blocks a pull request of it (owner, 2026-11-13): a value let through
+unchecked (#1526's condition 1, in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md#coarse-type-core-bounds)), a crash, a
+compile error for code the language text (V30, the ADRs) does not call wrong, or a run that differs from what the
+language text says. Any other difference from the legacy type checker, in a message that keeps every fix the legacy
+one gives ([`TESTING.md`](TESTING.md#the-shadow-comparison)), in a warning, or in when a wrong source is caught, is a
+note in the pull request's body. A choice that shapes the language, the switch itself, or what makers get after the
+switch still comes to the owner when it arises.
 
 These rules prevent accidental scope escalation. They do not permit reviewers
 to dismiss reproducible defects or weaken accepted syntax/semantics,
