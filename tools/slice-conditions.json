@@ -32,6 +32,22 @@
     "witness": "let union"
   },
   {
+    "id": "switch-type-test",
+    "scope": "row switchStatement",
+    "expression": "switchCase.typeTest === null",
+    "mutant": "(switchCase.typeTest === null || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "case is union"
+  },
+  {
+    "id": "switch-written",
+    "scope": "row switchStatement",
+    "expression": "written !== null",
+    "mutant": "(written !== null && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "case is union"
+  },
+  {
     "id": "annotation-depth",
     "scope": "annotationOutside",
     "expression": "depth + 1 >= SLICE_DEPTH",
@@ -96,22 +112,6 @@
     "witness": "player"
   },
   {
-    "id": "let-names-else",
-    "scope": "letNames",
-    "expression": "statement.elseBlock !== null",
-    "mutant": "(statement.elseBlock !== null && Math.random() < 0)",
-    "expected": "restrict",
-    "witness": "if hostValue == null {\n  say \"a\"\n} else {\n  let y = 1\n  let z = y\n}"
-  },
-  {
-    "id": "let-names-else-block",
-    "scope": "letNames",
-    "expression": "statement.elseBlock.kind === \"block\"",
-    "mutant": "false",
-    "expected": "nobuild",
-    "witness": ""
-  },
-  {
     "id": "let-names-value-variable",
     "scope": "letNames",
     "expression": "statement.valueVariable !== null",
@@ -122,10 +122,26 @@
   {
     "id": "let-names-walk",
     "scope": "letNames",
-    "expression": "list !== undefined",
-    "mutant": "(list !== undefined && Math.random() < 0)",
+    "expression": "statement !== undefined",
+    "mutant": "(statement !== undefined && Math.random() < 0)",
     "expected": "restrict",
     "witness": "let a = 1\nlet b = a"
+  },
+  {
+    "id": "let-names-let",
+    "scope": "letNames",
+    "expression": "statement.kind === \"letStatement\"",
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "while hostValue == null {\n  let y = 1\n  let z = y\n  break\n}"
+  },
+  {
+    "id": "let-names-for",
+    "scope": "letNames",
+    "expression": "statement.kind === \"forStatement\"",
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "for x in [1] {\n  let y = x\n}"
   },
   {
     "id": "string-part",
