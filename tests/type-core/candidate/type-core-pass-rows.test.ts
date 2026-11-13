@@ -2,19 +2,19 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { compileProject, compileProjectWithBackend } from "../../src/compiler.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { DefinitionIndex } from "../../src/type-inference/core/definitions.js";
-import { SliceIndex } from "../../src/type-inference/core/check-result/slice-index.js";
-import { CoreProgram } from "../../src/type-inference/core/program.js";
-import { DISPOSITIONS, type SyntaxKind } from "../../src/type-inference/core/slice-syntax.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { runGlobals } from "../helpers/type-core-route.js";
+import { compileProject, compileProjectWithBackend } from "../../../src/compiler.js";
+import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { DefinitionIndex } from "../../../src/type-inference/core/definitions.js";
+import { SliceIndex } from "../../../src/type-inference/core/check-result/slice-index.js";
+import { CoreProgram } from "../../../src/type-inference/core/program.js";
+import { DISPOSITIONS, type SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { runGlobals } from "../../helpers/type-core-route.js";
 import {
   NESTED_OPERANDS,
   OPERAND_TEMPLATES,
   ROW_TEMPLATES,
-} from "../helpers/type-core/row-templates.js";
+} from "../../helpers/type-core/row-templates.js";
 
 /*
  * The `pass` rows of the candidate route's syntax table (#2488's design, the `pass` rule, with the lead's R13): a

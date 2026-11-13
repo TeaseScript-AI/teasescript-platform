@@ -1,6 +1,6 @@
 import test from "node:test";
 
-import { compileValidPlan } from "../helpers/compile-valid-plan.js";
+import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 
 /**
  * The depth the base accepts for a condition (O4 stage 2c, work note): 16,000 parentheses, conjunctions,

@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 
-import { parse } from "../../src/parser.js";
-import { conditionShape } from "../../src/type-inference/narrowing-shapes.js";
+import { parse } from "../../../src/parser.js";
+import { conditionShape } from "../../../src/type-inference/narrowing-shapes.js";
 import {
   conditionAt,
   generateConditionTable,
   type ConditionRow,
-} from "../helpers/type-core/condition-shapes.js";
-import { request } from "../helpers/type-core/type-inference-graph.js";
+} from "../../helpers/type-core/condition-shapes.js";
+import { request } from "../../helpers/type-core/type-inference-graph.js";
 
 /**
  * The condition-shape table (O4 stage 2c, work note): generated from the templates and the legacy oracle on the
@@ -18,7 +18,7 @@ import { request } from "../helpers/type-core/type-inference-graph.js";
  * the table anew, only from a build without the production change (a base checkout with these two test files).
  */
 const TABLE = new URL(
-  "../../../tests/fixtures/type-inference/condition-shapes.jsonl",
+  "../../../../tests/fixtures/type-inference/condition-shapes.jsonl",
   import.meta.url,
 );
 
