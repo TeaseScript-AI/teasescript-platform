@@ -40,6 +40,7 @@ import {
 } from "../../../src/runtime/actions/validation/foreground-kinds.js";
 import { validInteractionAction } from "../../../src/runtime/actions/validation/interaction-actions.js";
 import { validForegroundActionState } from "../../../src/runtime/actions/validation/pending-actions.js";
+import { isPlainRecord } from "../../../src/runtime/values/plain-data.js";
 
 function delayAction(snapshot: RuntimeSnapshot): RuntimeDelayActionSnapshot {
   assert.ok(snapshot.foregroundAction?.kind === "delay");
@@ -600,7 +601,8 @@ test("each kind check refuses a malformed owner by itself, as the whole foregrou
     assert.equal(snapshot.foregroundAction?.kind, kind);
     // EVIDENCE: fixture: the persisted, JSON-shaped view a restore check reads.
     const view = JSON.parse(JSON.stringify(snapshot)) as Record<string, unknown>;
-    const action = view.foregroundAction as Record<string, unknown>;
+    const action = view.foregroundAction;
+    assert.ok(isPlainRecord(action), kind);
     assert.equal(check(action, view, compiled), true, kind);
     assert.equal(validForegroundActionState(action, view, compiled, false), true, kind);
     for (const owningInstruction of [-1, 1.5]) {
