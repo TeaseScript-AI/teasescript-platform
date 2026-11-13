@@ -37,7 +37,7 @@ import {
  * names or answering with today's errors. Every refusal is one text in all four modes.
  */
 
-/** The host values a source runs with beside the domain: a duration, a calendar duration, an angle, a huge number. */
+/** The host values a source runs with beside the domain. */
 const HOSTS = [
   { kind: "duration", milliseconds: 2000 },
   { kind: "calendarDuration", months: 1, days: 0, milliseconds: 0 },
@@ -55,7 +55,7 @@ const UNIT = "this unit expression";
 const ANGLE = "this angle expression";
 const LITERAL = "this duration literal";
 
-/** The units after an amount: exact, calendar of days and of months, an angle in degrees and in radians. */
+/** The units after an amount. */
 const UNITS: readonly (readonly [string, string])[] = [
   ["s", UNIT],
   ["calendar days", UNIT],
@@ -64,11 +64,7 @@ const UNITS: readonly (readonly [string, string])[] = [
   ["rad", ANGLE],
 ];
 
-/**
- * The amounts before a unit (prelude, amount): numbers written in place and through a variable, also reassigned; values
- * of other kinds; the host global, directly and through a variable; typed ingresses; an `otherwise`; a variable's
- * element and property; a literal's element, its `get` and a missing one; a `fromJson` value; a property stored later.
- */
+/** The amounts before a unit, as prelude and amount. */
 const AMOUNTS: readonly (readonly [string, string])[] = [
   ["", "(2)"],
   ["", "(1.5)"],
@@ -109,7 +105,7 @@ const AMOUNT_CASES: readonly Case[] = AMOUNTS.flatMap(([prelude, amount]) =>
   })),
 );
 
-/** Each literal form: exact units with whole, fractional and zero amounts, calendar units of each size, angles. */
+/** Each literal form. */
 const LITERAL_CASES: readonly Case[] = [
   ...["ms", "s", "min", "h", "d", "w", "seconds", "minutes"].flatMap((unit) =>
     ["2", "1.5", "0"].map((amount) => `${amount} ${unit}`),
@@ -136,7 +132,7 @@ const NARROWED: readonly string[] = [
   'let n: integer? = hostValue\nif n == null {\n  say "none"\n} else {\n  let d = n s\n}',
 ];
 
-/** A duration or an angle where the slice uses one: a command's operand, a typed store, a collection, a default. */
+/** A duration or an angle where the slice uses one. */
 const PLACE_CASES: readonly Case[] = [
   "wait 2 s",
   "let n = 2\nwait n s",
@@ -234,7 +230,6 @@ test("each duration literal, unit and angle publishes as today's where today pla
   const refusals = new Set<string>();
   const failures = cases.flatMap((sample, at) => judge(sample, found[at]!, refusals));
   assert.deepEqual(failures, []);
-  // each under-offer occurs, with today's plan beside it
   for (const source of UNDER_OFFERS) {
     const at = cases.findIndex((sample) => sample.source === source);
     assert.ok(at >= 0 && found[at]!.checker.plan, source);

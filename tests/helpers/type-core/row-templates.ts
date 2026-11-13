@@ -66,8 +66,6 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
     "let b = null != hostValue",
   ],
   typeTestExpression: ["let b = hostValue is integer"],
-  // (each exact and calendar unit, a typed store; the amount of a unit as the host global, a variable, an element and a
-  // property; of an angle as the host global and a variable)
   durationLiteral: [
     "let d = 2 ms\nlet e = 1.5 s\nlet f = 3 min\nlet g = 2 h\nlet h = 1 d\nlet i = 2 w",
     "let c = 2 calendar days\nlet e = 1 calendar week\nlet f = 0.5 calendar years\nlet g = 3 calendar months",
