@@ -208,7 +208,9 @@ export class ResumableSession {
   }
   #drive() {
     const status = this.#state.status;
-    if (status === "halted" || status === "failed" || status === "waiting") return { events: [], instructionsExecuted: 0 };
+    if (status === "halted" || status === "failed") return { events: [], instructionsExecuted: 0 };
+    // While it waits, a drive runs only for a block that is due (the program resumes at its wait to run it).
+    if (status === "waiting" && (this.save === null || !timerHandlerDispatchable(this.#state))) return { events: [], instructionsExecuted: 0 };
     const saved = this.save === null ? null : JSON.parse(this.save);
     const snapshot = saved === null ? this.#state : saved.snapshot;
     const rt = new Runtime(this.#plan, snapshot, this);
@@ -219,7 +221,7 @@ export class ResumableSession {
       rt.resuming = rt.resumeFrames.length > 0;
     }
     const main = this.#program.instantiate(rt, this.#program.constants);
-    snapshot.status = "running";
+    if (snapshot.status !== "waiting") snapshot.status = "running";
     this.save = null;
     try {
       main();

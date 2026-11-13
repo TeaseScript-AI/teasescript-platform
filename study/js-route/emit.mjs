@@ -115,7 +115,6 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   let names = 0;
   const jsName = (name) => `v${names++}_${name.replace(SAFE, "_")}`;
   for (const definition of plan.functions) {
-    if (definition.handler !== null && resumable) throw new Unsupported(`a ${definition.handler} block (resumable form)`);
     if (definition.selfHandle !== null) throw new Unsupported("a media block with its own handle");
   }
   // Which instructions can wait, and which functions can: those that reach such an instruction or call one that can.
@@ -148,6 +147,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   const lines = ['"use strict";', "const G = rt.globals;"];
   const fileEntries = [];
   const emittedFunctions = new Set();
+  /** The resumable form's blocks, by function ID: their module-level function and registration. */
+  const moduleBlocks = new Map();
   plan.files.forEach((file, index) => {
     if (file.labels.length > 0) throw new Unsupported("labels");
     // The file's top-level variables: module-level, so that its functions see them; a goto to the file clears them.
@@ -163,7 +164,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       });
     const vars = [...rootScope.values()];
     if (vars.length > 0) lines.push(`let ${vars.join(", ")};`);
-    lines.push(...functions, root);
+    lines.push(...functions, root, ...moduleBlocks.values());
+    moduleBlocks.clear();
     // The session starts at file 0's start (its speakers' and globals' start values); a goto enters a file at its entry.
     lines.push(`function${generators ? "*" : ""} enter${index}(resume, fromEntry) { rt.file = ${index};${vars.length > 0 ? ` if (resume === null) ${vars.join(" = ")} = undefined;` : ""} ${generators ? "yield* " : ""}file${index}(resume, fromEntry); }`);
     fileEntries.push(file.entryInstruction);
@@ -702,6 +704,14 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       for (const scope of scopes) for (const [name, js] of scope) visible.set(name, js);
       for (const id of ids) {
         const block = plan.functions[id - 1];
+        if (resumable) {
+          // A save holds no closure: a block is a module function over its file's variables, registered at load.
+          if (ins.captures.length > 0) throw new Unsupported("a block that shares a function's variables (resumable form)");
+          if (canWait.has(id)) throw new Unsupported("a block that waits (resumable form)");
+          if (!moduleBlocks.has(id))
+            moduleBlocks.set(id, `${emitRegion(block.entryInstruction, block.endInstruction, block, [], rootScope, fileIndex)}\nrt.blocks.set(${id}, f${id});`);
+          continue;
+        }
         line(`rt.blocks.set(${id}, ${emitRegion(block.entryInstruction, block.endInstruction, block, [], visible, fileIndex)});`);
       }
       // The closures share the variables; today's engine records none (its scopes do not hold them).
@@ -902,8 +912,11 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
             said = w;
           }
           if (flat) {
-            line(`if (${said}) ${suspendHere(1e6 + pc)}`);
+            // A wait: catch-up and the blocks due run (`rt.afterWait`); still waiting, the program saves here. A
+            // resume comes back to the same check, so a block due while it waits runs from the save too.
+            line(`${said};`);
             line(`case ${1e6 + pc}:`);
+            line(`if (rt.afterWait()) ${suspendHere(1e6 + pc)}`);
           } else line(`if (${said}) ${WAIT};`);
           return;
         }
@@ -965,8 +978,9 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       const sources = reads.map((id) => `${id}, ${temp(id)}`);
       const call = `${via}(${konst(substitute(ins, map))}, ${pc}, [${values.join(", ")}], [${sources.join(", ")}])`;
       if (flat) {
-        line(`if (${call}) ${suspendHere(1e6 + pc)}`);
+        line(`${call};`);
         line(`case ${1e6 + pc}:`);
+        line(`if (rt.afterWait()) ${suspendHere(1e6 + pc)}`);
       } else line(`if (${call}) ${WAIT};`);
       for (const id of writes) line(`${temp(id)} = rt.takeTemporary(${id});`);
     }

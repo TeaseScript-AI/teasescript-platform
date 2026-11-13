@@ -517,6 +517,16 @@ export class Runtime {
     }
   }
   /**
+   * The resumable form's wait, at first arrival and at each resume: catch-up toward the observed time and the blocks
+   * due (none of which waits) run; true while the session still waits, so the program saves there.
+   */
+  afterWait() {
+    const snapshot = this.snapshot;
+    if (snapshot.status !== "waiting") return false;
+    this.runBlocks();
+    return snapshot.status === "waiting";
+  }
+  /**
    * The generator form's wait: as `waited` without the replay. The program yields, so the drive ends; the host acts on
    * the live state; the next drive resumes here, runs the blocks dispatched meanwhile (a block that can wait is a
    * generator too) and yields again while the session still waits.
