@@ -96,9 +96,10 @@ export interface Item {
    */
   readonly called?: true;
   /**
-   * A kind a type test proved of external data (`narrowedItems`, #1073): the test proves the kind, never the ingress, so a
-   * consumer still asks C9's boundary of the ingress the data came by (#1073). An item made from others takes it
-   * through `marksOf`, never through `computedMarks`.
+   * A kind a type test proved of external data (`narrowedItems`, #1073), or a stopped read of an ingress
+   * (`Consumers.valueItems`): the kind is proved or unknown, never the ingress, so a consumer still asks C9's boundary
+   * of the ingress the data came by. An item made from others takes it through `marksOf`, never through
+   * `computedMarks`.
    */
   readonly fromExternal?: true;
   /**
