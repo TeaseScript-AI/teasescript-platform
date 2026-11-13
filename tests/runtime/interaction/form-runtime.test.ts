@@ -605,7 +605,7 @@ test("a form that cannot be built fails when it opens, with a message that names
   );
 });
 
-test("isFormUi narrows only a form UI whose accessible name has a name's shape", () => {
+test("isFormUi narrows only a form UI whose accessible name is a form's", () => {
   const plan = formPlan(SETTINGS, OBJECT);
   const action = started(plan).foregroundAction;
   assert.ok(action?.kind === "interaction" && action.ui.kind === "form");
@@ -615,6 +615,7 @@ test("isFormUi narrows only a form UI whose accessible name has a name's shape",
     42,
     { kind: "text" },
     { kind: "text", text: 1 },
+    { kind: "text", text: " " },
     { kind: "localizedDefault", key: "password" },
     { kind: "other", text: "Form" },
   ])

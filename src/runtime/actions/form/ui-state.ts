@@ -5,8 +5,9 @@ import { isNormalizedOpaqueColor } from "../../../color.js";
 import { isInteractionChoiceValue } from "../../../choice-values.js";
 import { isBlankTextAnswer } from "../../../interaction-answers.js";
 import {
-  interactionStringFits,
   MAX_INTERACTION_OPTION_ENTRIES,
+  interactionStringFits,
+  interactionStringHasNonWhitespace,
 } from "../../../interaction-limits.js";
 import type {
   FormField,
@@ -20,7 +21,7 @@ import {
 } from "../../values/serializable-values.js";
 import { isFormFieldKind } from "../../../form-fields.js";
 import type { RuntimeFormStateSnapshot } from "../model.js";
-import { hasExactKeys } from "../../snapshot/state.js";
+import { hasExactKeys } from "../../../plan/validation-support.js";
 import { isPlainRecord } from "../../values/plain-data.js";
 import { cycleValueKind, withinBounds } from "./shared-helpers.js";
 
@@ -201,9 +202,9 @@ export function formUiTexts(ui: FormUi): string[] {
 }
 
 /**
- * Narrows a form UI: every field of `FormUi` has its type, and its fields, buttons, hint and timeout are well formed.
- * That the accessible name is not blank, and the texts' byte limit, are `validInteractionUiShape`'s, which measures
- * them.
+ * Narrows a form UI: every field of `FormUi` has its type, its fields, buttons, hint and timeout are well formed, and its
+ * accessible name is a form's. It does not measure the texts against the interaction's byte limit, which
+ * `validInteractionUiShape` does.
  */
 export function isFormUi(value: unknown): value is FormUi {
   return (
@@ -214,11 +215,15 @@ export function isFormUi(value: unknown): value is FormUi {
   );
 }
 
-/** A form's accessible name: a text, or the form's default (`answer`). */
+/** A form's accessible name: a text that is not blank, or the form's default (`answer`). */
 function isFormAccessibleName(value: unknown): value is InteractionAccessibleName {
   if (!isPlainRecord(value)) return false;
   if (value.kind === "text")
-    return hasExactKeys(value, ["kind", "text"]) && typeof value.text === "string";
+    return (
+      hasExactKeys(value, ["kind", "text"]) &&
+      typeof value.text === "string" &&
+      interactionStringHasNonWhitespace(value.text)
+    );
   return (
     value.kind === "localizedDefault" &&
     hasExactKeys(value, ["kind", "key"]) &&

@@ -2,7 +2,6 @@ import { isMessageMarkup } from "../message-markup.js";
 import { isMessagePresentation } from "../message-presentation.js";
 import { isRecord, nonNegativeSafeInteger } from "../plan/validation-support.js";
 import { isFormUi } from "./actions/form/ui-state.js";
-import { validInteractionUiShape } from "./actions/validation/interaction-ui.js";
 import { validFormResult } from "./actions/form/submission.js";
 import type { InterpreterEvent } from "./events.js";
 import { validSpan } from "./snapshot/snapshot-format.js";
@@ -119,9 +118,10 @@ function isSpeaker(value: unknown): boolean {
 }
 
 /**
- * A settlement's kind and identity, and an answer's sequence and text. A UI whose kind is `form` is checked as restore
- * checks it (`validInteractionUiShape`), with the answers, shown options and presentation; a UI of another kind only as
- * a record, whatever the answer's kind.
+ * A settlement's kind and identity, and an answer's sequence and text. A UI whose kind is `form` is checked by
+ * `isFormUi`, with the answers, shown options and presentation; not its texts' byte limit, which only the Worker-side
+ * `validInteractionUiShape` measures. A UI of another kind is checked only as a record, whatever the answer's kind
+ * (#2736).
  */
 function validSettlement(settlement: unknown): boolean {
   if (
@@ -143,8 +143,7 @@ function validSettlement(settlement: unknown): boolean {
     return false;
   return (
     ui["kind"] !== "form" ||
-    (validInteractionUiShape("form", ui) &&
-      isFormUi(ui) &&
+    (isFormUi(ui) &&
       validFormResult(
         ui,
         settlement["result"],

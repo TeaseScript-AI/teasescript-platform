@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../../../src/compiler.js";
-import { MAX_INTERACTION_AGGREGATE_UTF8_BYTES } from "../../../src/interaction-limits.js";
 import { parseMessageMarkup } from "../../../src/message-markup.js";
 import type { InstructionPlan } from "../../../src/plan/model.js";
 import {
@@ -880,7 +879,7 @@ test("a form that submits at its time limit restores only with a value in every 
   }
 });
 
-test("a stored answer event keeps a form UI only as the engine shows one", () => {
+test("a stored answer event refuses a form UI whose accessible name is not a form's", () => {
   const plan = compileValidPlan(
     'let a = askForm "Settings", fields: { enabled: false }, submit: "Go"\nexit',
   );
@@ -896,10 +895,6 @@ test("a stored answer event keeps a form UI only as the engine shows one", () =>
       { accessibleName: { kind: "localizedDefault", key: "password" } },
     ],
     ["a name without its text", { accessibleName: { kind: "text" } }],
-    [
-      "texts over the interaction's limit",
-      { hint: "x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1) },
-    ],
   ] as const) {
     const stored = JSON.parse(JSON.stringify(completion));
     Object.assign(stored.settlement.ui, change);
