@@ -447,9 +447,9 @@ export class DefinitionIndex {
   public constructor(
     readonly program: CoreProgram,
     /**
-     * The selecting stores' targets by their place (`answers.ts`'s `storeTargets`): below an object's own `first`,
-     * `last` or `random` (#1275); `null` for a store into or below a dict's `values` or `keys`, or a removal from it,
-     * which makes no definition (#2378).
+     * The selecting stores' targets by their place (`answers.ts`'s `storeTargets`): where a `first`, `last` or `random`
+     * stands above the stored place, an object's own property or an element (#1275); `null` for a store into or below a
+     * dict's `values` or `keys`, or a removal from it, which makes no definition (#2378).
      */
     readonly storeTargets: ReadonlyMap<
       PlaceId,
