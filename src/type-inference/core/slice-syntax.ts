@@ -2,6 +2,7 @@ import type {
   Block,
   CallExpression,
   Expression,
+  InteractionExpression,
   Program,
   Statement,
   TransferTarget,
@@ -9,10 +10,11 @@ import type {
 } from "../../ast.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { dictMethod } from "../../dict-operations.js";
+import { isBlankTextAnswer } from "../../interaction-answers.js";
 import { listMethod } from "../../list-methods.js";
 import { isTextMethod, TEXT_METHODS } from "../../text-operations.js";
 import type { SourceSpan } from "../../source.js";
-import { sayOperands, statementExpressions } from "../../expression-children.js";
+import { askParts, sayOperands, statementExpressions } from "../../expression-children.js";
 import { SLICE_DEPTH } from "./contract-descriptors.js";
 import { methodCategory } from "./method-categories.js";
 import type { CoreFile } from "./program.js";
@@ -287,7 +289,16 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
         : walk([node.left, node.right]),
   },
   rangeExpression: modelled((node) => [node.start, node.end]),
-  interactionExpression: REFUSED,
+  interactionExpression: {
+    row: "modelled",
+    // (the asks of `SLICE_ASKS`, with a prefill `askPrefillAdmitted` admits; its parts in evaluation order, `askParts`:
+    // options, presentation, question, `hint:` and `prefill:` as written, or the named arguments; `as` names its speaker
+    // by an identifier that is no expression, not walked)
+    visit: (node) =>
+      !SLICE_ASKS.has(node.interactionKind) || !askPrefillAdmitted(node)
+        ? refuse(node.span, "this ask")
+        : walk([...askParts(node)]),
+  },
   sayExpression: REFUSED,
   showButtonExpression: REFUSED,
   showPopupExpression: REFUSED,
@@ -488,6 +499,70 @@ export function transferCall(call: CallExpression): boolean {
     call.arguments.length === 1 &&
     call.arguments[0]!.kind === "positionalArgument"
   );
+}
+
+/**
+ * The asks of the slice, those whose answer the core gives a kind (`interactionCategory`): not `askForm` and
+ * `askBooleans`, the form of toggles built on it, whose answer it does not (V30 §20).
+ */
+const SLICE_ASKS: ReadonlySet<InteractionExpression["interactionKind"]> = new Set([
+  "text",
+  "number",
+  "integer",
+  "date",
+  "time",
+  "datetime",
+  "password",
+  "boolean",
+  "choice",
+]);
+
+/** An ask's `prefill:`, a basic ask's or a choice's own, or `askBoolean`'s named argument. */
+export function askPrefill(ask: InteractionExpression): Expression | null {
+  return (
+    ask.prefill ??
+    ask.formArguments.find((argument) => argument.name.name === "prefill")?.value ??
+    null
+  );
+}
+
+/**
+ * The prefills of an ask the slice holds (V30 §19, §20): none; one not written as a scalar literal, on any ask but
+ * `askPassword`, which takes none; or a scalar literal the request takes as written: on `askText` plain text that is not
+ * blank, on `askNumber` a number, on `askInteger` a whole number written as one in the safe range, on
+ * `askBoolean` `true` or `false`, on `askChoice` any (a value no button has preselects none). Any other is outside:
+ * today's checker refuses each (TSV039, and TSV043 on `askPassword`), and a literal of the request's own kind would be
+ * written into the plan's request, whose validation refuses it.
+ */
+function askPrefillAdmitted(ask: InteractionExpression): boolean {
+  const written = askPrefill(ask);
+  if (written === null) return true;
+  if (ask.interactionKind === "password") return false;
+  const prefill = unwrapped(written);
+  switch (prefill.kind) {
+    case "stringLiteral":
+      return (
+        ask.interactionKind === "choice" ||
+        (ask.interactionKind === "text" &&
+          !isBlankTextAnswer(
+            prefill.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join(""),
+          ))
+      );
+    case "numberLiteral":
+      return (
+        ask.interactionKind === "choice" ||
+        ask.interactionKind === "number" ||
+        (ask.interactionKind === "integer" &&
+          prefill.numericType === "integer" &&
+          Number.isSafeInteger(prefill.value))
+      );
+    case "booleanLiteral":
+      return ask.interactionKind === "choice" || ask.interactionKind === "boolean";
+    case "nullLiteral":
+      return ask.interactionKind === "choice";
+    default:
+      return true;
+  }
 }
 
 /** A node kind in words: `ifStatement` is "if statement". */

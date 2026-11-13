@@ -11,6 +11,7 @@ import type {
   CallExpression,
   LoadExpression,
   BinaryExpression,
+  InteractionExpression,
   Program,
 } from "../../../ast.js";
 import { type SourceSpan } from "../../../source.js";
@@ -20,6 +21,7 @@ import {
   statementExpressions,
   expressionParts,
   sayOperands,
+  askParts,
 } from "../../../expression-children.js";
 import type { FactSite } from "../../backend.js";
 import type { SourceSite, PlaceId } from "../../graph.js";
@@ -77,6 +79,8 @@ export class SliceIndex {
   readonly loads: LoadExpression[] = [];
   /** The values `say` shows. */
   readonly shown: Expression[] = [];
+  /** The asks, in source order. */
+  readonly asks: InteractionExpression[] = [];
   /** The `otherwise`, call or load that each fallback or `default:` belongs to, by its operand and what it holds. */
   readonly #fallbackOf = new Map<Expression, BinaryExpression | CallExpression | LoadExpression>();
   /** The property store whose target's receiver each expression is. */
@@ -202,6 +206,15 @@ export class SliceIndex {
               });
             if (method !== null)
               pending.push({ expression: method.object, store, whole: false, parent: expression });
+            break;
+          }
+          case "interactionExpression": {
+            this.asks.push(expression);
+            // (a question's presentation options are no properties of the script's values)
+            if (expression.presentation !== null) this.#presentations.add(expression.presentation);
+            const parts = askParts(expression);
+            for (let at = parts.length - 1; at >= 0; at -= 1)
+              pending.push({ expression: parts[at]!, store, whole: false, parent: expression });
             break;
           }
           default: {
