@@ -138,7 +138,7 @@ export class NarrowingRoutes extends RouteEntries {
    * produces the kind, unless a condition around the use tests it. Any other read keeps its warning: an element step or
    * a reference member, which the route query does not follow (#1073).
    *
-   * In a program that holds an arm no run is proved to enter (`holdsInfeasible`), a route promotes only through arms
+   * In a program that holds an arm no run is proved to enter (`defaultHolds`), a route promotes only through arms
    * runs enter, between a writer and a use that stand in the session's first file's top level with nothing on their
    * chains a run might not pass (`#plain`), and only by a certificate its own value proves: a literal, a scalar copy
    * of one, an `otherwise` selected by its left side's own witness, a `load` whose literal default a run selects
@@ -163,7 +163,7 @@ export class NarrowingRoutes extends RouteEntries {
     if (site === null) return null;
     const node = program.exprAt(site);
     // (a program that holds an arm no run is proved to enter: its route queries pass only entered arms, #1938)
-    if ((yield* this.holdsInfeasible()) && this.feasible === null)
+    if ((yield* this.defaultHolds()) && this.feasible === null)
       this.feasible = yield* this.feasibility();
     if (flagged && (node === null || !this.inBody(node))) {
       // (a marked read outside a block's body: only a way into it, past the forward query)
@@ -539,22 +539,26 @@ export class NarrowingRoutes extends RouteEntries {
       rights.push(c.right);
       left = c.left;
     }
-    const holds = function* (at: PlaceId, kind: ItemTag, routes: NarrowingRoutes): Work<boolean> {
+    const producesAt = function* (
+      at: PlaceId,
+      kind: ItemTag,
+      routes: NarrowingRoutes,
+    ): Work<boolean> {
       program.work.charge("exactQueries");
       const literal = literalTag(program, at);
       if (literal !== null) return literal === kind;
       return produces(program.work, yield* routes.pass.values.valueItems(at, node, []), kind);
     };
     // from the innermost out: whether the value so far can be null, and whether it produced the kind
-    let nullable = yield* holds(left, "null", this);
-    let produced = tag !== "null" && (yield* holds(left, tag, this));
+    let nullable = yield* producesAt(left, "null", this);
+    let produced = tag !== "null" && (yield* producesAt(left, tag, this));
     let index = rights.length;
     for (const _ of steps(program.work, "exactQueries", () => index > 0)) {
       index -= 1;
       const right = rights[index]!;
       if (!nullable) break;
-      if (tag !== "null" && !produced) produced = yield* holds(right, tag, this);
-      nullable = yield* holds(right, "null", this);
+      if (tag !== "null" && !produced) produced = yield* producesAt(right, tag, this);
+      nullable = yield* producesAt(right, "null", this);
     }
     return tag === "null" ? nullable : produced;
   }

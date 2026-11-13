@@ -1,4 +1,4 @@
-import type { FlowGraph, FlowNode } from "../flow-graph.js";
+import type { FlowGraph, FlowNode } from "./model.js";
 
 /*
  * The dominators of the type core's flow graph: which node every run that reaches another passes first. The exact path

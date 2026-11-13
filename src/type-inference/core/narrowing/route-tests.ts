@@ -1,6 +1,6 @@
 /*
  * The route rule's condition tests (`NarrowingRoutes`, routes.ts): the closed set of tests the tested-producer rule
- * reads (`checked`), arm feasibility by entry narrowing and the program default (`holdsInfeasible`), and where a
+ * reads (`checked`), arm feasibility by entry narrowing and the program default (`defaultHolds`), and where a
  * node's statement stands in the statement tree (`chainOf`).
  */
 import type { Expression, Statement } from "../../../ast.js";
@@ -199,7 +199,7 @@ export class RouteTests {
   readonly #whiles: TreeStatement[] = [];
   /** The arms the corridor passes through none of, made on the first query of a program the default holds. */
   #feasibility: Feasibility | null = null;
-  /** Whether the program holds an `if` arm infeasible or unavailable (`holdsInfeasible`), made on the first query. */
+  /** Whether the route rule's default holds (`defaultHolds`), made on the first query. */
   #holds: boolean | null = null;
   /** Per arm, its feasibility: infeasible, unavailable evidence, or feasible (`#infeasible`). */
   readonly #infeasibleArms = new Map<TreeBlock, ArmFeasibility>();
@@ -209,9 +209,9 @@ export class RouteTests {
   readonly #work: WorkLedger;
 
   public constructor(
-    readonly pass: CorePass,
-    readonly index: NarrowingIndex,
-    readonly tree: StatementTree,
+    protected readonly pass: CorePass,
+    protected readonly index: NarrowingIndex,
+    protected readonly tree: StatementTree,
   ) {
     pass.program.work.charge("indexSteps");
     this.#work = pass.program.work;
@@ -448,15 +448,15 @@ export class RouteTests {
   }
 
   /**
-   * The route rule's default (#1937, narrowed by #1938): whether a live `if` arm of the program's admitted callables is
-   * one `#infeasible` does not answer `feasible`: infeasible by entry narrowing (the narrowing forms over the core's
-   * items), or a tested read's answer missing (`unavailable`). Where one is, `NarrowingRoutes.required` promotes only
-   * routes through arms runs enter (`feasibility`), by a certificate its own value proves; every other use keeps the
-   * warning. An uncalled function contributes no live arm. An arm it does not prove counts as feasible: a comparison
-   * that is constant outside the narrowing forms (`o.k == 1`), a loop's exit, a `switch` case, another location's test.
-   * One answer per program, from the `if`s `#testing` finds once.
+   * Whether the route rule's default holds (#1937, narrowed by #1938): a live `if` arm of the program's admitted
+   * callables that `#infeasible` does not answer `feasible`, infeasible by entry narrowing (the narrowing forms over
+   * the core's items) or with a tested read's answer missing (`unavailable`). Where one is, `NarrowingRoutes.required`
+   * promotes only routes through arms runs enter (`feasibility`), by a certificate its own value proves; every other
+   * use keeps the warning. An uncalled function contributes no live arm. An arm it does not prove counts as feasible: a
+   * comparison that is constant outside the narrowing forms (`o.k == 1`), a loop's exit, a `switch` case, another
+   * location's test. One answer per program, from the `if`s `#testing` finds once.
    */
-  protected *holdsInfeasible(): Work<boolean> {
+  protected *defaultHolds(): Work<boolean> {
     this.#work.charge("eventSteps");
     if (this.#holds !== null) return this.#holds;
     const work = this.#work;
