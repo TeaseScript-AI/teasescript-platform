@@ -8,7 +8,8 @@
  * (`TYPED_ENTRIES`), which no freeze holds, is the exception: a write to its elements after its run ended is caught at
  * the process's exit (`changedTyped`), which fails the file, not at its line. Every refusal it throws is counted, so
  * one a `catch` swallows fails the file at its exit too; V8's own error at a write to frozen data is kept from any
- * handler in `src/type-inference/` by the lint's `catch` rule (R60). A write made through an intrinsic
+ * handler in `src/type-inference/` by the lint's `catch` and `finally` rule (R60, R67) while it leaves as the pending
+ * error, and a later error can replace it (docs/TESTING.md, "Frozen retained state"). A write made through an intrinsic
  * (`Map.prototype.set` and its kind, called, bound or aliased) is outside what the instrument sees: the lint
  * (`check-retained-state`) refuses the `.prototype` that names one, and another native collection's
  * method applied to a made one is code written to get around it (R33). The instrument does
