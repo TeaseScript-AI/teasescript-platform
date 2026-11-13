@@ -2,18 +2,23 @@
 // `row-templates.ts`: the values each operand position is sampled with, the refusals, run differences and rule
 // differences the guard requires, and the contexts it samples a command in.
 
-import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
+import { operandRules, type SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
 import { CONVERSIONS, isConversion } from "../../../src/conversions.js";
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 import type { ValueKind } from "../../../src/value-kinds.js";
 import {
-  ASK_POSITIONS,
   CHOICE_REFUSED,
   PREFILL_LITERALS,
   PREFILL_OPERANDS,
   PREFILLED_ASKS,
 } from "./ask-templates.js";
-import { declaration, spoken, OPERAND_TEMPLATES } from "./row-templates.js";
+import {
+  declaration,
+  spoken,
+  NESTED_OPERANDS,
+  OPERAND_TEMPLATES,
+  SAMPLED_TEMPLATES,
+} from "./row-templates.js";
 
 /** A literal of each kind the slice writes one of: a sample's first origin. */
 const LITERALS: Readonly<Partial<Record<ValueKind, string>>> = {
@@ -102,7 +107,7 @@ export const HOSTLESS_VALUES: Readonly<Record<HostlessKind, SerializableRuntimeV
 
 /** A command operand's first template, or a prefill's (`PREFILL_OPERANDS`), with `value` in place of the host global. */
 const commandWith = (row: SyntaxKind, operand: string, value: string): string =>
-  (OPERAND_TEMPLATES[row]?.[operand]?.[0] ?? PREFILL_OPERANDS[operand]!).replace(
+  (SAMPLED_TEMPLATES[row]?.[operand]?.[0] ?? PREFILL_OPERANDS[operand]!).replace(
     "hostValue",
     value,
   );
@@ -113,7 +118,7 @@ export interface Sample {
   readonly operand: string;
   /** Its value's kind; none where the value fails before it is one (`FAILING_PRODUCER`). */
   readonly kind: string;
-  readonly origin: "literal" | "conversion" | "ingress" | "failing";
+  readonly origin: "literal" | "conversion" | "ingress" | "failing" | "nested" | "carrier";
   /** What stands before the command: the typed ingress, or nothing. */
   readonly prelude: string;
   /** The operand's value as the command writes it. */
@@ -128,16 +133,40 @@ export interface Sample {
  * A value whose producer the slice admits and which fails at run time, before it is a value of any kind: a list read past
  * its end. A sample's fourth origin, without a kind (the lead's R18).
  */
-export const FAILING_PRODUCER = "[1][4]";
+const FAILING_PRODUCER = "[1][4]";
+
+/** The kinds a typed ingress is read through an element with (`samples`' nested origin). */
+const NESTED_KINDS = ["integer", "string", "boolean", "null", "list", "date"] as const;
+
+/** The host global carried, or a read of a place whose type is undecided (`samples`' carrier origin): prelude, value. */
+const CARRIERS: readonly (readonly [string, string])[] = [
+  ["", "[hostValue][0]"],
+  ["", "[hostValue].get(0, default: hostValue)"],
+  ["", "{v: hostValue}.v"],
+  ["let u = hostValue\n", "[u][0]"],
+  ["let u = hostValue\n", "u"],
+  ["let u = {v: hostValue}\n", "u.v"],
+];
 
 /**
- * Every sample: each command operand position (`OPERAND_TEMPLATES`, or the templates given) with each kind from each
+ * The origins whose value the command operand table declines where today's checker plans (the lead's R10, R11): an
+ * outside value carried through an element, a call or a conversion's default, whose kind the core does not know at the
+ * operand; the declared positions' test admits a decline only of these and counts them.
+ */
+export const DECLINED_ORIGINS: ReadonlySet<Sample["origin"]> = new Set([
+  "conversion",
+  "nested",
+  "carrier",
+]);
+
+/**
+ * Every sample: each command operand position (`SAMPLED_TEMPLATES`, or the templates given) with each kind from each
  * origin.
  */
 export function samples(
   templates: Readonly<
     Partial<Record<SyntaxKind, Readonly<Record<string, readonly string[]>>>>
-  > = OPERAND_TEMPLATES,
+  > = SAMPLED_TEMPLATES,
 ): Sample[] {
   const values = [
     ...Object.entries(LITERALS).map(([kind, value]) => ({
@@ -160,9 +189,26 @@ export function samples(
       host,
     })),
     { kind: "none", origin: "failing" as const, prelude: "", value: FAILING_PRODUCER },
+    // (a typed ingress read through an element: the outside value its store's check stands for, carried, R10)
+    ...NESTED_KINDS.flatMap((kind) =>
+      ["[m][0]", "[m].get(0, default: m)"].map((value) => ({
+        kind,
+        origin: "nested" as const,
+        prelude: `let m: ${kind} = hostValue\n`,
+        value,
+        host: HOST_VALUES[kind],
+      })),
+    ),
+    // (the host global carried, or read through a place whose type is undecided, R10: its kind unknown to both)
+    ...CARRIERS.map(([prelude, value]) => ({
+      kind: "unknown",
+      origin: "carrier" as const,
+      prelude,
+      value,
+    })),
   ];
   return Object.entries(templates).flatMap(([key, operands]) => {
-    // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
+    // EVIDENCE: invariant: the templates' keys are AST kinds (`SAMPLED_TEMPLATES`' type).
     const row = key as SyntaxKind;
     return Object.keys(operands!).flatMap((operand) =>
       values.map((value) => ({
@@ -235,7 +281,7 @@ const FITTING_COMMANDS: Readonly<Record<string, string>> = {
 };
 
 /** A sample's fitting twin: its command with the position's fitting value, or the twin written whole. */
-export const twinCommand = (sample: Sample): string =>
+const twinCommand = (sample: Sample): string =>
   FITTING_COMMANDS[sample.operand] ??
   commandWith(sample.row, sample.operand, FITTING_OPERANDS[sample.row]![sample.operand]!);
 
@@ -307,7 +353,9 @@ export const DECLARED_REFUSALS: readonly {
       (sample) =>
         sample.row === "sayStatement" &&
         sample.operand === "value" &&
-        sample.origin !== "ingress" &&
+        (sample.origin === "literal" ||
+          sample.origin === "conversion" ||
+          sample.origin === "failing") &&
         SAY_REFUSED.has(sample.kind),
     )
     .map((sample) => ({
@@ -322,7 +370,9 @@ export const DECLARED_REFUSALS: readonly {
   ...samples()
     .filter(
       (sample) =>
-        sample.row === "gotoStatement" && sample.origin !== "ingress" && sample.kind !== "string",
+        sample.row === "gotoStatement" &&
+        ["literal", "conversion", "failing"].includes(sample.origin) &&
+        sample.kind !== "string",
     )
     .map((sample) => ({
       row: "gotoStatement" as const,
@@ -330,7 +380,7 @@ export const DECLARED_REFUSALS: readonly {
       refused: sample.command,
       admitted: 'goto script("part.tease")',
       gate: "outsideAnswers (src/type-inference/core/backend.ts)",
-      text: "an argument that its built-in checks",
+      text: "an operand its instruction does not take",
     })),
   // (a built-in speaker field's value of a kind it does not take, or unknown where no runtime check is cited; a
   // `defaultSaySkippable` of any known kind but a truth value is today's compile error, so it has no entry here)
@@ -361,8 +411,8 @@ export const DECLARED_REFUSALS: readonly {
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this speaker property",
   })),
-  // (a check that no store takes: a typed default inside a command's operand or a `say`'s value, the lead's R11; its
-  // place is the command operand table's, step 1½)
+  // (a check that no store takes: a typed default inside a command's operand or a `say`'s value, the lead's R11; at a
+  // command's operand, the command operand table declines it first, an outside value carried, step 1½'s R10)
   ...(
     [
       [
@@ -384,24 +434,19 @@ export const DECLARED_REFUSALS: readonly {
       position,
       refused: `${command} ${value}`,
       admitted: `let m = ${value}\n${command} m`,
-      gate: "runtimeChecks (src/type-inference/core/check-result/runtime-plan.ts)",
-      text: "a check that no store takes",
+      ...(row === "sayStatement"
+        ? {
+            gate: "runtimeChecks (src/type-inference/core/check-result/runtime-plan.ts)",
+            text: "a check that no store takes",
+          }
+        : {
+            gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+            text: "an operand its instruction does not take",
+          }),
     };
   }),
-  // (a host value stored at a written type only `null` fills, at every position: the slice takes no such type, the
-  // lead's R44; the twin is the position's template, the host value not stored at a written type)
-  ...samples()
-    .filter((sample) => sample.origin === "ingress" && sample.kind === "null")
-    .map((sample) => ({
-      row: sample.row,
-      position: `${sample.operand}, ${sample.kind} (${sample.origin})`,
-      refused: `${sample.prelude}${sample.command}`,
-      admitted: commandWith(sample.row, sample.operand, "hostValue"),
-      gate: "annotationOutside (src/type-inference/core/slice-syntax.ts)",
-      text: "this written type",
-    })),
   // (an ask's prefill but a literal the request takes as written, `PREFILL_LITERALS`: the host global there and every
-  // sample, the `null` ingress aside, which its written type refuses first; the twin asks with a fitting literal or none)
+  // sample of the first four origins; the twin asks with a fitting literal or none)
   ...[
     ...Object.entries(PREFILL_OPERANDS).map(([operand, template]) => ({
       operand,
@@ -415,9 +460,8 @@ export const DECLARED_REFUSALS: readonly {
     })
       .filter(
         (sample) =>
-          !(
-            sample.origin === "literal" && PREFILL_LITERALS[sample.operand]!.includes(sample.kind)
-          ) && !(sample.origin === "ingress" && sample.kind === "null"),
+          ["literal", "conversion", "ingress", "failing"].includes(sample.origin) &&
+          !(sample.origin === "literal" && PREFILL_LITERALS[sample.operand]!.includes(sample.kind)),
       )
       .map((sample) => ({
         operand: sample.operand,
@@ -449,10 +493,30 @@ export const DECLARED_REFUSALS: readonly {
       gate: "outsideAnswers (src/type-inference/core/backend.ts)",
       text: "this operand",
     })),
-  // (a choice object's text or value from the host: what the button returns, which the script cannot know)
+  // (the guard's nested operands, `NESTED_OPERANDS`, at a position of the command operand table: an outside value a
+  // load, a list's `get` or a call carries, whose kind the core does not know at the operand, R10)
+  ...Object.entries(OPERAND_TEMPLATES).flatMap(([row, operands]) =>
+    Object.entries(operands ?? {}).flatMap(([operand, templates]) =>
+      operandRules(row)?.[operand] === undefined
+        ? []
+        : templates.flatMap((template, at) =>
+            NESTED_OPERANDS.map((nested) => ({
+              // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
+              row: row as SyntaxKind,
+              position: `${operand} ${at}, ${nested}`,
+              refused: template.replace("hostValue", nested),
+              admitted: template,
+              gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+              text: "an operand its instruction does not take",
+            })),
+          ),
+    ),
+  ),
+  // (a choice object's text or value from the host, `CHOICE_OBJECT_OPERANDS`: what the button returns, which the script
+  // cannot know)
   ...[
     [
-      "askChoice.text, returned (no value beside it)",
+      "askChoice.returnedText",
       "let r = askChoice {text: hostValue}",
       'let r = askChoice {text: "t"}',
     ],
@@ -515,100 +579,6 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
     at: "hostValue",
     todayAt: call!,
   })),
-];
-
-/**
- * The command operand positions with a declared rule difference (#2488's design rulings, R2, keyed by position as the
- * lead's R14 has it: a closed list, which the command operand table empties). For a value the operand does not take,
- * whatever its kind and origin, where today's checker gives one of `today`'s compile errors, the route publishes as for
- * the command with a fitting operand (its fitting twin, `FITTING_OPERANDS`), and each run ends in one of three ways, in
- * the order the runtime works (R18): where it does not reach the command, as the twin's; where an operand's evaluation
- * fails, as that operand alone does (`let v = <operand>` there), same code and site; where every operand evaluates, the
- * command refuses the value with one of `failure`'s codes, at the statement or at the value, nothing of its effect
- * happening; `at` is the statement, the value, or the call holding the value (a transfer's `script(…)`, whose failure
- * comes before any file is entered). A written type holding both kinds (`string?` at a transfer's path) is today's
- * error too; the route's runs go on as the command with a value it takes, and end by those three ways with one it does
- * not (the samples hold single kinds; `type-core-candidate-transfers.test.ts` holds the path's). Where today's checker
- * gives no error, both publish and their runs are equal. That holds wherever the command stands (R12), where the route
- * admits the value alone there; where it refuses that, it refuses the command alike (R16). The guard samples kinds and
- * origins (`samples`, `PAIRED_SAMPLES`) and contexts (`CONTEXTS`).
- */
-export const DECLARED_RULE_DIFFERENCES: readonly {
-  readonly row: SyntaxKind;
-  readonly operand: string;
-  readonly today: readonly string[];
-  readonly failure: readonly string[];
-  readonly at: "statement" | "value" | "call" | "ask";
-}[] = [
-  ...(
-    [
-      ["deleteStatement", "key", ["TSV038"], ["TSR054"], "value"],
-      ["exportTextStatement", "text", ["TSV043"], ["TSR050"], "statement"],
-      ["exportTextStatement", "title", ["TSV040", "TSV042"], ["TSR021"], "statement"],
-      ["exportTextStatement", "fileName", ["TSV043"], ["TSR050"], "statement"],
-      ["openUrlStatement", "url", ["TSV043"], ["TSR050"], "statement"],
-      ["openUrlStatement", "buttonText", ["TSV040", "TSV042"], ["TSR021"], "statement"],
-      ["openUrlStatement", "alwaysButton", ["TSV043"], ["TSR050"], "statement"],
-      ["sayStatement", "pacing", ["TSV043"], ["TSR050", "TSR065"], "statement"],
-      ["showButtonStatement", "label", ["TSV040", "TSV042"], ["TSR021"], "statement"],
-      ["showButtonStatement", "background", ["TSV029"], ["TSR052"], "statement"],
-      ["showButtonStatement", "timeout", ["TSV043"], ["TSR050", "TSR065"], "statement"],
-      ["showImageStatement", "image", ["TSV036"], ["TSR050"], "statement"],
-      ["showPopupStatement", "message", ["TSV040", "TSV042"], ["TSR021"], "statement"],
-      ["showPopupStatement", "buttonText", ["TSV040", "TSV042"], ["TSR021"], "statement"],
-      ["waitStatement", "duration", ["TSV043"], ["TSR050", "TSR065"], "value"],
-      ["gotoStatement", "path", ["TSV043"], ["TSR058"], "call"],
-    ] as const
-  ).map(([row, operand, today, failure, at]) => ({ row, operand, today, failure, at })),
-  ...ASK_POSITIONS,
-];
-
-/**
- * For each command with more than one operand position, the command with one operand it does not take and another whose
- * producer fails at run time (R18): its run fails, whichever comes first.
- */
-export const PAIRED_SAMPLES: readonly {
-  readonly row: SyntaxKind;
-  readonly misfit: string;
-  readonly failing: string;
-  readonly command: string;
-}[] = [
-  {
-    row: "openUrlStatement",
-    misfit: "url",
-    failing: "buttonText",
-    command: `openUrl(2, buttonText: ${FAILING_PRODUCER})`,
-  },
-  {
-    row: "exportTextStatement",
-    misfit: "text",
-    failing: "title",
-    command: `exportText(2, title: ${FAILING_PRODUCER})`,
-  },
-  {
-    row: "showPopupStatement",
-    misfit: "message",
-    failing: "buttonText",
-    command: `showPopup(message: [1], buttonText: ${FAILING_PRODUCER})`,
-  },
-  {
-    row: "showButtonStatement",
-    misfit: "background",
-    failing: "timeout",
-    command: `showButton "Go", background: 2, timeout: ${FAILING_PRODUCER}`,
-  },
-  {
-    row: "sayStatement",
-    misfit: "pacing",
-    failing: "presentation",
-    command: `say bubble(color: ${FAILING_PRODUCER}) "a", 2`,
-  },
-  {
-    row: "interactionExpression",
-    misfit: "askText.hint",
-    failing: "askText.question",
-    command: `let r = askText(${FAILING_PRODUCER}, hint: [1])`,
-  },
 ];
 
 /**
