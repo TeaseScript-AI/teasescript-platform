@@ -146,8 +146,19 @@ export class Runtime {
   index(expression, object, index) {
     return nativeIndexRead(this, expression, expression.object, object, index);
   }
-  prop(value, name, span) {
-    return nativeProperty(value, name, span);
+  /** A property read: an object's own property natively; what the native layer lacks, by today's evaluator. */
+  prop(value, name, span, synthetic) {
+    if (value instanceof NativeObject) {
+      const found = value.properties.get(name);
+      if (found !== undefined) return found;
+    }
+    try {
+      return nativeProperty(value, name, span);
+    } catch (error) {
+      if (!(error instanceof NativeNotImplementedError) || synthetic === undefined) throw error;
+      this.bridged += 1;
+      return this.bridge(synthetic, [value], -1);
+    }
   }
   list(...items) {
     return items;

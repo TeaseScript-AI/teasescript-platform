@@ -32,6 +32,9 @@ function closed(node) {
   return Object.values(node).every(closed);
 }
 
+/** Instruction fields that hold no expression to evaluate: spans, types and checks. */
+const NOT_EXPRESSIONS = new Set(["span", "type", "typeCheck", "fallbackCheck", "expected", "partChecks"]);
+
 export class Unsupported extends Error {
   constructor(what) {
     super(`study emitter: ${what}`);
@@ -258,7 +261,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
           const object = expr(e.object);
           if (e.name === "length")
             return `(${o} = ${object}, Array.isArray(${o}) ? ${o}.length : rt.prop(${o}, "length", ${konst(e.span)}))`;
-          return `rt.prop(${object}, ${JSON.stringify(e.name)}, ${konst(e.span)})`;
+          return `rt.prop(${object}, ${JSON.stringify(e.name)}, ${konst(e.span)}, ${konst({ ...e, object: { kind: "temporary", temporaryId: 1e9, span: e.object.span } })})`;
         }
         case "index": {
           const o = x();
@@ -854,12 +857,13 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
       const find = (node) => {
         if (Array.isArray(node)) return node.forEach(find);
         if (node === null || typeof node !== "object") return;
-        if (typeof node.kind === "string" && EXPRESSION_KINDS.has(node.kind) && node !== ins) {
+        if (typeof node.kind === "string" && EXPRESSION_KINDS.has(node.kind) && node !== ins && node.span !== undefined) {
           map.set(node, { kind: "temporary", temporaryId: 1e9 + operands.length, span: node.span });
           operands.push(node);
           return;
         }
-        for (const [key, value] of Object.entries(node)) if (key !== "span") find(value);
+        // Type plans (no span) are no expressions, though some share a kind's name (an object or dict type).
+        for (const [key, value] of Object.entries(node)) if (!NOT_EXPRESSIONS.has(key)) find(value);
       };
       find(ins);
       const reads = [];

@@ -180,7 +180,7 @@ for (const file of files) {
       ...weight,
       events: expected.out.reduce((n, o) => n + o.events.length, 0),
       endsAt: expected.waiting === null ? expected.out.at(-1)?.status : `${expected.waiting}${expected.interaction ? `:${expected.interaction}` : ""}`,
-      ...(difference === null ? {} : { difference: JSON.stringify(difference).slice(0, 600) }),
+      ...(difference === null ? {} : { difference: JSON.stringify(difference).slice(0, 600), emittedFailure: JSON.stringify(session.state.failure ?? null).slice(0, 400) }),
       size: emitted.source.length,
       gzip: zlib.gzipSync(emitted.source).length,
       bridgedCalls: session.bridged ?? 0,
