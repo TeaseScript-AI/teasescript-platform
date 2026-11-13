@@ -416,7 +416,7 @@ test("a demand made again after a forget stays forgettable until forgetting clos
  * allowances from that one up, in the four modes and both read orders: what the second stop forgets, every answer and
  * the charged counters equal those with every record kept (`withEveryRecord`). The oracle compares what production can
  * reach: complete runs and runs cut short at a demand's allowance; a run the analysis's budget stops closes forgetting
- * instead (`Solver.run`), so no forget follows it (`type-core-solver`).
+ * instead (`Solver.run`), so no forget follows it (`solver/type-core-solver-forgetting`).
  */
 test("a run cut short keeps the readers its returns would have kept (#1599)", () => {
   const source =
