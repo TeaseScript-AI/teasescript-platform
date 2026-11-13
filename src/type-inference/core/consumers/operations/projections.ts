@@ -1,18 +1,18 @@
-import type { Constraint, PlaceId, SourceSite } from "../../graph.js";
-import { isExternal, isOpaque, requiredKind } from "../admission.js";
-import type { Consumers } from "../consumers.js";
-import { OWN_SELECTION, REFERENCE } from "../contract.js";
-import { withoutEmpty } from "../exact-path.js";
-import type { FlowNode } from "../flow-graph.js";
-import { makeItem, REASON, type ItemTag } from "../items.js";
-import { selectsElement } from "../method-categories.js";
-import { propertyName } from "../program.js";
-import { explainingItem, type DiagnosticRule } from "../result.js";
-import { error } from "./diagnostics.js";
+import type { Constraint, PlaceId, SourceSite } from "../../../graph.js";
+import { isExternal, isOpaque, requiredKind } from "../../admission.js";
+import type { Consumers } from "../../consumers.js";
+import { OWN_SELECTION, REFERENCE } from "../../contract.js";
+import { withoutEmpty } from "../../exact-path.js";
+import type { FlowNode } from "../../flow-graph.js";
+import { makeItem, REASON, type ItemTag } from "../../items.js";
+import { selectsElement } from "../../method-categories.js";
+import { propertyName } from "../../program.js";
+import { explainingItem, type DiagnosticRule } from "../../result.js";
+import { error } from "../reports/diagnostics.js";
 import { defaultNull } from "./fallbacks.js";
-import { literalSyntax } from "./finishing.js";
-import { hasProperty, unsettledItem } from "./kinds.js";
-import type { Offending } from "./model.js";
+import { literalSyntax } from "../finishing.js";
+import { hasProperty, unsettledItem } from "../kinds.js";
+import type { Offending } from "../model.js";
 import {
   keyLabel,
   kindsOf,
@@ -21,10 +21,10 @@ import {
   receiverKinds,
   shownLabel,
   unlistedObject,
-} from "./names.js";
+} from "../names.js";
 import { consume } from "./operands.js";
 import { memberChecks } from "./receivers.js";
-import { obligation, propertiesOf, warning } from "./warnings.js";
+import { obligation, propertiesOf, warning } from "../reports/warnings.js";
 
 // A projection's consumers: a `for` loop's iterable (C13), an element selection (C6), a member access.
 

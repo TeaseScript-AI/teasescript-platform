@@ -56,11 +56,11 @@ import {
   type ContractReader,
   type ContractRequest,
 } from "./contract-descriptors.js";
-import { withFacts } from "./consumers/diagnostics.js";
-import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
+import { withFacts } from "./consumers/reports/diagnostics.js";
+import { enclosingStores, requiredStores } from "./consumers/stores/enclosing.js";
 import { finishedItems, finishingRead, labelDomain } from "./consumers/finishing.js";
-import { freshStores, ingressMark, markHolder, markValue } from "./consumers/fresh.js";
-import { mixed, mixedChoices, mixedJoin } from "./consumers/mixed.js";
+import { freshStores, ingressMark, markHolder, markValue } from "./consumers/stores/fresh.js";
+import { mixed, mixedChoices, mixedJoin } from "./consumers/stores/mixed.js";
 import type {
   CheapDecision,
   CheapFrontier,
@@ -70,11 +70,11 @@ import type {
   LandingQuestion,
   Reach,
 } from "./consumers/model.js";
-import { operations } from "./consumers/operations.js";
-import { receivers } from "./consumers/receivers.js";
-import { admittedStores, decide } from "./consumers/stores.js";
+import { operations } from "./consumers/operations/operations.js";
+import { receivers } from "./consumers/operations/receivers.js";
+import { admittedStores, decide } from "./consumers/stores/stores.js";
 import { cheapDecided } from "./consumers/syntax.js";
-import { speakers, uses } from "./consumers/uses.js";
+import { speakers, uses } from "./consumers/operations/uses.js";
 import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
@@ -92,9 +92,9 @@ export {
   leftOutCompletion,
   leftOutWarning,
   withoutRecords,
-} from "./consumers/left-out.js";
+} from "./consumers/reports/left-out.js";
 import { retainedModule } from "./retained/retained.js";
-export type { Omission } from "./consumers/left-out.js";
+export type { Omission } from "./consumers/reports/left-out.js";
 
 /*
  * The consumers of the coarse core (checkpoint 9, §4): every use that needs a kind asks its operand's

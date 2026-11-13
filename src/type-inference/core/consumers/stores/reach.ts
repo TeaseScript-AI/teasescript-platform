@@ -1,10 +1,10 @@
-import type { PlaceId, SourceSite } from "../../graph.js";
-import { joinParts, keepText, keptArray } from "../budget.js";
-import type { Consumers } from "../consumers.js";
-import { keyOf, type Definition } from "../definitions.js";
-import { propertyStep } from "../program.js";
-import type { KeyReach, Reach } from "./model.js";
-import { ownSpan } from "./names.js";
+import type { PlaceId, SourceSite } from "../../../graph.js";
+import { joinParts, keepText, keptArray } from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { keyOf, type Definition } from "../../definitions.js";
+import { propertyStep } from "../../program.js";
+import type { KeyReach, Reach } from "../model.js";
+import { ownSpan } from "../names.js";
 
 // A2, ADR 0021 1.1: the first direct read or store of a path, and what reaches a place only through copies.
 

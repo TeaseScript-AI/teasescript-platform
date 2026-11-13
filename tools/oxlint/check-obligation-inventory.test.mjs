@@ -28,12 +28,12 @@ const BOUNDARY_EXPORT = [
   ],
 ];
 const CONSUMERS = "src/type-inference/core/consumers.ts";
-const FRESH = "src/type-inference/core/consumers/fresh.ts";
+const FRESH = "src/type-inference/core/consumers/stores/fresh.ts";
 const FRESH_START = "export function freshStores(walk: Consumers): void {\n";
 const SELF = "walk";
 const FRESH_LABEL = "Consumers.freshStores";
-const FRESH_TO_ADMISSION = "../admission";
-const FRESH_IMPORTS = 'import type { Admission } from "../admission.js";\n';
+const FRESH_TO_ADMISSION = "../../admission";
+const FRESH_IMPORTS = 'import type { Admission } from "../../admission.js";\n';
 // where a member is inserted into the Consumers class
 const CONSUMER_MEMBERS = "  public check(): void {\n";
 // A part of admission's the split layout adds in memory, beside the files the layout already has.

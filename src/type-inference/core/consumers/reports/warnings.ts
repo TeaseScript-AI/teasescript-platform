@@ -1,17 +1,17 @@
-import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
-import { concrete, isExternal, requiredKind } from "../admission.js";
-import { keptSteps } from "../budget.js";
-import type { Consumers } from "../consumers.js";
-import { REFERENCE, termAt, typeTags, writtenOf } from "../contract.js";
-import { keptKey, keyOf, keyPlace, type Key } from "../definitions.js";
-import { withoutEmpty } from "../exact-path.js";
-import type { FlowNode } from "../flow-graph.js";
-import { kindsInOrder, REASON, type ContextWord, type Item, type ItemTag } from "../items.js";
-import { codeOf, pathPhrase } from "../messages.js";
-import { measuresLength } from "../method-categories.js";
-import { stablePath } from "../narrowing/narrowings.js";
-import { propertyName, propertyStep, siteKey, stepName } from "../program.js";
-import { propertyNames, type PropertyNamesTask } from "../property-names.js";
+import type { PlaceId, SourceSite, TypeTerm } from "../../../graph.js";
+import { concrete, isExternal, requiredKind } from "../../admission.js";
+import { keptSteps } from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { REFERENCE, termAt, typeTags, writtenOf } from "../../contract.js";
+import { keptKey, keyOf, keyPlace, type Key } from "../../definitions.js";
+import { withoutEmpty } from "../../exact-path.js";
+import type { FlowNode } from "../../flow-graph.js";
+import { kindsInOrder, REASON, type ContextWord, type Item, type ItemTag } from "../../items.js";
+import { codeOf, pathPhrase } from "../../messages.js";
+import { measuresLength } from "../../method-categories.js";
+import { stablePath } from "../../narrowing/narrowings.js";
+import { propertyName, propertyStep, siteKey, stepName } from "../../program.js";
+import { propertyNames, type PropertyNamesTask } from "../../property-names.js";
 import {
   contextOf,
   offendingKinds,
@@ -25,13 +25,13 @@ import {
   type RequiredKind,
   type StoreRoot,
   type StoreStep,
-} from "../result.js";
+} from "../../result.js";
 import { siteOf } from "./diagnostics.js";
-import { SHOWN } from "./kinds.js";
+import { SHOWN } from "../kinds.js";
 import { leftOutWarning } from "./left-out.js";
 import { proveOrigin, type StoreOrigin } from "./origins.js";
-import { kindsOf } from "./names.js";
-import { keyStepsIn, stepsArray, type CanonicalKey } from "../contract/key-ids.js";
+import { kindsOf } from "../names.js";
+import { keyStepsIn, stepsArray, type CanonicalKey } from "../../contract/key-ids.js";
 
 // The consumers' warnings and their sentences (D1, D2): a context word's detail, a store's root and steps.
 
