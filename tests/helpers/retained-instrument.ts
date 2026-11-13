@@ -115,13 +115,60 @@ const NATIVE_COLLECTIONS = new Set<unknown>([
   WeakSet.prototype,
 ]);
 /**
- * The writers of a native map or set the program's walk reaches, by its prototype: each refuses (R61). A weak one is
- * refused itself, as the walk cannot see its entries.
+ * Every method of a native collection's prototype, by what it does to the collection (#1072 review round 11): a made
+ * collection's own writers replace each that stores, a map or set the indexed program reaches refuses each that
+ * stores or removes, and the rest read. The instrument's suite holds this list to the runtime's, so that a writer a
+ * later runtime adds fails it instead of storing past every writer. Names the runtime lacks are skipped.
  */
-const PROGRAM_WRITERS = new Map<unknown, readonly string[]>([
-  [Map.prototype, ["set", "delete", "clear"]],
-  [Set.prototype, ["add", "delete", "clear"]],
-]);
+export const COLLECTION_METHODS = {
+  map: {
+    stores: ["set", "getOrInsert", "getOrInsertComputed"],
+    removes: ["delete", "clear"],
+    reads: ["constructor", "get", "has", "entries", "forEach", "keys", "values", "size"],
+  },
+  set: {
+    stores: ["add"],
+    removes: ["delete", "clear"],
+    reads: [
+      "constructor",
+      "has",
+      "entries",
+      "forEach",
+      "keys",
+      "values",
+      "size",
+      "union",
+      "intersection",
+      "difference",
+      "symmetricDifference",
+      "isSubsetOf",
+      "isSupersetOf",
+      "isDisjointFrom",
+    ],
+  },
+  weakMap: {
+    stores: ["set", "getOrInsert", "getOrInsertComputed"],
+    removes: ["delete"],
+    reads: ["constructor", "get", "has"],
+  },
+  weakSet: { stores: ["add"], removes: ["delete"], reads: ["constructor", "has"] },
+} as const;
+
+/**
+ * The writers of a native map or set the program's walk reaches, by its prototype: each that stores or removes
+ * refuses (R61). A weak one is refused itself, as the walk cannot see its entries.
+ */
+const PROGRAM_WRITERS = new Map<unknown, readonly string[]>(
+  (
+    [
+      [Map.prototype, COLLECTION_METHODS.map],
+      [Set.prototype, COLLECTION_METHODS.set],
+    ] as const
+  ).map(([prototype, { stores, removes }]) => [
+    prototype,
+    [...stores, ...removes].filter((name) => name in prototype),
+  ]),
+);
 // (taken before any test runs: an ordinary object's brand, which no built-in with internal state has)
 const TO_STRING = Object.prototype.toString;
 
@@ -134,7 +181,7 @@ const INDEX = /^(?:0|[1-9]\d*)$/;
 const MAP_FOR_EACH = Map.prototype.forEach;
 const SET_FOR_EACH = Set.prototype.forEach;
 
-type Method = (this: WeakKey, ...args: unknown[]) => WeakKey;
+type Method = (this: WeakKey, ...args: never[]) => void;
 type KindName = "map" | "set" | "weakMap" | "weakSet" | "record" | "arena" | "array";
 
 /** A kind made here: its instrument, its name and kind, and what holds its contents (a collection itself, a proxy's private target). */
@@ -229,27 +276,71 @@ export function watchWrites<K, V>(map: Map<K, V>, written: (key: K, value: V) =>
   return true;
 }
 
-/** The writers a collection is given (one function each for all collections, so its call sites stay production's). */
+function mapSet(this: WeakKey, key: unknown, value: unknown): WeakKey {
+  const made = MADE.get(this)!;
+  made.instrument.stored(made, key, value, true);
+  const done = Map.prototype.set.call(this, key, value);
+  WATCHERS.get(this)?.(key, value);
+  return done;
+}
+
+function weakMapSet(this: WeakKey, key: unknown, value: unknown): WeakKey {
+  const made = MADE.get(this)!;
+  made.instrument.stored(made, key, value, true);
+  // EVIDENCE: invariant: a weak map's key is an object; the native writer refuses one that is not.
+  return WeakMap.prototype.set.call(this, key as object, value);
+}
+
+/** A native `getOrInsert` or `getOrInsertComputed`: the entry under `key`, made by `given` where there is none. */
+type Upsert = <V>(this: WeakKey, key: unknown, given: V) => V;
+
+/** Whether the runtime gives a map's prototype the upserts (ES2026), which the declared lib does not name yet. */
+function hasUpserts(
+  prototype: Map<unknown, unknown> | WeakMap<WeakKey, unknown>,
+): prototype is (Map<unknown, unknown> | WeakMap<WeakKey, unknown>) & {
+  readonly getOrInsert: Upsert;
+  readonly getOrInsertComputed: Upsert;
+} {
+  return "getOrInsert" in prototype && "getOrInsertComputed" in prototype;
+}
+
+/** A weak map's `has` for any key: `false` for one that is no object, as the native reader answers. */
+function weakHas(this: WeakKey, key: unknown): boolean {
+  return isReference(key) && WeakMap.prototype.has.call(this, key);
+}
+
+/**
+ * A map's `getOrInsert` and `getOrInsertComputed` (#1072 review round 11), where the runtime has them: an entry it
+ * lacks is stored through the map's own `set`, so it is checked as any store is, and the native method then reads it.
+ */
+function upserts(
+  has: (this: WeakKey, key: unknown) => boolean,
+  set: (this: WeakKey, key: unknown, value: unknown) => WeakKey,
+  prototype: Map<unknown, unknown> | WeakMap<WeakKey, unknown>,
+): Readonly<Record<string, Method>> {
+  if (!hasUpserts(prototype)) return {};
+  const native = prototype;
+  return {
+    getOrInsert<V>(this: WeakKey, key: unknown, value: V): V {
+      if (!has.call(this, key)) set.call(this, key, value);
+      return native.getOrInsert.call(this, key, value);
+    },
+    getOrInsertComputed<V>(this: WeakKey, key: unknown, compute: (key: unknown) => V): V {
+      if (!has.call(this, key)) set.call(this, key, compute(key));
+      return native.getOrInsertComputed.call(this, key, compute);
+    },
+  };
+}
+
+/**
+ * The writers a collection is given (one function each for all collections, so its call sites stay production's):
+ * one for each method of `COLLECTION_METHODS` that stores.
+ */
 const COLLECTION_WRITERS: Readonly<
   Record<"map" | "set" | "weakMap" | "weakSet", Readonly<Record<string, Method>>>
 > = {
-  map: {
-    set(this: WeakKey, key: unknown, value: unknown): WeakKey {
-      const made = MADE.get(this)!;
-      made.instrument.stored(made, key, value, true);
-      const done = Map.prototype.set.call(this, key, value);
-      WATCHERS.get(this)?.(key, value);
-      return done;
-    },
-  },
-  weakMap: {
-    set(this: WeakKey, key: unknown, value: unknown): WeakKey {
-      const made = MADE.get(this)!;
-      made.instrument.stored(made, key, value, true);
-      // EVIDENCE: invariant: a weak map's key is an object; the native writer refuses one that is not.
-      return WeakMap.prototype.set.call(this, key as object, value);
-    },
-  },
+  map: { set: mapSet, ...upserts(Map.prototype.has, mapSet, Map.prototype) },
+  weakMap: { set: weakMapSet, ...upserts(weakHas, weakMapSet, WeakMap.prototype) },
   set: {
     add(this: WeakKey, value: unknown): WeakKey {
       const made = MADE.get(this)!;
@@ -436,8 +527,9 @@ export class RetainedInstrument implements RetainedRecorder {
    * The indexed program (`Retained.program`): every object its graph reaches, through data fields, a function's own
    * values and native maps' and sets' entries (read by the intrinsics), is admitted as it is, as the program is never
    * written after its indexing: an object or a function is frozen, a map or a set given writers that refuse, a typed
-   * array compared at the exit; a weak collection or another built-in, whose contents the walk cannot see, is
-   * refused. The walk stops at a listed class's instance.
+   * array compared at the exit; a weak collection or another built-in, whose contents the walk cannot see, and an
+   * accessor, whose result it does not see, are refused. The walk reads descriptors, and a built-in's brand by
+   * `Object.prototype.toString`, which reads a class's `Symbol.toStringTag`. It stops at a listed class's instance.
    */
   public program<T extends object>(program: T): void {
     this.#programGraph(program, [program]);
@@ -481,7 +573,7 @@ export class RetainedInstrument implements RetainedRecorder {
       ) {
         // (what the walk cannot see into, a weak collection's entries or another built-in's internal state, is refused)
         this.#refuse(
-          `a ${className(value)} the indexed program reaches, whose contents its walk cannot see`,
+          `an instance of ${className(value)} the indexed program reaches, whose contents its walk cannot see`,
         );
         continue;
       }
@@ -501,7 +593,9 @@ export class RetainedInstrument implements RetainedRecorder {
       }
       for (const key of Reflect.ownKeys(value)) {
         const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+        // (a getter's result is not seen, so an accessor is refused, as a stored one is)
         if ("value" in descriptor) stack.push(descriptor.value);
+        else this.#refuse(`an accessor \`${String(key)}\` in the indexed program`);
       }
       // (plain data, an array and a class's instance alike: the program is never written after its indexing)
       if (writers === undefined) Object.freeze(value);

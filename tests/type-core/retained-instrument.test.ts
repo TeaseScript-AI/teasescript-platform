@@ -12,6 +12,7 @@ import {
 import { Solver, type Demand, type Work } from "../../src/type-inference/core/solver.js";
 import { itemScope } from "../helpers/type-core-items.js";
 import {
+  COLLECTION_METHODS,
   InstrumentProbe,
   REFUSED,
   RetainedInstrument,
@@ -751,4 +752,73 @@ test("a collection's function key is admitted as a function value is: refused un
     () => ++map!.keys().next().value!.cache.n,
   ]);
   assert.deepEqual(steps, ["refused", "refused", "ok", "frozen"]);
+});
+
+test("every method of a native collection is classed, and each that stores goes through the instrument", () => {
+  const natives = [
+    ["map", Map.prototype],
+    ["set", Set.prototype],
+    ["weakMap", WeakMap.prototype],
+    ["weakSet", WeakSet.prototype],
+  ] as const;
+  for (const [kind, prototype] of natives) {
+    const { stores, removes, reads } = COLLECTION_METHODS[kind];
+    const classed = new Set<string>([...stores, ...removes, ...reads]);
+    // (a method a later runtime adds is unclassed here, and fails this test until it is classed and, if it stores,
+    // given a writer)
+    assert.deepEqual(
+      Object.getOwnPropertyNames(prototype).filter((name) => !classed.has(name)),
+      [],
+      kind,
+    );
+    assert.deepEqual(
+      Object.getOwnPropertySymbols(prototype).filter(
+        (symbol) => symbol !== Symbol.iterator && symbol !== Symbol.toStringTag,
+      ),
+      [],
+      kind,
+    );
+  }
+});
+
+interface Upserting {
+  getOrInsert<V>(key: unknown, value: V): V;
+  getOrInsertComputed<V>(key: unknown, compute: (key: unknown) => V): V;
+}
+
+/** `made` with the upserts the runtime of `.nvmrc` has, which the declared lib does not name yet. */
+function upserting<T extends object>(made: T): T & Upserting {
+  // EVIDENCE: invariant: Node 26 gives maps and weak maps both upserts (ES2026); the test fails at its call where not.
+  return made as T & Upserting;
+}
+
+test("a map's upserts store through its own writer: checked at the store, sealed at the switch, refused in the program", () => {
+  let map: (Map<string, { n: number }> & Upserting) | undefined;
+  const program = upserting(new Map<string, number>());
+  const { steps } = stepped(() => [
+    () => {
+      map = upserting(Retained.map<string, { n: number }>("T.upserts"));
+      map.getOrInsert("a", { n: 0 });
+      map.getOrInsertComputed("b", () => ({ n: 0 }));
+      Retained.program({ program });
+    },
+    () => ++map!.get("a")!.n,
+    () => ++map!.get("b")!.n,
+    () => map!.getOrInsert("f", () => 1),
+    () => upserting(Retained.weakMap<object, unknown>("T.weakUpserts")).getOrInsert({}, () => 1),
+    () => program.getOrInsert("k", 1),
+    () => program.getOrInsertComputed("k", () => 1),
+  ]);
+  assert.deepEqual(steps, ["ok", "frozen", "frozen", "refused", "refused", "refused", "refused"]);
+  assert.equal(program.size, 0);
+});
+
+test("the program's walk refuses an own accessor, whose result it does not see", () => {
+  const { steps } = stepped(() => [
+    () =>
+      Retained.program(
+        Object.defineProperty({}, "lazy", { get: () => ({ n: 0 }), enumerable: true }),
+      ),
+  ]);
+  assert.deepEqual(steps, ["refused"]);
 });

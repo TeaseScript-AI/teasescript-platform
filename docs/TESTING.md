@@ -353,14 +353,15 @@ Covered, each closed by construction:
   - a record, an arena or an array: a copy of the given top level (`retainedCopy`) that the instrument wraps;
   - a map, set, weak map or weak set: its own writers.
 - **The plain data a covered kind reaches.** It is frozen at the switch. V8's `TypeError` at a write to plain data
-  frozen at the switch is a refusal: the `catch` and `finally` rule keeps it from being handled in
+  frozen at the switch is a refusal, as is one at a write to what a registration freezes: the `catch` and `finally` rule
+  keeps it from being handled in
   `src/type-inference/` (docs/LINTING.md, "Retained state in type inference"), and the compiler's own catches outside
   take only native stack exhaustion.
 - **An owner's fields:** locked at its first switch and opened by marks. Its private fields are reached through
   `hidden`.
 - **A registered program:** what it reaches is frozen, its maps and sets refuse writes, its typed arrays are compared
-  at the process's exit, what its walk cannot see into (a weak collection, another built-in) is refused, and its
-  classes' private collections are reached through `hidden` (`Retained.programPart`).
+  at the process's exit, what its walk cannot see into (a weak collection, another built-in, an accessor) is refused,
+  and its classes' private collections are reached through `hidden` (`Retained.programPart`).
 - **A registered function's own properties:** frozen at registration.
 - **A typed array under `TYPED_ENTRIES`:** compared at the process's exit with its bytes when its run ended; a
   difference fails the file.
@@ -368,7 +369,8 @@ Covered, each closed by construction:
 Not covered, each with its reason:
 
 - module scope (#1072 R57: an item of its own);
-- what a closure captures (its registration comment, read at review, R26);
+- what a closure captures (its registration comment, read at review, R26), and what a function the program reaches
+  captures, a bound function's values among them (code the program's indexing made);
 - code outside `src/type-inference/`: an owner given to it, its writes and its catches;
 - a typed array written and then restored between two comparisons;
 - a private `readonly` field assigned again in its constructor after a run switch inside that constructor (R36);
