@@ -1,0 +1,17 @@
+// List methods today's evaluator runs for the emitted program (bridged): each must change the variable's list.
+let xs = []
+for i in 0..10 {
+  xs.add(i)
+}
+xs.shuffle()
+say "shuffled ${xs}", instant
+let last = xs.removeLast()
+say "removed ${last}, left ${xs.length}", instant
+xs.sort()
+say "sorted ${xs}", instant
+let stack = [1, 2, 3]
+while stack.length > 0 {
+  stack.removeLast()
+}
+say "emptied ${stack.length}", instant
+exit

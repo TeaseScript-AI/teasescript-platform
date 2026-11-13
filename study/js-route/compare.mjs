@@ -25,6 +25,8 @@ for (let i = 0; i < args.length; i += 1) {
 const FRESH = { seed, wallClockMs: Date.UTC(2026, 6, 13, 9, 0, 0) };
 const BUDGET = 2_000_000_000;
 const OPERATIONS = Number(process.env.OPERATIONS ?? 200);
+/** RUNAWAY=1: the emitted program carries the cheap runaway check, so a loop that never ends faults after 10 s. */
+const RUNAWAY = process.env.RUNAWAY === "1";
 
 /**
  * The fields an action records of the interpreter's frames (the call it waits in, its open scopes and loops), which an
@@ -60,9 +62,10 @@ function planOf(file) {
     const paths = teaseFiles(file);
     const ordered = ["main.tease", ...paths.filter((p) => p !== "main.tease")].filter((p) => paths.includes(p));
     const result = compileProject(ordered.map((p) => ({ path: p, source: fs.readFileSync(path.join(file, p), "utf8") })));
-    return { plan: result.plan ?? null, files: ordered.length };
+    return { plan: result.plan ?? null, files: ordered.length, diagnostics: result.diagnostics };
   }
-  return { plan: compileSource(fs.readFileSync(file, "utf8")).plan ?? null, files: 1 };
+  const result = compileSource(fs.readFileSync(file, "utf8"));
+  return { plan: result.plan ?? null, files: 1, diagnostics: result.diagnostics };
 }
 
 function firstDifference(a, b, at = "") {
@@ -114,12 +117,14 @@ function play(session, state, operations) {
     instructions += result.instructionsExecuted ?? 0;
     return result;
   };
-  out.push(view(state(), timed(() => session.run({ instructionBudget: BUDGET }))));
+  // The state is read after the operation: `view(state(), op())` would read it first.
+  const after = (result) => view(state(), result);
+  out.push(after(timed(() => session.run({ instructionBudget: BUDGET }))));
   for (let n = 0; n < operations; n += 1) {
     const operation = nextOperation(state());
     if (operation === null) break;
-    out.push(view(state(), timed(() => (operation.kind === "time" ? session.observeTime(operation.nowMs) : session.completeAction(operation.request)))));
-    out.push(view(state(), timed(() => session.run({ instructionBudget: BUDGET }))));
+    out.push(after(timed(() => (operation.kind === "time" ? session.observeTime(operation.nowMs) : session.completeAction(operation.request)))));
+    out.push(after(timed(() => session.run({ instructionBudget: BUDGET }))));
   }
   return { out, times, instructions, waiting: state().foregroundAction?.kind ?? null, interaction: state().foregroundAction?.interactionKind ?? null };
 }
@@ -128,21 +133,26 @@ for (const file of files) {
   const compiled = planOf(file);
   const name = path.basename(file);
   if (!compiled.plan) {
-    console.log(JSON.stringify({ file: name, verdict: "uncompiled" }));
+    // Codes and lines only; the messages (which can quote a source) with DIAGNOSTICS=1, for invented sources.
+    const shownDiagnostic = (d) => `${d.span?.start?.line ?? "?"}:${d.code ?? ""}${process.env.DIAGNOSTICS === "1" ? ` ${d.message}` : ""}`;
+    console.log(JSON.stringify({ file: name, verdict: "uncompiled", diagnostics: (compiled.diagnostics ?? []).filter((d) => d.severity !== "warning").slice(0, 3).map(shownDiagnostic) }));
     continue;
   }
+  // Today's engine first, so that every compiled Tease reports its weight (instructions run in the play, plan size).
+  const today = createFreshRuntimeSession(compiled.plan, FRESH);
+  process.stderr.write(`${name}: today's engine\n`);
+  const expected = play(today, () => today.exportSnapshot(), OPERATIONS);
+  const weight = { files: compiled.files, planInstructions: compiled.plan.instructions.length, instructions: expected.instructions, operations: expected.out.length };
   let emitted;
   try {
-    emitted = compileProgram(compiled.plan, mode === "resumable");
+    emitted = compileProgram(compiled.plan, mode === "resumable", RUNAWAY);
   } catch (error) {
     if (!(error instanceof Unsupported)) throw error;
-    console.log(JSON.stringify({ file: name, verdict: "unsupported", why: error.message }));
+    console.log(JSON.stringify({ file: name, verdict: "unsupported", why: error.message, ...weight }));
     continue;
   }
   if (emitDir !== null) fs.writeFileSync(path.join(emitDir, `${name}.js`), emitted.source);
-  const today = createFreshRuntimeSession(compiled.plan, FRESH);
-  const expected = play(today, () => today.exportSnapshot(), OPERATIONS);
-  const session = mode === "resumable" ? createResumableSession(compiled.plan, FRESH) : createEmittedSession(compiled.plan, FRESH);
+  const session = mode === "resumable" ? createResumableSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY }) : createEmittedSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY });
   let largestSave = 0;
   if (mode === "resumable") {
     const run = session.run.bind(session);
@@ -152,11 +162,12 @@ for (const file of files) {
       return r;
     };
   }
+  process.stderr.write(`${name}: emitted (${mode})\n`);
   let actual;
   try {
     actual = play(session, () => session.state, OPERATIONS);
   } catch (error) {
-    console.log(JSON.stringify({ file: name, verdict: "unsupported", why: String(error?.message ?? error).slice(0, 300), operations: expected.out.length }));
+    console.log(JSON.stringify({ file: name, verdict: "unsupported", why: String(error?.message ?? error).slice(0, 300), ...weight }));
     continue;
   }
   const difference = firstDifference(expected.out, actual.out);
@@ -166,9 +177,7 @@ for (const file of files) {
       file: name,
       mode,
       verdict: difference === null ? "same" : "different",
-      operations: expected.out.length,
-      files: compiled.files,
-      instructions: expected.instructions,
+      ...weight,
       events: expected.out.reduce((n, o) => n + o.events.length, 0),
       endsAt: expected.waiting === null ? expected.out.at(-1)?.status : `${expected.waiting}${expected.interaction ? `:${expected.interaction}` : ""}`,
       ...(difference === null ? {} : { difference: JSON.stringify(difference).slice(0, 600) }),

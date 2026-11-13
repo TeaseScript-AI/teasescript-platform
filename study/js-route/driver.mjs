@@ -155,11 +155,11 @@ export class ResumableSession {
   /** The save: JSON text, or null before the first wait. */
   save = null;
   #state;
-  constructor(plan, fresh) {
+  constructor(plan, fresh, { runawayCheck = false } = {}) {
     const captured = captureOrReuseInstructionPlan(plan);
     if (!captured.validation.valid || captured.plan === null) throw new TypeError("Malformed instruction plan.");
     this.#plan = captured.plan;
-    this.#program = compileProgram(this.#plan, true);
+    this.#program = compileProgram(this.#plan, true, runawayCheck);
     this.#state = withFrozenTemporalCaptures(createFreshRuntimeSnapshotWithValidatedPlan(this.#plan, fresh));
   }
   get state() {
@@ -224,6 +224,6 @@ export class ResumableSession {
   }
 }
 
-export function createResumableSession(plan, fresh = {}) {
-  return new ResumableSession(plan, fresh);
+export function createResumableSession(plan, fresh = {}, options = {}) {
+  return new ResumableSession(plan, fresh, options);
 }
