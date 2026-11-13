@@ -52,7 +52,8 @@ import {
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
  * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an
- * `askChoice` whose buttons may return more than one type, a `case` that may never match (`neverMatching`), an argument
+ * `askChoice` whose buttons may return more than one type, a `case` value the core's types show may never match
+ * (`neverMatching`; where they are wider, #2728), an argument
  * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested
  * `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a route to the use has no
  * check, else a warning whose use the runtime checks.
@@ -376,15 +377,17 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
 }
 
 /**
- * The first `case` value that may never match its `switch`'s subject: a mistake in the source (V30 §32), for which the
- * core has no rule. Judged by `impossibleCaseMessage` (`src/switch-cases.ts`) on the subject's and the value's types: a
- * literal's own kind (`caseLiteral`), else the facts' (`expressionTypes`).
+ * The first `case` value the core's types show may never match its `switch`'s subject: a mistake in the source (V30
+ * §32), for which the core has no rule. It reads the subject twice: its type, for the predicate, and the reasons of the
+ * unknown items its answer holds, for the admitted set. The predicate is `impossibleCaseMessage` (`src/switch-cases.ts`)
+ * on the subject's and the value's types: a literal's own kind (`caseLiteral`), else the facts' (`expressionTypes`).
  * Admitted, closed: a value the predicate finds a member of the subject's type that may equal, where the subject's type
- * holds no unknown, or the subject's answer has items and each unknown one is of an external origin (the host's or a
- * load's). Every other case value is refused: so every value of a subject whose type holds an unknown of another reason
- * (a stop's among them). The types are the core's, which can be wider than today's checker's (a read of a written place
- * that today's narrowing has narrowed, an external value carried through a typed place): there a case today's checker
- * refuses is admitted, and never matches when it runs.
+ * holds no unknown, or the subject's answer has items and each unknown one is of the external reason alone
+ * (`REASON.external`: host data, a typeless load or `fromJson`). Every other case value is refused: so every value of a
+ * subject whose type holds an unknown, where its answer has no items or holds an unknown of another reason (a stop's
+ * among them). The types are the core's, which can be wider than today's checker's (a read of a written place that
+ * today's narrowing has narrowed, an external value carried through a typed place): there a case today's checker
+ * refuses is admitted, and never matches when it runs (#2728).
  */
 function neverMatching(answers: Answers, index: SliceIndex): Outside | null {
   const switches = index.statements.filter((statement) => statement.kind === "switchStatement");
@@ -400,14 +403,14 @@ function neverMatching(answers: Answers, index: SliceIndex): Outside | null {
     const subjectType = typeOf(subject);
     let held = subject;
     while (held.kind === "parenthesizedExpression") held = held.expression;
-    const external = (): boolean => {
+    const unknownsExternal = (): boolean => {
       const items = answers.at(nodeOf(answers, index, held))?.items ?? [];
       return (
         items.length > 0 &&
         items.every((item) => item.tag !== "unknown" || item.reasons === REASON.external)
       );
     };
-    const admitted = members(subjectType).every(isKnown) || external();
+    const admitted = members(subjectType).every(isKnown) || unknownsExternal();
     for (const switchCase of statement.cases)
       for (const value of switchCase.values)
         if (
