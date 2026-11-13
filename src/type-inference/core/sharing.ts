@@ -1,11 +1,9 @@
 /*
- * For the tests: while `withoutSharing` runs, the core shares no answer between equivalent values: no alias class or
- * chain of copies, no level of a key's prefix entries by structure, no stop of a store's walk for another of the same
- * snapshot (the decider's and the named data's), no literal entry for the reads of one key, and none of S6c's: no
- * option of a choice, add of a run, computed value of a literal or prefix entry for another of its class
- * (`Contract.classOf`), nor a class of computed-key loads' answer for every path below their root (#1203). Every value
- * is then answered by itself, at each path; the published records and the lowered plan must be byte-identical either
- * way, which the differential test asserts.
+ * For the tests: while `withoutSharing` runs, `sharing()` is false, and each of its readers answers a value by itself
+ * instead of taking an equivalent value's answer: in `admission/` (classes, scans, literal cells, walks, regions, the
+ * written decider), in `contract/` (levels, the literal index, `others.ts`), `exact-path.ts` and
+ * `indexes/plus-index.ts` (#1203). The published records and the lowered plan must be the same either way; the type
+ * core's oracles compare a program with the sharing on and off (`tests/helpers/type-core-oracles-modes.ts`).
  */
 
 let shared = true;
