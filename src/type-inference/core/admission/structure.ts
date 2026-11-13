@@ -26,32 +26,34 @@ import { propertyStep } from "../program.js";
 import type { Structure } from "./model.js";
 import { readNow, type Reads } from "../inherited/reads.js";
 
-// The own structures of stored values and source keys (F2): their literals' fields and elements, depths, landings.
+// The own structures of stored values and source keys: their literals' fields and elements, depths, landings.
 
 /**
- * A value's source key: the key a copy reads, a call's callee's result key (F20), a dict's `values` read as its
+ * A value's source key: the key a copy reads, a call's callee's result key, a dict's `values` read as its
  * elements; `null` for any other value and for a dict's `keys`, which hold text.
  */
 export function sourceOf(admission: Admission, value: PlaceId): CanonicalKey | null {
   return readNow(sourceOfRead(admission, value));
 }
 
-/** `sourceOf` with its dict owners' contracts reads (`Read`, #1072 A2). */
+/**
+ * `sourceOf` with its dict owners' contracts reads (`Read`, #1072: a read inside an inherited proof is yielded, never
+ * run).
+ */
 export function* sourceOfRead(admission: Admission, value: PlaceId): Reads<CanonicalKey | null> {
   const { contract } = admission.pass;
   const found = contract.copiedKey(value) ?? contract.resultKey(value);
   if (found === null) return null;
-  // (the source in its identity, as the structures and depths hold it: G3 stage 1)
+  // (the source in its identity, as the structures and depths hold it)
   const key = canonicalKey(contract, found);
-  // (G3 stage 1: a cursor with no built-in member on its path holds no dict's list step: itself, never walked)
+  // (a cursor with no built-in member on its path holds no dict's list step: itself, never walked)
   if (isKeyId(key) && contract.pathMembers[keyIdPath(key)] === 0) return key;
   const read = yield* dictStepsRead(admission, key);
   return read === null ? null : contract.keyAt(read.place, read.path);
 }
 
 /**
- * Whether a key's path holds a dict's `values` step by its spelling; a cursor with no built-in member holds none (G3
- * stage 1).
+ * Whether a key's path holds a dict's `values` step by its spelling; a cursor with no built-in member holds none.
  */
 export function spellsValues(admission: Admission, key: Key): boolean {
   const { contract } = admission.pass;
@@ -99,7 +101,7 @@ export function* dictStepsRead(
   return { place: walk.place, path, dropped, values };
 }
 
-/** A stored value's own structure: its literals' fields and elements at every depth, and their sources (F2). */
+/** A stored value's own structure: its literals' fields and elements at every depth, and their sources. */
 export function valueStructure(admission: Admission, value: PlaceId): Structure {
   const id = `v${value}`;
   let structure = admission.structures.get(id);
@@ -134,10 +136,10 @@ export function expectStructures(admission: Admission, values: Iterable<PlaceId>
 }
 
 /**
- * A source key's own structure (F2): the elements, at every depth, of the values stored at it or at a prefix of it (an
+ * A source key's own structure: the elements, at every depth, of the values stored at it or at a prefix of it (an
  * add's below its element), cut to the key's path, and of the keys below it with stores. A copied record's fields are
- * none of it: they are admitted at their first read (A2,
- * docs/specifications/type-inference-accepted-record/admission.md#section-5-a2).
+ * none of it: they are admitted at their first read
+ * (docs/specifications/type-inference-accepted-record/admission.md#section-5-a2).
  */
 function keyStructure(admission: Admission, key: Key): Structure {
   const id = `k${key}`;
@@ -347,9 +349,9 @@ function joinInto(
 }
 
 /**
- * The structure of one value standing at a path and read below `strip`, relative to that path (F2), once per value,
- * strip and side (`elements`: below a key its elements only), from its parts' (G3 2c: a carrier nested in carriers is
- * walked once, never again for each value around it). A literal read whole is walked with the literals nested in it as
+ * The structure of one value standing at a path and read below `strip`, relative to that path, once per value, strip
+ * and side (`elements`: below a key its elements only), from its parts' (a carrier nested in carriers is walked once,
+ * never again for each value around it). A literal read whole is walked with the literals nested in it as
  * cells, each one's fields as it is met, its cells after them, the last cell first; a literal read into by its cells
  * on the path; a value no literal holds through the values it carries, or the source key it reads (a source read at a
  * path no key or read of the program reaches is a recursion: cut). Each part's structure, any other value a literal
@@ -505,13 +507,13 @@ function longestKey(admission: Admission): number {
 }
 
 /**
- * The element depth of a source key's known structure, its sources' followed (F2): once per key, a cycle of copies
+ * The element depth of a source key's known structure, its sources' followed: once per key, a cycle of copies
  * (Tarjan's components) one turn of it for each of its keys, so the copies of one source share it and every order
  * gives one answer.
  */
 export function depthOf(admission: Admission, asked: Key): number {
   const { program, contract } = admission.pass;
-  // (a key in its identity, as the depths hold it: G3 stage 1)
+  // (a key in its identity, as the depths hold it)
   const key = canonicalKey(contract, asked);
   const known = admission.depths.get(key);
   if (known !== undefined) return known;
@@ -578,7 +580,7 @@ export function depthOf(admission: Admission, asked: Key): number {
   return admission.depths.get(key)!;
 }
 
-/** The paths below a literal's element its known structure gives (F2), and `also`, each once. */
+/** The paths below a literal's element its known structure gives, and `also`, each once. */
 export function pathsBelow(
   admission: Admission,
   value: PlaceId,
@@ -606,7 +608,7 @@ export function pathsBelow(
 
 /**
  * The paths below a collection literal's elements that its own literals give or admission decides where the literal
- * lands (a read's path, A2): there a named element's fields are compared too
+ * lands (a read's path): there a named element's fields are compared too
  * (docs/specifications/type-inference-accepted-record/admission.md#section-5-a2: a field is copy-only until a literal
  * or a read reaches it); beside them, where copies land there and two elements may hold something (`touchElements`).
  */
@@ -669,7 +671,7 @@ function decidedBelow(admission: Admission, asked: Key): readonly Steps[] {
   if (admission.below === null) {
     admission.below = new Map();
     for (const group of admission.groups()) {
-      // (a cursor's steps made through the charged boundary, its prefixes its ancestors: G3 stage 1)
+      // (a cursor's steps made through the charged boundary, its prefixes its ancestors)
       const path = admission.stepsAt(group);
       const walk = group.key === undefined ? null : keyWalk(admission.pass.contract, group.key);
       for (let length = 0; length < path.length; length += 1) {
@@ -685,7 +687,7 @@ function decidedBelow(admission: Admission, asked: Key): readonly Steps[] {
       }
     }
   }
-  // (a key in its identity, as the groups' prefixes hold it: G3 stage 1)
+  // (a key in its identity, as the groups' prefixes hold it)
   return admission.below.get(canonicalKey(admission.pass.contract, asked)) ?? [];
 }
 

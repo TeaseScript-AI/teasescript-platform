@@ -1,4 +1,4 @@
-// A4's answers through copies' landings: whether copies land a path in a place, and the place a place inherits through.
+// Answers through copies' landings: whether copies land a path in a place, and the place a place inherits through.
 import type { PlaceId } from "../../../graph.js";
 import type { Admission } from "../../admission.js";
 import { joinParts, keep, keepText, keptParts, keptText } from "../../budget.js";
@@ -18,19 +18,19 @@ import { positions } from "../../positions.js";
 import type { Inheritance, InheritedCopy, Storing } from "../model.js";
 import { copiesAlong, copiesOf, copyForest, inheritance, nearest } from "./inheritance.js";
 
-/**
- * The place whose inherited type a place's is at a path (`inheritedAt`): a place whose only store on the
- * path is one whole copy of an unwritten inheriting place, outside every cycle of copies, inherits there what that
- * place does (its scan finds the copy, whose type is that place's, and nothing beside it); so a chain of such copies
- * answers as its nearest member with a store on the path, or its top. Each copy storing its own field asks that member
- * directly, never every copy above it (the reviewer's control of a copy's own contribution).
- */
 /** `passThrough` of a cursor: a place no copy forest holds answers itself; else its steps made (`stepsOfId`). */
 export function passThroughKey(admission: Admission, place: PlaceId, key: KeyId): PlaceId {
   if (!copyForest(admission).parent.has(place)) return place;
   return passThrough(admission, place, stepsOfId(admission.pass.contract, key));
 }
 
+/**
+ * The place whose inherited type a place's is at a path (`inheritedAt`): a place whose only store on the path is one
+ * whole copy of an unwritten inheriting place, outside every cycle of copies, inherits there what that place does (its
+ * scan finds the copy, whose type is that place's, and nothing beside it); so a chain of such copies answers as its
+ * nearest member with a store on the path, or its top. Each copy storing its own field asks that member directly, never
+ * every copy above it.
+ */
 export function passThrough(admission: Admission, place: PlaceId, path: Steps): PlaceId {
   const forest = copyForest(admission);
   if (!forest.parent.has(place)) return place;
@@ -38,7 +38,7 @@ export function passThrough(admission: Admission, place: PlaceId, path: Steps): 
   const lists: (Storing | undefined)[] = [];
   for (let length = 1; length <= path.length; length += 1) {
     admission.pass.program.work.charge("indexSteps");
-    // (a record's prefix text through its record, `prefixText`; an array's made and charged as before)
+    // (a record's prefix text through its record, `prefixText`; an array's made and charged)
     const text = isPathSteps(path)
       ? path.prefixText(length)
       : keptText(admission.work, path.slice(0, length));
@@ -49,12 +49,8 @@ export function passThrough(admission: Admission, place: PlaceId, path: Steps): 
 }
 
 /**
- * Whether copies land a path in a place (`Inheritance`): its own landings, else its copies' sources' landings below
- * their strips, on an explicit stack, each place and path asked once.
- */
-/**
  * `landed` of a key in its identity: a cursor's past wrappers from its path's id (`landedFrontier`), its steps made only
- * where no wrapper is passed (G3 stage 1).
+ * where no wrapper is passed.
  */
 export function landedKey(admission: Admission, place: PlaceId, key: Key): boolean {
   const { contract } = admission.pass;
@@ -67,8 +63,12 @@ export function landedKey(admission: Admission, place: PlaceId, key: Key): boole
   return landedOwn(admission, place, stepsOfId(contract, key));
 }
 
+/**
+ * Whether copies land a path in a place (`Inheritance`): its own landings, else its copies' sources' landings below
+ * their strips, on an explicit stack, each place and path asked once.
+ */
 export function landed(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
-  // (G3 3a: a path past wrappers lands as its frontier's rest lands in the frontier's read's binding, `landedFrontier`)
+  // (a path past wrappers lands as its frontier's rest lands in the frontier's read's binding, `landedFrontier`)
   if (path.length > 1 && positions()) {
     const frontier = landedFrontier(admission, place, admission.pass.contract.pathIdOf(path));
     if (frontier.place !== place)
@@ -78,7 +78,7 @@ export function landed(admission: Admission, place: PlaceId, path: readonly stri
 }
 
 /**
- * G3 3a: where a place's path lands past wrappers (`landingHop`): each wrapper whose path goes on below its step lands
+ * Where a place's path lands past wrappers (`landingHop`): each wrapper whose path goes on below its step lands
  * there what its read's binding lands at the rest; the binding and the rest (a path id) where no wrapper follows. Once
  * per place and path, from its parent's.
  */
@@ -120,7 +120,7 @@ function landedFrontier(
 }
 
 /**
- * G3 3a: a wrapper's step as `landed` reads it, or `null`: the place answers through no copy above it and stands in no
+ * A wrapper's step as `landed` reads it, or `null`: the place answers through no copy above it and stands in no
  * cycle of copies; of the copies landing in it, one alone lies along a path through `step`, a copy of the wrapper's read
  * at `step` exactly, at its root (`Contract.wrapperHop`); no copy of a written type, and no copy of its own, lands
  * strictly below `step`. So a path through `step` and below it lands in the place as its rest lands in the read's
@@ -230,7 +230,7 @@ function landedOwn(admission: Admission, place: PlaceId, path: Steps): boolean {
           (fed.has(at) && steps.length === 0) ||
           null;
     if (found !== null) memo.set(key, found);
-    // (its copies above the path, looked up by its prefixes, Astra's review r2 B2)
+    // (its copies above the path, looked up by its prefixes)
     else
       frames.push({ key, path: steps, copies: copiesAlong(admission, at, steps, false), next: 0 });
     return found;

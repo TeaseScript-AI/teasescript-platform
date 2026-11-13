@@ -40,9 +40,9 @@ interface StepPositions<T> {
 
 /**
  * #2065: a prefix's contributions to the decisions of paths below it, once per admission's settled snapshot of them
- * (`ReceivingDomain.holders`, cleared by its `reset()`): its whole stores as A2's scan lists them (`wholeOf`) and its
- * settled stores as A5's offending scan reads them (`PrefixStores.list`), each indexed by the first steps it can hold
- * (`wholePositions`, `entrySupport`), built only where the reads it saves pay for it (`holdersOf`).
+ * (`ReceivingDomain.holders`, cleared by its `reset()`): its whole stores as the decider's scan lists them (`wholeOf`)
+ * and its settled stores as the candidates' offending scan reads them (`PrefixStores.list`), each indexed by the first
+ * steps it can hold (`wholePositions`, `entrySupport`), built only where the reads it saves pay for it (`holdersOf`).
  */
 export interface PrefixHolders {
   list: readonly Definition[] | null;
@@ -76,16 +76,17 @@ function firstStep(rest: Rest): string | null {
 
 /**
  * The prefix's state for a decided path's walk below it, `null` where the index selects nothing: a path whose first
- * step is no ordinary property, or a prefix of fewer than three contributions (a walk of two saves at most one read).
- * A state made for another snapshot of the whole stores or the settled stores is made again. The pay rule, as #1456's
+ * step is no ordinary property, or a prefix of fewer than three contributions (a walk of two saves at most one read). A
+ * state made for another snapshot of the whole stores or the settled stores is made again. The pay rule, as #1456's
  * builds the property index (#1948's form): once the walks' reads that held nothing at their paths reach twice the
- * contributions, each name's holders among the settled stores are counted (`countHolding`); from then on each walk
- * adds the reads its path's first step would have saved, the stores without it: half of them for A2's scan, which
- * stops at its decider (in source order, at about half), all for A5's offending scan, which reads every store. Each
- * index is made once those reach the construction's charges (`entriesCost`, `wholeCost`). Until its holding count a
- * prefix's state is kept uncharged, as the property index's read count is (`PrefixLevels.reads`, #1456): a prefix
- * that never reaches its holding count is charged exactly main's work, so its index charges move no stop. From the
- * holding count on, its units are kept and each walk's lookup is charged, whether or not its index is then made.
+ * contributions, each name's holders among the settled stores are counted (`countHolding`); from then on each walk adds
+ * the reads its path's first step would have saved, the stores without it: half of them for the decider's scan, which
+ * stops at its decider (in source order, at about half), all for the candidates' offending scan, which reads every
+ * store. Each index is made once those reach the construction's charges (`entriesCost`, `wholeCost`). Until its holding
+ * count a prefix's state is kept uncharged, as the property index's read count is (`PrefixLevels.reads`, #1456): a
+ * prefix that never reaches its holding count is charged exactly what it would be without the index, so its index
+ * charges move no stop. From the holding count on, its units are kept and each walk's lookup is charged, whether or not
+ * its index is then made.
  */
 function holdersOf(
   admission: Admission,
@@ -192,7 +193,7 @@ function entriesCost(entries: number, names: number): number {
  * The whole stores' index's charges (`wholePositions`, `positions`), each charged once its list is known: the stores
  * each settled store brought, read once to sort them and once by their stores, and once more as their classes' parts;
  * each class, three times; each member; and each name of the distinct literals. Beyond this the construction reads each
- * member's stops (`stopsOf`, once an admission, which A2's own walk shares) and indexes the steps they add.
+ * member's stops (`stopsOf`, once an admission, which the decider's own walk shares) and indexes the steps they add.
  */
 function wholeCost(admission: Admission, state: PrefixHolders): number {
   const work = admission.pass.program.work;
@@ -204,7 +205,7 @@ function wholeCost(admission: Admission, state: PrefixHolders): number {
   return 3 * state.brought + 3 * state.list!.length + members + state.names;
 }
 
-/** Whether a contribution's items at a path hold nothing there: none, or F11's `missing` alone. */
+/** Whether a contribution's items at a path hold nothing there: none, or a `missing` property alone. */
 export function holdsNothing(items: readonly Item[]): boolean {
   return items.every((item) => item.tag === "unknown" && item.reasons === REASON.missing);
 }
@@ -348,8 +349,8 @@ function wholePositions(admission: Admission, state: PrefixHolders): StepPositio
 
 /**
  * A settled store's names, where its value is a closed object literal stored whole whose holder marks nothing
- * (`closedObject`, `marksNothing`): at a path below a property it lacks, its read is F11's `missing` alone; `null` for
- * any other store, which the index takes for every step.
+ * (`closedObject`, `marksNothing`): at a path below a property it lacks, its read is a `missing` property alone; `null`
+ * for any other store, which the index takes for every step.
  */
 function entrySupport(admission: Admission, entry: PrefixEntry): ReadonlySet<string> | null {
   const { contract } = admission.pass;
@@ -404,8 +405,8 @@ function supportOf(
  * The first steps a stop at a value's root can bring an answer to, where it is a whole copy of an unwritten place,
  * through no operation, the place's one settled store a closed object literal (`entrySupport`) that only its own stores
  * of that literal brought, with no layer below its root: that literal's names. These are `sourceSteps`' exclusions (no
- * copy into the place, no cycle or forwarding, no deeper store). `inherits`: the copy's inherited written type (A4,
- * `inheritedInto`), which the place's stores decide, its literal's written parts standing below its own properties;
+ * copy into the place, no cycle or forwarding, no deeper store). `inherits`: the copy's inherited written type
+ * (`inheritedInto`), which the place's stores decide, its literal's written parts standing below its own properties;
  * else the copy's value (a read of the place, `Contract.copiedKey`), the place's contract, its literal's. `null` for any
  * other stop, unproved.
  */
