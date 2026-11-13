@@ -78,7 +78,8 @@ function heldOf(backend: Backend, session: PlayerSession): HeldSession {
 
 /**
  * Starts the in-process backend, ready at once: the Player's ops served on a port pair in this realm. With `delayMs`,
- * replies arrive after that delay instead of on a microtask (the delayed smoke). `historySpill` and `historyBudget` set
+ * replies arrive after that delay instead of on a microtask (the delayed smoke). A stop delivers the session's replies
+ * in transit and its acknowledgement at once, unless `stopAsWorker`: then they arrive as other replies do. `historySpill` and `historyBudget` set
  * Debug's rewind histories' spill store and admission bound (`playerOpsContext`). `wrapPort` wraps the client's end of
  * the port pair, for a test that observes or holds what crosses this connection alone.
  */
@@ -86,6 +87,7 @@ export function createInProcessBackend(
   build: BuildIdentity,
   options: {
     readonly delayMs?: number;
+    readonly stopAsWorker?: boolean;
     readonly wrapPort?: (port: ClientPort) => ClientPort;
   } & NonNullable<Parameters<typeof playerOpsContext>[0]> = {},
 ): PlayerBridge {
@@ -139,13 +141,14 @@ export function createInProcessBackend(
       else toClient?.(transit.splice(index, 1)[0]!.data);
     }
   };
-  // A stop's acknowledgement and the replies before it arrive at once, so the stop is synchronous here.
-  const halt = bridge.halt.bind(bridge);
-  bridge.halt = (session, stop) => {
-    const acknowledged = halt(session, stop);
-    flush(session.id);
-    return acknowledged;
-  };
+  if (options.stopAsWorker !== true) {
+    const halt = bridge.halt.bind(bridge);
+    bridge.halt = (session, stop) => {
+      const acknowledged = halt(session, stop);
+      flush(session.id);
+      return acknowledged;
+    };
+  }
   backends.set(bridge, { bridge, context, sessions, flush });
   return bridge;
 }
