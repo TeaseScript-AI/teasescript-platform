@@ -76,9 +76,10 @@ export interface Provenance {
  */
 export interface ContextDetail {
   /**
-   * Whether the word is the warned read's own (its exact path failed there): only then do the details below
-   * name what the read itself depends on; else the word came with a value from another line (a copy, a projection, a
-   * call) and its sentence speaks of that value's origin.
+   * Whether the word is the warned read's own (`detail` in `consumers/reports/warnings.ts`): its exact path failed
+   * there (`directWord`), the word is `later` or `budget`, or it names a reference's member the check reads; only then
+   * do the details below name what the read itself depends on; else the word came with a value from another line (a
+   * copy, a projection, a call) and its sentence speaks of that value's origin.
    */
   readonly direct: boolean;
   /** `unknown`: the value comes from outside the script (host data, a typeless `load` or `fromJson`, F19). */

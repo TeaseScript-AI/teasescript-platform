@@ -5,8 +5,8 @@
  * and a read chain's depth have their own limits. A stop is no compile error (D4): the ledger then only finishes, every
  * later charge counted apart and none stopping it, and each unit before the stop is counted to the place that spent it,
  * so one warning can name the heaviest. A demand's own allowance, its measure and its signal are here
- * (`demandAllowanceFor`, `own`, `DemandExhausted`); the solver gives the demand up, and its reader answers with its
- * key's contract.
+ * (`demandAllowanceFor`, `own`, `DemandExhausted`); the solver gives the demand up, and its reader answers
+ * as `DemandExhausted` says.
  */
 
 /** The allowance every program has, however small. */
@@ -244,8 +244,9 @@ const LIMIT_NAMES: Readonly<Record<BudgetLimit, string>> = {
 };
 
 /**
- * A demand that crossed its allowance: the solver gives it up between two steps of its computations,
- * so no computation is cut midway; its reader answers with its key's contract and the reason `budget`.
+ * A demand that crossed its allowance: the solver gives it up between two steps of its computations, so no computation
+ * is cut midway; its reader answers with its key's contract and the reason `budget`, or `STOPPED` where it has none or
+ * that too crosses the allowance (`Consumers.run`).
  */
 export class DemandExhausted extends Error {
   public constructor() {
@@ -508,9 +509,10 @@ export class WorkLedger {
   }
 
   /**
-   * Runs `callback` as finishing work without a stop: the checks of statements nested past the nesting limit after an
-   * analysis that ran to its end (D4), a diagnostic's fix facts, what a stop forgets by (`countApart`), counted apart
-   * and never stopping it. Inside another `apart` callback it stays apart to that callback's end.
+   * Runs `callback` as finishing work without a stop, counted apart and never stopping it: among its callers, the
+   * checks of statements nested past the nesting limit after an analysis that ran to its end (D4), a diagnostic's fix
+   * facts, and what a stop forgets by (`countApart`). Inside another `apart` callback it stays apart to that callback's
+   * end.
    */
   public apart<T>(callback: () => T): T {
     const outer = this.#apart;
@@ -575,11 +577,12 @@ let testAllowance: number | null = null;
 let testDemandAllowance: number | null = null;
 
 /**
- * A demand's allowance: 256 × the nodes of the reading site's callable, or a test's
- * (`withTestDemandAllowance`).
+ * A demand's allowance: 256 × `nodes`, or a test's (`withTestDemandAllowance`). A read passes the flow nodes of its
+ * site's function, or the program's outside one (`Consumers`); a decision and a completion pass the program's
+ * (`consumers/stores/stores.ts`, `consumers.ts`).
  */
-export function demandAllowanceFor(callableNodes: number): number {
-  return testDemandAllowance ?? WORK_PER_NODE * callableNodes;
+export function demandAllowanceFor(nodes: number): number {
+  return testDemandAllowance ?? WORK_PER_NODE * nodes;
 }
 
 /** Test-only: runs `callback` with `allowance` as every demand's allowance (`demandAllowanceFor`). */

@@ -46,8 +46,7 @@ export type OperationResult =
   | { readonly kind: "type"; readonly type: StaticType }
   /**
    * The types the result may have while an operand's type is not known: `x / 4` with `x` unknown can be a number, never
-   * text. The result is one of them, with the operand's provenance: a store of the result into a place that none of
-   * them fits is still an error, and a place one of them fits keeps a runtime check.
+   * text. The result is one of them, with the operand's provenance.
    */
   | { readonly kind: "possible"; readonly types: readonly StaticType[]; readonly why: DynamicWhy }
   /** A copy of a part of an operand: an element the method gives, a selected property, a dict key. */
