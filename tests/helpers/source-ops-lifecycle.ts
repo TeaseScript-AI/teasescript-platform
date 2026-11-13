@@ -15,8 +15,9 @@ import { deliveredRun } from "./bridge/delivered-run.js";
 /*
  * The retention child of the lifecycle invariant in `player-bridge-debug-source.test.ts` (see `retention-witness.ts`):
  * each case it is given (`route/completion`) runs Debug's source ops on a connection of its own with its marked
- * project, and tears it down; `completion` pauses `drawCode` at an await and tears down there. Module state carries
- * from case to case, as the Worker's does.
+ * project, and tears it down; `completion` pauses `drawCode` at an await and closes the connection there, as its
+ * Worker's loss does (the host runs no other op while one is awaited). Module state carries from case to case, as the
+ * Worker's does.
  */
 
 // Where `drawCode` can be paused: after its sidecar's text arrives, and after the renderer loads.
@@ -56,7 +57,7 @@ registerHooks({
   },
 });
 
-const { playerBridgeOps, playerOpsContext } =
+const { closeConnection, playerBridgeOps, playerOpsContext } =
   await import("../../player/engine-bridge/player-ops.js");
 const { markedProject, planText } = await import("./bridge/source-ops-project.js");
 const sessions: HostSessions = {
@@ -108,7 +109,7 @@ async function runCases() {
       before = heldBefore(context);
       await run("teardown", null);
     } else {
-      // The asked plan's first `drawCode`, paused at the await `completion` names, torn down there.
+      // The asked plan's first `drawCode`, paused at the await `completion` names, its connection closed there.
       let reached = () => {};
       let release = () => {};
       const atPoint = new Promise<void>((resolve) => (reached = resolve));
@@ -117,10 +118,13 @@ async function runCases() {
       const pending = run("drawCode", { plan: asked, path: sites[0]!.path, site: sites[0] });
       await atPoint;
       before = heldBefore(context);
-      await run("teardown", null);
+      closeConnection(context, sessions);
       release();
-      // What the request does after the one teardown stays for the witness to find.
-      late = (await pending).result === null ? "no code" : "code";
+      // What the request does after the close stays for the witness to find; refused, it answers no code either.
+      late = await pending.then(
+        (outcome) => (outcome.result === null ? "no code" : "code"),
+        () => "no code",
+      );
     }
     // A torn-down connection reaches what a fresh one does: its containers, empty.
     results.push({ name, late, extra: reach(context).size - freshReach, before, context });
