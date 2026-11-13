@@ -1,0 +1,97 @@
+import type {
+  SerializableRuntimeDict,
+  SerializableRuntimeList,
+  SerializableRuntimeObject,
+  SerializableRuntimeScalar,
+  SerializableRuntimeSet,
+  SerializableRuntimeValue,
+} from "../../values/serializable-values.js";
+
+/**
+ * The native engine's values: what its bindings, temporaries and collections hold while it runs. A canonical value
+ * (`SerializableRuntimeValue`) becomes one through `fromCanonical` and back through `toCanonical` (`codec.ts`).
+ *
+ * - Text, numbers, `true`/`false` and `null` are JavaScript primitives, as in canonical values.
+ * - A list is a plain array of native values.
+ * - An object and a dict are classes over a `Map`, in insertion order; replacing a value keeps its position.
+ * - A set is a `NativeSet`, whose members only `native-set.ts` changes.
+ * - Every other value (ranges, durations, dates, handles, regexes, ...) is its canonical record, frozen, and shared:
+ *   nothing changes it in place.
+ *
+ * Ownership: each list, object, dict and set has exactly one holder (a binding, a temporary, or a slot of another
+ * collection). Storing a value that another holder keeps stores a copy (`copyNativeValue`); a value nothing else holds,
+ * such as a literal's or an operation's result, is stored as it is.
+ */
+export type NativeValue =
+  SerializableRuntimeScalar | NativeList | NativeObject | NativeDict | NativeSet | NativeLeaf;
+
+export type NativeList = NativeValue[];
+
+/** A value that holds no other values and is never changed in place, kept as its frozen canonical record. */
+export type NativeLeaf = Readonly<
+  Exclude<
+    SerializableRuntimeValue,
+    | SerializableRuntimeScalar
+    | SerializableRuntimeList
+    | SerializableRuntimeObject
+    | SerializableRuntimeSet
+    | SerializableRuntimeDict
+  >
+>;
+
+/** An object's properties by name, in the order they were first set. */
+export class NativeObject {
+  public readonly kind = "object";
+  public readonly properties: Map<string, NativeValue>;
+
+  public constructor(properties: Map<string, NativeValue> = new Map()) {
+    this.properties = properties;
+  }
+}
+
+/** A dict's entries by key, in insertion order; a removed key added again goes last. */
+export class NativeDict {
+  public readonly kind = "dict";
+  public readonly entries: Map<string, NativeValue>;
+
+  public constructor(entries: Map<string, NativeValue> = new Map()) {
+    this.entries = entries;
+  }
+}
+
+/**
+ * Unique members by `==`, in insertion order. `native-set.ts` owns `items` and `membership`: only its functions add,
+ * remove or clear members, so `membership`, when built, indexes exactly `items`. A member is never changed in place.
+ */
+export class NativeSet {
+  public readonly kind = "set";
+  public readonly items: NativeValue[];
+  /** The index of `items`, built at the first operation that needs it; `null` until then. */
+  public membership: NativeSetMembership | null = null;
+
+  /** `items` must be unique by `==`; `nativeSetOf` builds a set from items that may repeat. */
+  public constructor(items: NativeValue[] = []) {
+    this.items = items;
+  }
+}
+
+/**
+ * A set's members by key: primitives as themselves (a `Set` compares `-0` and `0` as `==` does), every other member
+ * under its key (`nativeValueKey`), or under a hash of a long key with the members whose keys share that hash.
+ */
+export interface NativeSetMembership {
+  readonly scalars: Set<SerializableRuntimeScalar>;
+  readonly records: Map<string, NativeValue[]>;
+}
+
+/** A list, object, dict or set: a value that holds others. */
+export type NativeComposite = NativeList | NativeObject | NativeDict | NativeSet;
+
+export function isNativeComposite(value: NativeValue): value is NativeComposite {
+  return (
+    Array.isArray(value) ||
+    value instanceof NativeObject ||
+    value instanceof NativeDict ||
+    value instanceof NativeSet
+  );
+}
