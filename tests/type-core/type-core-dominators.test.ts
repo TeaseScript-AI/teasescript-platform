@@ -7,7 +7,6 @@ import { parse } from "../../src/parser.js";
 import { validateProjectSemantics } from "../../src/semantic.js";
 import {
   dominators,
-  insideLoopsOf,
   type Dominators,
 } from "../../src/type-inference/core/flow-graph/dominators.js";
 import {
@@ -21,7 +20,7 @@ import { FLOW_PROGRAMS, HOST_GLOBALS } from "../helpers/type-core/type-core-flow
 /*
  * The dominators of the coarse core's flow graph: Lengauer and Tarjan's algorithm
  * against the iterative one on every graph of the corpus, and the shapes the exact path depends on, each expected by
- * the table's rule or by what a run does: literal loops (P7), labels and boundaries (X4), loops (X5), computed
+ * the table's rule or by what a run does: literal loops (P7), labels and boundaries (X4), computed
  * transfers (L11), blocks, early leaves (F5a), and calls that cannot return (L10).
  */
 
@@ -181,7 +180,6 @@ test("the dominators agree with the iterative algorithm on every graph of the co
 test("a literal count of one or more runs the body before the loop is left (P7)", () => {
   const twice = analyse('repeat 2 {\n  say "B"\n  say "D"\n}\nsay "R"\nexit');
   assert.equal(twice.dom.dominates(twice.at("D"), twice.at("R")), true);
-  assert.equal(insideLoopsOf(twice.at("D"), twice.at("R")), true);
   const folded = analyse('repeat (1 + 1) {\n  say "D"\n}\nsay "R"\nexit');
   assert.equal(folded.dom.dominates(folded.at("D"), folded.at("R")), true);
   const unknown = analyse('repeat hostValue {\n  say "D"\n}\nsay "R"\nexit');
@@ -233,20 +231,6 @@ test("a condition its literals decide has a dead way, as the type check reads co
     assert.equal(at(dead).dead, true, condition);
     assert.equal(at(dead === "B" ? "C" : "B").dead, false, condition);
   }
-});
-
-test("every loop around a read must enclose its definition (X5)", () => {
-  const { at } = analyse(
-    'say "BEFORE"\nrepeat hostValue {\n  say "OUTER"\n  repeat hostValue {\n    say "INNER"\n  }\n  say "AFTER_INNER"\n}\nexit',
-  );
-  assert.equal(insideLoopsOf(at("BEFORE"), at("OUTER")), false);
-  assert.equal(insideLoopsOf(at("OUTER"), at("AFTER_INNER")), true);
-  assert.equal(insideLoopsOf(at("INNER"), at("AFTER_INNER")), true);
-  assert.equal(insideLoopsOf(at("OUTER"), at("INNER")), false);
-  assert.equal(insideLoopsOf(at("INNER"), at("BEFORE")), true);
-  const each = analyse('for item in hostList {\n  say "BODY"\n}\nexit');
-  // A loop variable's binding counts as inside its loop.
-  assert.equal(insideLoopsOf(each.graph.loops[0]!.body, each.at("BODY")), true);
 });
 
 test("a label that some `goto` enters is a boundary, one that only the code before it reaches is not (X4)", () => {

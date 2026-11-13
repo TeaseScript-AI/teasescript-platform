@@ -205,13 +205,3 @@ export function dominators(graph: FlowGraph): Dominators {
     hdom: (node) => byId(hdom[node.id]!),
   };
 }
-
-/**
- * X5: whether every loop around `read` also encloses `definition`. The loops around a node are nested, outermost
- * first, so it is enough that `definition` lies in `read`'s innermost loop at the same depth; a `for` loop's binding
- * lies in its loop.
- */
-export function insideLoopsOf(definition: FlowNode, read: FlowNode): boolean {
-  const depth = read.loops.length;
-  return depth === 0 || definition.loops[depth - 1] === read.loops[depth - 1];
-}
