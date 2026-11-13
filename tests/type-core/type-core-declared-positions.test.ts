@@ -30,13 +30,12 @@ import {
   HOST_VALUES,
   HOSTLESS_VALUES,
   FAILING_PRODUCER,
-  filesOf,
-  OPERAND_TEMPLATES,
   PAIRED_SAMPLES,
   type Sample,
   samples,
   twinCommand,
-} from "../helpers/type-core/row-templates.js";
+} from "../helpers/type-core/declared-samples.js";
+import { filesOf, OPERAND_TEMPLATES } from "../helpers/type-core/row-templates.js";
 
 /*
  * The command operand positions' declared rule differences (#2488's design rulings, R2, keyed by position as the lead's
