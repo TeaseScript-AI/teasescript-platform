@@ -1018,8 +1018,8 @@ then with the runtime's reply. Nothing is greyed because an answer was sent. Exc
 way, the Playroom first checks an answer by the runtime's own rules; one they refuse never leaves the composer, and the
 notice shows at once. The runtime stays the authority: when it refuses the answer, as when a block's question overtakes it, the answer leaves the chat, its
 typed text is back before what was typed since, with the notice "The question was gone before your answer arrived. Your
-text is back in the field." (only its first sentence for an answer not typed, such as a clicked choice or button), and
-its controls show again once its question does.
+text is back in the field." (only its first sentence where no chat text comes back, as for a choice, a button or a
+password), and its controls show again once its question does.
 A popup or an `exportText` dialog closes at once in the same way; when its close is refused, it shows again once it is
 the question.
 
