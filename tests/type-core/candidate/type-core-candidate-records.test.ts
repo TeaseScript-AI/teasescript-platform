@@ -16,21 +16,23 @@ import { reportedDiagnostics } from "../../../src/type-inference/core/check-resu
 import { VALUE_KIND_NAMES } from "../../../src/value-kinds.js";
 import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
 import {
-  companions,
-  derive,
   derivedText,
-  evaluate,
   syntaxOf,
   Underivable,
+} from "../../helpers/type-core/derived/type-core-derived.js";
+import { derive } from "../../helpers/type-core/derived/type-core-derived-checks.js";
+import { companions } from "../../helpers/type-core/derived/type-core-derived-companions.js";
+import {
+  evaluate,
   type CheckEvent,
   type PredictedRun,
-} from "../../helpers/type-core-derived.js";
+} from "../../helpers/type-core/derived/type-core-derived-runs.js";
 import {
   type FixtureRecord,
   heldBack,
   readFixture,
 } from "../../helpers/type-core/type-core-fixture.js";
-import { evaluateProject } from "../../helpers/type-core/derived-transfers.js";
+import { evaluateProject } from "../../helpers/type-core/derived/derived-transfers.js";
 import {
   assignments,
   derivedContent,

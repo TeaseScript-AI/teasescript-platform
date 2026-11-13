@@ -3,7 +3,17 @@
 
 import type { Expression, Statement } from "../../../../src/ast.js";
 import { VALUE_KIND_NAMES } from "../../../../src/value-kinds.js";
-import { Underivable, type DerivedType, storeOf, unwrap, admittedShape, partOf, unionTypes, writtenType, fallbackOf } from "./type-core-derived.js";
+import {
+  Underivable,
+  type DerivedType,
+  storeOf,
+  unwrap,
+  admittedShape,
+  partOf,
+  unionTypes,
+  writtenType,
+  fallbackOf,
+} from "./type-core-derived.js";
 import { literalType, expectedType } from "./type-core-derived-defaults.js";
 
 /**

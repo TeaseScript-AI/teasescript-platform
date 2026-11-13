@@ -3,7 +3,25 @@
 
 import type { Expression, Statement } from "../../../../src/ast.js";
 import { VALUE_KIND_NAMES } from "../../../../src/value-kinds.js";
-import { Underivable, type DerivedType, site, syntaxOf, allStatements, storeOf, unwrap, selected, admittedShape, partOf, nodesIn, unionTypes, writtenType, withoutNull, type DefaultOwner, fallbackOf, expressions } from "./type-core-derived.js";
+import {
+  Underivable,
+  type DerivedType,
+  site,
+  syntaxOf,
+  allStatements,
+  storeOf,
+  unwrap,
+  selected,
+  admittedShape,
+  partOf,
+  nodesIn,
+  unionTypes,
+  writtenType,
+  withoutNull,
+  type DefaultOwner,
+  fallbackOf,
+  expressions,
+} from "./type-core-derived.js";
 
 /**
  * A default's value at its typed call (F18): literal data, typed ingress calls, and reads of variables at the call's

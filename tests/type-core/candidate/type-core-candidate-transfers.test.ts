@@ -8,7 +8,8 @@ import { compileProject, compileProjectWithBackend } from "../../../src/compiler
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
-import { derive, syntaxOf } from "../../helpers/type-core-derived.js";
+import { syntaxOf } from "../../helpers/type-core/derived/type-core-derived.js";
+import { derive } from "../../helpers/type-core/derived/type-core-derived-checks.js";
 import { HELD_MODES } from "../../helpers/type-core-held-host.js";
 import {
   derivedStores,
@@ -17,7 +18,7 @@ import {
   recordOfFile,
   runGlobals,
 } from "../../helpers/type-core-route.js";
-import { evaluateProject } from "../../helpers/type-core/derived-transfers.js";
+import { evaluateProject } from "../../helpers/type-core/derived/derived-transfers.js";
 import { DOMAIN } from "../../helpers/type-core/row-guard-records.js";
 import {
   ROW_HOSTS,

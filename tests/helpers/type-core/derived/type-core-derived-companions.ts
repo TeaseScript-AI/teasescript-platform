@@ -1,7 +1,14 @@
 // The derivation's companions of a record's source (`companions`): variants of the program that keep every span, each
 // run by the rules beside the original.
 
-import { Underivable, type Syntax, allStatements, storeOf, unwrap, expressions } from "./type-core-derived.js";
+import {
+  Underivable,
+  type Syntax,
+  allStatements,
+  storeOf,
+  unwrap,
+  expressions,
+} from "./type-core-derived.js";
 
 // ------------------------------------------------------------------------------------------------ the companions
 

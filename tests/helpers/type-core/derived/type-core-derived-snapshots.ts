@@ -4,8 +4,34 @@
 import { isDeepStrictEqual } from "node:util";
 
 import type { Expression, IfStatement, Statement } from "../../../../src/ast.js";
-import { Underivable, type DerivedType, derivedText, allStatements, unwrap, selected, admittedShape, nodesIn, isBlockOrStatement, writtenType, fallbackOf } from "./type-core-derived.js";
-import { literalType, declaredNames, type Snap, type Chain, type Resolve, INDEX, type State, OPEN, NULL, ALL, isAll, partAt, snapshotAt } from "./type-core-derived-defaults.js";
+import {
+  Underivable,
+  type DerivedType,
+  derivedText,
+  allStatements,
+  unwrap,
+  selected,
+  admittedShape,
+  nodesIn,
+  isBlockOrStatement,
+  writtenType,
+  fallbackOf,
+} from "./type-core-derived.js";
+import {
+  literalType,
+  declaredNames,
+  type Snap,
+  type Chain,
+  type Resolve,
+  INDEX,
+  type State,
+  OPEN,
+  NULL,
+  ALL,
+  isAll,
+  partAt,
+  snapshotAt,
+} from "./type-core-derived-defaults.js";
 
 /** An expression's `Chain` with the chains of the bindings in scope by name; `null` for any other expression. */
 function chainOf(expression: Expression, chains: ReadonlyMap<string, Chain | null>): Chain | null {

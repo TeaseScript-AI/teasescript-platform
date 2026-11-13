@@ -348,7 +348,7 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "tests/helpers/type-core-derived.ts",
+    "file": "tests/helpers/type-core/derived/type-core-derived-companions.ts",
     "kind": "reference",
     "text": "hostValu2",
     "waits": "#1937"

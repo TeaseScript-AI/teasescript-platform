@@ -4,7 +4,28 @@
 import type { Expression, Statement } from "../../../../src/ast.js";
 import { listProperty } from "../../../../src/list-methods.js";
 import type { CompactRecord } from "../../type-core-records.js";
-import { Underivable, type DerivedType, type DerivedStore, type Discharge, type DerivedContent, site, derivedText, repairsRecord, type Syntax, allStatements, storeOf, targetName, unwrap, selected, partOf, unionTypes, withoutNull, type DefaultOwner, fallbackOf, expressions } from "./type-core-derived.js";
+import {
+  Underivable,
+  type DerivedType,
+  type DerivedStore,
+  type Discharge,
+  type DerivedContent,
+  site,
+  derivedText,
+  repairsRecord,
+  type Syntax,
+  allStatements,
+  storeOf,
+  targetName,
+  unwrap,
+  selected,
+  partOf,
+  unionTypes,
+  withoutNull,
+  type DefaultOwner,
+  fallbackOf,
+  expressions,
+} from "./type-core-derived.js";
 import { expectedType, writtenLanding } from "./type-core-derived-defaults.js";
 import { sourceShape, typeOf } from "./type-core-derived-shapes.js";
 import { snapshotsOf } from "./type-core-derived-snapshots.js";

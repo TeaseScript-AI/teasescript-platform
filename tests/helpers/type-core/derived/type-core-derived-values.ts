@@ -1,7 +1,17 @@
 // The fixture's values as a run reads and shows them: a value's fit to a checked type, JSON read by kind and field, and
 // the text a `say` shows.
 
-import { DEFAULT_TEMPORAL_CONTEXT, formatIsoDate, formatIsoDateTime, formatIsoTime, formatIsoTimestamp, localFields, presentDate, presentDateTime, presentTime } from "../../../../src/temporal.js";
+import {
+  DEFAULT_TEMPORAL_CONTEXT,
+  formatIsoDate,
+  formatIsoDateTime,
+  formatIsoTime,
+  formatIsoTimestamp,
+  localFields,
+  presentDate,
+  presentDateTime,
+  presentTime,
+} from "../../../../src/temporal.js";
 import type { SerializableRuntimeValue } from "../../../../src/runtime/values/serializable-values.js";
 import { Underivable, type DerivedType } from "./type-core-derived.js";
 

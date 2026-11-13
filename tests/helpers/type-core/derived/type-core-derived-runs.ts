@@ -1,23 +1,57 @@
 // A run of a source by the rules (`evaluate`): how it ends, the checks it evaluates, and the transfer that ends a file.
 
 import type { Expression, Statement } from "../../../../src/ast.js";
-import { booleanFromText, CONVERSIONS, isConversion, numberFromText } from "../../../../src/conversions.js";
+import {
+  booleanFromText,
+  CONVERSIONS,
+  isConversion,
+  numberFromText,
+} from "../../../../src/conversions.js";
 import { escapeMarkup } from "../../../../src/message-markup.js";
 import { dictMethod } from "../../../../src/dict-operations.js";
 import { hasListMethod, listMethod, listProperty } from "../../../../src/list-methods.js";
 import { hasTemporalMethod } from "../../../../src/temporal-builtins.js";
 import { isDictKey } from "../../../../src/value-kinds.js";
-import { DEFAULT_TEMPORAL_CONTEXT, parseIsoDate, parseIsoDateTime, parseIsoTime, parseIsoTimestamp } from "../../../../src/temporal.js";
-import { binaryFromBase64, binaryFromDataUrl } from "../../../../src/runtime/host-data/stored-files.js";
+import {
+  DEFAULT_TEMPORAL_CONTEXT,
+  parseIsoDate,
+  parseIsoDateTime,
+  parseIsoTime,
+  parseIsoTimestamp,
+} from "../../../../src/temporal.js";
+import {
+  binaryFromBase64,
+  binaryFromDataUrl,
+} from "../../../../src/runtime/host-data/stored-files.js";
 import { RuntimeFault } from "../../../../src/runtime/errors.js";
 import type { RuntimeErrorCode } from "../../../../src/diagnostic-codes.js";
 import { jsonText } from "../../../../src/runtime/values/json-base64.js";
-import { readCollection, readDict, sortOrder } from "../../../../src/runtime/values/collection-operations.js";
+import {
+  readCollection,
+  readDict,
+  sortOrder,
+} from "../../../../src/runtime/values/collection-operations.js";
 import { callStringMethod } from "../../../../src/runtime/values/string-operations.js";
-import { isDict, isList as isRuntimeList, isRange, isSet, isTemporal } from "../../../../src/runtime/values/value-predicates.js";
+import {
+  isDict,
+  isList as isRuntimeList,
+  isRange,
+  isSet,
+  isTemporal,
+} from "../../../../src/runtime/values/value-predicates.js";
 import { joinedText } from "../../../../src/runtime/values/value-text.js";
 import type { SerializableRuntimeValue } from "../../../../src/runtime/values/serializable-values.js";
-import { Underivable, type DerivedStore, type DerivedContent, site, type Syntax, storeOf, unwrap, writtenType, fallbackOf } from "./type-core-derived.js";
+import {
+  Underivable,
+  type DerivedStore,
+  type DerivedContent,
+  site,
+  type Syntax,
+  storeOf,
+  unwrap,
+  writtenType,
+  fallbackOf,
+} from "./type-core-derived.js";
 import { fitsType, jsonValue, readJson, shown } from "./type-core-derived-values.js";
 
 // ------------------------------------------------------------------------------------------------- the evaluator
