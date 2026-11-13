@@ -1,0 +1,12 @@
+// A runtime fault inside a function, two calls deep: the failure must name this file and line 5.
+let items = [1, 2, 3]
+function pick(i) {
+  let doubled = i * 2
+  return items[doubled]
+}
+function outer(n) {
+  return pick(n) + 1
+}
+say "first ${outer(1)}"
+say "then ${outer(4)}"
+exit

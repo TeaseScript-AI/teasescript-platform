@@ -725,7 +725,7 @@ function randomDrawRequest(
   return typeof checked === "string" ? checked : { drawId, outcome: checked };
 }
 
-function executePlannedInstruction(
+export function executePlannedInstruction(
   plan: InstructionPlan,
   instruction: Instruction,
   snapshot: RuntimeSnapshot,

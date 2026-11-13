@@ -1,0 +1,11 @@
+// Number and text rules a player sees: rounding, number to text, text case and comparison, sorting.
+let xs = [0.1 + 0.2, 1 / 3, 2.5, -2.5, 1e21, 123456789.125, 0.000001]
+for x in xs {
+  say "${x} ${round(x)} ${round(x, decimals: 2)} ${floor(x)}"
+}
+let words = ["b", "B", "a", "Straße", "ǅ", "é", "e"]
+words.sort()
+say "${words.join(", ")}"
+say "${"Straße".toUpperCase()} ${"İ".toLowerCase()} ${"ß" == "SS"}"
+say "${sqrt(2)} ${exp(1)} ${ln(10)} ${tan(30)}"
+exit

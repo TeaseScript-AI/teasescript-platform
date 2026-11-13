@@ -1,0 +1,17 @@
+// Copies where the language copies: assignment, arguments, returns, elements, loop items.
+let a = [[1, 2], [3]]
+let b = a
+b[0][0] = 9
+function grow(list) {
+  list.add(4)
+  return list
+}
+let c = grow(a[1])
+let d = {"k": [1]}
+let e = d["k"]
+e.add(2)
+for item in a {
+  item.add(0)
+}
+say "${a[0][0]} ${b[0][0]} ${a[1].length} ${c.length} ${d["k"].length} ${e.length} ${a[0].length}"
+exit

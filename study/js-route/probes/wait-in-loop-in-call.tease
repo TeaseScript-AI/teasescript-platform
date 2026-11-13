@@ -1,0 +1,16 @@
+// A wait inside a loop inside a function call, called from a loop: part C's case.
+function rounds(n) {
+  let total = 0
+  for i in 0..n {
+    let x = randomInteger(1..=6)
+    total += x
+    say "Round ${i}: ${x}"
+  }
+  return total
+}
+let sum = 0
+repeat 3 {
+  sum += rounds(4)
+}
+say "Sum ${sum}"
+exit

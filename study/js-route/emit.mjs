@@ -61,8 +61,20 @@ function mayChange(e) {
 
 const SAFE = /[^A-Za-z0-9_]/g;
 
-export function emitProgram(plan) {
-  if (plan.files.length !== 1) throw new Unsupported("a plan of more than one file");
+/** Expression kinds, for finding an instruction's operands. */
+const EXPRESSION_KINDS = new Set(["literal", "regex", "duration", "calendarDuration", "identifier", "debugMode",
+  "playerProfileField", "list", "object", "set", "dict", "group", "template", "property", "index", "call", "unary",
+  "unit", "angleUnit", "binary", "range", "temporary", "preparedReference", "storageLoad", "tagQuery", "typeTest"]);
+
+/** Instruction kinds today's engine may leave waiting (an action with the host), besides a paced `say`. */
+const WAITING_KINDS = new Set(["wait", "interaction", "capture", "fileStore", "lock", "storageWrite", "playMedia", "showImage"]);
+
+/**
+ * `resumable`: part C's way (2): every region that can reach a wait becomes resumable (a switch over its instructions,
+ * its variables saved as plain data at a wait); everything else stays structured. Without it, a wait asks the session
+ * (`rt.waited`), which way (1), replaying from the start, answers.
+ */
+export function emitProgram(plan, { resumable = false } = {}) {
   const K = [];
   const konst = (value) => {
     let index = K.indexOf(value);
@@ -85,28 +97,64 @@ export function emitProgram(plan) {
     if (definition.parameters.some((parameter) => parameter.hasDefault))
       throw new Unsupported("a default parameter");
   }
-  const firstFunction = Math.min(plan.instructions.length, ...plan.functions.map((f) => f.entryInstruction));
-  const functionEnds = plan.functions.map((f) => [f.entryInstruction, f.endInstruction]).sort((a, b) => a[0] - b[0]);
-  let covered = firstFunction;
-  for (const [start, end] of functionEnds) {
-    if (start !== covered) throw new Unsupported("a root region that is not one range before the functions");
-    covered = end;
+  // Which instructions can wait, and which functions can: those that reach such an instruction or call one that can.
+  const waitsHere = (ins) =>
+    (ins.kind === "say" && ins.pacing !== "instant") || WAITING_KINDS.has(ins.kind);
+  const canWait = new Set();
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const definition of plan.functions) {
+      if (canWait.has(definition.id)) continue;
+      for (let pc = definition.entryInstruction; pc < definition.endInstruction; pc += 1) {
+        const ins = plan.instructions[pc];
+        if (waitsHere(ins) || (ins.kind === "callFunction" && canWait.has(ins.functionId))) {
+          canWait.add(definition.id);
+          changed = true;
+          break;
+        }
+      }
+    }
   }
-  if (covered !== plan.instructions.length) throw new Unsupported("instructions after the last function");
-
-  // The root's first scope: module-level variables that every function sees.
-  const rootScope = new Map();
-  const root = emitRegion(0, firstFunction, null, []);
-  const functions = plan.functions.map((definition) =>
-    emitRegion(definition.entryInstruction, definition.endInstruction, definition, definition.parameters),
-  );
+  const waitsAt = (pc) => {
+    const ins = plan.instructions[pc];
+    return waitsHere(ins) || (ins.kind === "callFunction" && canWait.has(ins.functionId));
+  };
+  const rangeWaits = (from, to) => {
+    if (!resumable) return false;
+    for (let pc = from; pc < to; pc += 1) if (waitsAt(pc)) return true;
+    return false;
+  };
   const lines = ['"use strict";', "const G = rt.globals;"];
-  if (rootScope.size > 0) lines.push(`let ${[...rootScope.values()].join(", ")};`);
-  for (const f of functions) lines.push(f);
-  lines.push(root, "return main;");
-  return { source: lines.join("\n"), constants: K, globals };
+  const fileEntries = [];
+  plan.files.forEach((file, index) => {
+    if (file.labels.length > 0) throw new Unsupported("labels");
+    if (file.entryInstruction !== file.startInstruction) throw new Unsupported("a file whose entry is not its start");
+    // The file's top-level variables: module-level, so that its functions see them; a goto to the file clears them.
+    const rootScope = new Map();
+    const root = emitRegion(file.startInstruction, file.rootEndInstruction, null, [], rootScope, index);
+    const functions = plan.functions
+      .filter((definition) => definition.entryInstruction >= file.rootEndInstruction && definition.entryInstruction < file.endInstruction)
+      .map((definition) => emitRegion(definition.entryInstruction, definition.endInstruction, definition, definition.parameters, rootScope, index));
+    const vars = [...rootScope.values()];
+    if (vars.length > 0) lines.push(`let ${vars.join(", ")};`);
+    lines.push(...functions, root);
+    lines.push(`function enter${index}(resume) { rt.file = ${index};${vars.length > 0 ? ` if (resume === null) ${vars.join(" = ")} = undefined;` : ""} file${index}(resume); }`);
+    fileEntries.push(file.entryInstruction);
+  });
+  lines.push(`const FILES = [${plan.files.map((_, i) => `enter${i}`).join(", ")}];`);
+  lines.push(
+    "function main() {",
+    "  let file = rt.resuming ? rt.resumeFrames[0].file : 0;",
+    "  for (;;) {",
+    "    try { FILES[file](rt.resuming ? rt.resumeFrame() : null); return; }",
+    "    catch (signal) { if (signal instanceof rt.Goto) { file = signal.file; continue; } throw signal; }",
+    "  }",
+    "}",
+    "return main;",
+  );
+  return { source: lines.join("\n"), constants: K, globals, fileEntries, canWait: [...canWait] };
 
-  function emitRegion(start, end, definition, parameters) {
+  function emitRegion(start, end, definition, parameters, rootScope, fileIndex) {
     const out = [];
     const temps = new Set();
     let scratch = 0;
@@ -121,6 +169,12 @@ export function emitProgram(plan) {
       return name;
     });
     const isRoot = definition === null;
+    const flatRegion = rangeWaits(start, end);
+    /** Whether emission is at the region's switch level (only in a resumable region), where a wait may stand. */
+    let flat = flatRegion;
+    /** Variables of a resumable region, declared at its top, saved at a wait. */
+    const hoisted = [];
+    const fnName = isRoot ? `file${fileIndex}` : `f${definition.id}`;
 
     const resolve = (name) => {
       for (let depth = scopes.length - 1; depth >= 0; depth -= 1) {
@@ -316,6 +370,14 @@ export function emitProgram(plan) {
     }
 
     function declare(name) {
+      if (flat && !(isRoot && scopes.length === 1)) {
+        const scope = scopes.at(-1);
+        if (scope.has(name)) throw new Unsupported("a name declared twice in one scope");
+        const js = jsName(name);
+        scope.set(name, js);
+        hoisted.push(js);
+        return { code: js, fresh: false };
+      }
       if (isRoot && scopes.length === 1) {
         const js = jsName(name);
         if (scopes[0].has(name)) throw new Unsupported("a top-level variable declared again (goto)");
@@ -336,92 +398,185 @@ export function emitProgram(plan) {
       return n;
     }
 
+    /** The variables a resumable region saves at a wait: its own, its parameters, its file's for a root, temporaries. */
+    function saved() {
+      return [...params, ...hoisted, ...(isRoot ? [...rootScope.values()] : []), ...[...temps].map((id) => `t${id}`)];
+    }
+    function suspendHere(resumeAt) {
+      return `{ pc = ${resumeAt}; rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: ${resumeAt}, v: [${"%SAVED%"}] }); throw rt.SUSPEND; }`;
+    }
+
+    /** The end of an `if` at `pc` and its else's end (or null), as lowering lays them out. */
+    function ifShape(pc, endAt) {
+      const ins = plan.instructions[pc];
+      const target = ins.target;
+      if (target <= pc || target > endAt) throw new Unsupported(`a jump at ${pc} out of its region`);
+      const last = plan.instructions[target - 1];
+      if (last.kind === "jump" && last.target > target && last.target <= endAt)
+        return { thenEnd: target - 1, target, elseEnd: last.target };
+      return { thenEnd: target, target, elseEnd: null };
+    }
+
     function emitRange(pc, endAt) {
       while (pc < endAt) {
         const ins = plan.instructions[pc];
+        if (flat) line(`case ${pc}:`);
         switch (ins.kind) {
           case "jumpIfFalse": {
-            const target = ins.target;
-            if (target <= pc || target > endAt) throw new Unsupported(`a jump at ${pc} out of its region`);
-            const last = plan.instructions[target - 1];
-            let thenEnd = target;
-            let elseEnd = null;
-            if (last.kind === "jump" && last.target > target && last.target <= endAt) {
-              thenEnd = target - 1;
-              elseEnd = last.target;
+            const shape = ifShape(pc, endAt);
+            const after = shape.elseEnd ?? shape.target;
+            if (flat && rangeWaits(pc + 1, after)) {
+              const c = x();
+              line(`${c} = ${expr(ins.condition)};`);
+              line(`if (${c} !== true && ${c} !== false) throw rt.notBool(${konst(ins.condition)}, ${c});`);
+              line(`if (!${c}) { pc = ${ins.target}; continue D; }`);
+              pc += 1;
+              continue;
             }
-            const c = x();
-            line(`${c} = ${expr(ins.condition)};`);
-            line(`if (${c} !== true && ${c} !== false) throw rt.notBool(${konst(ins.condition)}, ${c});`);
-            line(`if (${c}) {`);
-            indent += 1;
-            emitRange(pc + 1, thenEnd);
-            indent -= 1;
-            if (elseEnd !== null) {
-              line("} else {");
+            structured(() => {
+              const c = x();
+              line(`${c} = ${expr(ins.condition)};`);
+              line(`if (${c} !== true && ${c} !== false) throw rt.notBool(${konst(ins.condition)}, ${c});`);
+              line(`if (${c}) {`);
               indent += 1;
-              emitRange(target, elseEnd);
+              emitRange(pc + 1, shape.thenEnd);
               indent -= 1;
-            }
-            line("}");
-            pc = elseEnd ?? target;
+              if (shape.elseEnd !== null) {
+                line("} else {");
+                indent += 1;
+                emitRange(shape.target, shape.elseEnd);
+                indent -= 1;
+              }
+              line("}");
+            });
+            pc = after;
             continue;
           }
           case "loopStart": {
             const endLoop = ins.target;
             if (endLoop <= pc || endLoop > endAt) throw new Unsupported("a loop that ends outside its region");
-            const label = `L${ins.loopId}`;
-            loops.set(ins.loopId, label);
-            if (ins.loopKind === "while") {
-              line(`${label}: while (true) {`);
-              indent += 1;
-              const c = x();
-              line(`${c} = ${expr(ins.expression)};`);
-              line(`if (${c} !== true) { if (${c} === false) break; throw rt.notBool(${konst(ins.expression)}, ${c}); }`);
-              scopes.push(new Map());
-            } else if (ins.loopKind === "for") {
-              const s = x();
-              line(`${s} = rt.forSource(${konst(ins)}, ${expr(ins.expression)});`);
-              const i = `i${pc}`;
-              line(`${label}: for (let ${i} = 0, a${pc} = ${s}.start, n${pc} = ${s}.length, it${pc} = ${s}.items, vs${pc} = ${s}.values; ${i} < n${pc}; ${i}++) {`);
-              indent += 1;
-              scopes.push(new Map());
-              const v = declare(ins.variable);
-              line(`let ${v.code} = it${pc} === null ? a${pc} + ${i} : it${pc}[${i}];`);
-              if (ins.valueVariable !== undefined) {
-                const w = declare(ins.valueVariable);
-                const c = x();
-                line(`let ${w.code} = (${c} = vs${pc}[${i}], typeof ${c} === "object" && ${c} !== null ? rt.copy(${c}) : ${c});`);
-              }
-            } else if (ins.loopKind === "repeat") {
-              const n = x();
-              line(`${n} = rt.repeatCount(${konst(ins.expression)}, ${expr(ins.expression)});`);
-              line(`${label}: for (let r${pc} = ${n}; r${pc} > 0; r${pc}--) {`);
-              indent += 1;
-              scopes.push(new Map());
-            } else throw new Unsupported(`a '${ins.loopKind}' loop`);
-            emitRange(pc + 1, endLoop);
-            scopes.pop();
-            loops.delete(ins.loopId);
-            indent -= 1;
-            line("}");
+            if (flat && rangeWaits(pc + 1, endLoop)) {
+              flatLoopHead(ins, pc);
+              pc += 1;
+              continue;
+            }
+            structured(() => structuredLoop(ins, pc, endLoop));
             pc = endLoop;
             continue;
           }
           case "loopControl": {
-            const label = loops.get(ins.loopId);
-            if (label === undefined) throw new Unsupported("a break or continue outside its loop");
-            line(`${ins.action === "break" ? "break" : "continue"} ${label};`);
+            const loop = loops.get(ins.loopId);
+            if (loop === undefined) throw new Unsupported("a break or continue outside its loop");
+            if (loop.flat) {
+              if (ins.action === "break") line(`${loop.run} = false;`);
+              line(`pc = ${ins.target}; continue D;`);
+              if (flat && ins.action === "continue" && plan.instructions[pc + 1] !== undefined && ins.target === loop.head && pc + 1 === loop.end) {
+                // The round's end: the loop's own end follows.
+                loops.delete(ins.loopId);
+                scopes.pop();
+              }
+            } else line(`${ins.action === "break" ? "break" : "continue"} ${loop.label};`);
             pc += 1;
             continue;
           }
           case "jump":
+            if (flat) {
+              line(`pc = ${ins.target}; continue D;`);
+              pc += 1;
+              continue;
+            }
             throw new Unsupported(`a jump at ${pc} that is no else`);
           default:
             statement(ins, pc);
             pc += 1;
         }
       }
+    }
+
+    /** Emits `body` as structured JavaScript, also inside a resumable region (where it holds no wait). */
+    function structured(body) {
+      const was = flat;
+      flat = false;
+      body();
+      flat = was;
+    }
+
+    function structuredLoop(ins, pc, endLoop) {
+      const label = `L${ins.loopId}`;
+      loops.set(ins.loopId, { label, flat: false });
+      if (ins.loopKind === "while") {
+        line(`${label}: while (true) {`);
+        indent += 1;
+        const c = x();
+        line(`${c} = ${expr(ins.expression)};`);
+        line(`if (${c} !== true) { if (${c} === false) break; throw rt.notBool(${konst(ins.expression)}, ${c}); }`);
+        scopes.push(new Map());
+      } else if (ins.loopKind === "for") {
+        const s = x();
+        line(`${s} = rt.forSource(${konst(ins)}, ${expr(ins.expression)});`);
+        const i = `i${pc}`;
+        line(`${label}: for (let ${i} = 0, a${pc} = ${s}.start, n${pc} = ${s}.length, it${pc} = ${s}.items, vs${pc} = ${s}.values; ${i} < n${pc}; ${i}++) {`);
+        indent += 1;
+        scopes.push(new Map());
+        const v = declare(ins.variable);
+        line(`let ${v.code} = it${pc} === null ? a${pc} + ${i} : it${pc}[${i}];`);
+        if (ins.valueVariable !== undefined) {
+          const w = declare(ins.valueVariable);
+          const c = x();
+          line(`let ${w.code} = (${c} = vs${pc}[${i}], typeof ${c} === "object" && ${c} !== null ? rt.copy(${c}) : ${c});`);
+        }
+      } else if (ins.loopKind === "repeat") {
+        const n = x();
+        line(`${n} = rt.repeatCount(${konst(ins.expression)}, ${expr(ins.expression)});`);
+        line(`${label}: for (let r${pc} = ${n}; r${pc} > 0; r${pc}--) {`);
+        indent += 1;
+        scopes.push(new Map());
+      } else throw new Unsupported(`a '${ins.loopKind}' loop`);
+      emitRange(pc + 1, endLoop);
+      scopes.pop();
+      loops.delete(ins.loopId);
+      indent -= 1;
+      line("}");
+    }
+
+    /**
+     * A loop that holds a wait, in a resumable region: its round starts at `case pc`, its state is the region's
+     * (`run` while it runs, its position), so a round resumes where it waited.
+     */
+    function flatLoopHead(ins, pc) {
+      const run = `run${pc}`;
+      hoisted.push(run);
+      loops.set(ins.loopId, { flat: true, run, head: pc, end: ins.target });
+      const exit = `{ ${run} = false; pc = ${ins.target}; continue D; }`;
+      if (ins.loopKind === "while") {
+        const c = x();
+        line(`${c} = ${expr(ins.expression)};`);
+        line(`if (${c} !== true) { if (${c} === false) ${exit} throw rt.notBool(${konst(ins.expression)}, ${c}); }`);
+        line(`${run} = true;`);
+        scopes.push(new Map());
+      } else if (ins.loopKind === "for") {
+        const [i, a, n, it, vs] = [`i${pc}`, `a${pc}`, `n${pc}`, `it${pc}`, `vs${pc}`];
+        hoisted.push(i, a, n, it, vs);
+        const s = x();
+        line(`if (${run} !== true) { ${s} = rt.forSource(${konst(ins)}, ${expr(ins.expression)}); ${run} = true; ${i} = 0; ${a} = ${s}.start; ${n} = ${s}.length; ${it} = ${s}.items; ${vs} = ${s}.values; }`);
+        line(`if (${i} >= ${n}) ${exit}`);
+        scopes.push(new Map());
+        const v = declare(ins.variable);
+        line(`${v.code} = ${it} === null ? ${a} + ${i} : ${it}[${i}];`);
+        if (ins.valueVariable !== undefined) {
+          const w = declare(ins.valueVariable);
+          const c = x();
+          line(`${w.code} = (${c} = ${vs}[${i}], typeof ${c} === "object" && ${c} !== null ? rt.copy(${c}) : ${c});`);
+        }
+        line(`${i} += 1;`);
+      } else if (ins.loopKind === "repeat") {
+        const r = `r${pc}`;
+        hoisted.push(r);
+        line(`if (${run} !== true) { ${r} = rt.repeatCount(${konst(ins.expression)}, ${expr(ins.expression)}); ${run} = true; }`);
+        line(`if (${r} <= 0) ${exit}`);
+        line(`${r} -= 1;`);
+        scopes.push(new Map());
+      } else throw new Unsupported(`a '${ins.loopKind}' loop`);
     }
 
     function statement(ins, pc) {
@@ -433,15 +588,19 @@ export function emitProgram(plan) {
           line(`rt.setDefaultSpeaker(${JSON.stringify(ins.name)}, ${rawRead(ins.name)}, ${konst(ins.span)});`);
           return;
         case "enterScope":
-          line("{");
-          indent += 1;
+          if (!flat) {
+            line("{");
+            indent += 1;
+          }
           scopes.push(new Map());
           return;
         case "leaveScope":
           if (scopes.length === 1) throw new Unsupported("a scope left at the region's first scope");
           scopes.pop();
-          indent -= 1;
-          line("}");
+          if (!flat) {
+            indent -= 1;
+            line("}");
+          }
           return;
         case "declareBinding": {
           if (ins.partChecks !== undefined) throw new Unsupported("part checks");
@@ -521,6 +680,11 @@ export function emitProgram(plan) {
           const slots = ins.arguments.map((a) => definition.parameters.findIndex((p) => p.name === a.parameterName));
           if (slots.includes(-1) || new Set(slots).size !== definition.parameters.length)
             throw new Unsupported("a call that does not supply every parameter");
+          const resumes = resumable && canWait.has(ins.functionId);
+          if (resumes) {
+            line("if (!rt.resuming) {");
+            indent += 1;
+          }
           const args = ins.arguments.map((a) => {
             const v = x();
             line(`${v} = ${own(a.value)};`);
@@ -529,8 +693,21 @@ export function emitProgram(plan) {
           ins.arguments.forEach((a, index) => {
             if (a.typeCheck !== undefined) line(`rt.typeCheck(${args[index]}, ${konst(a.typeCheck)}, ${konst(a.value.span)});`);
           });
+          if (resumes) {
+            indent -= 1;
+            line("}");
+          }
           const ordered = definition.parameters.map((_, slot) => args[slots.indexOf(slot)]);
-          line(`rt.enter(${konst(ins.span)}); ${temp(ins.destinationTemporary)} = f${ins.functionId}(${ordered.join(", ")}); rt.depth -= 1;`);
+          if (!resumes) {
+            line(`rt.enter(${konst(ins.span)}); ${temp(ins.destinationTemporary)} = f${ins.functionId}(${ordered.join(", ")}); rt.depth -= 1;`);
+            return;
+          }
+          // A call of a function that can wait: on resume its frame comes back to it; at its wait this frame is saved.
+          line(`try {`);
+          line(`  if (rt.resuming) { rt.depth += 1; ${temp(ins.destinationTemporary)} = f${ins.functionId}(rt.resumeFrame()); }`);
+          line(`  else { rt.enter(${konst(ins.span)}); ${temp(ins.destinationTemporary)} = f${ins.functionId}(null${ordered.map((a) => `, ${a}`).join("")}); }`);
+          line(`} catch (signal) { if (signal === rt.SUSPEND) rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: ${pc}, v: [%SAVED%] }); throw signal; }`);
+          line(`rt.depth -= 1;`);
           return;
         }
         case "bindSuppliedParameter":
@@ -564,7 +741,10 @@ export function emitProgram(plan) {
           ];
           // The gate records where the say stands; inside a function this prototype knows only its own region's part.
           const place = `{ pc: ${pc}, ownerCallFrameId: null, scopeDepth: ${scopes.length}, loopDepth: ${openLoops()} }`;
-          line(`if (rt.say(${konst(ins)}, () => ({ ${parts.join(", ")} }), ${place})) rt.waited();`);
+          if (flat) {
+            line(`if (rt.say(${konst(ins)}, () => ({ ${parts.join(", ")} }), ${place})) ${suspendHere(1e6 + pc)}`);
+            line(`case ${1e6 + pc}:`);
+          } else line(`if (rt.say(${konst(ins)}, () => ({ ${parts.join(", ")} }), ${place})) rt.waited();`);
           return;
         }
         case "exit":
@@ -573,16 +753,75 @@ export function emitProgram(plan) {
         case "end":
           line(`rt.end(${konst(ins.span)});`);
           return;
+        case "goto":
+          throw new Unsupported("goto a label");
+        case "transfer":
+          if (ins.mode !== undefined && ins.mode !== "goto") throw new Unsupported(`a file ${ins.mode}`);
+          bridgeInstruction(ins, pc, "rt.transfer");
+          return;
         default:
-          throw new Unsupported(`the instruction '${ins.kind}'`);
+          bridgeInstruction(ins, pc, "rt.instruction");
       }
+    }
+
+    /**
+     * An instruction the emitter does not write itself: its operands are evaluated here in field order and today's
+     * engine executes it on the session's state (`rt.instruction`); the temporaries it reads go to the state first,
+     * those it writes come back after it, past its wait when it waits.
+     */
+    function bridgeInstruction(ins, pc, via) {
+      const operands = [];
+      const map = new Map();
+      const find = (node) => {
+        if (Array.isArray(node)) return node.forEach(find);
+        if (node === null || typeof node !== "object") return;
+        if (typeof node.kind === "string" && EXPRESSION_KINDS.has(node.kind) && node !== ins) {
+          map.set(node, { kind: "temporary", temporaryId: 1e9 + operands.length, span: node.span });
+          operands.push(node);
+          return;
+        }
+        for (const [key, value] of Object.entries(node)) if (key !== "span") find(value);
+      };
+      find(ins);
+      const reads = [];
+      const writes = [];
+      for (const [key, value] of Object.entries(ins)) {
+        if (typeof value !== "number" || !/Temporary$/.test(key)) continue;
+        (/^destination|^default/.test(key) ? writes : reads).push(value);
+      }
+      if (Array.isArray(ins.temporaryIds)) reads.push(...ins.temporaryIds);
+      const values = operands.map((operand) => expr(operand));
+      const sources = reads.map((id) => `${id}, ${temp(id)}`);
+      const call = `${via}(${konst(substitute(ins, map))}, ${pc}, [${values.join(", ")}], [${sources.join(", ")}])`;
+      if (flat) {
+        line(`if (${call}) ${suspendHere(1e6 + pc)}`);
+        line(`case ${1e6 + pc}:`);
+      } else line(`if (${call}) rt.waited();`);
+      for (const id of writes) line(`${temp(id)} = rt.takeTemporary(${id});`);
     }
 
     emitRange(start, end);
     const header = [];
-    const locals = [...[...temps].map((id) => `t${id}`), ...Array.from({ length: scratch }, (_, i) => `x${i}`)];
+    const locals = [...[...temps].map((id) => `t${id}`), ...Array.from({ length: scratch }, (_, i) => `x${i}`), ...hoisted];
     if (locals.length > 0) header.push(`  let ${locals.join(", ")};`);
-    if (definition === null) return [`function main() {`, ...header, ...out, "}"].join("\n");
-    return [`function f${definition.id}(${params.join(", ")}) {`, ...header, ...out, "  return null;", "}"].join("\n");
+    if (!flatRegion) {
+      if (definition === null) return [`function file${fileIndex}() {`, ...header, ...out, "}"].join("\n");
+      return [`function f${definition.id}(${params.join(", ")}) {`, ...header, ...out, "  return null;", "}"].join("\n");
+    }
+    // A resumable region: its argument evaluation before a call that waits runs only on a fresh entry of that call.
+    const savedList = saved().join(", ");
+    const body = out.map((text) => text.replaceAll("%SAVED%", savedList));
+    const signature = definition === null ? `function file${fileIndex}(resume) {` : `function f${definition.id}(resume${params.map((p) => `, ${p}`).join("")}) {`;
+    return [
+      signature,
+      ...header,
+      `  let pc = ${start};`,
+      `  if (resume !== null) { pc = resume.pc; [${savedList}] = resume.v; }`,
+      "  D: for (;;) switch (pc) {",
+      ...body,
+      definition === null ? "  default: throw new Error(`study: no resume point ${pc}`);" : "  return null;",
+      "  }",
+      "}",
+    ].join("\n");
   }
 }

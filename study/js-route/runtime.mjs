@@ -10,7 +10,7 @@ import {
   unitDuration,
 } from "../../dist/src/runtime/evaluator.js";
 import { Evaluator } from "../../dist/src/runtime/evaluator.js";
-import { haltForExit } from "../../dist/src/runtime/engine.js";
+import { executePlannedInstruction, haltForExit } from "../../dist/src/runtime/engine.js";
 import { DICT_ACCESS } from "../../dist/src/dict-operations.js";
 import { isRepeatCount } from "../../dist/src/loop-rules.js";
 import { badRepeatCount } from "../../dist/src/runtime/instructions/loops.js";
@@ -65,6 +65,12 @@ import { NativeDict, NativeObject, NativeSet } from "../../dist/src/runtime/nati
 export const SUSPEND = Symbol("suspend");
 /** Thrown to unwind the program after `exit`. */
 export const EXIT = Symbol("exit");
+/** Thrown by a `goto` to a file: the program's dispatcher starts that file. */
+export class Goto {
+  constructor(file) {
+    this.file = file;
+  }
+}
 
 export class Runtime {
   constructor(plan, snapshot, session) {
@@ -81,9 +87,18 @@ export class Runtime {
     /** The labels of prepared references by temporary, as `referencePlaceLabel` gives them. */
     this.referenceLabels = [];
     this.session = session;
+    this.Goto = Goto;
+    this.SUSPEND = SUSPEND;
+    /** Part C way (2): the frames a wait saved, innermost first; on resume, the frames to give back, outermost first. */
+    this.frames = [];
+    this.resumeFrames = [];
+    this.resuming = false;
+    /** Each file's entry instruction, by file index (`emitProgram`). */
+    this.fileEntries = [];
     this.NEEDS = NEEDS_DEFAULT;
     /** How many calls and expressions today's evaluator ran for the program (`bridge`). */
     this.bridged = 0;
+    this.bridgedInstructions = 0;
   }
 
   preparedReferenceLabel(temporaryId) {
@@ -377,6 +392,11 @@ export class Runtime {
     for (const event of events) drive.push(event);
     return session.status === "waiting";
   }
+  resumeFrame() {
+    const frame = this.resumeFrames.shift();
+    if (this.resumeFrames.length === 0) this.resuming = false;
+    return frame;
+  }
   /** At a wait the program reached: true when the session settled it (the program goes on), else the drive ends. */
   waited() {
     if (this.session.settle(this)) return;
@@ -389,6 +409,50 @@ export class Runtime {
   }
   end(span) {
     throw endWithoutCall(span);
+  }
+  /**
+   * Today's engine executes `synthetic`, an instruction whose operands are temporaries 1e9 + i holding `values`; the
+   * temporaries `sources` (id, value pairs) go to the state first. Gives true when the instruction waits.
+   */
+  instruction(synthetic, pc, values, sources) {
+    const snapshot = this.snapshot;
+    const ids = new Set();
+    values.forEach((value, index) => {
+      snapshot.temporaries.push({ id: 1e9 + index, value: shown(value) });
+      ids.add(1e9 + index);
+    });
+    for (let i = 0; i < sources.length; i += 2) {
+      if (sources[i + 1] === undefined) continue;
+      snapshot.temporaries.push({ id: sources[i], value: shown(sources[i + 1]) });
+      ids.add(sources[i]);
+    }
+    snapshot.nextInstruction = pc;
+    snapshot.status = "running";
+    this.bridgedInstructions += 1;
+    try {
+      executePlannedInstruction(this.plan, synthetic, snapshot, new Evaluator(snapshot, this.capabilities, this.events, this.plan), this.events);
+    } finally {
+      for (let i = snapshot.temporaries.length - 1; i >= 0; i -= 1)
+        if (ids.has(snapshot.temporaries[i].id)) snapshot.temporaries.splice(i, 1);
+      snapshot.contextualSpeaker = null;
+    }
+    return snapshot.status === "waiting";
+  }
+  /** A `goto` to a file, executed by today's engine (its effects on timers, media and draws), then unwound to it. */
+  transfer(synthetic, pc, values, sources) {
+    this.instruction(synthetic, pc, values, sources);
+    const file = this.fileEntries.indexOf(this.snapshot.nextInstruction);
+    if (file < 0) throw new Error("study: a goto to a place that is no file's entry");
+    this.depth = 0;
+    throw new Goto(file);
+  }
+  /** The value an instruction of today's engine wrote to temporary `id`, taken off the state. */
+  takeTemporary(id) {
+    const temporaries = this.snapshot.temporaries;
+    const index = temporaries.findIndex((temporary) => temporary.id === id);
+    if (index < 0) return undefined;
+    const [temporary] = temporaries.splice(index, 1);
+    return fromCanonical(temporary.value);
   }
   fault(code, message, span) {
     return fault(code, message, span);
