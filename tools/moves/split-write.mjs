@@ -13,35 +13,42 @@
 //
 // ASSIGN is a JSON file, kept with the split's evidence:
 //   { "old": PATH,
-//     "setup": { "path": PATH, "header": SENTENCE, "lines": [[A, B]…] },
-//     "files": { PATH: { "header": SENTENCE | null, "tests": [N…], "lines": [[A, B]…] }, … } }
+//     "setup": { "path": PATH, "header": SENTENCE, "lines": [[A, B]…], "names": [NAME…], "reads": [PATH…] },
+//     "files": { PATH: { "header": SENTENCE | null, "tests": [N…], "lines": …, "names": …, "reads": … }, … } }
 // A test is a top-level call whose first argument is a string (`test("…", …)`), numbered from 1 in OLD's order. Each
 // test is named by exactly one file. `"lines"` (optional) gives OLD's lines A to B (1-based, inclusive) to that file
 // whole, statements and comments alike: a docblock that describes another file's tests, a range of declarations that
 // belong in the setup module. A range within OLD's leading `//` lines (a pin mark) puts those lines first in that
-// file's header instead. A `header` sentence is wrapped to 120 columns as `//` lines above the file's imports; `null`
-// writes none (the file that keeps OLD's own docblock).
+// file's header instead. `"names"` (optional) gives each statement declaring one of the names a range, from the line
+// after the statement or import before it (its blank and comment lines) to its last line: a name OLD does not declare,
+// or one two files name, is refused, and a range a name gives is refused as any range is (overlapping another). A
+// `header` sentence is wrapped to 120 columns as `//` lines above the file's imports; `null` writes none (the file that
+// keeps OLD's own docblock).
 //
 // The rule for what is not a test: a declaration (its names, a destructuring pattern's included) goes to the file whose
 // tests read it, through the declarations they read in turn; to the setup module when tests of two files read it, or
-// when a setup declaration reads it. A setup declaration another file reads gains `export `; each file imports, by
-// name, the setup names it reads (once each; an interface or a type alias with `type`), and OLD's imports filtered to
-// the names its statements use (a relative specifier rewritten for its folder; an import without bindings goes to every
-// file). OLD's imports are only their own lines, wherever they stand: the code between two imports is placed as any
-// statement. Lines after OLD's last statement go with it.
+// when a setup declaration reads it. Every other file may read the setup module's declarations, and any file those of
+// the files its `"reads"` names (a layered split: one file reading several, or a chain). A declaration another file
+// reads gains `export `; each file imports, by name, the names it reads from each other file (once each; an interface
+// or a type alias with `type`; the setup module's import first, then the others' in the assignment's order), and OLD's
+// imports filtered to the names its statements use (a relative specifier rewritten for its folder; an import without
+// bindings goes to every file). OLD's imports are only their own lines, wherever they stand: the code between two
+// imports is placed as any statement. Lines after OLD's last statement go with it.
 //
 // Refused, writing nothing (exit 2): a leading `//` line of OLD in no range (it would be lost), or a comment above a
 // later import in none; a test named twice or not at all, or a number OLD does not have; a statement that is neither a
 // test nor a declaration and in no range; a declaration no test reaches; statements of two files on one line; a range
 // that overlaps another, cuts a statement's own lines, holds an import or crosses from OLD's leading `//` lines into
-// the body; a file whose declaration reads one placed in another file that is not the setup module; a path outside the
-// repository; a target that exists at REV and is not OLD; a missing header. On success it removes OLD from the working
-// tree unless OLD is a target, and prints each file written with its line count. Prettier is not run: format the
-// written files afterwards. Beside ASSIGN it writes `renames.json`, OLD to every written file (`{ "renames": { OLD:
-// [FILE, …] } }`), the map `pure-move-check --renames` and `move-sweep --renames` read. Last it lists each string in
-// OLD's code outside an import or export declaration that starts with `./` or `../` and went to a file in another
-// folder than OLD's (`relative paths to read: N`, then each with its file and OLD line): a path relative to the file,
-// which the move may break and the tool cannot tell from data, for the builder to read.
+// the body; a file whose statement reads one placed in another file that is neither the setup module (for a file other
+// than it) nor named by its `"reads"`; a `"reads"` entry that is not another file of the split; reads that form a cycle
+// between files (each named with one name it reads); a path outside the repository; a target that exists at REV and is
+// not OLD; a missing header. On success it removes OLD from the working tree unless OLD is a target, and prints each
+// file written with its line count. Prettier is not run: format the written files afterwards. Beside ASSIGN it writes
+// `renames.json`, OLD to every written file (`{ "renames": { OLD: [FILE, …] } }`), the map `pure-move-check --renames`
+// and `move-sweep --renames` read. Last it lists each string in OLD's code outside an import or export declaration that
+// starts with `./` or `../` and went to a file in another folder than OLD's (`relative paths to read: N`, then each
+// with its file and OLD line): a path relative to the file, which the move may break and the tool cannot tell from
+// data, for the builder to read.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -182,6 +189,29 @@ function scan(file, text) {
   return { imports, statements, tests, relative, docblock };
 }
 
+/**
+ * Each target's ranges (`targets`, `[file, spec]` pairs) as a function of its file and spec: its `lines`, and a range for
+ * each statement declaring one of its `names`, from the line after the statement or import before it (`nodes`, OLD's in
+ * order) to its last, never into OLD's `lead` leading `//` lines.
+ */
+function namedRanges(old, nodes, lead, targets) {
+  const named = new Map();
+  for (const [file, spec] of targets)
+    for (const name of spec.names ?? []) {
+      const owners = old.statements.filter((statement) => statement.names.includes(name));
+      refuseUnless(owners.length > 0, `${file}: OLD declares no ${name}`);
+      refuseUnless(!named.has(name), `${name} is named by ${named.get(name)} and ${file}`);
+      named.set(name, file);
+    }
+  return (file, spec) => {
+    const out = [...(spec.lines ?? [])];
+    for (const [at, node] of nodes.entries())
+      if (!node.import && node.names.some((name) => named.get(name) === file))
+        out.push([Math.max(lead + 1, at === 0 ? 1 : nodes[at - 1].last + 1), node.last]);
+    return out;
+  };
+}
+
 /** The file each of OLD's lines goes to, by the assignment's ranges, tests and the declaration rule. */
 function place(old, lines, assign) {
   const lead = leadingComments(lines);
@@ -191,10 +221,12 @@ function place(old, lines, assign) {
     ...old.imports.map((entry) => ({ import: true, own: entry.first, last: entry.last })),
     ...old.statements,
   ].sort((a, b) => a.own - b.own);
+  const targets = [[setup, assign.setup], ...Object.entries(assign.files)];
+  const rangesOf = namedRanges(old, nodes, lead, targets);
   /** OLD line (1-based) → its file, from the ranges. */
   const ranged = new Map();
-  for (const [file, spec] of [[setup, assign.setup], ...Object.entries(assign.files)])
-    for (const [from, to] of spec.lines ?? []) {
+  for (const [file, spec] of targets)
+    for (const [from, to] of rangesOf(file, spec)) {
       refuseUnless(
         Number.isInteger(from) &&
           Number.isInteger(to) &&
@@ -261,6 +293,15 @@ function place(old, lines, assign) {
       if (file !== statement.file) [statement.file, changed] = [file, true];
     }
   }
+  // (each file reads the setup module, and the files its `reads` names, and no other; the reads form no cycle)
+  const mayRead = new Map(targets.map(([file, spec]) => [file, new Set(spec.reads ?? [])]));
+  for (const [file, spec] of targets)
+    for (const target of spec.reads ?? [])
+      refuseUnless(
+        target !== file && mayRead.has(target),
+        `${file}: its reads name ${target}, which is not another file of the split`,
+      );
+  const edges = new Map(targets.map(([file]) => [file, new Map()]));
   for (const statement of old.statements) {
     refuseUnless(
       statement.file !== undefined,
@@ -268,12 +309,19 @@ function place(old, lines, assign) {
     );
     for (const name of statement.reads) {
       const target = byName.get(name).file;
+      if (target === statement.file) continue;
       refuseUnless(
-        target === statement.file || target === setup,
-        `line ${statement.own}: ${statement.file} reads ${name}, placed in ${target}`,
+        (target === setup && statement.file !== setup) || mayRead.get(statement.file).has(target),
+        `line ${statement.own}: ${statement.file} reads ${name}, placed in ${target}, which its reads do not name`,
       );
+      if (!edges.get(statement.file).has(target)) edges.get(statement.file).set(target, name);
     }
   }
+  const cycle = cycleOf(edges);
+  refuseUnless(
+    cycle === null,
+    `a cycle of reads between the split's files: ${cycle?.map(([file, name]) => `${file} reads ${name}`).join(", ")}`,
+  );
   // Each line: a range's file, else the statement's below it (its blank and comment lines above it), else the last's.
   // An import's own lines are written again in each file's imports; above it, only blank lines may go unplaced.
   const fileOf = new Map(ranged);
@@ -305,6 +353,33 @@ function place(old, lines, assign) {
   return { fileOf, lead, byName };
 }
 
+/**
+ * A cycle in `edges` (file → the files it reads, each with one name it reads there), as `[file, name]` steps in the
+ * order of the reads, or `null` when there is none.
+ */
+function cycleOf(edges) {
+  const done = new Set();
+  const path = [];
+  const visit = (file) => {
+    const at = path.findIndex(([step]) => step === file);
+    if (at !== -1) return path.slice(at);
+    if (done.has(file)) return null;
+    for (const [target, name] of edges.get(file)) {
+      path.push([file, name]);
+      const found = visit(target);
+      if (found !== null) return found;
+      path.pop();
+    }
+    done.add(file);
+    return null;
+  };
+  for (const file of edges.keys()) {
+    const found = visit(file);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
 /** `sentence` as `//` lines of at most WIDTH columns. */
 function wrap(sentence) {
   const out = [];
@@ -333,19 +408,23 @@ function respecified(specifier, oldPath, file) {
 function render(old, lines, assign, { fileOf, lead, byName }) {
   const setup = assign.setup.path;
   const targets = [...Object.entries(assign.files), [setup, assign.setup]];
-  const readElsewhere = new Set(
-    old.statements.filter((s) => s.file !== setup).flatMap((s) => [...s.reads]),
-  );
+  // (a declaration another file reads gains `export `)
   const exportLines = new Set(
     old.statements
-      .filter((s) => s.file === setup && s.names.some((name) => readElsewhere.has(name)))
+      .filter((s) =>
+        s.names.some((name) =>
+          old.statements.some((other) => other.file !== s.file && other.reads.has(name)),
+        ),
+      )
       .filter((s) => !lines[s.own - 1].startsWith("export "))
       .map((s) => s.own),
   );
   // (once each: an overloaded function's signatures are statements of one name)
-  const setupNames = [
-    ...new Set(old.statements.filter((s) => s.file === setup).flatMap((s) => s.names)),
+  const namesOf = (file) => [
+    ...new Set(old.statements.filter((s) => s.file === file).flatMap((s) => s.names)),
   ];
+  // (the files a file may import from, in the order its imports are written: the setup module, then the others)
+  const sources = [setup, ...Object.keys(assign.files)];
   const texts = new Map();
   for (const [file, spec] of targets) {
     refuseUnless(
@@ -376,18 +455,18 @@ function render(old, lines, assign, { fileOf, lead, byName }) {
         imports.push(`import ${entry.typeOnly ? "type " : ""}${clause} from "${from}";`);
       }
     }
-    if (file !== setup) {
-      const read = new Set(statements.flatMap((s) => [...s.reads]));
-      const names = setupNames.filter((name) => read.has(name));
-      if (names.length > 0) {
-        const target = respecified(
-          `./${path.posix.basename(setup).replace(/\.(m?)ts$/u, ".$1js")}`,
-          setup,
-          file,
-        );
-        const list = names.map((name) => (byName.get(name).type ? `type ${name}` : name));
-        imports.push(`import { ${list.join(", ")} } from "${target}";`);
-      }
+    const read = new Set(statements.flatMap((s) => [...s.reads]));
+    for (const source of sources) {
+      if (source === file) continue;
+      const names = namesOf(source).filter((name) => read.has(name));
+      if (names.length === 0) continue;
+      const target = respecified(
+        `./${path.posix.basename(source).replace(/\.(m?)ts$/u, ".$1js")}`,
+        source,
+        file,
+      );
+      const list = names.map((name) => (byName.get(name).type ? `type ${name}` : name));
+      imports.push(`import { ${list.join(", ")} } from "${target}";`);
     }
     const body = [];
     for (let line = lead + 1; line <= lines.length; line += 1)

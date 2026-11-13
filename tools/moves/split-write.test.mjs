@@ -468,3 +468,153 @@ test("a JavaScript OLD is read as TypeScript is: a property read on a call lists
   assert.match(r.read("tools/probe-one.test.mjs"), /^const a = f\(\{ b: 1 \}\)\.c;$/mu);
   assert.match(r.read("tools/probe-two.test.mjs"), /^const c = 1;$/mu);
 });
+
+/** A helper module of four layers (line numbers matter): a base, two readers of it, and an aggregator of both. */
+const LAYERED = [
+  "// The layered helper.",
+  'import { double } from "../lib/numbers.js";',
+  "",
+  "/** The base. */",
+  "const BASE = 1;",
+  "",
+  "type Left = number;",
+  "",
+  "/** Reads the base. */",
+  "const LEFT: Left = double(BASE);",
+  "",
+  "const RIGHT = BASE + 1;",
+  "",
+  "/** Reads both. */",
+  "export function both(): number {",
+  "  return LEFT + RIGHT;",
+  "}",
+  "",
+].join("\n");
+const LAYERS = {
+  base: "tests/helpers/layers/base.ts",
+  left: "tests/helpers/layers/left.ts",
+  right: "tests/helpers/layers/right.ts",
+  top: "tests/helpers/layers/top.ts",
+};
+const HELPER = "tests/helpers/layered.ts";
+
+/** The layered split by names: the base as the setup module, `top` reading `left` and `right`. */
+function layered(changes = {}) {
+  const spec = (header, names, more = {}) => ({ header, tests: [], names, ...more });
+  const files = {
+    [LAYERS.left]: spec("Left.", ["Left", "LEFT"]),
+    [LAYERS.right]: spec("Right.", ["RIGHT"]),
+    [LAYERS.top]: spec(null, ["both"], { lines: [[1, 1]], reads: [LAYERS.left, LAYERS.right] }),
+  };
+  for (const [file, change] of Object.entries(changes)) files[file] = { ...files[file], ...change };
+  return { old: HELPER, setup: { path: LAYERS.base, header: "The base.", names: ["BASE"] }, files };
+}
+
+test("a module reading several split-out files is written in one run, its reads named, each import by name (#2583)", (t) => {
+  const r = repository(t, OLD, { [HELPER]: LAYERED });
+  const result = r.run(layered());
+  assert.equal(result.status, 0, result.err);
+  assert.equal(r.read(LAYERS.base), "// The base.\n\n/** The base. */\nexport const BASE = 1;\n");
+  assert.equal(
+    r.read(LAYERS.left),
+    [
+      "// Left.",
+      "",
+      'import { double } from "../../lib/numbers.js";',
+      'import { BASE } from "./base.js";',
+      "",
+      "type Left = number;",
+      "",
+      "/** Reads the base. */",
+      "export const LEFT: Left = double(BASE);",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(
+    r.read(LAYERS.right),
+    '// Right.\n\nimport { BASE } from "./base.js";\n\nexport const RIGHT = BASE + 1;\n',
+  );
+  assert.equal(
+    r.read(LAYERS.top),
+    [
+      "// The layered helper.",
+      "",
+      'import { LEFT } from "./left.js";',
+      'import { RIGHT } from "./right.js";',
+      "",
+      "/** Reads both. */",
+      "export function both(): number {",
+      "  return LEFT + RIGHT;",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  const check = spawnSync(
+    process.execPath,
+    [RECONSTRUCT, r.base, HELPER, LAYERS.base, LAYERS.left, LAYERS.right, LAYERS.top],
+    { cwd: r.fixture, encoding: "utf8" },
+  );
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+});
+
+test("a chain of three layers is written in one run, each layer importing the one below (#2583)", (t) => {
+  const r = repository(t, OLD, { [HELPER]: LAYERED });
+  // (right and top go to one file, which reads left; left reads the base)
+  const result = r.run({
+    ...layered(),
+    files: {
+      [LAYERS.left]: { header: "Left.", tests: [], names: ["Left", "LEFT"] },
+      [LAYERS.top]: {
+        header: null,
+        tests: [],
+        names: ["RIGHT", "both"],
+        lines: [[1, 1]],
+        reads: [LAYERS.left],
+      },
+    },
+  });
+  assert.equal(result.status, 0, result.err);
+  assert.match(
+    r.read(LAYERS.top),
+    /^\/\/ The layered helper\.\n\nimport \{ BASE \} from "\.\/base\.js";\nimport \{ LEFT \} from "\.\/left\.js";\n\nconst RIGHT = BASE \+ 1;\n/u,
+  );
+  assert.match(r.read(LAYERS.left), /^import \{ BASE \} from "\.\/base\.js";$/mu);
+});
+
+test("a read no reads entry names, a cycle of reads, a reads entry or a name the split lacks, and a name given twice are refused (#2583)", (t) => {
+  const r = repository(t, OLD, { [HELPER]: LAYERED });
+  // (each keyed by the refusal it must give, so that no later check stands in for it)
+  const cases = {
+    // the aggregator without its reads: the refusal a star split always gave
+    [`${LAYERS.top} reads LEFT, placed in ${LAYERS.left}, which its reads do not name`]: layered({
+      [LAYERS.top]: { reads: undefined },
+    }),
+    // (left's both reads right's LEFT; right's LEFT reads left's type Left)
+    [`a cycle of reads between the split's files: ${LAYERS.left} reads LEFT, ${LAYERS.right} reads Left`]:
+      layered({
+        [LAYERS.left]: { names: ["Left", "both"], reads: [LAYERS.right] },
+        [LAYERS.right]: { names: ["LEFT", "RIGHT"], reads: [LAYERS.left] },
+        [LAYERS.top]: { names: [], reads: [] },
+      }),
+    [`${LAYERS.top}: its reads name tests/helpers/layers/none.ts, which is not another file of the split`]:
+      layered({
+        [LAYERS.top]: { reads: [LAYERS.left, LAYERS.right, "tests/helpers/layers/none.ts"] },
+      }),
+    [`${LAYERS.top}: OLD declares no MISSING`]: layered({
+      [LAYERS.top]: { names: ["both", "MISSING"] },
+    }),
+    [`RIGHT is named by ${LAYERS.right} and ${LAYERS.top}`]: layered({
+      [LAYERS.top]: { names: ["both", "RIGHT"] },
+    }),
+    // a name's range and a range over the same statement
+    "overlaps another at line 13": layered({ [LAYERS.right]: { lines: [[13, 13]] } }),
+    // a declaration no name, range or test places is still refused
+    "line 15: both: no test reaches it": layered({ [LAYERS.top]: { names: [] } }),
+  };
+  for (const [name, assign] of Object.entries(cases)) {
+    const result = r.run(assign);
+    assert.equal(result.status, 2, `${name}: ${result.out}${result.err}`);
+    assert.ok(result.err.startsWith("split-write: ") && result.err.includes(name), result.err);
+    assert.equal(r.changed(), "", name);
+  }
+});
