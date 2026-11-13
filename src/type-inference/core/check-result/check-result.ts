@@ -141,9 +141,10 @@ export function coreCheckResult(
 ): TypeCheckResult {
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
   const { checks, core, contracts, moved } = runtimeChecks(answers, index, request);
-  const values = knownValues(answers, index, (call) => core.expected.get(call));
-  const known = (expression: Expression) => values.known(expression);
-  const refused = knownAmountRefused(index, values, request);
+  const expected = (call: CallExpression) => core.expected.get(call);
+  const known = knownValues(answers, index, expected);
+  // (on known values of its own, so the work its walk spends leaves the checks' budget as it was)
+  const refused = knownAmountRefused(index, knownValuesOf(answers, index, expected), request);
   if (refused !== null)
     throw new OutsideContract(refused, `this ${KIND_WORDS[refused.kind] ?? "calculation"}`);
   const fallbacks = fallbackUses(answers, index);
@@ -203,8 +204,20 @@ function knownValues(
   answers: Answers,
   index: SliceIndex,
   expected: (call: CallExpression) => TypePlan | undefined,
+): (expression: Expression) => KnownValue | undefined {
+  const values = knownValuesOf(answers, index, expected);
+  const known = (expression: Expression) => values.known(expression);
+  answers.shareKnown(known);
+  return known;
+}
+
+/** A program's known values (`knownValues`), not shared: each instance spends its own `KNOWN_VALUE_WORK`. */
+function knownValuesOf(
+  answers: Answers,
+  index: SliceIndex,
+  expected: (call: CallExpression) => TypePlan | undefined,
 ): KnownValues {
-  const values = new KnownValues(
+  return new KnownValues(
     (identifier) => {
       const initializer = answers.initializers.get(
         siteKey(index.fileOf(identifier), identifier.span),
@@ -223,8 +236,6 @@ function knownValues(
       return kinds.includes("unknown") || admitsKnown(kinds, value);
     },
   );
-  answers.shareKnown((expression) => values.known(expression));
-  return values;
 }
 
 /** A step `knownAmountRefused` refuses, in words. */
@@ -237,8 +248,7 @@ const KIND_WORDS: Readonly<Record<string, string>> = {
  * The first step whose known amount today's checker refuses, by today's own predicates on the core's known values: a
  * step whose known operands give no value it can represent (`findVisibleOverflows`, today's TSV050: in the slice, a unit
  * or an angle of a known amount), then a calendar unit whose known amount gives no whole days or months (`unitValue`,
- * today's TSV043); `null` where none is. Both read `quantity`, which spends no known-value work, so the checks after it
- * read what they read without them.
+ * today's TSV043); `null` where none is. Its walk builds known values, which spends their work, so `values` is its own.
  */
 function knownAmountRefused(
   index: SliceIndex,
@@ -404,11 +414,10 @@ export function checkedResult(answers: Answers, request: CoreAnalysisRequest): C
         throw error;
       }
     };
-    const values = knownValues(answers, index, expected);
     return checkedOf(
       answers,
       index,
-      (expression) => values.known(expression),
+      knownValues(answers, index, expected),
       fallbackUses(answers, index),
     );
   });
