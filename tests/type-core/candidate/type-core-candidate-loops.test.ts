@@ -49,7 +49,10 @@ const one = (name: string, source: string, expect: Expect = "equal"): Row => ({
   expect,
 });
 
-/** A diagnostic the inherited classes allow on one side only: the route's TSV041 warning, today's TSV046 warning. */
+/**
+ * A diagnostic allowed on one side only: the route's TSV041 warning (1a's class, and in a type case's block #2674's, whose
+ * type case does not narrow), today's TSV046 warning.
+ */
 const ROUTE_ONLY = "warning TSV041";
 const TODAY_ONLY = "warning TSV046";
 
