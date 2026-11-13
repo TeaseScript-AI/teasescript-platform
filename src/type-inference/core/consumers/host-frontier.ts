@@ -119,7 +119,7 @@ export interface FrontierRead {
 
 /**
  * Test-only: runs `callback` with each read's walk bounded by `bound` (the exact reference: `Infinity` for both), and
- * records each read's walk (the bounded frontier's oracle, `tests/type-core-stop/type-core-stop-frontier.test.ts`).
+ * records each read's walk (the bounded frontier's oracle, `type-core-stop-frontier.test.ts`).
  */
 export function withFrontierBound<T>(
   bound: { readonly depth: number; readonly copies: number },

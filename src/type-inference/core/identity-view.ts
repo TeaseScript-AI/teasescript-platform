@@ -395,7 +395,7 @@ function viewProgram(
  * parentheses, and below a slot, what parentheses hold and a property's or an element's receiver; with the parentheses
  * stripped from a callee, a unit each. The analysis's readers that take a parenthesized
  * expression for its place read these slots only, as a write's; a test reads its subject's value, which a call's result
- * shares with its argument when it runs (the inventory in tests/type-core/type-core-identity.test.ts).
+ * shares with its argument when it runs (the inventory in type-core-identity.test.ts).
  */
 function placeSlots(
   node: SyntaxNode,

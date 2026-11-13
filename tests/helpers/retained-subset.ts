@@ -65,7 +65,7 @@ export const FROZEN_IN_CI: ReadonlyMap<string, string> = new Map<string, string>
   ],
   [
     "type-core-key-ids.test",
-    "4 first: function PathSteps.followedBy (contract/key-ids.ts), function test.copiedKey (tests/type-core/type-core-key-ids.test.ts) and 2 more",
+    "4 first: function PathSteps.followedBy (contract/key-ids.ts), function test.copiedKey (tests/type-core/contract/type-core-key-ids.test.ts) and 2 more",
   ],
   [
     "type-core-messages-site.test",

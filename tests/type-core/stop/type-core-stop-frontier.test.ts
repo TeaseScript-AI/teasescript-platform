@@ -2,25 +2,25 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
+} from "../../../src/type-inference/core/budget.js";
 import {
   FRONTIER_COPIES,
   FRONTIER_DEPTH,
   withFrontierBound,
   type FrontierRead,
-} from "../../src/type-inference/core/consumers/host-frontier.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
+} from "../../../src/type-inference/core/consumers/host-frontier.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   heldDemands,
   HELD_MODES,
   randomCopyGraph,
   topologySources,
-} from "../helpers/type-core-held-host.js";
-import { stopIdentity } from "../helpers/type-core-oracles.js";
+} from "../../helpers/type-core-held-host.js";
+import { stopIdentity } from "../../helpers/type-core-oracles.js";
 
 /** An analysis and its reads' walks (`withFrontierBound`). */
 type Walked = { readonly result: Answers; readonly reads: ReadonlyMap<string, FrontierRead> };

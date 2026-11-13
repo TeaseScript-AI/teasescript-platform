@@ -831,7 +831,7 @@ interface PathMemo {
 /**
  * A path's steps as its record keeps them (G3 stage 1), opaque: read by position (`length`, `at`), spelled only by the
  * record (`text`, `prefixText`, `textOf`), and copied out only by `toArray`, a charged copy, each site's listed with its
- * reason (`tests/type-core/type-core-key-ids.test.ts`). Its views (`from`, `to`) read the steps they view in place, never a
+ * reason (`type-core-key-ids.test.ts`). Its views (`from`, `to`) read the steps they view in place, never a
  * copy; a view's path's id and text, found where asked (`spanId`, `prefixId`, `textOf`), are kept on the steps it views
  * by its offset and length (an entry), so the same view made again finds both free, as a span view's own id is. Its
  * joins (`stepsJoin`, `stepsAfter`) hold the steps a join of arrays held, made as plainly, their path the arena's join

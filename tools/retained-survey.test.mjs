@@ -15,7 +15,7 @@ function count(t, files) {
   for (const [file, value] of Object.entries({
     "tests/type-core/a.test.ts": "",
     "tests/type-core/b.test.ts": "",
-    "tests/type-core-stop/c.test.ts": "",
+    "tests/type-core/stop/c.test.ts": "",
     "tests/type-core/messages/d.test.ts": "",
     ...files,
   })) {

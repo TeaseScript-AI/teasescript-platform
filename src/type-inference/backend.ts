@@ -114,7 +114,7 @@ export interface TypeCheckResult {
   readonly ways: WayFacts;
   /**
    * The statements that the check found never run once their function, block, or file runs, which its narrowing and its
-   * loop effects follow: the plan's reachability finds the same ones (tests/semantic/reachability-differential.test.ts).
+   * loop effects follow: the plan's reachability finds the same ones (reachability-differential.test.ts).
    */
   readonly unreachable: ReadonlySet<Statement>;
   /** What the flow check of speaker properties needs from the check, once the project is lowered (V30 §37). */

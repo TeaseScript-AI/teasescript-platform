@@ -2,7 +2,7 @@
 // file wrote in a survey (`RETAINED_SURVEY=<folder>`, `tests/helpers/retained-instrument-preload.ts`), one JSON file per
 // test process, read from the folders given and every folder below them (a gathered queue campaign included). It prints
 // the files surveyed, the shapes refused and the writes to frozen data, then each refusal and frozen write by its
-// count, and names each test file of `tests/type-core/` and `tests/type-core-stop/`, a folder down in either included
+// count, and names each test file of `tests/type-core/`, a folder down in it included
 // (as the suite reads them, `suiteTestFiles`, from the working directory), that wrote no survey.
 //
 //   node tools/retained-survey.mjs FOLDER...
@@ -49,7 +49,7 @@ for (const survey of folders.flatMap(surveys)) {
 }
 const sum = (counts) => [...counts.values()].reduce((a, b) => a + b, 0);
 const missing = suiteTestFiles("tests", ".test.ts")
-  .filter((path) => /^type-core(-stop)?\//u.test(path))
+  .filter((path) => /^type-core\//u.test(path))
   .map((path) => basename(path, ".ts"))
   .filter((name) => !files.has(name))
   .sort();
