@@ -54,7 +54,7 @@ import {
 } from "./type-core-derived.js";
 import { fitsType, jsonValue, readJson, shown } from "./type-core-derived-values.js";
 import { askEnd } from "./derived-asks.js";
-import { functionCalls } from "./derived-functions.js";
+import { functionCalls, type ProjectFile } from "./derived-functions.js";
 
 // ------------------------------------------------------------------------------------------------- the evaluator
 
@@ -116,7 +116,7 @@ export function evaluate(
     loads: [],
   },
   /** The project's files, whose `global function`s the file's calls may name (`derived-functions.ts`). */
-  project: readonly Syntax[] = [],
+  project: readonly ProjectFile[] = [],
 ): {
   readonly run: PredictedRun;
   readonly events: readonly CheckEvent[];
@@ -143,8 +143,9 @@ export function evaluate(
   // (the calls of the script's own functions, `derived-functions.ts`)
   const functions = functionCalls({
     own: statements,
-    project,
     stores,
+    content,
+    project,
     env,
     value: (e) => value(e),
     run: (b) => run(b),
