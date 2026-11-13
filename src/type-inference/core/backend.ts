@@ -1,9 +1,10 @@
-import type { CallArgument, CallExpression, Expression } from "../../ast.js";
+import type { CallArgument, CallExpression, Expression, Statement } from "../../ast.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
+import type { SourceSpan } from "../../source.js";
 import { BUILT_IN_SPEAKER_PROPERTIES } from "../../speaker-terms.js";
 import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } from "../backend.js";
-import type { SourceSite } from "../graph.js";
-import { analyseCore, type Answers } from "./answers.js";
+import type { PlaceId, SourceSite } from "../graph.js";
+import { analyseCore, type Answers, type PlaceAnswer } from "./answers.js";
 import { asked, coreCheckResult, coreFacts } from "./check-result/check-result.js";
 import {
   LIMIT_REASONS,
@@ -11,7 +12,10 @@ import {
   SliceIndex,
   OutsideContract,
   SLICE_DEPTH,
+  unwrap,
 } from "./check-result/slice-index.js";
+import { COLLECTIONS } from "./contract-descriptors.js";
+import { keyOf } from "./definitions.js";
 import { oneType } from "./consumers/kinds.js";
 import { checkedOnSource, identityView, type IdentityView } from "./identity-view.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
@@ -50,9 +54,10 @@ import {
  * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
  * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an
  * `askChoice` whose buttons may return more than one type, an argument
- * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested
- * `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a route to the use has no
- * check, else a warning whose use the runtime checks.
+ * of another kind than a built-in function takes (the built-in signature check C13, S9b), lists nested
+ * `SLICE_DEPTH` deep, and a place whose admitted type an operation on external data widens (`widenedPlace`, #2727). A
+ * possible `null` is the route rule's (AD-1): a compile error where a route to the use has no check, else a warning
+ * whose use the runtime checks.
  * Refused during it: a value whose structure the slice does not follow, at the store whose capture established it
  * (`leftSlice`), the analysis ended there. A stop compiles with its warning and its checks at runtime (D4 a′), but a
  * store whose check the stop leaves uncarried or undecided declines the program (#1526 decision 2, condition 1,
@@ -373,5 +378,109 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           };
       }
     }
+  return widenedPlace(answers, index);
+}
+
+/**
+ * The first place whose admitted type an operation on external data widens, at the store or read the walk reached it
+ * from, or `null`. Admission counts a kind that only external-only items give (A2, A3: an operation's result kind
+ * possible solely through external data) as a store's (#2727), so where a store of the program settles another kind,
+ * the place is admitted wider than its stores settle it and a store of that operation goes unchecked, where ADR 0021
+ * rules 1.2 and 1.7 keep the settled type and check the store. A level whose admitted kinds hold no such kind, or whose
+ * contract holds no settled one (`null` and an unknown settle nothing, rule 1.1), is left to the analysis.
+ *
+ * The walk judges each level once: every property and element step below each place a `let` or an assignment stores
+ * into or a variable read reads. A value reaches a place only through a `let`, an assignment or a loop, and a loop
+ * variable's value goes on only through a read or an assignment. A level `SLICE_DEPTH` deep, or more levels than
+ * `SLICE_DEPTH` per expression of the program (copies along a cycle, or copies of copies many levels deep), leaves the
+ * slice instead. The walk runs only where an operation of the program gives an external-only item, the one source of
+ * one: an operator's value or a compound assignment's.
+ */
+function widenedPlace(answers: Answers, index: SliceIndex): Outside | null {
+  const external = (node: Statement | Expression): boolean =>
+    (answers.at(nodeOf(answers, index, node))?.items ?? []).some((item) => item.extOnly === true);
+  const compound = index.statements.filter(
+    (statement) => statement.kind === "assignmentStatement" && statement.operator !== "=",
+  );
+  if (!index.expressions.some(external) && !compound.some(external)) return null;
+  const roots: {
+    readonly at: Statement | Expression;
+    readonly span: SourceSpan;
+    readonly name: string | null;
+    readonly place: { readonly id: PlaceId; readonly path: readonly string[] } | null;
+  }[] = [];
+  for (const statement of index.statements)
+    if (statement.kind === "letStatement" || statement.kind === "assignmentStatement")
+      roots.push({
+        at: statement,
+        span: statement.kind === "letStatement" ? statement.name.span : statement.target.span,
+        name:
+          statement.kind === "letStatement" ? statement.name.name : variableOf(statement.target),
+        place: answers.storedPlace(nodeOf(answers, index, statement)),
+      });
+  for (const read of index.reads)
+    roots.push({
+      at: read,
+      span: read.span,
+      name: read.name,
+      place: answers.at(nodeOf(answers, index, read))?.place ?? null,
+    });
+  const judged = new Set<string>();
+  const most = SLICE_DEPTH * (index.expressions.length + 1);
+  for (const { at, span, name, place } of roots) {
+    if (place === null) continue;
+    const pending: (readonly string[])[] = [place.path];
+    for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
+      const key = keyOf(place.id, path);
+      if (judged.has(key)) continue;
+      judged.add(key);
+      if (judged.size > most || path.length + 1 >= SLICE_DEPTH)
+        return {
+          file: index.fileOf(at),
+          span,
+          what: "a value whose structure the slice does not follow",
+        };
+      const answer = answers.place(place.id, path);
+      if (widens(answer)) {
+        const label = path.map((step) => (step === "element" ? "[]" : `.${step}`)).join("");
+        return {
+          file: index.fileOf(at),
+          span,
+          what: `'${name ?? "this place"}${label}', whose type an operation on external data widens`,
+        };
+      }
+      for (const property of answers.placeProperties(place.id, path))
+        pending.push([...path, property]);
+      if (answer.contract.kinds.some((item) => COLLECTIONS.has(item.tag)))
+        pending.push([...path, "element"]);
+    }
+  }
   return null;
+}
+
+/**
+ * Whether a decided level admits a kind that only external-only items give, beside a kind its stores settle
+ * (`widenedPlace`).
+ */
+function widens(answer: PlaceAnswer): boolean {
+  if (answer.admitted.by !== "decided") return false;
+  const items = answer.contract.kinds;
+  const settled = items.some(
+    (item) => item.extOnly !== true && item.tag !== "null" && item.tag !== "unknown",
+  );
+  return (
+    settled &&
+    answer.admitted.kinds.some((tag) => {
+      const giving = items.filter((item) => item.tag === tag);
+      return giving.length > 0 && giving.every((item) => item.extOnly === true);
+    })
+  );
+}
+
+/** The variable an assignment's target stores into, below its properties and elements; `null` for another receiver. */
+function variableOf(target: Expression): string | null {
+  let at = target;
+  while (at.kind === "propertyAccessExpression" || at.kind === "indexExpression")
+    at = unwrap(at.object);
+  return at.kind === "identifier" ? at.name : null;
 }

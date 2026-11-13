@@ -1,13 +1,14 @@
 // The candidate route's operators (#2488's step 2c, #2688): each operand of each unary and binary operator, from the host
 // and from a typed place, compiles on the route in the four held modes, and every run ends as today's and as the
-// derived oracle's (`derived-operators.ts`); `and` and `or` skip a right side that would fail.
+// derived oracle's (`derived-operators.ts`); `and` and `or` skip a right side that would fail. A place an operation on
+// external data widens beside its stores' kind leaves the slice (`widenedPlace`, #2727).
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProject, compileProjectWithBackend } from "../../../src/compiler.js";
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
-import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
 import { HELD_MODES } from "../../helpers/type-core-held-host.js";
 import { recordOfFile, runGlobals } from "../../helpers/type-core-route.js";
@@ -123,5 +124,56 @@ test("a typed place stores no operation none of whose possible types fits it: AD
       ["TSV041"],
       mode.name,
     );
+  }
+});
+
+test("a place an operation on external data widens beside its stores' kind leaves the slice, at the variable (#2727)", () => {
+  // (each widens an `integer` place by the `number` an operation on the host value may give, a check today's checker
+  // carries at the store, and which admission's reading of external-only kinds leaves out until #2727)
+  for (const [source, offset, place] of [
+    ["let n = 1\nn = n - hostValue", 4, "n"],
+    ["let n = 1\nn -= hostValue", 4, "n"],
+    ["let o = {a: 1}\no.a = o.a + hostValue", 4, "o.a"],
+    ["let o = {a: 1}\no.a += hostValue", 4, "o.a"],
+    ["let o = {a: 1}\no = {a: o.a - hostValue}", 4, "o.a"],
+    ["let o = {a: 1}\nlet p = {a: 1 - hostValue}\no = p", 4, "o.a"],
+    ["let xs = [1]\nxs = [1, 1 - hostValue]", 4, "xs[]"],
+    ["let n = 1\nlet k = n - hostValue\nn = k", 4, "n"],
+    ["let n = 1\nlet m = n\nm = m - hostValue", 14, "m"],
+    ["let n = 1\nif hostValue > 0 {\n  n = n - hostValue\n}", 4, "n"],
+  ] as const) {
+    const files = [{ path: "main.tease", source: `${source}\nexit\n` }];
+    for (const mode of HELD_MODES)
+      assert.throws(
+        () => mode.run(() => compileProjectWithBackend(files, OPTIONS, CORE_BACKEND)),
+        (error) =>
+          error instanceof CandidateOutsideSlice &&
+          error.site.start === offset &&
+          error.what === `'${place}', whose type an operation on external data widens`,
+        `${source} [${mode.name}]`,
+      );
+  }
+  // (and none where no store of the program settles the place, or where the place admits the operation's kinds through
+  // the program's own stores: each runs as today's)
+  for (const source of [
+    "let m = 1 - hostValue",
+    "let n = null\nn = 1 - hostValue",
+    "let x = 0.5\nx = x - hostValue",
+    'let s = "a"\ns = s + hostValue',
+    "let n = 2\nn = n * hostValue",
+  ]) {
+    const files = [{ path: "main.tease", source: `${source}\nexit\n` }];
+    const today = compileProject(files, OPTIONS);
+    assert.ok(today.plan !== null, source);
+    for (const mode of HELD_MODES) {
+      const route = mode.run(() => compileProjectWithBackend(files, OPTIONS, CORE_BACKEND));
+      assert.ok(route.plan !== null, `${source} [${mode.name}]`);
+      for (const hostValue of [2, 2.5])
+        assert.deepEqual(
+          runGlobals(route.plan, { hostValue }),
+          runGlobals(today.plan, { hostValue }),
+          `${source} [${mode.name}] with ${hostValue}`,
+        );
+    }
   }
 });

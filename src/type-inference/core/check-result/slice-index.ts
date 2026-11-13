@@ -67,7 +67,10 @@ function pushStatements(pending: Entry[], list: readonly Statement[]): void {
 export class SliceIndex {
   readonly lets: LetStatement[] = [];
   readonly statements: Statement[] = [];
-  /** Every expression the analysis answers: all but an assignment's target, which a compound one's variable is. */
+  /**
+   * Every expression the analysis answers: an assignment's target is none, but its receiver and index are, and so is a
+   * compound assignment's variable, which it reads.
+   */
   readonly expressions: Expression[] = [];
   readonly lists: ListLiteral[] = [];
   /** The reads of variables and host values. */
