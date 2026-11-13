@@ -148,6 +148,11 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "exact-path.ts #defVal spread": [1, "items, no path"],
   "exact-path.ts #stopAt spread": [2, "the spans per prefix of a path, no path"],
   "items.ts union composite": [2, "two item ids"],
+  // the command operand table's position names (#2488's step 1½), read from the syntax after the analysis, never a path
+  "slice-syntax.ts askOperandsByPosition step": [
+    1,
+    "an ask's operand position named as the table names it (`askText.question`)",
+  ],
   // a diagnostic's sentences (#1195), made for the author after the analysis, never kept by it
   "messages/words.ts choiceSubject step": [
     1,
