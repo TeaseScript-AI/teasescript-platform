@@ -210,7 +210,8 @@ const UI_CHECK: OperandCheck = { file: INTERACTION, function: "materializeIntera
  * from today's checker's rule for the position; `form`, today's rule on the operand as written (a known text, a choice
  * object written in place), shared whole with today's checker; `today`, today's compile errors for a value the operand does not
  * take; `check`, where the instruction refuses such a value whatever the plan says. The route refuses an operand that
- * may hold a value its rule does not take (`backend.ts`'s `outsideAnswers`), so today's checker answers.
+ * may hold a value its rule does not take (`backend.ts`'s `outsideAnswers`): the core has no consumer of its own at a
+ * command operand, so no part of the analysis judges the operand against its instruction until the table does.
  */
 export interface OperandRule {
   readonly takes: readonly ItemTag[];
@@ -371,7 +372,8 @@ export const COMMAND_OPERANDS = {
           : [[`${ask}.hint`, shown(SHOWN_TEXT)]]),
       ]),
     ),
-    // (an `askChoice`'s buttons, V30 §19: a choice object's own shape is the choice consumer's, TSV029)
+    // (an `askChoice`'s buttons, V30 §19: an option, a list's element, a label and a labelled list's element; a choice
+    // object written there has a choice object's shape, `choiceObjectShape`)
     "askChoice.option": choice([...CHOICE_VALUES, "object", "list", "set"], "returns"),
     "askChoice.element": choice([...CHOICE_VALUES, "object"], "returns"),
     "askChoice.label": choice([...SHOWS, "object", "list", "set"], "labelled"),
@@ -417,8 +419,9 @@ const ASK_NAMES: Readonly<Record<InteractionExpression["interactionKind"], strin
 /**
  * A command's or an ask's operands by the table's positions (`COMMAND_OPERANDS`), in source order; an operand the table
  * names no position for is not listed. A `wait` with a unit after its length takes an amount of that unit (`amount`);
- * an `askChoice`'s option is its `label` where a name or number labels it, else a list's elements each an `element`, a
- * choice object's `background`, or the `option` itself.
+ * an `askChoice`'s option is its `label` where a name or number labels it, a labelled list's elements each a
+ * `labelledElement`; else a list's elements each an `element`, or the `option` itself; a choice object written in any of
+ * these gives its `text` (`returnedText` where the button returns it), `value` and `background` (`choiceObject`).
  */
 export function commandOperands(
   node: Statement | InteractionExpression,
