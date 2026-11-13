@@ -522,6 +522,46 @@
         {"kind":"step","instructions":6,"status":"failed","rng":{"algorithm":"xorshift32-v1","state":11355432},"events":1,"eventsDigest":"58795a519fcb39ca6a4d2f0e064d603cce5485c2f458b56b379f54854df9cd9f","stateDigest":"81946f3a99ce69300eb57e62d189d8f58a87f22c2d207374b480c09d970574c2"}
       ]
     },
+    "project-rounds": {
+      "sourceSha256": "8947d2f56128ff7a58ddcaf428911bb14f3fae94a1d7d4435aba33d02841e7dc",
+      "instructions": 51,
+      "said": ["Total 27","Next 81 of 3","Done"],
+      "cuts": [
+        {"kind":"step","instructions":25,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"4223dc31cc7ac7a9d4e4d5e1044ce1ee9afaf4f004c0f6e87849db4dba17a889","stateDigest":"19753da2641a62f7a3fd92b770fc4bd333f61f9d54414115e9f580ba7c124d0b"},
+        {"kind":"step","instructions":48,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"30fbab3e9d0932089ed584ed1e7bd491784a5a07211ce51e9025b42b74de935d","stateDigest":"1a80fb68fe42f979a3a79045cce14890a513ad7d91d8c2aad90d9281248bc2aa"},
+        {"kind":"step","instructions":49,"status":"waiting","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"156d349a0590da73aa81dcf1363fb99906017742c9ce1534cb736c62f050029f","stateDigest":"41ac192e9d280d30c89397fc51c12a2c10521968dba2667d16facbf3c92fa730"},
+        {"kind":"observe","instructions":49,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"d3725331b8dd3f6937750bb3d9e5a8481af52ee8f562b2cda4fb41f5990585c9","stateDigest":"ba1a5932405e2558813f4d3943b0beeb16b47b20636fb9205247a28dc1143ea4"},
+        {"kind":"step","instructions":50,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"8f93811b38d0480c1215545b8348ea763cb7cbc49fd5a0977925a66222f84335","stateDigest":"fc5f9214ba3811dde56d633ebb9e0aec89b51cca203f702d4a4280241c13f937"},
+        {"kind":"step","instructions":51,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"fc1f5e615e5f6e59b590437e9a49d99c4bc73e2a1fd6443ca97f3cad1c437d72","stateDigest":"7f6d8b908ce56f060ebebeef3422dbb21509b503d683873d16690a0f121e0372"}
+      ]
+    },
+    "runtime-failure": {
+      "sourceSha256": "20b1a20d9f88dbfa846a58aaf4dab57e9e7666832eb1118189c075bfea3e2690",
+      "instructions": 3,
+      "said": ["Before"],
+      "cuts": [
+        {"kind":"step","instructions":2,"status":"running","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"86afdb8910c3a6c837c56d361a15ad73dc70e6d21812c3edd785b279fedd3bc2","stateDigest":"52cfcf4c840345f3bebf32ca2686729b1cf1a6b416c774d3c1eb81110fcba73f"},
+        {"kind":"step","instructions":3,"status":"failed","rng":{"algorithm":"xorshift32-v1","state":5},"events":1,"eventsDigest":"4ddfe090b06b5f29df0c21d92ec19e0bf65d1ebb261b5c5aedb983b119a68b5d","stateDigest":"b558bffa1d3e41d4cc45e99dd2c82cad2c296eae4622e56a0fd8ac76ae146577"}
+      ]
+    },
+    "seeded-random-seed-1": {
+      "sourceSha256": "d0454f85d708b4b0e5a166f785f185741de07d4f71e269ce8965b07b67818964",
+      "instructions": 4,
+      "said": ["1 true"],
+      "cuts": [
+        {"kind":"step","instructions":3,"status":"running","rng":{"algorithm":"xorshift32-v1","state":67634689},"events":1,"eventsDigest":"0cf7e5c74caf40481992def4c0eeabb9d7ecd1d8f76b58e6296f65939b2605ba","stateDigest":"4977450de4c9b526c4a22ab1dd13c3f206f027e8c99a46b59287412f632713f9"},
+        {"kind":"step","instructions":4,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":67634689},"events":1,"eventsDigest":"d1a41d8d90d599c3dd921a5197ed70d767e6794e6120c46f9b52f240014bb603","stateDigest":"7d2eaf368f24fe8dcb3ad08bcb31a86a0b9a317f5e7852df92bf04a991f914a5"}
+      ]
+    },
+    "seeded-random-seed-2": {
+      "sourceSha256": "d0454f85d708b4b0e5a166f785f185741de07d4f71e269ce8965b07b67818964",
+      "instructions": 4,
+      "said": ["1 true"],
+      "cuts": [
+        {"kind":"step","instructions":3,"status":"running","rng":{"algorithm":"xorshift32-v1","state":134253570},"events":1,"eventsDigest":"0cf7e5c74caf40481992def4c0eeabb9d7ecd1d8f76b58e6296f65939b2605ba","stateDigest":"e3a89666d39b302d29637a829f65202c139a96813de035aac292d160d4323d53"},
+        {"kind":"step","instructions":4,"status":"halted","rng":{"algorithm":"xorshift32-v1","state":134253570},"events":1,"eventsDigest":"d1a41d8d90d599c3dd921a5197ed70d767e6794e6120c46f9b52f240014bb603","stateDigest":"d2e76f0f6c51ecf0c70f310b9e63ff4e1124d58011b49a58210304e8b0f12dbf"}
+      ]
+    },
     "helper-input": {
       "sourceSha256": "bf6554539de8d587aca8fffe3990f4fc789654b9ba7a4f389099baef20fb346d",
       "tapeSha256": "73dc06edc3b8d4e7cfcfa108ca8d0b2a484d79e522affdc682cd17a42e3032fc",

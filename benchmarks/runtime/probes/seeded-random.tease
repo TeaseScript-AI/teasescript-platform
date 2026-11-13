@@ -1,0 +1,4 @@
+let a = randomInteger(1..=100)
+let b = chance(50)
+say "${a} ${b}", instant
+exit

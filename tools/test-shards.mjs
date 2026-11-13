@@ -4,7 +4,6 @@ import {
   costlyTestFiles,
   costlyTestSeconds,
   otherTestSeconds,
-  oracleSeconds,
   pretestSeconds,
   testFilesAtOnce,
 } from "./costly-test-files.mjs";
@@ -15,35 +14,22 @@ const MEASURED = {
   costlyTestSeconds,
   otherTestSeconds,
   pretestSeconds,
-  oracleSeconds,
   testFilesAtOnce,
 };
 
 const secondsOf = (weights) => (file) =>
   weights.costlyTestSeconds[file] ?? weights.otherTestSeconds;
 
-/**
- * The seconds shard `index` of `count` spends before its tests: CI's last test job runs the pre-test checks first
- * (`check-3`'s `check:pretest`). With one shard, as `npm test` runs locally, none.
- */
+/** The seconds shard `index` of `count` spends before its tests: CI's last test job runs the pre-test checks first. */
 const startSeconds = (index, count, weights) =>
   count > 1 && index === count ? weights.pretestSeconds : 0;
 
 /**
- * The seconds shard `index` of `count` spends after its tests: CI's first test job compares with the runtime oracle
- * (`check-1`'s `oracle:test`). With one shard, none. (`check-3`'s few seconds validating the local-agent tooling are not
- * counted.)
- */
-const endSeconds = (index, count, weights) =>
-  count > 1 && index === 1 ? weights.oracleSeconds : 0;
-
-/**
  * The compiled test files of shard `index` (1-based) of `count`, in the order the full suite runs them (the costly files
  * first, `costlyTestFiles`). Each shard runs `testFilesAtOnce` files at once, so the files go longest first, ties by
- * name, to the shard whose slot frees soonest counting what that shard runs after its tests (`endSeconds`), the last
- * shard's slots starting after its pre-test checks (`startSeconds`): the shards then end close together (#1638: CI's
- * test phase as parallel jobs). A file not in `costlyTestSeconds` counts `otherTestSeconds`. Every file is in exactly
- * one shard. `weights` defaults to the measured ones (`MEASURED`).
+ * name, to the shard that has a file slot free soonest, the last shard's slots starting after the pre-test checks: the
+ * shards then end close together (#1638: CI's test phase as parallel jobs). A file not in `costlyTestSeconds` counts
+ * `otherTestSeconds`. Every file is in exactly one shard. `weights` defaults to the measured ones (`MEASURED`).
  */
 export function shardFiles(files, index, count, weights = MEASURED) {
   if (
@@ -64,11 +50,7 @@ export function shardFiles(files, index, count, weights = MEASURED) {
     let [shard, slot] = [0, 0];
     for (const [s, times] of slots.entries())
       for (const [t, time] of times.entries())
-        if (
-          time + endSeconds(s + 1, count, weights) <
-          slots[shard][slot] + endSeconds(shard + 1, count, weights)
-        )
-          [shard, slot] = [s, t];
+        if (time < slots[shard][slot]) [shard, slot] = [s, t];
     slots[shard][slot] += seconds(file);
     if (shard === index - 1) mine.add(file);
   }
@@ -82,13 +64,13 @@ export function shardFiles(files, index, count, weights = MEASURED) {
 
 /**
  * The estimated seconds until shard `index` of `count` ends, given its files: the pre-test checks it runs first, then
- * its files `testFilesAtOnce` at once in the order given, each starting when a slot frees, then the oracle comparison.
+ * its files `testFilesAtOnce` at once in the order given, each starting when a slot frees.
  */
 export function shardSeconds(files, index, count, weights = MEASURED) {
   const seconds = secondsOf(weights);
   const slots = Array(weights.testFilesAtOnce).fill(startSeconds(index, count, weights));
   for (const file of files) slots[slots.indexOf(Math.min(...slots))] += seconds(file);
-  return Math.max(...slots) + endSeconds(index, count, weights);
+  return Math.max(...slots);
 }
 
 /** The folders under `tests/` that hold no test files, so the suite reads none of them: a closed list. */

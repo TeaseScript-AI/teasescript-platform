@@ -1,0 +1,4 @@
+let xs = [1, 2]
+say "Before", instant
+say "${xs[5]}"
+exit

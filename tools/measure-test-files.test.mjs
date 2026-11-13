@@ -83,7 +83,7 @@ function fill(root) {
   // `npm run build` and `npm run check:pretest` pass at once: the files are compiled already.
   write("bin/npm", "#!/bin/sh\nexit 0\n", 0o755);
   // `gh` answers the four requests the tool makes from `gh.json` (CI's newest passed runs as `list`, each run's pre-test
-  // and oracle step seconds and test jobs' file seconds), in the real shapes, and fails any other.
+  // step seconds and test jobs' file seconds), in the real shapes, and fails any other.
   write(
     "bin/gh",
     `#!${process.execPath}
@@ -95,11 +95,6 @@ const where = /^repos\\/\\{owner\\}\\/\\{repo\\}\\/actions\\/runs\\/(\\d+)(\\/jo
 const start = Date.parse("2026-11-01T00:00:00Z");
 // (a run's \`conclusion\` defaults to success; \`failed\` is a test job that failed, \`unstarted\` one that never started)
 const steps = (run, n) => n === run.unstarted ? [] : [
-  ...(n === 0
-    ? [{ name: "Compare with the runtime oracle", conclusion: "success",
-         started_at: new Date(start).toISOString(),
-         completed_at: new Date(start + run.oracle * 1000).toISOString() }]
-    : []),
   ...(n === run.jobs.length - 1
     ? [{ name: "Check source before the tests", conclusion: "success",
          started_at: new Date(start).toISOString(),
@@ -209,20 +204,19 @@ test(
   { timeout: 60_000 },
   () => {
     const root = checkout();
-    // Three runs of two test jobs each, the last job's pre-test step 100, 120 and 140 s, the first job's oracle step
-    // 50, 90 and 60 s (median 60, mean 67); the type-core file's 0.25 s is listed as 1, the least a listed file weighs.
+    // Three runs of two test jobs each, the last job's pre-test step 100, 120 and 140 s; the type-core file's 0.25 s
+    // is listed as 1, the least a listed file weighs.
     const runs = (missing) =>
       Object.fromEntries(
         [
           // (run 11 lacks `sub/a.test.js`, so its median is that of an even count, 30 and 14)
-          [11, 100, 50, [null, 1, 0.25, 3]],
-          [12, 120, 90, [30, 2, 0.25, 4]],
-          [13, 140, 60, [14, 3, 0.25, 5]],
-        ].map(([id, pretest, oracle, [subA, a, typeCore, plain]]) => [
+          [11, 100, [null, 1, 0.25, 3]],
+          [12, 120, [30, 2, 0.25, 4]],
+          [13, 140, [14, 3, 0.25, 5]],
+        ].map(([id, pretest, [subA, a, typeCore, plain]]) => [
           id,
           {
             pretest,
-            oracle,
             jobs: [
               { ...(subA === null ? {} : { "sub/a.test.js": subA }), "a.test.js": a },
               Object.fromEntries(
@@ -244,7 +238,6 @@ test(
       assert.deepEqual(costly(module), [`"sub/a.test.js": 22,`, `"sub/type-core-z.test.js": 1,`]);
       assert.match(module, /their mean \(2 files\)\. \*\/\nexport const otherTestSeconds = 3\.0;/u);
       assert.match(module, /export const pretestSeconds = 120;/u);
-      assert.match(module, /export const oracleSeconds = 60;/u);
       assert.match(module, /export const testFilesAtOnce = 3;/u);
 
       writeFileSync(join(root, "gh.json"), JSON.stringify(runs("type-core-dir/plain.test.js")));

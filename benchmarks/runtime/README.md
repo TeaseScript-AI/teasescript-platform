@@ -22,9 +22,10 @@ implementations, a probe's expected output.
 - `references.mjs`: the interactive workloads' texts computed in plain JavaScript from each fixture's parameter and tape;
   `tools/benchmark-runtime.test.mjs` checks the manifest against them.
 - `probes/`: small semantic probes of evaluation order, capture (`{ before: rows, removed: rows.removeLast() }`),
-  copies and references, loops, defaults, waits in calls, and the target-before-right-hand-side failure at three seeds.
-  Each also runs restored from checkpoint JSON at every cut and must give the same cuts, as does a case with
-  `restoreEachCut`.
+  copies and references, loops, defaults, waits in calls, the target-before-right-hand-side failure at three seeds, and
+  the runtime oracle's own cases that need no host or compile options: a two-file project, a runtime failure and a
+  seeded draw at two seeds. Each also runs restored from checkpoint JSON at every cut and must give the same cuts, as
+  does a case with `restoreEachCut`.
 - `baseline.json`: per case, its source hash (and tape hash), its instructions, its texts and every cut (each
   `stepToEvent`, `run`, `observeTime` or tape call return): instructions so far, status, RNG state, number and digest of
   the events, the digest of the snapshot without its `format` and `version`, and a tape call's outcome, its kind and the

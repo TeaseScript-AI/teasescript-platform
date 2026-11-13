@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url";
 import {
   costlyTestFiles,
   costlyTestSeconds,
-  oracleSeconds,
   otherTestSeconds,
   pretestSeconds,
   testFilesAtOnce,
@@ -122,10 +121,9 @@ test("a compiled test file is named by its path under dist/tests/, and is type-c
     assert.ok(!isTypeCoreTestFile(name), name);
 });
 
-test("the shards' estimated ends, the first's with the oracle comparison, the last's with the pre-test checks, differ by no more than the costliest file", () => {
-  assert.equal(shardSeconds([], 1, 2), oracleSeconds);
+test("the shards' estimated ends, the last after the pre-test checks, differ by no more than the costliest file", () => {
+  assert.equal(shardSeconds([], 1, 2), 0);
   assert.equal(shardSeconds([], 2, 2), pretestSeconds);
-  assert.equal(shardSeconds([], 1, 1), 0, "one shard, as `npm test` runs locally, runs neither");
   for (const count of [2, 3]) {
     const loads = Array.from({ length: count }, (_, i) =>
       shardSeconds(shardFiles(files, i + 1, count), i + 1, count),
@@ -150,7 +148,6 @@ test("the costliest files fill shard 1's slots, and the next starts in shard 2 a
     costlyTestSeconds: { "x.test.js": 400, "z.test.js": 300, "y.test.js": 200, "w.test.js": 150 },
     otherTestSeconds: 5,
     pretestSeconds: 100,
-    oracleSeconds: 0,
     testFilesAtOnce: 3,
   };
   const input = ["y.test.js", "w.test.js", "x.test.js", "z.test.js"];
@@ -169,40 +166,6 @@ test("the costliest files fill shard 1's slots, and the next starts in shard 2 a
   assert.deepEqual(shardFiles(["x.test.js", ...small], 2, 2, { ...weights, pretestSeconds: 0 }), [
     "small-2.test.js",
   ]);
-});
-
-test("each shard's fixed seconds are counted where they fall: shard 1 gets fewer files for its oracle comparison", () => {
-  // Equal small files, so the shards' loads can come within one file of each other: shard 1's files then fill the
-  // oracle comparison's seconds less than shard 2's fill its pre-test checks' seconds. (fixed seconds, so the rule holds
-  // apart from the measured weights, as the test above)
-  const weights = {
-    costlyTestFiles: [],
-    costlyTestSeconds: {},
-    otherTestSeconds: 1.4,
-    pretestSeconds: 50,
-    oracleSeconds: 89,
-    testFilesAtOnce,
-  };
-  const small = Array.from(
-    { length: 300 },
-    (_, i) => `small-${String(i).padStart(3, "0")}.test.js`,
-  );
-  const [first, second] = [shardFiles(small, 1, 2, weights), shardFiles(small, 2, 2, weights)];
-  assert.ok(weights.oracleSeconds > weights.pretestSeconds);
-  assert.ok(first.length < second.length, `${first.length} files against ${second.length}`);
-  const [firstEnd, secondEnd] = [
-    shardSeconds(first, 1, 2, weights),
-    shardSeconds(second, 2, 2, weights),
-  ];
-  assert.ok(
-    Math.abs(firstEnd - secondEnd) <= weights.otherTestSeconds,
-    `${firstEnd} s against ${secondEnd} s`,
-  );
-  // Without the oracle seconds the files would split as before: shard 1 would take the extra ones.
-  assert.ok(
-    shardSeconds(first, 1, 2, weights) - weights.oracleSeconds <
-      shardSeconds(second, 2, 2, weights) - weights.pretestSeconds,
-  );
 });
 
 test("every file with seconds exists, costliest first; a type-core test file without them is named, not refused (#2088)", (t) => {

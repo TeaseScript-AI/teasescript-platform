@@ -1,0 +1,6 @@
+let extra = total([16, 23], start: 42)
+say "Next ${extra} of ${rounds}", instant
+wait 2 s
+say "Done", instant
+exit
+say "Never", instant

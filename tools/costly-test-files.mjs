@@ -3,7 +3,7 @@
 // cost changes much. A new type-core test file runs in full without an entry, which the coordinator lands from the
 // merge's CI runs (`check-changed` and `tools/test-shards.test.mjs` name it until then).
 // Merged with runtime-v2's table at 7df8cba8b (#2367): a runtime/ or player/ file that table lists keeps its seconds
-// there, since it runs runtime-v2's engine, as do `otherTestSeconds`, `pretestSeconds` and `oracleSeconds`.
+// there, since it runs runtime-v2's engine, as do `otherTestSeconds` and `pretestSeconds`.
 // The full suite starts the listed files first, costliest first, and CI's test jobs share the files out by these
 // seconds (`tools/test-shards.mjs`).
 
@@ -140,9 +140,6 @@ export const otherTestSeconds = 1.6;
 
 /** The seconds of the checks CI's last test job runs before its tests (`check:pretest`). */
 export const pretestSeconds = 190;
-
-/** The seconds of the runtime oracle comparison CI's first test job runs after its tests (`oracle:test`). */
-export const oracleSeconds = 108;
 
 /** The test files one CI test job runs at once: `node --test`'s default on CI's four CPUs. */
 export const testFilesAtOnce = 3;
