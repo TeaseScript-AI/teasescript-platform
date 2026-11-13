@@ -21,7 +21,7 @@ import { siteKey } from "./site-keys.js";
 
 /*
  * The stop oracle (D4 a′): a compile stopped at some unit against the unstopped compile,
- * whole. One function for the tests of `tests/type-core-stop/` and the every-unit sweep kept outside CI.
+ * whole. One function for the tests of `tests/type-core/stop/` and the every-unit sweep kept outside CI.
  */
 
 /** A plan's globals for one run. */

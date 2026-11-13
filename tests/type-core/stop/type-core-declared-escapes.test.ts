@@ -1,29 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compileProjectWithBackend } from "../../src/compiler.js";
-import type { InstructionPlan } from "../../src/plan/model.js";
-import { run } from "../../src/runtime/engine.js";
+import { compileProjectWithBackend } from "../../../src/compiler.js";
+import type { InstructionPlan } from "../../../src/plan/model.js";
+import { run } from "../../../src/runtime/engine.js";
 import {
   createSerializableList,
   createSerializableObject,
   type SerializableRuntimeValue,
-} from "../../src/runtime/values/serializable-values.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
-import type { Item } from "../../src/type-inference/core/items.js";
-import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
-import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
+} from "../../../src/runtime/values/serializable-values.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { withTestDemandAllowance } from "../../../src/type-inference/core/budget.js";
+import type { Item } from "../../../src/type-inference/core/items.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
+import { coreRequest, type SourceFile } from "../../helpers/type-core-analysis.js";
 import {
   planDigest,
   type RunResult,
   runsDigest,
   textDigest,
-} from "../helpers/type-core/type-core-declared-escapes.js";
-import { FIRST_ASKER_MAIN, MAIN } from "../helpers/type-core/type-core-declared-escapes-main.js";
-import { HELD_MODES } from "../helpers/type-core-held-host.js";
-import { everyAnswer } from "../helpers/type-core-oracles.js";
-import { hostValues } from "../helpers/type-core-stop-runs.js";
+} from "../../helpers/type-core/stop/type-core-declared-escapes.js";
+import {
+  FIRST_ASKER_MAIN,
+  MAIN,
+} from "../../helpers/type-core/stop/type-core-declared-escapes-main.js";
+import { HELD_MODES } from "../../helpers/type-core-held-host.js";
+import { everyAnswer } from "../../helpers/type-core-oracles.js";
+import { hostValues } from "../../helpers/type-core-stop-runs.js";
 
 // #2116's declared difference under #2080: the O4 lead's rulings 6 to 21 on #2065's design round. Decision (B) is moot,
 // #2080 part 2 (#2227) having landed first; the owner's answer on the one-sided refusal is pending. This file pins known

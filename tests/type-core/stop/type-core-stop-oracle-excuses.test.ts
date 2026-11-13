@@ -4,23 +4,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProjectWithBackend, type ProjectDiagnostic } from "../../src/compiler.js";
-import type { Diagnostic } from "../../src/diagnostics.js";
-import { type SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestAllowance } from "../../src/type-inference/core/budget.js";
-import { withoutRecords } from "../../src/type-inference/core/consumers.js";
-import type { Obligation } from "../../src/type-inference/core/result.js";
-import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
-import { heldRun, HELD_MODES, phaseEnds, type HeldCase } from "../helpers/type-core-held-host.js";
+import { compileProjectWithBackend, type ProjectDiagnostic } from "../../../src/compiler.js";
+import type { Diagnostic } from "../../../src/diagnostics.js";
+import { type SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
+import { withoutRecords } from "../../../src/type-inference/core/consumers.js";
+import type { Obligation } from "../../../src/type-inference/core/result.js";
+import { coreRequest, type SourceFile } from "../../helpers/type-core-analysis.js";
+import {
+  heldRun,
+  HELD_MODES,
+  phaseEnds,
+  type HeldCase,
+} from "../../helpers/type-core-held-host.js";
 import {
   repeatedDecisions,
   standsForNullCheck,
   stopProblems,
   type Globals,
   type StopRun,
-} from "../helpers/type-core-stop-oracle.js";
+} from "../../helpers/type-core-stop-oracle.js";
 import {
   ALLOWANCE,
   object,
@@ -28,7 +33,7 @@ import {
   stopRun,
   gatedProblems,
   lastUnsettled,
-} from "../helpers/type-core/type-core-stop-setup.js";
+} from "../../helpers/type-core/stop/type-core-stop-setup.js";
 
 /**
  * A fix a stop gives in words (#1449): at a settled walk stop whose unchecked region holds a store, its
