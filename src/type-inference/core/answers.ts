@@ -109,9 +109,6 @@ import { stopDiagnostics } from "./stop-diagnostics.js";
 import { Retained, retainedModule } from "./retained/retained.js";
 import type { IdentityView } from "./identity-view.js";
 
-// (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
-export { closedType };
-
 /*
  * The answers of the coarse core: `analyseCore` runs once per compile and publishes, after its last pass, the frozen
  * surface (`Answers`) `check-result/` and the backend read: per source occurrence its items, route, place and
@@ -426,8 +423,6 @@ export interface OccurrenceAnswer {
   readonly place: { readonly id: PlaceId; readonly path: readonly string[] } | null;
   /** The obligations this occurrence owes as a consumer, one per offending kind. */
   readonly obligations: readonly Obligation[];
-  /** The narrowing that answered the read (§13 N1–N2): `null` until stage 3b joins. */
-  readonly narrowing: null;
 }
 
 /**
@@ -1657,7 +1652,6 @@ class CoreAnswers implements Answers {
             route: "value",
             place: { id: d.place, path: d.path },
             obligations,
-            narrowing: null,
           };
     }
     const items = this.#items(value, node, []);
@@ -1677,7 +1671,6 @@ class CoreAnswers implements Answers {
       route,
       place: target === null ? null : { id: target.root, path: target.path },
       obligations,
-      narrowing: null,
     };
   }
 

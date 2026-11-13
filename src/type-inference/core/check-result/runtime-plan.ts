@@ -18,8 +18,8 @@ import {
 import { type StaticType, union } from "../../../static-types.js";
 import { typePlan } from "../../../type-plans.js";
 import type { RuntimeCheckSite, CoreRuntimeChecks } from "../../backend.js";
-import { type Answers, closedType } from "../answers.js";
-import { type ContractResult } from "../contract-descriptors.js";
+import { type Answers } from "../answers.js";
+import { closedType, type ContractResult } from "../contract-descriptors.js";
 import { leftOutWarning, leftOutCheck, leftOutCompletion } from "../consumers.js";
 import { type ItemTag } from "../items.js";
 import { type CoreAnalysisRequest, propertyName } from "../program.js";
