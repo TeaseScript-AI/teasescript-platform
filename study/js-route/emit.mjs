@@ -130,7 +130,6 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
   const fileEntries = [];
   plan.files.forEach((file, index) => {
     if (file.labels.length > 0) throw new Unsupported("labels");
-    if (file.entryInstruction !== file.startInstruction) throw new Unsupported("a file whose entry is not its start");
     // The file's top-level variables: module-level, so that its functions see them; a goto to the file clears them.
     const rootScope = new Map();
     const root = emitRegion(file.startInstruction, file.rootEndInstruction, null, [], rootScope, index);
@@ -140,16 +139,18 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
     const vars = [...rootScope.values()];
     if (vars.length > 0) lines.push(`let ${vars.join(", ")};`);
     lines.push(...functions, root);
-    lines.push(`function enter${index}(resume) { rt.file = ${index};${vars.length > 0 ? ` if (resume === null) ${vars.join(" = ")} = undefined;` : ""} file${index}(resume); }`);
+    // The session starts at file 0's start (its speakers' and globals' start values); a goto enters a file at its entry.
+    lines.push(`function enter${index}(resume, fromEntry) { rt.file = ${index};${vars.length > 0 ? ` if (resume === null) ${vars.join(" = ")} = undefined;` : ""} file${index}(resume, fromEntry); }`);
     fileEntries.push(file.entryInstruction);
   });
   lines.push(`const FILES = [${plan.files.map((_, i) => `enter${i}`).join(", ")}];`);
   lines.push(
     "function main() {",
     "  let file = rt.resuming ? rt.resumeFrames[0].file : 0;",
+    "  let entered = false;",
     "  for (;;) {",
-    "    try { FILES[file](rt.resuming ? rt.resumeFrame() : null); return; }",
-    "    catch (signal) { if (signal instanceof rt.Goto) { file = signal.file; continue; } throw signal; }",
+    "    try { FILES[file](rt.resuming ? rt.resumeFrame() : null, entered); return; }",
+    "    catch (signal) { if (signal instanceof rt.Goto) { file = signal.file; entered = true; continue; } throw signal; }",
     "  }",
     "}",
     "return main;",
@@ -806,22 +807,30 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
       for (const id of writes) line(`${temp(id)} = rt.takeTemporary(${id});`);
     }
 
-    emitRange(start, end);
+    const entry = isRoot ? plan.files[fileIndex].entryInstruction : start;
+    if (isRoot && entry !== start && !flatRegion) {
+      line("if (!fromEntry) {");
+      indent += 1;
+      emitRange(start, entry);
+      indent -= 1;
+      line("}");
+      emitRange(entry, end);
+    } else emitRange(start, end);
     const header = [];
     const locals = [...[...temps].map((id) => `t${id}`), ...Array.from({ length: scratch }, (_, i) => `x${i}`), ...hoisted];
     if (locals.length > 0) header.push(`  let ${locals.join(", ")};`);
     if (!flatRegion) {
-      if (definition === null) return [`function file${fileIndex}() {`, ...header, ...out, "}"].join("\n");
+      if (definition === null) return [`function file${fileIndex}(resume, fromEntry) {`, ...header, ...out, "}"].join("\n");
       return [`function f${definition.id}(${params.join(", ")}) {`, ...header, ...(tick ? [`  ${tick}`] : []), ...out, "  return null;", "}"].join("\n");
     }
     // A resumable region: its argument evaluation before a call that waits runs only on a fresh entry of that call.
     const savedList = saved().join(", ");
     const body = out.map((text) => text.replaceAll("%SAVED%", savedList));
-    const signature = definition === null ? `function file${fileIndex}(resume) {` : `function f${definition.id}(resume${params.map((p) => `, ${p}`).join("")}) {`;
+    const signature = definition === null ? `function file${fileIndex}(resume, fromEntry) {` : `function f${definition.id}(resume${params.map((p) => `, ${p}`).join("")}) {`;
     return [
       signature,
       ...header,
-      `  let pc = ${start};`,
+      `  let pc = ${definition === null ? `fromEntry ? ${entry} : ${start}` : start};`,
       `  if (resume !== null) { pc = resume.pc; [${savedList}] = resume.v; }`,
       "  D: for (;;) switch (pc) {",
       ...body,
