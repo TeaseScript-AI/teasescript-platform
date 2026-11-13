@@ -137,15 +137,18 @@ identity verification without executing Node. The normal pull-request CI starts
 again after publication and still runs the complete canonical command on the
 published commit.
 
-### The switch's shadow gate
+### The shadow comparison
 
-The switch to the constraint backend ([architecture](ARCHITECTURE.md#static-type-analysis)) needs this gate's
-verdict `green` on the switching commit's `main`. The gate compiles every source of the 15,406-source set (`corpus`,
-its cases file named by `CASES_JSON`), the type-core fixture (`fixture`) and each maintained family (`copies`,
-`joins`, `messages`, `property`, `rings`, `stops`) through both public routes of one built tree in the four modes. It
-then classifies every legacy/core pair, and every source's core with sharing on against off, with
-`tests/families/shadow-classify.mjs` (runner and classes: [`tests/families/README.md`](../tests/families/README.md#shadow)).
-Per set, its manifest from a built tree of that commit, then its shards on the central queue:
+The shadow comparison compiles every source of a set through both public routes of one built tree, the legacy backend
+and the constraint backend ([architecture](ARCHITECTURE.md#static-type-analysis)), in the four modes. It is a campaign
+that finds defects in the constraint backend, run when it is expected to find some, and not the switch's condition.
+Every difference it finds is explained as a defect or as a note
+([owner escalation](DEVELOPMENT-WORKFLOW.md#proportional-repair-and-owner-escalation)). Its sets are the 15,406-source
+set (`corpus`, its cases file named by `CASES_JSON`), the type-core fixture (`fixture`) and each maintained family
+(`copies`, `joins`, `messages`, `property`, `rings`, `stops`). It classifies every legacy/core pair, and every source's
+core with sharing on against off, with `tests/families/shadow-classify.mjs` (runner, classes and their states:
+[`tests/families/README.md`](../tests/families/README.md#shadow)).
+Per set, its manifest from a built tree of the compared commit, then its shards on the central queue:
 
 ```shell
 node <tree>/tests/families/shadow.mjs <tree> <set> --manifest > expect-<set>.jsonl
@@ -159,7 +162,7 @@ and then over all records:
 
 ```shell
 node tests/families/shadow-classify.mjs <every shard's shadow.jsonl> --expect expect-corpus.jsonl \
-  --expect expect-fixture.jsonl --expect expect-copies.jsonl ... --out <folder> --gate
+  --expect expect-fixture.jsonl --expect expect-copies.jsonl ... --out <folder>
 ```
 
 with one `--expect` per set's manifest (the flag takes one file).
@@ -167,39 +170,9 @@ with one `--expect` per set's manifest (the flag takes one file).
 For `corpus`, both commands also need `CASES_JSON=<cases.json>` before `node`, and the job `--data <cases.json>`.
 Each route's `--memory` holds whatever `NODE_OPTIONS` the queue sets: a route starts without it. `--demands 16` is the
 completion control: nothing stops at the natural allowance on current `main`, so only a demand-allowance run reaches
-a receiving completion. The gate table also counts, as information only, the control's runs that left the slice by
-the class that names their text (`declined/lost check` or an exclusion rule), every such class a row and a text no class
-names apart. `--expect` makes a source without a result count as
-`unavailable`.
-
-Each class has one of four states:
-
-- `pass`: agreement, or the legacy route's heap exhausted in its analysis while the core finished (legacy behaviour the
-  switch resolves);
-- `attributed`: for `differs/rule`, `/checks`, `/plan` and `/wording`, a pair takes its binding's group only where key,
-  mode, class and guard all match; otherwise it is `changed` (bound but its reading or class differs) or `unbound`, both
-  open until re-adjudication. Only a `conforms` group is attributed for those four classes. Sharing-dependent stop
-  classes retain their attribution; the switch still owes each source its accepted expectation, a stop through the stop
-  oracle's lost-check judgment;
-- `accepted (condition 1; condition 2 list)`: from taxonomy v5, `declined/lost check`, a program the core declines
-  where a stop lost a check it requires (#1781), at the natural allowance and at the control alike. #1526 decision 2's
-  condition 1 accepts it (the legacy compiles); condition 2 re-assesses every such case before the switch;
-- `open`: the gate is not green while such a row has a pair. These rows are every exclusion of the candidate slice,
-  the surviving-check, integer-use and stop differences, failed runs other than the legacy heap, exceptions, results
-  that are missing or rowless; in the sharing column, a difference where neither mode stops, a mode outside the slice
-  and an order not compared; and coverage without ordinary decisions or without a completion at the control.
-
-The verdict line is `gate: green` only when no row is `open`. A result the classifier cannot read, a pair that no
-class or two classes take, a result outside the manifests, or a source recorded twice with different results fails
-the run (`gate: failed`, exit 1). An exclusion text or a changed diagnostic code that no taxonomy version decides needs
-a new version with a witness before the gate can pass. `--gate` exits 1 unless the verdict is `green`.
-
-Each adjudicated group names what it covers, its verdict, witness, evidence and, while open, what closes it. A defect
-stays open until its issue is resolved and a new adjudication records it; a pending construction stays open until it is
-built and re-adjudicated. Bindings must validate every raw publication against the adjudicated run; re-adjudication
-replaces the group table and bindings together, with history by version. Claim gate movement only from replays;
-projected counts remain ceilings until replay. Before reading the switch verdict, add independent area sources for
-accepted calls, camera forms and tag predicates that neither gate sources nor converted units exercise.
+a receiving completion. Its table (`gate.md`) also counts, as information only, the control's runs that left the slice
+by the class that names their text (`declined/lost check` or an exclusion rule), every such class a row and a text no
+class names apart. `--expect` makes a source without a result count as `unavailable`.
 
 A wording difference that drops a fix the legacy route gives, or gives a worse one, is a defect to repair, not an
 owner question: the new checker keeps every fix the legacy checker gives, in the form of
@@ -219,8 +192,8 @@ before it. An empty cell has no corpus yet.
 | Website front end | none yet: its checks and area label come when the front end exists | | |
 | Player | `npm run check`; the [scoped visual check](#player-browser-and-visual-verification) after a visible UI change; [`npm run test:player:browser`](#local-browser-smoke-and-future-host-e2e-gate) for a change to `player/` or its fixture packages | `npm run test:player:browser` plus [`npm run test:player:preview`](#player-browser-and-visual-verification) | a real-device check |
 
-The compiler's shadow gate (`tests/families/shadow.mjs`) is a campaign run from the tree after merges and reported on
-the tracker issue; it is not a per-pull-request level.
+The compiler's [shadow comparison](#the-shadow-comparison) is a campaign run when it is expected to find defects and
+reported on the tracker issue; it is not a per-pull-request level.
 
 The exact compiler comparison uses `tests/families/plans.mjs` for the whole plan, diagnostics, charge trace and
 questions in four modes, counting resumed records in its verdict and refusing one build as both trees. Judge each
@@ -625,8 +598,8 @@ written-leaf proof: the stopped kinds must exactly equal the written leaf domain
 every recorded step. Compare every remaining record field exactly, except read-derived fields must equal what the proven
 kinds and proof route imply through the consumer's own derivation or be refused. Guard against drift in kind-reading
 obligation sites and read-derived fields; keep narrowed operand domains, changed fallback expectations, changed sites or
-boundaries and an extra property-presence sentence unpaired. This proof does not relax the shadow gate's wording
-comparison.
+boundaries and an extra property-presence sentence unpaired. This proof does not relax the shadow comparison's
+`differs/wording` class.
 
 Attribute a shifted stop threshold to a scheduled baseline-defect issue only when charging is correct and the mechanism
 and lost check are identical, listing each moved row beside its baseline twin. A loss introduced by the construction

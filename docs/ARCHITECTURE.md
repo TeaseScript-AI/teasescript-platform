@@ -120,7 +120,11 @@ snapshot for comparing two analyses of the same sources.
 
 - **The switch:** one change makes the constraint backend the compiler's backend in place of the legacy backend, and
   a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's. The
-  switch needs the [shadow gate](TESTING.md#the-switchs-shadow-gate) green.
+  switch needs (owner, 2026-11-13): every construct of the language covered by the constraint backend; the whole test
+  suite, and every converted script that the legacy backend compiles correctly, passing with it as the compiler's
+  backend; #1526's decision 2 met: no plan that lets a value through unchecked, and every remaining case re-assessed
+  ([`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md#coarse-type-core-bounds)); and its speed measured in a browser on the
+  largest script.
 
 ## Performance boundary
 

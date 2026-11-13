@@ -12,7 +12,7 @@ Which tool answers which question:
 | Does an area's analysis (its publication, its stops) differ between two trees? | `run.mjs`, `stalls.mjs` ([Running an area](#running-an-area)) |
 | Does a set's plan, diagnostics, charge trace or questions on the core's route differ between two trees? | `plans.mjs` ([Plans](#plans)) |
 | What differs in a differing demand row, and which tree's output does the allowance stop? | `plans.mjs summary` ([Plans](#plans)) |
-| Where does the core's route differ from the current checker on one tree (the shadow gate)? | `shadow.mjs`, `shadow-classify.mjs` ([Shadow](#shadow)) |
+| Where does the core's route differ from the current checker on one tree (the shadow comparison)? | `shadow.mjs`, `shadow-classify.mjs` ([Shadow](#shadow)) |
 | Does a stop let a value through that the natural plan rejects? | `stop-runs.mjs` ([Stop runs](#stop-runs)) |
 | What do the checker, the core and the core's route each answer for a list of cases, plans and runs included? | `differential.mjs` ([Differential records](#differential-records)) |
 | Are two trees' records of a list of cases equal but for some fields, such as a changed message's `message`? | `differential.mjs join --ignore` ([Differential records](#differential-records)) |
@@ -559,7 +559,7 @@ sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> --
 research's `results.jsonl`, whose crashed sources have no rows) and gives every route pair (a source in one mode, legacy
 against core) exactly one class, and every source in each order one class of the sharing column, the core with sharing
 on against off (#1711). Each class has its rule in words, a witness and a gate state: `pass`, `attributed` (the rule
-class is known; S11 still owes each source's accepted expectation), `accepted (condition 1; condition 2 list)` or `open`. Pairs: `agree`; `differs/stop`,
+class is known), `accepted (condition 1; condition 2 list)` or `open`. Pairs: `agree`; `differs/stop`,
 `/surviving`, `/integer`, `/rule` by the codes whose diagnostic identities (path, code, severity, offsets) changed, in
 that precedence, then `/checks`, `/plan`, `/wording` where the identities are equal (the other differing parts are
 columns of the pair); from version 5 `declined/lost check` (accepted: the core declined the program where a stop lost a
@@ -576,7 +576,7 @@ natural runs hold ordinary decision records and at least one run at the demand c
 completion) and, as information only, the sources whose core differs across the four modes and the control's runs that
 left the slice, one row a class that names a text, `declined/lost check` and each rule of `EXCLUSIONS` (zeros
 included), and one a text no class names (`Unlisted control texts`); the verdict line is `gate:
-green` only with no `open` row, and `--gate` (S11's final run, with `--expect`) exits 1 otherwise. Over the research's
+green` only with no `open` row, and `--gate` (which needs `--expect`) exits 1 otherwise. Over the research's
 records it reproduces its aggregate (`~/work/evidence/1728/`):
 
 ```sh
