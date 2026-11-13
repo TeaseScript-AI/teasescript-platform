@@ -1,5 +1,6 @@
 // The checks and predicates every restore check of pending actions shares: session times, safe integers, exact keys,
-// canonical arrays, and the interaction kinds' predicates.
+// canonical arrays, the interaction kinds' predicates, whether a lock outcome fits its call (`lockOutcomeFits`), item
+// equality (`sameItems`), and a runtime temporary's value (`runtimeTemporaryValue`).
 
 import { isInteractionChoiceValue } from "../../../choice-values.js";
 import {
