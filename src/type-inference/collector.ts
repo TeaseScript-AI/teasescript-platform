@@ -69,10 +69,9 @@ import { interactionEvidence, selectorsEvidence } from "./syntax-evidence.js";
 
 // The collector of the constraint graph: one walk over the project's programs, which emits the places and constraints
 // of `graph.ts` and decides nothing. Its order is `TypeChecker`'s (`type-checker.ts`), except that it walks every
-// function body after its file's top level instead of at the first call, and every block after the functions. It
-// mirrors `TypeChecker`'s scoping rules to resolve names (`type-inference-graph.test.ts` compares its reads with the
-// legacy facts' on every repository source); it reads no type and reports no diagnostic. The type core (`core/`)
-// decides every type from the graph it makes.
+// function body after its file's top level instead of at the first call. It mirrors `TypeChecker`'s scoping rules to
+// resolve names (`type-inference-graph.test.ts` compares its reads with the legacy facts' on every repository source);
+// it reads no type and reports no diagnostic. The type core (`core/`) decides every type from the graph it makes.
 
 /**
  * Collects the constraint graph of the project of `request`. Names resolve, since the type analysis runs after name
