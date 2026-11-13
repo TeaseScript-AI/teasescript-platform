@@ -32,7 +32,7 @@ import { ABSENT, HELD_REFERENCE } from "./kinds.js";
 import { lackingAt, nodeAt, pathAt } from "./literal-index.js";
 import { measuresLength, selectsElement } from "../method-categories.js";
 import type { ObjectsProof, ObjectSite, PrefixEntry } from "./model.js";
-import { othersAt, readGroupsAt } from "./others.js";
+import { othersAt, readGroupsAt } from "./class-groups.js";
 import { termAt, writtenOf } from "./terms.js";
 import { resultOf, valueRoute } from "./value-kinds.js";
 
