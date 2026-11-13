@@ -18,17 +18,17 @@ import { keyLabel, ownSpan, quietKinds, shownLabel, writtenTermOf } from "../nam
 import { obligation, storeRoot, storeWarning, warnGroups } from "../reports/warnings.js";
 import { type CanonicalKey } from "../../contract/key-ids.js";
 
-// C10: a fallback's or a default's kinds against the direct value's, and an unwritten parameter's default (ADR 1.5).
+// A fallback's or a default's kinds against the direct value's, and an unwritten parameter's default (ADR 1.5).
 
 /**
- * C10: a fallback or a default is `null`, or has the direct value's family without its `null` (whole numbers with
- * numbers; a conversion's result; nested list, set and dict literals by their elements), or a load's or `fromJson`'s
- * written expected type's kinds at every depth (ADR 1.2, 7: a whole number fits a written number, a fraction never a
- * written integer, the owner's F3), or the value lands directly in a written place whose union holds both; a direct
- * value that is only `null` or unsettled imposes none. Where the direct value's kinds are unknown, or it has a written
- * type, its domain's family stands for them (`domainFamily`). Both definite and incompatible: an error at the fallback, below
- * it at the innermost offending element; possible: a warning with its `copy-type`; an unknown the fallback may
- * hold: a warning against those kinds, its host data meeting its boundary.
+ * A fallback or a default is `null`, or has the direct value's family without its `null` (whole numbers with numbers;
+ * a conversion's result; nested list, set and dict literals by their elements), or a load's or `fromJson`'s written
+ * expected type's kinds at every depth (ADR 1.2, 7: a whole number fits a written number, a fraction never a written
+ * integer), or the value lands directly in a written place whose union holds both; a direct value that is only `null`
+ * or unsettled imposes none. Where the direct value's kinds are unknown, or it has a written type, its domain's family
+ * stands for them (`domainFamily`). Both definite and incompatible: an error at the fallback, below it at the innermost
+ * offending element; possible: a warning with its `copy-type`; an unknown the fallback may hold: a warning against
+ * those kinds, its host data meeting its boundary.
  */
 export function fallbackFits(
   walk: Consumers,
@@ -40,7 +40,7 @@ export function fallbackFits(
   domainAt: ((rest: readonly string[], unknown: boolean) => Domain | null) | null = null,
 ): void {
   // nested list, set and dict literals by their elements, one depth after another; the target: the fallback's own
-  // key path at the depth, a dict's value its `entry` (§10.5)
+  // key path at the depth, a dict's value its `entry`
   const { contract, program } = walk.pass;
   // the label's recipe: the fallback's own, then one step below it per depth, its text made where a check or a
   // warning there shows it (a label stepped at every depth made k nested `otherwise` k² code units, uncharged, #1433)
@@ -77,7 +77,7 @@ export interface Domain {
 }
 
 /**
- * C10's requirement from a domain: the kinds the domain of a direct value at `rest` gives its fallback, the
+ * A fallback's requirement from a domain: the kinds the domain of a direct value at `rest` gives its fallback, the
  * join of its non-null members' families, `null` contributing none: what the value retains, its contract's kinds
  * (`quietKinds`: a written variable's, parameter's or call result's type, a copy's of one); `written` where the value
  * has a written type there (`writtenTermOf`). An `otherwise` chain's contract is its operands' joined at the path, once
@@ -98,11 +98,11 @@ export function domainFamily(
   if (!written && !unknown) return null;
   walk.pass.program.work.charge("checks");
   const kinds = quietKinds(walk, value, rest);
-  // (its `null` contributes no family: C10 reads a direct value's concrete kinds)
+  // (its `null` contributes no family: a fallback's check reads a direct value's concrete kinds)
   return kinds === null || !oneFamily(kinds) ? null : { kinds, written };
 }
 
-/** C10 at one path of the fallback, its label there made by `label`: whether its elements are checked too. */
+/** The fallback's check at one path, its label there made by `label`: whether its elements are checked too. */
 function fallbackFitsAt(
   walk: Consumers,
   c: ValueConstraint,
@@ -118,7 +118,7 @@ function fallbackFitsAt(
   const site = program.places[value]?.site;
   if (site === null || site === undefined || !("result" in c)) return false;
   const read = directAt(rest);
-  // the direct value's domain stands for the whole value, definite (its ingress is checked against it, C9),
+  // the direct value's domain stands for the whole value, definite (its ingress is checked against it),
   // where its own kinds are unknown, or where a written type gives it; never for a stopped read nor one proved
   // only `null`
   const domain =
@@ -193,7 +193,8 @@ function fallbackFitsAt(
       ? !(rest.length > 0 && into !== null && !intoTags.includes("null"))
       : admits(tag, directTags) || (unionHolds && admits(tag, intoTags));
   // the family the fallback is checked against: the direct value's (whole numbers with numbers), a load's or
-  // `fromJson`'s written type itself (its `null` C10's exception, never listed), and the receiving union's kinds
+  // `fromJson`'s written type itself (its `null` never listed: a fallback may be `null`), and the receiving union's
+  // kinds
   const own: ItemTag[] = written
     ? direct.filter(concrete).map((item) => item.tag)
     : [...directFamilies].flatMap((found): ItemTag[] =>
@@ -206,7 +207,7 @@ function fallbackFitsAt(
   // repeating it included; a family, or a kind the union adds, the table's)
   const joined: ItemTag[] = [...new Set([...own, ...added])];
   const against = kindsInItsOrder(joined, written ? own : undefined);
-  // §3.3: a fallback whose contract every kind of fits asks nothing more at this path
+  // the quiet path: a fallback whose contract every kind of fits asks nothing more at this path
   const quiet = quietKinds(walk, value, rest);
   const fallback =
     quiet !== null && quiet.every(fitsKind) ? [] : withoutEmpty(walk.valueItems(value, node, rest));
@@ -250,7 +251,7 @@ function fallbackFitsAt(
     );
   }
   if (union !== null && union.has("unknown")) return false;
-  // below the fallback, a definite element of its literals none of whose kinds fits: an error at that element (A8);
+  // below the fallback, a definite element of its literals none of whose kinds fits: an error at that element;
   // else both definite and incompatible, no kind of the fallback fitting: an error at the fallback;
   // possible: one warning and check per offending kind
   const element = offendingElement(walk, value, node, rest, fitsKind);
@@ -274,7 +275,7 @@ function fallbackFitsAt(
 }
 
 /**
- * A8: the innermost element of a fallback's literals at `rest` whose kinds are definite and none fits, in source
+ * The innermost element of a fallback's literals at `rest` whose kinds are definite and none fits, in source
  * order, with its kinds; `null` at the fallback itself or where no literal holds one.
  */
 function offendingElement(
@@ -312,9 +313,9 @@ function offendingElement(
 }
 
 /**
- * ADR 1.5: an unwritten parameter's default must suit the body: its null reaching a member access with no store
- * between is an error, once in the function, also through copies of the parameter that reach the access unchanged and
- * unguarded.
+ * The unwritten parameter a read of `key` at `at` reads (`defaultNull`), with the node its value is read at: the
+ * parameter itself, or the one whose value reaches the key unchanged and unguarded through whole copies with no event
+ * between; `null` where none does. Each key and node on the chain kept with the chain's answer (`Consumers.defaults`).
  */
 function defaultSource(
   walk: Consumers,
@@ -346,7 +347,7 @@ function defaultSource(
         found = place.written === null ? step : null;
       else {
         // (a key in its identity, a wrapper's family's its cursor: its definitions and events through the contract,
-        // no text made, G3 stage 1)
+        // no text made)
         const reaching = walk.pass.contract.reachingDef(step.key, step.at);
         const copy =
           reaching !== null &&
@@ -376,6 +377,11 @@ function defaultSource(
   return found;
 }
 
+/**
+ * ADR 1.5: an unwritten parameter's default must suit the body: where the default is `null` and reaches the member
+ * access at `site` as its receiver `owner` with no store between, also through copies of the parameter that reach it
+ * unchanged and unguarded (`defaultSource`), the access is an error.
+ */
 export function defaultNull(
   walk: Consumers,
   owner: PlaceId,
