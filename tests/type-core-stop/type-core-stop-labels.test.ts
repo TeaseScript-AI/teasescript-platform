@@ -371,6 +371,119 @@ test("a combined stop spells a dictionary's value and a derived list's read as t
   }
 });
 
+// (a level's container: a list, a dictionary, a nullable dictionary, a union of dictionaries)
+type Level = "list" | "dict" | "dict?" | "dicts";
+const shapes: { readonly levels: readonly Level[]; readonly written?: string }[] = [
+  { levels: ["list"] },
+  { levels: ["dict"] },
+  { levels: ["dict", "dict"] },
+  { levels: ["list", "dict"] },
+  { levels: ["dict", "list"] },
+  { levels: ["dict", "list", "dict"] },
+  { levels: ["list", "dict?"], written: "integer dict?[]" },
+  { levels: ["list", "dicts"], written: "(integer dict | integer[] dict)[]" },
+  { levels: ["list", "dict"], written: "integer dict[]?" },
+  { levels: ["list", "dict"], written: "integer dict[] | integer dict set" },
+];
+const annotation = (levels: readonly Level[]) =>
+  [...levels]
+    .reverse()
+    .reduce((type, level) => (level === "list" ? `${type}[]` : `${type} dict`), "integer");
+const roots = [
+  {
+    name: "xs",
+    path: ["xs"],
+    own: "xs",
+    program: (t: string, v: string, read: string) =>
+      `let xs: ${t} = ${v}\nrepeat ${read} {say "a"}\nexit\n`,
+  },
+  {
+    name: "values",
+    path: ["values"],
+    own: "values",
+    program: (t: string, v: string, read: string) =>
+      `let values: ${t} = ${v}\nrepeat ${read} {say "a"}\nexit\n`,
+  },
+  {
+    name: "parameter",
+    path: ["show", "xs"],
+    own: "xs",
+    program: (t: string, _: string, read: string) =>
+      `function show(xs: ${t}) {repeat ${read} {say "a"}}\nexit\n`,
+  },
+  {
+    name: "result",
+    path: ["build", "result"],
+    own: "build()",
+    program: (t: string, v: string, read: string) =>
+      `function build: ${t} {return ${v}}\nrepeat ${read} {say "a"}\nexit\n`,
+  },
+];
+// (a value of the written type: each level's container holding one, `hostValue` at the bottom)
+const literal = (levels: readonly Level[]) =>
+  [...levels]
+    .reverse()
+    .reduce(
+      (value, level) => (level === "list" ? `[${value}]` : `dict {a: ${value}}`),
+      "hostValue",
+    );
+// (every chain down the levels: at each its element; at a dictionary its `values` then an element, or, last, its
+// `keys` then an element; at a list, last, its `values` or `keys`, a property no written type follows, then an
+// element; each step with its owner's container, a derived list's `derived`, past a property `unknown`)
+type Step = { readonly step: string; readonly owner: Level | "derived" | "unknown" };
+const chains = (levels: readonly Level[]): Step[][] => {
+  const out: Step[][] = [];
+  const down = (at: number, chain: Step[]) => {
+    if (chain.length > 0) out.push(chain);
+    if (at === levels.length) return;
+    const level = levels[at]!;
+    down(at + 1, [...chain, { step: "element", owner: level }]);
+    if (level === "list") {
+      for (const step of ["values", "keys"])
+        out.push([...chain, { step, owner: level }, { step: "element", owner: "unknown" }]);
+      return;
+    }
+    down(at + 1, [
+      ...chain,
+      { step: "values", owner: level },
+      { step: "element", owner: "derived" },
+    ]);
+    if (at === levels.length - 1)
+      out.push([...chain, { step: "keys", owner: level }, { step: "element", owner: "derived" }]);
+  };
+  down(0, []);
+  return out;
+};
+// (the grammar's second reading, from the shape alone: a chain is derived where a `values` or `keys` step has a
+// dictionary among its owner's kinds; E where it is not and every `entry` has a dictionary owner, every kind of it;
+// E2 where it is, its own text exactly)
+const DERIVED_STEPS = new Set(["values", "keys"]);
+const hasDict = (owner: Step["owner"]) =>
+  owner === "dict" || owner === "dict?" || owner === "dicts";
+const expected = (chain: readonly Step[], label: { form: string; entries?: readonly number[] }) => {
+  const derived = chain.some(
+    ({ step, owner }) => (step === "values" || step === "keys") && hasDict(owner),
+  );
+  if (label.form === "E")
+    return (
+      !derived &&
+      label.entries!.every(
+        (i) =>
+          chain[i]!.step === "element" &&
+          (chain[i]!.owner === "dict" || chain[i]!.owner === "dicts"),
+      )
+    );
+  return label.form === "E2" && derived;
+};
+const check = (target: string, site: SourceSite): Obligation => ({
+  kind: "integer-check",
+  target,
+  against: ["integer"],
+  on: `check that ${target} is a whole number before the read`,
+  site,
+  boundary: false,
+});
+
 /**
  * The written proof of a combined stop's more precise label, total over the compiler's label grammar (#1595, the lead's
  * ruling after Codex r3 on #1687). `keyLabel` (`consumers/names.ts`) makes every check's target:
@@ -410,121 +523,6 @@ test("a combined stop spells a dictionary's value and a derived list's read as t
  * `produced.mjs`); its "refuse" answers stand on the grammar alone.
  */
 test("a combined stop's more precise label is proved by its written type exactly as the label grammar allows (#1595)", () => {
-  // (a level's container: a list, a dictionary, a nullable dictionary, a union of dictionaries)
-  type Level = "list" | "dict" | "dict?" | "dicts";
-  const shapes: { readonly levels: readonly Level[]; readonly written?: string }[] = [
-    { levels: ["list"] },
-    { levels: ["dict"] },
-    { levels: ["dict", "dict"] },
-    { levels: ["list", "dict"] },
-    { levels: ["dict", "list"] },
-    { levels: ["dict", "list", "dict"] },
-    { levels: ["list", "dict?"], written: "integer dict?[]" },
-    { levels: ["list", "dicts"], written: "(integer dict | integer[] dict)[]" },
-    { levels: ["list", "dict"], written: "integer dict[]?" },
-    { levels: ["list", "dict"], written: "integer dict[] | integer dict set" },
-  ];
-  const annotation = (levels: readonly Level[]) =>
-    [...levels]
-      .reverse()
-      .reduce((type, level) => (level === "list" ? `${type}[]` : `${type} dict`), "integer");
-  const roots = [
-    {
-      name: "xs",
-      path: ["xs"],
-      own: "xs",
-      program: (t: string, v: string, read: string) =>
-        `let xs: ${t} = ${v}\nrepeat ${read} {say "a"}\nexit\n`,
-    },
-    {
-      name: "values",
-      path: ["values"],
-      own: "values",
-      program: (t: string, v: string, read: string) =>
-        `let values: ${t} = ${v}\nrepeat ${read} {say "a"}\nexit\n`,
-    },
-    {
-      name: "parameter",
-      path: ["show", "xs"],
-      own: "xs",
-      program: (t: string, _: string, read: string) =>
-        `function show(xs: ${t}) {repeat ${read} {say "a"}}\nexit\n`,
-    },
-    {
-      name: "result",
-      path: ["build", "result"],
-      own: "build()",
-      program: (t: string, v: string, read: string) =>
-        `function build: ${t} {return ${v}}\nrepeat ${read} {say "a"}\nexit\n`,
-    },
-  ];
-  // (a value of the written type: each level's container holding one, `hostValue` at the bottom)
-  const literal = (levels: readonly Level[]) =>
-    [...levels]
-      .reverse()
-      .reduce(
-        (value, level) => (level === "list" ? `[${value}]` : `dict {a: ${value}}`),
-        "hostValue",
-      );
-  // (every chain down the levels: at each its element; at a dictionary its `values` then an element, or, last, its
-  // `keys` then an element; at a list, last, its `values` or `keys`, a property no written type follows, then an
-  // element; each step with its owner's container, a derived list's `derived`, past a property `unknown`)
-  type Step = { readonly step: string; readonly owner: Level | "derived" | "unknown" };
-  const chains = (levels: readonly Level[]): Step[][] => {
-    const out: Step[][] = [];
-    const down = (at: number, chain: Step[]) => {
-      if (chain.length > 0) out.push(chain);
-      if (at === levels.length) return;
-      const level = levels[at]!;
-      down(at + 1, [...chain, { step: "element", owner: level }]);
-      if (level === "list") {
-        for (const step of ["values", "keys"])
-          out.push([...chain, { step, owner: level }, { step: "element", owner: "unknown" }]);
-        return;
-      }
-      down(at + 1, [
-        ...chain,
-        { step: "values", owner: level },
-        { step: "element", owner: "derived" },
-      ]);
-      if (at === levels.length - 1)
-        out.push([...chain, { step: "keys", owner: level }, { step: "element", owner: "derived" }]);
-    };
-    down(0, []);
-    return out;
-  };
-  // (the grammar's second reading, from the shape alone: a chain is derived where a `values` or `keys` step has a
-  // dictionary among its owner's kinds; E where it is not and every `entry` has a dictionary owner, every kind of it;
-  // E2 where it is, its own text exactly)
-  const DERIVED_STEPS = new Set(["values", "keys"]);
-  const hasDict = (owner: Step["owner"]) =>
-    owner === "dict" || owner === "dict?" || owner === "dicts";
-  const expected = (
-    chain: readonly Step[],
-    label: { form: string; entries?: readonly number[] },
-  ) => {
-    const derived = chain.some(
-      ({ step, owner }) => (step === "values" || step === "keys") && hasDict(owner),
-    );
-    if (label.form === "E")
-      return (
-        !derived &&
-        label.entries!.every(
-          (i) =>
-            chain[i]!.step === "element" &&
-            (chain[i]!.owner === "dict" || chain[i]!.owner === "dicts"),
-        )
-      );
-    return label.form === "E2" && derived;
-  };
-  const check = (target: string, site: SourceSite): Obligation => ({
-    kind: "integer-check",
-    target,
-    against: ["integer"],
-    on: `check that ${target} is a whole number before the read`,
-    site,
-    boundary: false,
-  });
   const disagree: string[] = [];
   let pairs = 0;
   for (const shape of shapes)
