@@ -390,7 +390,7 @@ function rewindStepOps(context: PlayerOpsContext) {
     if (prepared.kind === "refused") return { result: prepared };
     const step = prepared.step!;
     // The step's own delivery, taken before anything awaits: the candidate is that delivery's until its reply is
-    // posted, whatever delivery is innermost when the read settles.
+    // posted.
     const delivery = context.delivery.scope();
     let made: { readonly held: HeldSession; readonly id: string };
     try {

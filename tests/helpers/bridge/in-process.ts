@@ -214,8 +214,8 @@ export interface HostFactoryInput {
  * random control. A restore begins without ownership, until an explicit adoption (`adoptRandom`).
  *
  * Its plan and session are owned by a delivery of the facade's own (`delivery.ts`) until the bridge took the session: a
- * fault before that undoes them, and a closed connection admits neither. They are bound to that delivery by name, so an
- * op's delivery that is open meanwhile (one still running, or one a request the factory began opened) never owns them.
+ * fault before that undoes them, and a closed connection admits neither. Like an op, it runs only while no other
+ * delivery is open: while an op is awaited it is refused, and a request its factory begins is refused by the host.
  */
 export function introduceNow(
   bridge: PlayerBridge,
@@ -278,7 +278,6 @@ function introduceIn(
           ...(control === null ? {} : { randomControl: control }),
         });
   const known = [...context.plans].find(([, held]) => held === created.plan)?.[0];
-  // Bound to the facade's delivery: a request the factory began may have opened one inside it, still running.
   const token = known ?? context.hold(created.plan, delivery);
   // A factory may not have installed the control it was given; its first read attaches it in any case.
   const held = new HeldSession(

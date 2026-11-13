@@ -1,17 +1,12 @@
 /*
- * Who owns what the host allocates on a connection (#2006). An op's delivery runs from just before the op runs until
- * its success reply is posted; a facade call's runs until its result has been handed to the bridge. Each allocation
- * registers its undo with its delivery before the retained reference is published (`own`). A delivery that is posted
- * (`posted`) hands what it allocated to the owners it was installed under: the connection, a plan, a slot, a session, a
- * ticket. One that fails (`abort`) undoes it: a throw before the outcome, in building, encoding or posting the success
- * reply. Closing the connection (`close`) is permanent: it aborts every open delivery, and from then on the owner admits
- * no delivery and no allocation, so late work cannot refill what the connection's cleanup cleared.
- *
- * Two deliveries can be open at once, in either order. A facade call can run while an op's delivery is open, awaiting;
- * and a facade's factory can begin a request whose op opens its delivery inside the facade's, and that delivery can
- * outlive the facade's. So an allocation registers with the innermost open delivery (`scope`) only where it runs inside
- * its own op; the facade names its own delivery for every allocation it makes (`in-process.ts`). Work that runs later for
- * an owner already established (a plan-text timer, a source-view continuation of a committed cache) writes to that
+ * Who owns what the host allocates on a connection (#2006). The host runs one op at a time (`worker-host.ts`), so at
+ * most one delivery is open: from just before its op runs until its success reply is posted. Each allocation registers
+ * its undo with that delivery before the retained reference is published (`own`). A delivery that is posted (`posted`)
+ * hands what it allocated to the owners it was installed under: the connection, a plan, a slot, a session, a ticket.
+ * One that fails (`abort`) undoes it: a throw before the outcome, in building, encoding or posting the success reply.
+ * Closing the connection (`close`) is permanent: it aborts the open delivery, and from then on the owner admits no
+ * delivery and no allocation, so late work cannot refill what the connection's cleanup cleared. Work that runs later
+ * for an owner already established (a plan-text timer, a source-view continuation of a committed cache) writes to that
  * owner's resource, checked by identity; it does not register with whatever delivery is open then.
  */
 
@@ -35,7 +30,7 @@ export class DeliveryRefusedError extends Error {
 
 /** The owner of one connection's deliveries; see the module comment. */
 export interface DeliveryOwner {
-  /** Opens a delivery, the innermost scope until it ends. */
+  /** Opens a delivery; refused while one is open, as the host runs one op at a time, or once closed. */
   begin(): Delivery;
   /** Registers `undo` of an allocation with `delivery`, before the allocation is published. */
   own(delivery: Delivery, undo: () => void): void;
@@ -43,19 +38,19 @@ export interface DeliveryOwner {
   commit(delivery: Delivery): void;
   /** Ends `delivery` failed: its undos run once, the latest first. */
   rollback(delivery: Delivery): void;
-  /** Ends the connection for good: every open delivery is aborted, and nothing is admitted from then on. */
+  /** Ends the connection for good: the open delivery is aborted, and nothing is admitted from then on. */
   close(): void;
-  /** The innermost open delivery, which an allocation registers with now; refused when there is none. */
+  /** The open delivery, which an allocation registers with now; refused when there is none. */
   scope(): Delivery;
   /** Whether the connection was closed. */
   readonly closed: boolean;
 }
 
-/** An owner's state: whether it is closed, and its open deliveries, innermost last, with their undos. */
+/** An owner's state: whether it is closed, and its open delivery with its undos, or `null`. */
 interface OwnerState {
   closed: boolean;
   readonly report: (error: unknown) => void;
-  readonly open: { readonly delivery: Delivery; readonly undos: (() => void)[] }[];
+  open: { readonly delivery: Delivery; readonly undos: (() => void)[] } | null;
   next: number;
 }
 
@@ -90,9 +85,9 @@ function reportUndoFailure(error: unknown): void {
 
 /**
  * The one deciding function: advances `owner` by `event` on `delivery` (`null` for `close`, and for `begin`, which
- * returns the new delivery). An unknown, foreign or ended delivery is refused for `own` and `posted`, and is nothing to
- * abort. A closed owner admits no `begin`, and as closing ended every open delivery, an `own` after it names an ended
- * one and is refused as such. `close` is idempotent.
+ * returns the new delivery). A delivery that is not the open one (unknown, foreign or ended) is refused for `own` and
+ * `posted`, and is nothing to abort. A closed owner admits no `begin`, nor does one with a delivery open; as closing
+ * ended the open delivery, an `own` after it names an ended one and is refused as such. `close` is idempotent.
  */
 export function advanceDelivery(
   owner: DeliveryOwner,
@@ -101,36 +96,36 @@ export function advanceDelivery(
 ): Delivery | null {
   const state = states.get(owner);
   if (state === undefined) throw new DeliveryRefusedError("An unknown delivery owner.");
-  const at = delivery === null ? -1 : state.open.findIndex((each) => each.delivery === delivery);
+  const open = state.open !== null && delivery !== null && state.open.delivery === delivery;
   switch (event.kind) {
     case "begin": {
       if (state.closed) throw new DeliveryRefusedError("The connection is closed.");
+      if (state.open !== null) throw new DeliveryRefusedError("A delivery is open already.");
       const begun: Delivery = Object.freeze({ delivery: ++state.next });
-      state.open.push({ delivery: begun, undos: [] });
+      state.open = { delivery: begun, undos: [] };
       return begun;
     }
     case "own":
-      if (at < 0) throw new DeliveryRefusedError("No open delivery owns this allocation.");
-      state.open[at]!.undos.push(event.undo);
+      if (!open) throw new DeliveryRefusedError("No open delivery owns this allocation.");
+      state.open!.undos.push(event.undo);
       return delivery;
     case "posted":
-      if (at < 0) throw new DeliveryRefusedError("No open delivery was posted.");
-      state.open.splice(at, 1);
+      if (!open) throw new DeliveryRefusedError("No open delivery was posted.");
+      state.open = null;
       return delivery;
     case "abort": {
-      if (at < 0) return delivery;
-      const [ended] = state.open.splice(at, 1);
-      undoAll(ended!.undos, state.report);
+      if (!open) return delivery;
+      const { undos } = state.open!;
+      state.open = null;
+      undoAll(undos, state.report);
       return delivery;
     }
     case "close": {
       if (state.closed) return null;
       state.closed = true;
-      const ended = state.open.splice(0);
-      undoAll(
-        ended.flatMap((each) => each.undos),
-        state.report,
-      );
+      const ended = state.open;
+      state.open = null;
+      if (ended !== null) undoAll(ended.undos, state.report);
       return null;
     }
     default:
@@ -147,23 +142,21 @@ export function deliveryOwner(report: (error: unknown) => void = reportUndoFailu
     rollback: (delivery) => void advanceDelivery(owner, delivery, { kind: "abort" }),
     close: () => void advanceDelivery(owner, null, { kind: "close" }),
     scope: () => {
-      const state = states.get(owner)!;
-      const innermost = state.open.at(-1);
-      if (innermost === undefined)
-        throw new DeliveryRefusedError("No open delivery owns this allocation.");
-      return innermost.delivery;
+      const open = states.get(owner)!.open;
+      if (open === null) throw new DeliveryRefusedError("No open delivery owns this allocation.");
+      return open.delivery;
     },
     get closed() {
       return states.get(owner)!.closed;
     },
   };
-  states.set(owner, { closed: false, report, open: [], next: 0 });
+  states.set(owner, { closed: false, report, open: null, next: 0 });
   return owner;
 }
 
 /**
  * A registry a connection retains, owned by its deliveries: the only way to add an entry (`set`) registers its undo with
- * a delivery first, the innermost open one unless the caller names its own (as the facade does). It adds new keys only,
+ * a delivery first, the open one unless the caller names it. It adds new keys only,
  * and never restores: undoing removes the entry if it is still the one it added. Removing an entry is a release
  * (`delete`, `clear`), which registers nothing. The map it keeps is reachable only through it, so no entry can be added
  * unregistered.
