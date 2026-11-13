@@ -3,7 +3,7 @@
  * the plan `o4-lead/plans/1072-retained-head0.md`, Amendment 3, rulings R19 to R25).
  *
  * What it guarantees, and nothing stronger: a write to retained state is refused where it happens, or is made by a
- * closed-list kind's own writer (a `Retained` collection's `set`/`add`/`delete`/`clear`; a record's, an arena's or an
+ * closed-list kind's own writer (a `Retained` collection's methods, `COLLECTION_METHODS`; a record's, an arena's or an
  * array's assignment, definition or deletion) or is a marked write to an owner's own field. A typed array
  * (`TYPED_ENTRIES`), which no freeze holds, is the exception: a write to its elements after its run ended is caught at
  * the process's exit (`changedTyped`), which fails the file, not at its line. Every refusal it throws is counted, so
@@ -15,8 +15,8 @@
  * read at review; the function's own properties are frozen at its registration. It changes no answer and no charge.
  *
  * How:
- * - What may be stored is a closed set of shapes, checked where it is stored (a collection's `set`/`add`, a map's object
- *   key too; a record's, an arena's or an array's write) and again at the next run switch: a primitive; plain data (an
+ * - What may be stored is a closed set of shapes, checked where it is stored (a collection's storing method, a map's
+ *   upserts among them, its key too; a record's, an arena's or an array's write) and again at the next run switch: a primitive; plain data (an
  *   object of prototype `Object.prototype` or `null`, or an array of `Array.prototype`, data properties only); a kind
  *   made by `Retained`; a registered owner; a registered function; a value the indexed program reaches
  *   (`Retained.program` and its parts, `Retained.programPart`: what it reaches frozen there, its maps and sets given
@@ -342,6 +342,11 @@ function upserts(native: GetOrInsertComputed | null): Readonly<Record<string, Me
       return upsert(this, key, () => value);
     },
     getOrInsertComputed<V>(this: WeakKey, key: unknown, compute: (key: unknown) => V): V {
+      // (a callback that is no function goes to the native method, which throws as production's does, held key or not)
+      if (typeof compute !== "function") {
+        const computed: (this: WeakKey, key: unknown, compute: (key: unknown) => V) => V = native!;
+        return computed.call(this, key, compute);
+      }
       return upsert(this, key, compute);
     },
   };
@@ -455,10 +460,6 @@ export class RetainedInstrument implements RetainedRecorder {
   /** The functions registered since the last switch, whose own properties' values are sealed there. */
   #functions: (readonly [string, object])[] = [];
 
-  /**
-   * `fn`'s own data properties' values (a frozen function's, fixed from its registration), but its `prototype`: the
-   * template its calls make instances from (a generator's is no plain object), which the freeze keeps in place.
-   */
   /** A function's own accessor, refused where it is registered or walked: its getter's result is not seen. */
   #refuseAccessors<T extends object>(fn: T, label: string): void {
     for (const key of Reflect.ownKeys(fn))
@@ -466,6 +467,10 @@ export class RetainedInstrument implements RetainedRecorder {
         this.#refuse(`an accessor \`${String(key)}\` of ${label}`);
   }
 
+  /**
+   * `fn`'s own data properties' values (a frozen function's, fixed from its registration), but its `prototype`: the
+   * template its calls make instances from (a generator's is no plain object), which the freeze keeps in place.
+   */
   #ownValues<T extends object>(fn: T): unknown[] {
     return Reflect.ownKeys(fn).flatMap((key) => {
       const descriptor = Object.getOwnPropertyDescriptor(fn, key)!;
@@ -601,6 +606,18 @@ export class RetainedInstrument implements RetainedRecorder {
         );
         continue;
       }
+      // (a prototype that is no class's own, as one a `__proto__` key from data sets, is one the walk does not see into;
+      // #1072 review round 13)
+      const made = constructorOf(value);
+      if (
+        prototype !== Array.prototype &&
+        !PLAIN.has(prototype) &&
+        (typeof made !== "function" ||
+          Object.getOwnPropertyDescriptor(made, "prototype")?.value !== prototype)
+      ) {
+        this.#refuse("an object of the indexed program whose prototype is no class's");
+        continue;
+      }
       const writers = PROGRAM_WRITERS.get(prototype);
       if (writers !== undefined) {
         // (non-configurable and read-only, as a made collection's: none falls back to the native writer)
@@ -615,8 +632,13 @@ export class RetainedInstrument implements RetainedRecorder {
           Object.defineProperty(value, writer, {
             value:
               upsert !== null && writer.startsWith("getOrInsert")
-                ? <V>(key: unknown): V => {
-                    const read: (this: WeakKey, key: unknown, compute: () => V) => V = upsert;
+                ? <V>(key: unknown, given: unknown): V => {
+                    const read: (this: WeakKey, key: unknown, compute: (key: unknown) => V) => V =
+                      upsert;
+                    // (a `getOrInsertComputed` callback that is no function goes to the native method, which throws)
+                    if (writer === "getOrInsertComputed" && typeof given !== "function")
+                      // EVIDENCE: invariant: the native method refuses a callback that is no function before any read.
+                      return read.call(held, key, given as (key: unknown) => V);
                     return read.call(held, key, () => refused(writer));
                   }
                 : (): never => refused(writer),
@@ -721,7 +743,8 @@ export class RetainedInstrument implements RetainedRecorder {
       );
     for (const key of Reflect.ownKeys(given)) {
       if (kind !== "record" && key === "length") continue;
-      // (the copy assigns each field, and an assignment there sets the copy's prototype instead)
+      // (the copy assigns each field, and an assignment there sets the copy's prototype instead; a null-prototype object's
+      // own `__proto__` field, which the copy would keep, is refused alike)
       if (key === "__proto__")
         this.#raise(`${name}: a field \`__proto__\` in what ${article(kind)} ${kind} is made from`);
       const descriptor = Object.getOwnPropertyDescriptor(given, key)!;

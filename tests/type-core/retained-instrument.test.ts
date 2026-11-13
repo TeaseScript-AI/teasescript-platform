@@ -903,3 +903,36 @@ test("a function's own accessor is refused where it is registered or the program
   ]);
   assert.deepEqual(steps, ["refused", "refused"]);
 });
+
+test("the program's walk refuses an object whose prototype is no class's, as a `__proto__` key from data sets", () => {
+  const names: readonly string[] = ["a", "__proto__"];
+  const index: Record<string, { n: number }> = {};
+  for (const name of names) index[name] = { n: 0 };
+  const { steps } = stepped(() => [
+    () => Retained.program({ index }),
+    () => Retained.program({ node: new ProgramNode(), map: new Map<string, number>() }),
+  ]);
+  assert.deepEqual(steps, ["refused", "ok"]);
+});
+
+test("an upsert's callback that is no function throws as the native one does, held key or not", () => {
+  const held = <T extends Upserting>(made: T): string => {
+    try {
+      // EVIDENCE: fixture: a callback that is no function, which the native method refuses with a TypeError.
+      made.getOrInsertComputed("k", 1 as never);
+      return "ok";
+    } catch (error) {
+      return error instanceof TypeError ? "TypeError" : String(error);
+    }
+  };
+  const native = upserting(new Map<string, number>([["k", 1]]));
+  const program = upserting(new Map<string, number>([["k", 1]]));
+  let outcomes: string[] = [];
+  withRetainedRecorder(new RetainedInstrument(), () => {
+    const made = upserting(Retained.map<string, number>("T.nonCallable"));
+    made.set("k", 1);
+    Retained.program({ program });
+    outcomes = [held(made), held(program)];
+  });
+  assert.deepEqual([held(native), ...outcomes], ["TypeError", "TypeError", "TypeError"]);
+});
