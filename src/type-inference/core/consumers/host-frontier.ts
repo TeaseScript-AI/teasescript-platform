@@ -81,9 +81,6 @@ interface HostFrontiers {
 
 const hostFrontiers = new WeakMap<Consumers, HostFrontiers>();
 
-// (the finishing read's copy bounds live in `model.ts`, which the stores' syntax shares, #1604)
-export { FRONTIER_COPIES, FRONTIER_DEPTH };
-
 /** The limits a read's walk follows (`withFrontierBound` in tests). */
 let frontierBound: { readonly depth: number; readonly copies: number } = {
   depth: FRONTIER_DEPTH,

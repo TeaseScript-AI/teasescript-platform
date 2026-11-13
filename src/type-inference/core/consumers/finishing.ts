@@ -56,19 +56,6 @@ export function typedCall(
 }
 
 /**
- * After a stop, a value's items at a node and a path as the finishing read answers them (`finishingRead`), for the
- * route's questions: one derivation with the consumers'.
- */
-export function finishedItems(
-  walk: Consumers,
-  value: PlaceId,
-  node: FlowNode | null,
-  rest: readonly string[],
-): readonly Item[] {
-  return finishingRead(walk, value, node, rest);
-}
-
-/**
  * A read in the finishing path, answered from the retained state only, the first source that decides it winning, in
  * this order: below a literal, its children's own reads, each through every source; a leaf's own kind (`leafKind`),
  * which no proof decides (an error found there stands, a host read's boundary check forms); the read's own answer as
