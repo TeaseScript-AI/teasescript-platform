@@ -548,14 +548,15 @@ function operandAdmitted(
 }
 
 /**
- * The first `case` value that may never match its `switch`'s subject (V30 §32: today's checker's TSV049, a compile error
- * the core has no sentence for), by today's own predicate (`impossibleCaseMessage`) on the subject's and the value's
- * types: a literal's own kind, as today's checker types one (`caseLiteral`), else the facts' (`expressionTypes`).
- * Admitted, closed: a value the predicate finds a member of the subject's type that may equal, where every unknown the
- * subject holds is of an external origin (the host's or a load's); an unknown of any other reason, a stop's among them,
- * or a subject without an answer is refused. The types are the core's, which can be wider than today's checker's (a
- * read of a written place that today's narrowing has narrowed, an external value carried through a typed place): there
- * a case today refuses is admitted, never matches when it runs, and nothing else differs.
+ * The first `case` value that may never match its `switch`'s subject: a mistake in the source (V30 §32), for which the
+ * core has no rule. Judged by `impossibleCaseMessage` (`src/switch-cases.ts`) on the subject's and the value's types: a
+ * literal's own kind (`caseLiteral`), else the facts' (`expressionTypes`).
+ * Admitted, closed: a value the predicate finds a member of the subject's type that may equal, where the subject's type
+ * holds no unknown, or the subject's answer has items and each unknown one is of an external origin (the host's or a
+ * load's). Every other case value is refused: so every value of a subject whose type holds an unknown of another reason
+ * (a stop's among them). The types are the core's, which can be wider than today's checker's (a read of a written place
+ * that today's narrowing has narrowed, an external value carried through a typed place): there a case today's checker
+ * refuses is admitted, and never matches when it runs.
  */
 function neverMatching(answers: Answers, index: SliceIndex): Outside | null {
   const switches = index.statements.filter((statement) => statement.kind === "switchStatement");
