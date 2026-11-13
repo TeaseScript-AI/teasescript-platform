@@ -9,6 +9,7 @@ import { checkCommentForecasts } from "./check-comment-forecasts.mjs";
 import { checkEvidenceComments } from "./check-evidence.mjs";
 import { checkObligationInventory } from "./check-obligation-inventory.mjs";
 import { checkQuestionSources } from "./check-question-sources.mjs";
+import { checkRetainedState } from "./check-retained-state.mjs";
 import { checkSiteKeys } from "./check-site-keys.mjs";
 import { checkWaitingOverrides } from "./check-waiting-overrides.mjs";
 import { lintFiles, OXLINT_OPTIONS, repositoryRoot } from "./files.mjs";
@@ -102,6 +103,7 @@ for (const diagnostic of [
   ...checkCommentDeclarations(repositoryRoot),
   ...checkObligationInventory(repositoryRoot),
   ...checkQuestionSources(repositoryRoot),
+  ...checkRetainedState(repositoryRoot),
   ...checkSiteKeys(repositoryRoot),
   ...(await checkWaitingOverrides(
     repositoryRoot,

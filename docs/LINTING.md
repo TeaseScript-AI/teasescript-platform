@@ -129,7 +129,54 @@ checked outside dictionary types, including test helpers and mutation callbacks.
 Runtime `typeof`, descriptor/prototype inspection, property omission, and partial static analyses are legitimate
 techniques. Lint does not require schema dependencies, forbid every reflective operation, or determine whether a
 boundary validation is sufficient. `Reflect.get` and `Reflect.apply` require a specific justification because they
-bypass ordinary typed property access or invocation.
+bypass ordinary typed property access or invocation. Type inference is the exception: see the next section.
+
+## Retained state in type inference
+
+`tools/oxlint/check-retained-state.mjs` holds the code side of the frozen retained-state regime (docs/TESTING.md,
+"Frozen retained state"), which catches a write to retained state that the type core makes by ordinary code, across
+runs, in test mode; it does not claim to resist code written to get around it (#1072 R33).
+
+Its widest rule closes the meta-object layer: in every file of `src/type-inference/`, the core files its other lines
+leave out included, a property changes only by assignment or by a kind's own method (#1072 R30, R34). Refused there:
+
+- `Object`, but as `Object.freeze`, `hasOwn`, `keys`, `values`, `entries`, `fromEntries`, `assign` or `is`: another
+  member, an alias (`const O = Object`) and a computed member (`Object[name]`) are refused;
+- `Reflect`, `globalThis`, `Function` and `eval`;
+- the `delete` operator;
+- `.prototype`, `__proto__` and `.constructor`, as a member, a computed key or a destructured name;
+- `defineProperty`, `defineProperties`, `__defineGetter__` and `__defineSetter__`, by name anywhere;
+- a constructor's `return <value>`.
+
+The retained API's own folder (`core/retained/`), which makes the makers' copy, is outside it.
+
+The check reads the program `tsconfig.json` defines: each file of `src/type-inference/` and `tests/helpers/` it compiles,
+a module reached only through another included. A `Retained` call is the one the checker resolves to the API's
+declaration, however it is spelled (#1072 Amendment 4). Its other lines:
+
+- a native `Map`, `Set`, `WeakMap` or `WeakSet`, found by the constructor the checker resolves, is not kept where the
+  instrument cannot reach it (a class field, a module's mutable variable, a parameter property);
+- a private field is `readonly` and either made by a maker or given by its class's `hidden` (`Retained.owner`, or
+  `Retained.programPart` in the program's own files);
+- a `Retained.closure` registration stands right below its comment naming what the function captures (#1072 R26);
+- a `catch` handles only type inference's own errors, and a `finally` completes normally (#1072 R60). Each `instanceof`
+  test of a `catch` binding names a class declared under `src/type-inference/` that extends `Error` directly. The block
+  ends in `throw <binding>`, or returns, yields, breaks, continues or throws another error only inside such a test's
+  consequent or after a top-level guard `if (!(<binding> instanceof C …)) throw <binding>;` (#1072 R67: a consumer that
+  stops at a `yield` closes the generator before its rethrow). A `finally` holds no `yield`, `return`, `break`,
+  `continue` or `throw`. The solver's step catch and the budget's forward their error, as `yield*` does, and are listed
+  by name. So V8's error at a write to frozen data is never handled in type inference while it leaves as the pending
+  error; a later error can replace it, which no line here sees (R68; docs/TESTING.md, "Frozen retained state", what is
+  not covered). The instrument's own refusals are counted where they are raised;
+- an `accessor` field is refused (#1072 R67): its value sits in a private slot that neither the private-field line nor
+  the instrument's lock of an owner sees.
+
+What these reach (a descriptor, a prototype, an integrity level, a deletion) could change a locked owner's field or a
+retained collection's writer unseen by the instrument, or make a frozen run compute what production does not. Only
+`src/type-inference/` and the tests import the core. The tests and `tests/helpers/` hold retained owners and use this
+layer on purpose, to observe the core (`type-core-held-host.ts` defines accessors on an owner to watch its reads); they
+are outside the rule, which reads only type inference. A type-inference author who needs a refused form takes it to the
+coordinator; there is no waiting list and no local disable.
 
 ## Evidence and exceptions
 

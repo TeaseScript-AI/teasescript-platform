@@ -2,6 +2,7 @@ import type { PlaceId } from "../../graph.js";
 import { keptText, pathText, type WorkCounter, type WorkLedger } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { convert } from "./key-ids.js";
+import { Retained } from "../retained/retained.js";
 
 // G3 stage 1: a path's label as a recipe, made one step from its parent's, and its text made only where
 // a diagnostic or a check shows it (`labelText`). A label no one shows costs its recipe and no text.
@@ -26,7 +27,10 @@ export function labelRoot(contract: Contract, place: PlaceId): Label {
   recorded?.records.push({ kind: "recipe", made: root === undefined });
   if (root === undefined) {
     const text = contract.pass.program.place(place).label;
-    contract.labelRoots.set(place, (root = { parent: null, step: "", text, below: null }));
+    contract.labelRoots.set(
+      place,
+      (root = Retained.record<Label>("Label", { parent: null, step: "", text, below: null })),
+    );
   }
   return root;
 }
@@ -36,8 +40,8 @@ export function labelBelow(parent: Label, step: string): Label {
   let found = parent.below?.get(step);
   recorded?.records.push({ kind: "recipe", made: found === undefined });
   if (found === undefined) {
-    found = { parent, step, text: null, below: null };
-    (parent.below ??= new Map()).set(step, found);
+    found = Retained.record<Label>("Label", { parent, step, text: null, below: null });
+    (parent.below ??= Retained.map("Label.below")).set(step, found);
   }
   return found;
 }
@@ -78,7 +82,8 @@ function shown(contract: Contract, label: Label): string {
   }
   const parts = partsOf(label);
   convert(contract, parts.length, 0, 1);
-  return (label.text = keptText(contract.work, parts));
+  label.text = keptText(contract.work, parts);
+  return label.text;
 }
 
 /**
@@ -154,7 +159,7 @@ export function withLabelRecords<T>(
 ): { readonly result: T; readonly records: readonly LabelRecord[] } {
   if (recorded !== null) throw new Error("Label records are already being recorded.");
   const records: LabelRecord[] = [];
-  recorded = { records, sites, passes: new WeakMap(), next: 0 };
+  recorded = { records, sites, passes: Retained.weakMap("labels.recorded.passes"), next: 0 };
   try {
     return { result: run(), records };
   } finally {

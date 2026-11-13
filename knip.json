@@ -27,6 +27,7 @@
     "player/vue/src/useStagePhoto.ts",
     "tests/**/*.test.ts",
     "tests/property/replay.ts",
+    "tests/helpers/retained-instrument-preload.ts",
     "tools/oxlint/{run,test}.mjs",
     "tools/oxlint/check-evidence.test.mjs",
     "tools/oxlint/anti-slop/src/**/*.test.ts",

@@ -339,6 +339,92 @@ whole and runs those programs in both orders: `TEASESCRIPT_SWEEP=full npm run te
 is the sweeps' queue evidence, which the builder of a change that can move a stop runs on a worker before a type-core
 review round, beside the generator areas above.
 
+### Frozen retained state
+
+In the type-core suites, a test-mode instrument (`tests/helpers/retained-instrument.ts`, installed by its preload
+through `tools/test-output-filter.mjs`) checks the state the type core keeps between solver runs where it is stored and
+at each run switch, and freezes what an ended run stored (#1072). It counts each refusal it throws, wherever it is
+caught, and the preload fails the file at its exit when it threw any. It catches a write that the type core makes by
+ordinary code, across runs, in test mode; it does not claim to resist code written to get around it (#1072 R33).
+
+Covered, each closed by construction:
+
+- **What a maker returns:**
+  - a record, an arena or an array: a copy of the given top level (`retainedCopy`) that the instrument wraps;
+  - a map, set, weak map or weak set: its own writers.
+- **The plain data a covered kind reaches.** It is frozen at the switch. V8's `TypeError` at a write to plain data
+  frozen at the switch, to what a registration freezes or to a locked owner field is a refusal while it leaves the core
+  as the pending error: the `catch` and `finally` rule keeps it from being handled in `src/type-inference/`
+  (docs/LINTING.md, "Retained state in type inference"), and the compiler's own catches outside take only native stack
+  exhaustion. It is not counted where it is raised, so a later error can replace it (#1072 R68, below). The
+  instrument's own refusals are counted where they are raised, and are not affected.
+- **An owner's fields:** locked at its first switch and opened by marks. Its private fields are reached through
+  `hidden`.
+- **A registered program:** what it reaches is frozen, its maps and sets refuse writes, its typed arrays are compared
+  at the process's exit, what its walk cannot see into (a weak collection, another built-in, an accessor) is refused,
+  and its classes' private collections are reached through `hidden` (`Retained.programPart`).
+- **A registered function's own properties:** frozen at registration.
+- **A typed array under `TYPED_ENTRIES`:** compared at the process's exit with its bytes when its run ended; a
+  difference fails the file.
+
+Not covered, each with its reason:
+
+- module scope (#1072 R57: an item of its own);
+- what a closure captures (its registration comment, read at review, R26), and what a function the program reaches
+  captures, a bound function's values among them (code the program's indexing made);
+- code outside `src/type-inference/`: an owner given to it, its writes and its catches;
+- V8's `TypeError` at such a write when a later error replaces it before it leaves the core (#1072 R68):
+  - a generator closed by a loop whose body throws, whose `finally` makes the write (the engine drops an error raised
+    while it closes a generator);
+  - a `finally` whose call throws after the write.
+
+  No generator `finally` in the core writes retained state today: the six are `core/values.ts:329` and `:964`,
+  `core/contract/value-kinds.ts:244` and `:374`, `core/contract-descriptors.ts:299` and `core/budget.ts:392`;
+- a prototype set by a `"__proto__"` key from data on an owner, a registered function or a function the program
+  reaches (#1072 R65): no core file writes a key from data to one. Of the 93 lines this lists in `src/type-inference/`
+  at #2417's head, 88 of them writes, none has an owner (`this`, or `pass` in `answers.ts`) or a function as its
+  object:
+
+  ```sh
+  rg --pcre2 -g '*.ts' -o '(?<![\w.$\]])[\w$.#]+(?:\[[^\]]*\])*\[[^\]]+\]\s*(=|\?\?=|\|\|=|\+=|-=)(?!=)' src/type-inference
+  ```
+
+- a typed array written and then restored between two comparisons;
+- a private `readonly` field assigned again in its constructor after a run switch inside that constructor (R36);
+- a write within one run; production;
+- admission and the receiving domain (#1072 1b ii); `narrowing/` (R49, an item of its own);
+- an `IDENTITY_CLASSES` class's own state, each listed with its reason;
+- the retained API itself, a trusted implementation.
+
+It runs in two regimes:
+
+- **CI** freezes only the files of `tests/helpers/retained-subset.ts`: a greedy cover, by their frozen cost, of every
+  retained kind by its site, owner kind and registered function that the type-core files exercise frozen, within no CI
+  shard above 10 minutes. That file names what the subset does not exercise. Its work-pinning suites run again
+  unfrozen in `tests/type-core-production/`.
+- **The whole survey** freezes every type-core file, as one queue pool, outside CI and never scheduled. A pull request
+  that changes `src/type-inference/core/**`, its retained makers included, carries in its READY the whole frozen survey
+  at its head: the pool's job exits, and the files, refusals and frozen writes that `node tools/retained-survey.mjs`
+  counts. From the pull request's checkout, `<SHA>` its head's full SHA:
+
+  ```sh
+  find tests/type-core tests/type-core-stop -maxdepth 2 -name '*.test.ts' | sort |
+    sed -E 's#^tests/#dist/tests/#; s#\.ts$#.js#' > /tmp/agent-work/<task>/survey-items.txt
+  sx-job submit --name 'survey-{i}' --owner <owner> --campaign <tag> --items /tmp/agent-work/<task>/survey-items.txt \
+    --target 20m --checkout <SHA> --unmerged "the whole frozen survey of the head" --timeout 2h --mem 8G -- \
+    bash -c 'cd "$SX_CHECKOUT" && mapfile -t items < "$SX_ITEMS" && RETAINED_SURVEY="$SX_OUT/survey" node tools/test-output-filter.mjs "${items[@]}" < /dev/null > "$SX_OUT/filter.txt" 2>&1'
+  sx-job wait --campaign <tag>
+  sx-job gather --campaign <tag> --into ~/work/evidence/<issue>/<SHA>/survey
+  node tools/retained-survey.mjs ~/work/evidence/<issue>/<SHA>/survey
+  ```
+
+  A job starts outside its checkout, hence the `cd "$SX_CHECKOUT"`. The last line exits 0 when every type-core file was
+  surveyed with no refusal and no frozen write; the tests' own outcome is the jobs' exits. `RETAINED_FREEZE=all` freezes
+  every file without the survey's notes.
+
+`RETAINED_MEASURE=<folder>`, with `NODE_OPTIONS=--enable-source-maps`, freezes every file too and writes what each
+exercises by its source site: the measurement the subset is chosen from.
+
 ## Test layers
 
 The testing strategy uses complementary layers:

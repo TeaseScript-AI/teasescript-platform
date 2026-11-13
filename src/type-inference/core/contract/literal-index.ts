@@ -30,6 +30,7 @@ import type {
   WalkRank,
 } from "./model.js";
 import { typeTags } from "./terms.js";
+import { Retained, retainedModule } from "../retained/retained.js";
 
 // The literal index (§8): one index of a literal's structure per literal value or cell, its paths and signature.
 
@@ -49,21 +50,21 @@ function marksOwn(node: IndexNode): boolean {
 
 /** A node of a literal's index holding nothing yet. */
 function indexNode(): IndexNode {
-  return {
-    terms: new Map(),
-    reads: [],
-    exact: [],
-    others: [],
+  return Retained.record("LiteralNode", {
+    terms: Retained.map("LiteralNode.terms"),
+    reads: Retained.array("LiteralNode.reads"),
+    exact: Retained.array("LiteralNode.exact"),
+    others: Retained.array("LiteralNode.others"),
     objects: null,
     reference: false,
     empty: false,
-    children: new Map(),
-    seen: new Set(),
-    readIds: new Map(),
+    children: Retained.map("LiteralNode.children"),
+    seen: Retained.set("LiteralNode.seen"),
+    readIds: Retained.map("LiteralNode.readIds"),
     firstRead: null,
     firstOther: null,
-    via: new Map(),
-  };
+    via: Retained.map("LiteralNode.via"),
+  });
 }
 
 /** Two places in a literal's one walk by their places at each depth (`Contract.standsAlong`): the earlier first. */
@@ -116,7 +117,9 @@ export function pathSteps(contract: Contract, id: number): string[] {
 /** The id of the path one `step` below the path `parent`, made (and charged, its step and slot) when first asked. */
 export function pathAt(contract: Contract, parent: number, step: string): number {
   let steps = contract.pathChildren[parent];
-  if (steps === undefined) contract.pathChildren[parent] = steps = new Map();
+  if (steps === undefined) {
+    contract.pathChildren[parent] = steps = Retained.map("Contract.pathChildren[]");
+  }
   const known = steps.get(step);
   if (known !== undefined) return known;
   contract.keepText(step.length);
@@ -506,10 +509,10 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
       if (term.kind === "object") {
         if (node.objects === null) {
           contract.keep(4);
-          node.objects = { list: [], count: new Map() };
+          node.objects = { list: [], count: Retained.map("LiteralNode.objects.count") };
         }
         // its property names, and the property its button value reads, decided once per record (V30 §19)
-        const names = new Set<string>();
+        const names = Retained.set<string>("LiteralNode.names");
         let value: Selected = null;
         let text: Selected = null;
         // (its names and their entry, its counts, its properties copied, a task per property)
@@ -557,7 +560,11 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
     for (let at = fill.length - 1; at >= 0; at -= 1) nodes.push(fill[at]!);
   }
   contract.indexing.delete(literal);
-  contract.literals.set(literal, { root, byId: new Map([[0, root]]), lacking: new Map() });
+  contract.literals.set(literal, {
+    root,
+    byId: Retained.map("LiteralIndex.byId", [[0, root]]),
+    lacking: Retained.map("LiteralIndex.lacking"),
+  });
 }
 
 /**
@@ -644,10 +651,10 @@ export function* loadsBelow(
     merged = withoutEmpty(mergeItems(items, program.scope));
     contract.keep(1 + merged.length);
     contract.loadsBelowOf.set(groups, merged);
-    if (staged !== null) loadsFlows.set(groups, staged.inclusions);
+    if (staged !== null) loadsFlows().set(groups, staged.inclusions);
   }
   if (flow !== null) {
-    const kept = loadsFlows.get(groups);
+    const kept = loadsFlows().get(groups);
     // (an answer kept by a reader that passed no flow: no flow of it)
     if (kept === undefined) flow.opaque("loads");
     // (read by the reader that made the kept answer, in its run: `kept`, which a run's own reads need not hold)
@@ -658,7 +665,10 @@ export function* loadsBelow(
 }
 
 /** #1668: per loads' groups, the inclusions their kept merged answer was made of (`loadsBelow`). */
-const loadsFlows = new WeakMap<readonly OtherGroup[], readonly Inclusion[]>();
+const loadsFlows = retainedModule<readonly OtherGroup[], readonly Inclusion[]>(
+  "literal-index.loadsFlows",
+  "weakMap",
+);
 
 /**
  * #1456: a prefix's property index over its sources (`PropertyIndex`), each a closed object literal stored whole: its
@@ -674,7 +684,7 @@ export function propertyIndex(
 ): PropertyIndex {
   const { work } = contract.pass.program;
   const sources: PropertySource[] = [];
-  const holders = new Map<number, PropertySource[]>();
+  const holders = Retained.map<number, PropertySource[]>("PropertyIndex.holders");
   const add = (literal: PlaceId, entry: PrefixEntry | null, group: LevelGroup | null): void => {
     work.charge("structureSteps");
     const object = contract.literalIndex(literal).root.objects!.list[0]!;
@@ -706,7 +716,13 @@ export function propertyIndex(
         : 0,
   );
   contract.keep(4);
-  return { sources, byWriter, holders, lacking: new Map(), folds: new Map() };
+  return {
+    sources,
+    byWriter,
+    holders,
+    lacking: Retained.map("PropertyIndex.lacking"),
+    folds: Retained.map("PropertyIndex.folds"),
+  };
 }
 
 /**

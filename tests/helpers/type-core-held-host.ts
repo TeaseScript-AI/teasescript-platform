@@ -48,6 +48,7 @@ import {
   type Globals,
   type StopRun,
 } from "./type-core-stop-oracle.js";
+import { watchRecord, watchWrites } from "./retained-instrument.js";
 import { sampled } from "./sweep.js";
 
 /*
@@ -1115,30 +1116,75 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     if (hooked.has(map)) return;
     hooked.add(map);
     for (const [key, value] of map) each(key, value);
+    // (a map the retained-state instrument made is watched through its own writer, which stays in place, #1072 R35;
+    // any other has its writer wrapped)
+    if (
+      watchWrites(map, (key, value) => {
+        if (live) each(key, value);
+      })
+    )
+      return;
+    const own = map.set;
     Object.defineProperty(map, "set", {
       configurable: true,
       writable: true,
       value(this: Map<K, V>, key: K, value: V) {
         if (live) each(key, value);
-        return Map.prototype.set.call(this, key, value);
+        return own.call(this, key, value);
       },
     });
   };
   const onPush = (list: Obligation[], each: (check: Obligation) => void): void => {
     if (hooked.has(list)) return;
     hooked.add(list);
+    const own = list.push;
     Object.defineProperty(list, "push", {
       configurable: true,
       writable: true,
       value(this: Obligation[], ...checks: Obligation[]) {
         if (live) for (const check of checks) each(check);
-        return Array.prototype.push.apply(this, checks);
+        return own.apply(this, checks);
       },
     });
   };
   const observe = (recipe: Label): void => {
     if (hooked.has(recipe)) return;
     hooked.add(recipe);
+    // (#1072 1b: in a frozen run a recipe is a record, observed through its own proxy; its fields stay its own)
+    let quiet = false;
+    const watched = watchRecord(
+      recipe,
+      "text",
+      (value) => {
+        if (quiet) return;
+        // EVIDENCE: invariant: a recipe's text is a string or `null` (`Label`).
+        const shownText = (value as string | null) ?? plain(recipe);
+        if (shownText !== null) touch(recipe, shownText);
+      },
+      (value) => {
+        if (typeof value === "string") touch(recipe, value);
+      },
+    );
+    if (watched) {
+      watchRecord(
+        recipe,
+        "below",
+        () => {},
+        (value) => {
+          if (value instanceof Map) onSet(value, (_, child: Label) => observe(child));
+        },
+      );
+      slots.set(recipe, () => {
+        quiet = true;
+        try {
+          return recipe.text;
+        } finally {
+          quiet = false;
+        }
+      });
+      if (recipe.below !== null) onSet(recipe.below, (_, child) => observe(child));
+      return;
+    }
     let text = recipe.text;
     let below = recipe.below;
     slots.set(recipe, () => text);

@@ -93,6 +93,7 @@ export {
   leftOutWarning,
   withoutRecords,
 } from "./consumers/left-out.js";
+import { retainedModule } from "./retained/retained.js";
 export type { Omission } from "./consumers/left-out.js";
 
 /*
@@ -133,12 +134,12 @@ function withBudget(items: readonly Item[]): readonly Item[] {
 }
 
 /** Whether a program is outside the candidate slice's syntax (`slice-syntax.ts`), walked once per analysis. */
-const OUTSIDE_SYNTAX = new WeakMap<CoreProgram, boolean>();
+const OUTSIDE_SYNTAX = retainedModule<CoreProgram, boolean>("consumers.OUTSIDE_SYNTAX", "weakMap");
 function outsideSliceSyntax(program: CoreProgram): boolean {
-  let outside = OUTSIDE_SYNTAX.get(program);
+  let outside = OUTSIDE_SYNTAX().get(program);
   if (outside === undefined) {
     outside = outsideSyntax(program.files, program.globals) !== null;
-    OUTSIDE_SYNTAX.set(program, outside);
+    OUTSIDE_SYNTAX().set(program, outside);
   }
   return outside;
 }
