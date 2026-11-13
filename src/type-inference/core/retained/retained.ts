@@ -6,17 +6,18 @@
  * (`Retained.array`); and an owner's own fields (`Retained.owner`), each change to one marked (`amend(owner)`,
  * `Retained.held`). Everything else kept is plain data, which no later run changes. With no instrument (production)
  * a record, arena or array is a copy of what it is given (`retainedCopy`), a collection the native one it makes, `owner`
- * and `amend` return at once, and nothing is charged. A test installs an instrument (`withRetainedRecorder`;
+ * and `amend` return at once, and nothing is charged. A test installs an instrument (`withRetainedInstrument`;
  * `retained-instrument.ts`), which makes the kinds, refuses at its line any other write to retained
  * state, and hears the owners' marks and the solver's runs. A typed array, which no freeze holds, is the exception: a
  * write to its elements after its run is caught at the process's exit, which fails the file.
  */
 
 /**
- * Test-only: what an instrument hears. Each kind made while it is installed is made by it; each name says the owner
- * and the field (`Contract.prefix`).
+ * Test-only: the calls the retained API makes on an installed instrument, which the test class `RetainedInstrument`
+ * (`tests/helpers/retained-instrument.ts`) implements. Each kind made while it is installed is made by it; each name
+ * says the owner and the field (`Contract.prefix`).
  */
-export interface RetainedRecorder {
+export interface RetainedInstrumentHooks {
   map<K, V>(name: string, entries: Iterable<readonly [K, V]> | null): Map<K, V>;
   set<T>(name: string, values: Iterable<T> | null): Set<T>;
   weakMap<K extends object, V>(name: string): WeakMap<K, V>;
@@ -48,21 +49,30 @@ export interface RetainedRecorder {
   run<T extends object>(run: T | null): void;
 }
 
-let active: RetainedRecorder | null = null;
-/** The instrument installed for the whole process (`installRetainedRecorder`), which `withRetainedRecorder` stands over. */
-let ambient: RetainedRecorder | null = null;
+let active: RetainedInstrumentHooks | null = null;
+/**
+ * The instrument installed for the whole process (`installRetainedInstrument`), which `withRetainedInstrument` stands
+ * over.
+ */
+let ambient: RetainedInstrumentHooks | null = null;
 
-/** Test-only: installs `recorder` for the whole process (the frozen type-core suites' preload). */
-export function installRetainedRecorder(recorder: RetainedRecorder): void {
+/** Test-only: installs `instrument` for the whole process (the frozen type-core suites' preload). */
+export function installRetainedInstrument(instrument: RetainedInstrumentHooks): void {
   if (active !== null) throw new Error("A retained-state instrument is already installed.");
-  ambient = active = recorder;
+  ambient = active = instrument;
 }
 
-/** Test-only: runs `callback` with `recorder` making every retained kind and hearing every mark. */
-export function withRetainedRecorder<T>(recorder: RetainedRecorder, callback: () => T): T {
+/**
+ * Test-only: runs `callback` with `instrument` in place of the process's own (`installRetainedInstrument`), if any,
+ * making every retained kind and hearing every mark and run; refused while another stands over the process's own.
+ */
+export function withRetainedInstrument<T>(
+  instrument: RetainedInstrumentHooks,
+  callback: () => T,
+): T {
   if (active !== ambient) throw new Error("A retained-state instrument is already installed.");
   const before = active;
-  active = recorder;
+  active = instrument;
   try {
     return callback();
   } finally {
@@ -71,7 +81,7 @@ export function withRetainedRecorder<T>(recorder: RetainedRecorder, callback: ()
 }
 
 /** The installed instrument, `null` in production: the solver takes it once, when made. */
-export function retainedRecorder(): RetainedRecorder | null {
+export function retainedInstrument(): RetainedInstrumentHooks | null {
   return active;
 }
 
@@ -190,7 +200,7 @@ export function retainedModule<K extends WeakKey, V>(
 export function retainedModule<T extends WeakKey>(name: string, kind: "weakSet"): () => WeakSet<T>;
 export function retainedModule(name: string, kind: ModuleKind): () => object {
   let native: object | undefined;
-  let recorded: { readonly by: RetainedRecorder; readonly value: object } | undefined;
+  let instrumented: { readonly by: RetainedInstrumentHooks; readonly value: object } | undefined;
   const make = (): object =>
     kind === "map"
       ? Retained.map(name)
@@ -201,7 +211,7 @@ export function retainedModule(name: string, kind: ModuleKind): () => object {
           : Retained.weakSet(name);
   return () => {
     if (active === null) return (native ??= make());
-    if (recorded?.by !== active) recorded = { by: active, value: make() };
-    return recorded.value;
+    if (instrumented?.by !== active) instrumented = { by: active, value: make() };
+    return instrumented.value;
   };
 }

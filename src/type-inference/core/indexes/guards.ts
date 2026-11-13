@@ -121,7 +121,7 @@ export class GuardIndex {
   #queries: { readonly events: NarrowingEvents; readonly routes: NarrowingRoutes } | null = null;
 
   public constructor(readonly program: CoreProgram) {
-    // (its narrowing indexes, `#narrowing` and `#queries`, are not exposed: outside the recorder's domain in #1072 1b)
+    // (its narrowing indexes, `#narrowing` and `#queries`, are not exposed: outside the instrument's domain in #1072)
     Retained.owner(this, "GuardIndex", (index) => ({ tested: index.#tested }));
     const work = program.work;
     const flow = program.flow;

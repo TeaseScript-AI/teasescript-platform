@@ -7,11 +7,8 @@ import {
   checkedResult,
   reportedDiagnostics,
 } from "../../../src/type-inference/core/check-result/check-result.js";
-import {
-  coreMessage,
-  messageSource,
-  type MessageSource,
-} from "../../../src/type-inference/core/messages.js";
+import { coreMessage, messageSource } from "../../../src/type-inference/core/messages.js";
+import type { MessageSource } from "../../../src/type-inference/core/messages/site.js";
 import type { CheckedDiagnostic } from "../../../src/type-inference/core/result.js";
 import { kindsInOrder } from "../../../src/type-inference/core/items.js";
 import { parsedExpression, typeText } from "../../../src/type-inference/core/messages/words.js";

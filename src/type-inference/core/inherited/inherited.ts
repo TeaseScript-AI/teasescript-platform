@@ -23,7 +23,7 @@ import { landed, landedKey, passThrough, passThroughKey } from "../admission/lan
 import type { Frontier, Inheriting, Stop, Stops, WaitingAnswer } from "../admission/model.js";
 import { permittedAt, unrestricted } from "../admission/permitted.js";
 import { inputsAt, inputsOf, scanAt } from "../admission/scan.js";
-import { inheritedInto, join, settleCycles, settledCycles } from "./waiting.js";
+import { inheritedInto, join, settleCycles, settleCyclesIfForgotten } from "./waiting.js";
 import { isRead, read, type Read, type Reads } from "./reads.js";
 import type { Proof, ProofDemand, Proven, Work } from "../solver.js";
 import type { WorkLedger } from "../budget.js";
@@ -222,7 +222,7 @@ function* waitOn(
 function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
   // (a key in its identity, as the proofs hold it)
   const key = canonicalKey(admission.pass.contract, asked);
-  settledCycles(admission);
+  settleCyclesIfForgotten(admission);
   let proof: InheritedProof | null;
   try {
     ({ proof } = admission.run(admission.pass.solver.proven(inheritedProof(admission, key))));
