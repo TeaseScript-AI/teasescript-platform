@@ -687,3 +687,18 @@ test("a module's collection is made by its kind, one per recorder", () => {
   });
   assert.equal(instrument.report().made.get("map"), 1);
 });
+
+test("a function the program reaches is frozen, and the plain data its own properties hold with the program's", () => {
+  const fn = Object.assign(() => 0, { cache: { n: 0 }, scalar: 0 });
+  let holder: { length: typeof fn } | undefined;
+  const { steps } = stepped(() => [
+    () => {
+      Retained.program({ fn });
+      holder = Retained.record("T.programFunction", { length: fn });
+    },
+    () => ++holder!.length.cache.n,
+    () => (fn.scalar = 1),
+  ]);
+  assert.deepEqual(steps, ["ok", "frozen", "frozen"]);
+  assert.deepEqual([fn.cache.n, fn.scalar], [0, 0]);
+});

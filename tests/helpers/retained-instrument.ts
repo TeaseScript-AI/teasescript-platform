@@ -450,7 +450,13 @@ export class RetainedInstrument implements RetainedRecorder {
       // (a listed class's instance stays its own: the work ledger and the item scope change after the indexing)
       if (value !== root && IDENTITY_CLASSES.has(constructorOf(value))) continue;
       this.#registered.add(value);
-      if (typeof value === "function") continue;
+      // (a function the program reaches is frozen, and what its own properties hold is walked as the program's data,
+      // as a registered function's is: admitted as registered, it is not walked again where it is stored)
+      if (typeof value === "function") {
+        Object.freeze(value);
+        stack.push(...this.#ownValues(value));
+        continue;
+      }
       const prototype: unknown = Object.getPrototypeOf(value);
       if (prototype === Map.prototype)
         MAP_FOR_EACH.call(value, (item: unknown, key: unknown) => stack.push(key, item));
