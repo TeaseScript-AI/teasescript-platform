@@ -4,7 +4,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { analyseCore } from "../../../src/type-inference/core/answers.js";
 import { WorkLedger } from "../../../src/type-inference/core/budget.js";
-import { coreCheckResult } from "../../../src/type-inference/core/check-result/check-result.js";
+import {
+  checkedResult,
+  coreCheckResult,
+} from "../../../src/type-inference/core/check-result/check-result.js";
 import { SliceIndex } from "../../../src/type-inference/core/check-result/slice-index.js";
 import { checkedOnSource, identityView } from "../../../src/type-inference/core/identity-view.js";
 import type { CoreAnalysisRequest } from "../../../src/type-inference/core/program.js";
@@ -94,7 +97,8 @@ function expectedUnits(request: CoreAnalysisRequest): number {
         for (let next = own.pop(); next !== undefined; next = own.pop()) {
           body += 1;
           if (kindOf(next) === "letStatement") names += 1;
-          if (kindOf(next) === "forStatement") names += isTree(next) && isTree(next["valueVariable"]) ? 2 : 1;
+          if (kindOf(next) === "forStatement")
+            names += isTree(next) && isTree(next["valueVariable"]) ? 2 : 1;
           if (isTree(next)) for (const [, child] of members(next)) own.push(child);
         }
         units += given + body + names;
@@ -215,4 +219,54 @@ test("the result read back onto the source charges a unit per node it translates
   const work = new WorkLedger(1_000_000);
   checkedOnSource(view, checked, work);
   assert.equal(work.counts().get("identitySteps"), nodes);
+});
+
+test("a request analysed twice makes its view again in the second run, with the same answers and work (#2493)", () => {
+  // (no view outlives its run: each analysis of the source makes its own, and only the view's own request names it)
+  const request = coreRequest(
+    main(
+      `${PASS}let xs: (integer | string)[] = [1, "s"]\nlet w: integer = pass(xs[1])\nrepeat pass(xs[1]) {}\nexit`,
+    ),
+  )!;
+  const runs = [0, 1].map(() => {
+    const answers = analyseCore(request);
+    const checked = checkedResult(answers, request);
+    return {
+      view: answers.identity,
+      steps: answers.budget.counts.get("identitySteps"),
+      diagnostics: checked.diagnostics,
+      checks: checked.checks,
+    };
+  });
+  const [first, second] = runs;
+  assert.ok(first !== undefined && second !== undefined && first.view.calls > 0);
+  assert.notEqual(second.view, first.view);
+  assert.equal(identityView(first.view.request), first.view);
+  assert.deepEqual({ ...second, view: second.view.calls }, { ...first, view: first.view.calls });
+});
+
+test("an analysis makes its view once: the program reads the view made for it, a call read or none (#2493)", () => {
+  for (const source of [
+    'let box = {n: 1}\nbox.n = 2\nsay "${box.n}"\nexit',
+    PASS + 'let box = {n: 1}\nbox.n = 2\nsay "${box.n}"\nexit',
+    PASS + 'let n = pass(1)\nsay "${n}"\nexit',
+  ]) {
+    const request = coreRequest(main(source))!;
+    // (as `coreOutcome` does: the view, then the analysis of the view's own request, never the compiler's)
+    const view = identityView(request);
+    assert.notEqual(view.request, request, source);
+    assert.equal(analyseCore(view.request).identity, view, source);
+  }
+});
+
+test("a copy of a view's own request with an option changed is analysed by its own options (#2493)", () => {
+  const view = identityView(coreRequest(main(PASS + 'let n = pass(1)\nsay "${n}"\nexit'))!);
+  assert.ok(view.calls > 0);
+  const copy = {
+    ...view.request,
+    options: { ...view.request.options, globals: ["hostValue", "other"] },
+  };
+  const answers = analyseCore(copy);
+  assert.notEqual(answers.identity, view);
+  assert.equal(answers.identity.request.options, copy.options);
 });
