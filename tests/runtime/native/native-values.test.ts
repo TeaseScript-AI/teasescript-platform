@@ -267,13 +267,13 @@ test("sets add, find, remove and clear members as today's sets do", () => {
  * Two lists whose keys (46 long, so hashed) differ but share one cyrb53 hash: the second member of a hashed key's bucket
  * (found by a birthday search over three code units, review round 1 of #2684).
  */
-const COLLIDING: readonly SerializableRuntimeValue[] = [
+const COLLIDING: readonly [SerializableRuntimeValue, SerializableRuntimeValue] = [
   { kind: "list", items: [`a\u5059\u375aa${"b".repeat(36)}`] },
   { kind: "list", items: [`a\u5179\u2caa\u6cd1${"b".repeat(36)}`] },
 ];
 
 test("members whose long keys share a hash stay apart, as in today's sets", () => {
-  const [first, second] = COLLIDING as [SerializableRuntimeValue, SerializableRuntimeValue];
+  const [first, second] = COLLIDING;
   assert.notEqual(valueKey(first), valueKey(second));
   const canonical = createCapturedSerializableSet([first]);
   const native = nativeSetOf([fromCanonical(first)]);
