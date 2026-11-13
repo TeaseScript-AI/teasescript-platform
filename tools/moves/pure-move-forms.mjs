@@ -124,6 +124,9 @@ function shapeOf(file, text) {
   return { importLines, headerComments, layoutBlanks, declarationStarts };
 }
 
+/** The forms that admit a line, as `verdictsOf` names them, in the report's order. */
+export const FORMS = ["import", "export", "whitespace", "header comment"];
+
 /**
  * Each added or removed line of `files` (the changes `movedLinesOf` reads for `mergeBase`..`head`) that Git does not
  * mark moved, and each line of a side that is no regular file whether Git marks it moved or not, with the form that

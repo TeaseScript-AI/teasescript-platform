@@ -97,7 +97,7 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
-import { PARSED, regular, verdictsOf } from "./pure-move-forms.mjs";
+import { FORMS, PARSED, regular, verdictsOf } from "./pure-move-forms.mjs";
 import {
   boundDeclarations,
   CannotRun,
@@ -109,7 +109,6 @@ import { bindingDifferences } from "./pure-move-bindings.mjs";
 
 export const RESIDUAL =
   "Git's move detection is heuristic: a moved block below its size threshold (20 alphanumeric characters) reads as added and removed. Read such a failure; it is not overridden.";
-const FORMS = ["import", "export", "whitespace", "header comment"];
 
 /**
  * The check of the change from the merge base of `base` and `HEAD`: `{ mergeBase, unadmitted, declared, stale, refused,
