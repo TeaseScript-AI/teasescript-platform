@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { operationRelations } from "../../src/type-inference/adapters/index.js";
-import { collectGraph } from "../../src/type-inference/collector.js";
-import type { ContractFamily } from "../../src/type-inference/graph.js";
-import { request } from "../helpers/type-core/type-inference-graph.js";
+import { operationRelations } from "../../../src/type-inference/adapters/index.js";
+import { collectGraph } from "../../../src/type-inference/collector.js";
+import type { ContractFamily } from "../../../src/type-inference/graph.js";
+import { request } from "../../helpers/type-core/type-inference-graph.js";
 
 /**
  * The relations table has a relation for every operation the collector emits (work note); an injected host

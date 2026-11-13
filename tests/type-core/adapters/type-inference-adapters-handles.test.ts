@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { HANDLE_KINDS, HANDLE_MEMBERS, type HandleKind } from "../../src/handle-members.js";
+import { HANDLE_KINDS, HANDLE_MEMBERS, type HandleKind } from "../../../src/handle-members.js";
 import {
   DURATION_TYPE,
   INTEGER_TYPE,
@@ -9,10 +9,13 @@ import {
   optional,
   STRING_TYPE,
   union,
-} from "../../src/static-types.js";
-import { memberOf, operationRelations } from "../../src/type-inference/adapters/index.js";
-import type { OperandView, OperationRelation } from "../../src/type-inference/adapters/relation.js";
-import { INVALID } from "../../src/type-inference/adapters/views.js";
+} from "../../../src/static-types.js";
+import { memberOf, operationRelations } from "../../../src/type-inference/adapters/index.js";
+import type {
+  OperandView,
+  OperationRelation,
+} from "../../../src/type-inference/adapters/relation.js";
+import { INVALID } from "../../../src/type-inference/adapters/views.js";
 import {
   assertCase,
   BOTTOM_VIEW,
@@ -22,7 +25,7 @@ import {
   legacyOperation,
   type AdapterExpectation,
   type LegacyExpectation,
-} from "../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-parity.js";
 
 /**
  * Parity of the members of handles with the legacy checker (work note): every property and method of

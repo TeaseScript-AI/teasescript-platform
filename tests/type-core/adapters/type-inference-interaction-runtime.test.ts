@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { InstructionPlan } from "../../src/plan/model.js";
-import { run } from "../../src/runtime/engine.js";
-import { completeAction } from "../../src/runtime/operations/complete-action.js";
-import { observeTime } from "../../src/runtime/operations/observe-time.js";
-import { updateInteraction } from "../../src/runtime/operations/update-interaction.js";
-import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
-import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
-import { valueKindOf, type ValueKind } from "../../src/value-kinds.js";
-import { compileValidPlan } from "../helpers/compile-valid-plan.js";
-import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
-import { runUntilExit } from "../helpers/run-until-exit.js";
+import type { InstructionPlan } from "../../../src/plan/model.js";
+import { run } from "../../../src/runtime/engine.js";
+import { completeAction } from "../../../src/runtime/operations/complete-action.js";
+import { observeTime } from "../../../src/runtime/operations/observe-time.js";
+import { updateInteraction } from "../../../src/runtime/operations/update-interaction.js";
+import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
+import type { RuntimeSnapshot } from "../../../src/runtime/snapshot/state.js";
+import { valueKindOf, type ValueKind } from "../../../src/value-kinds.js";
+import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
+import { runUntilExit } from "../../helpers/run-until-exit.js";
 
 // The interaction adapters' shape and optionality branches at runtime (stage-2b work note): each program is a row
 // of the case tables (`tests/fixtures/type-inference/adapter-cases/{choice,form,commands}.jsonl`), named by its `id`

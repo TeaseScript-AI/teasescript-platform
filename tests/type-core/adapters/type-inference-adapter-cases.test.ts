@@ -2,16 +2,19 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 
-import { operationRelations } from "../../src/type-inference/adapters/index.js";
-import { VALUE_KIND_NAMES, VALUE_KINDS } from "../../src/value-kinds.js";
-import { MADE_KINDS, UNMADE_KINDS } from "../helpers/type-core/adapter-cases/adapter-case-forms.js";
+import { operationRelations } from "../../../src/type-inference/adapters/index.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS } from "../../../src/value-kinds.js";
+import {
+  MADE_KINDS,
+  UNMADE_KINDS,
+} from "../../helpers/type-core/adapter-cases/adapter-case-forms.js";
 import {
   generateTable,
   ROUTINE_NAMES,
   type CaseRow,
   type RoutineName,
-} from "../helpers/type-core/adapter-cases/adapter-case-tables.js";
-import { assertCase, type AdapterExpectation } from "../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-cases/adapter-case-tables.js";
+import { assertCase, type AdapterExpectation } from "../../helpers/type-core/adapter-parity.js";
 
 /**
  * The case tables of the branched legacy routines (O4 stage 2b, work note): each table is generated from its
@@ -19,7 +22,7 @@ import { assertCase, type AdapterExpectation } from "../helpers/type-core/adapte
  * drift unseen), and every row is asserted against the relation the routing gives the operation. Set
  * `ADAPTER_CASES_WRITE=1` to write the tables anew after a deliberate change of the templates or the legacy.
  */
-const TABLES = new URL("../../../tests/fixtures/type-inference/adapter-cases/", import.meta.url);
+const TABLES = new URL("../../../../tests/fixtures/type-inference/adapter-cases/", import.meta.url);
 
 function tablePath(routine: RoutineName): URL {
   return new URL(`${routine}.jsonl`, TABLES);

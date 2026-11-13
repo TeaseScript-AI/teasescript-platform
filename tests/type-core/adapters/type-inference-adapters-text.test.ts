@@ -9,11 +9,14 @@ import {
   union,
   withValues,
   type StaticType,
-} from "../../src/static-types.js";
-import { memberOf, operationRelations } from "../../src/type-inference/adapters/index.js";
-import type { OperandView, OperationRelation } from "../../src/type-inference/adapters/relation.js";
-import { INVALID } from "../../src/type-inference/adapters/views.js";
-import type { ValueKind } from "../../src/value-kinds.js";
+} from "../../../src/static-types.js";
+import { memberOf, operationRelations } from "../../../src/type-inference/adapters/index.js";
+import type {
+  OperandView,
+  OperationRelation,
+} from "../../../src/type-inference/adapters/relation.js";
+import { INVALID } from "../../../src/type-inference/adapters/views.js";
+import type { ValueKind } from "../../../src/value-kinds.js";
 import {
   assertCase,
   assertEqualResult,
@@ -24,8 +27,8 @@ import {
   legacyOperation,
   type AdapterExpectation,
   type LegacyExpectation,
-} from "../helpers/type-core/adapter-parity.js";
-import { OPERANDS } from "../helpers/type-core/adapter-operands.js";
+} from "../../helpers/type-core/adapter-parity.js";
+import { OPERANDS } from "../../helpers/type-core/adapter-operands.js";
 
 /**
  * Parity of the members of text with the legacy checker (work note): every method of `TEXT_METHODS` with

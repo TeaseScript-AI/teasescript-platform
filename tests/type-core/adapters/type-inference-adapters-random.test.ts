@@ -8,9 +8,9 @@ import {
   STRING_TYPE,
   union,
   type StaticType,
-} from "../../src/static-types.js";
-import { PropertyTable } from "../../src/static-types/property-tables.js";
-import { operationRelations } from "../../src/type-inference/adapters/index.js";
+} from "../../../src/static-types.js";
+import { PropertyTable } from "../../../src/static-types/property-tables.js";
+import { operationRelations } from "../../../src/type-inference/adapters/index.js";
 import {
   assertCase,
   assertEqualResult,
@@ -19,7 +19,7 @@ import {
   dynamicView,
   inputsOf,
   legacyOperation,
-} from "../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-parity.js";
 
 const INTEGER = closedView(INTEGER_TYPE);
 

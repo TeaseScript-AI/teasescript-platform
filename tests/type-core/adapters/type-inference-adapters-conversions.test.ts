@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ConversionName } from "../../src/language-facts.js";
+import type { ConversionName } from "../../../src/language-facts.js";
 import {
   BOOLEAN_TYPE,
   INTEGER_TYPE,
@@ -11,10 +11,10 @@ import {
   REGEX_TYPE,
   STRING_TYPE,
   type StaticType,
-} from "../../src/static-types.js";
-import { operationRelations } from "../../src/type-inference/adapters/index.js";
-import type { OperandView } from "../../src/type-inference/adapters/relation.js";
-import type { ContractFamily } from "../../src/type-inference/graph.js";
+} from "../../../src/static-types.js";
+import { operationRelations } from "../../../src/type-inference/adapters/index.js";
+import type { OperandView } from "../../../src/type-inference/adapters/relation.js";
+import type { ContractFamily } from "../../../src/type-inference/graph.js";
 import {
   assertCase,
   BOTTOM_VIEW,
@@ -23,8 +23,8 @@ import {
   inputsOf,
   legacyOperation,
   type AdapterExpectation,
-} from "../helpers/type-core/adapter-parity.js";
-import { OPERANDS } from "../helpers/type-core/adapter-operands.js";
+} from "../../helpers/type-core/adapter-parity.js";
+import { OPERANDS } from "../../helpers/type-core/adapter-operands.js";
 
 /**
  * Parity of the conversions and of the file, hash and lock calls, `escapeMarkup` and `script` with the legacy checker

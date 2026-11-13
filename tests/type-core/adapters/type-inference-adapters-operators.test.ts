@@ -12,9 +12,9 @@ import {
   union,
   UNKNOWN_TYPE,
   withValues,
-} from "../../src/static-types.js";
-import { operationRelations } from "../../src/type-inference/adapters/index.js";
-import type { ContractFamily } from "../../src/type-inference/graph.js";
+} from "../../../src/static-types.js";
+import { operationRelations } from "../../../src/type-inference/adapters/index.js";
+import type { ContractFamily } from "../../../src/type-inference/graph.js";
 import {
   assertCase,
   assertEqualResult,
@@ -23,7 +23,7 @@ import {
   dynamicView,
   inputsOf,
   legacyOperation,
-} from "../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-parity.js";
 
 function relation(family: ContractFamily, name: string) {
   const found = operationRelations().relation({ family, name });

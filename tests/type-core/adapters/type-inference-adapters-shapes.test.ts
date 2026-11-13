@@ -9,10 +9,13 @@ import {
   STRING_TYPE,
   union,
   type StaticType,
-} from "../../src/static-types.js";
-import { operationRelations } from "../../src/type-inference/adapters/index.js";
-import type { OperandView, OperationRelation } from "../../src/type-inference/adapters/relation.js";
-import type { ContractFamily } from "../../src/type-inference/graph.js";
+} from "../../../src/static-types.js";
+import { operationRelations } from "../../../src/type-inference/adapters/index.js";
+import type {
+  OperandView,
+  OperationRelation,
+} from "../../../src/type-inference/adapters/relation.js";
+import type { ContractFamily } from "../../../src/type-inference/graph.js";
 import {
   assertCase,
   BOTTOM_VIEW,
@@ -21,7 +24,7 @@ import {
   inputsOf,
   isClosedFact,
   legacyOperation,
-} from "../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-parity.js";
 
 /**
  * The input-shape tables of the three relations the PR review rounds found siblings in (work note, the
