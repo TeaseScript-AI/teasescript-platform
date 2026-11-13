@@ -516,3 +516,24 @@ test("--help, no BASE and no map, or an unknown option print the usage and canno
     assert.match(err, /usage: node tools\/moves\/move-sweep\.mjs/u, args.join(" "));
   }
 });
+
+test("a declaration's reason that is blank or holds a line break cannot run, as in pure-move-check (#2583)", (t) => {
+  const line = '  const fixture = "/a/util.js";';
+  const r = moved(t, [line]);
+  for (const reason of ["", "   ", "first\nsecond", "\n"]) {
+    const refused = r.run(
+      r.base,
+      "--declare",
+      r.json("reason", [{ file: "tools/refs.mjs", text: line, reason }]),
+    );
+    assert.equal(refused.status, 2, JSON.stringify(reason));
+    assert.match(refused.err, /a declaration is not \{ file, text, reason \}/u);
+    assert.equal(refused.out, "", JSON.stringify(reason));
+  }
+  const passed = r.run(
+    r.base,
+    "--declare",
+    r.json("reason", [{ file: "tools/refs.mjs", text: line, reason: "a fixture's path" }]),
+  );
+  assert.equal(passed.status, 0, passed.err);
+});

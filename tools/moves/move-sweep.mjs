@@ -55,7 +55,8 @@
 // output difference, not a hit difference.
 //
 // --declare FILE: a JSON array of `{ "file", "text", "reason" }`, a hit of form 1, 4 or 5 the reader states is not
-// stale (a test fixture's invented path), printed with its reason. `text` is the hit's whole line as `pure-move-check`
+// stale (a test fixture's invented path), printed with its reason (one clause: not blank, no line break, as
+// `pure-move-check` requires). `text` is the hit's whole line as `pure-move-check`
 // reads it (without its LF, a CR before that kept), so a rebase that moves the line leaves it declared; one declaration
 // covers one line, two lines of one text need two, taken in the file's order, and every declaration must match such a
 // hit. An entry with `line` (the old form) or `side` (`pure-move-check`'s field) cannot run, and a line that a lone CR
@@ -429,7 +430,8 @@ function declarationsOf(file) {
       typeof d.text === "string" &&
       !d.text.includes("\n") &&
       typeof d.reason === "string" &&
-      d.reason !== "" &&
+      d.reason.trim() !== "" &&
+      !d.reason.includes("\n") &&
       Object.keys(d).every((key) => ["file", "text", "reason"].includes(key));
     if (!valid) refuse(`a declaration is not { file, text, reason }: ${entry}`);
   }
