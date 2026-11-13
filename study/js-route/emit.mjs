@@ -395,9 +395,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       e.arguments.forEach((argument, index) => {
         if (index !== lazy) args.push(own(argument.value));
       });
-      // Without a lazy default, today's evaluator can run a call the native operations do not have.
+      // Today's evaluator can run a call the native operations do not have (with a lazy default only a collection
+      // method, whose default the program runs: `rt.call`).
       let synthetic = "null";
-      if (lazy === -1) {
+      {
         const map = new Map();
         let slot = 0;
         if (callee.kind === "property") map.set(callee.object, { kind: "temporary", temporaryId: 1e9 + slot++, span: callee.object.span });
@@ -690,6 +691,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
      * The blocks an instruction creates, each as a closure over the variables visible where it stands, so that they
      * share them (ADR 0024); the runtime runs one when today's engine dispatches it at a wait (`rt.runBlocks`).
      */
+    function rawGlobal(name) {
+      return `G[${globalIndex(name)}]`;
+    }
+
     function blockClosures(ins) {
       const ids = [ins.handlerFunctionId, ins.finishFunctionId, ...(ins.cues ?? []).map((cue) => cue.functionId)].filter((id) => typeof id === "number");
       if (ids.length === 0) return ins;
@@ -705,6 +710,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
 
     function statement(ins, pc) {
       switch (ins.kind) {
+        case "declareGlobal":
+          // The global's value lives in the program (G); the state gets its start value too, as today's engine keeps it.
+          line(`${rawGlobal(ins.name)} = rt.declareGlobal(${konst(ins)}, ${typeChecked(own(ins.value), ins.typeCheck, ins.value.span)});`);
+          return;
         case "startTimer":
         case "showPermanentButton":
         case "playMedia":
@@ -790,7 +799,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
             root = root.kind === "group" ? root.expression : root.object;
           }
           if (root.kind !== "identifier")
-            throw new Unsupported("a prepared reference that is not a place inside a variable");
+            throw new Unsupported(`a prepared reference that is not a place inside a variable (${root.kind}${root.kind === "call" ? ` ${root.callee?.name ?? root.callee?.kind}` : ""})`);
           const placeLabel = label ? JSON.stringify([root.name, ...steps].join(".")) : "null";
           line(`${temp(ins.destinationTemporary)} = ${expr(ins.expression)}; rt.referenceLabels[${ins.destinationTemporary}] = ${placeLabel};`);
           return;

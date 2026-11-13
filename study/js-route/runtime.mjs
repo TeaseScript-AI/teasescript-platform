@@ -226,6 +226,8 @@ export class Runtime {
       this.bridged += 1;
       if (expression.callee.kind === "property" && (Array.isArray(receiver) || receiver instanceof NativeSet || receiver instanceof NativeDict))
         return this.collectionMethod(expression, synthetic, receiver, positional, named, lazy !== -1, args);
+      // Today's evaluator would run the lazy default itself, which reads the program.
+      if (lazy !== -1) throw error;
       return expression.callee.kind === "property"
         ? this.bridge(synthetic, [receiver, ...args], 0)
         : this.bridge(synthetic, args, -1);
@@ -404,6 +406,10 @@ export class Runtime {
         value: checkedSpeakerProperty(property.name, property.value.value, property.span),
       });
     }
+  }
+  declareGlobal(instruction, value) {
+    this.snapshot.globals.push({ name: instruction.name, value: shown(value) });
+    return value;
   }
   speakerOf(name, value, span) {
     return declaredSpeaker(this, name, value === undefined ? undefined : shown(value), span);
