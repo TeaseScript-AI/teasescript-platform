@@ -17,10 +17,14 @@
 //   2. a bare `export` keyword added to a moved declaration: an added line where a top-level declaration starts with
 //      its `export` modifier, paired with a removed line where the same declaration starts without one, the rest of
 //      the two lines equal, indentation aside, each removed line paired once;
-//   3. a line of whitespace alone whose line break before it lies outside every token's text, in a file the check
-//      parses without a syntax error (a template literal's or a string's lines are its content; JSX text's are a
-//      token's too, so refused, though JSX drops a whitespace line; a comment's are admitted); any other whitespace
-//      line is unadmitted and declared as any line is (an empty line's entry has `"text": ""`);
+//   3. a line of whitespace alone whose line break before it lies outside every token's text as TypeScript's parse of
+//      that side's blob places the tokens, in a file the check parses without a syntax error (a template literal's or a
+//      string's lines are its content; JSX text's lines after its first non-whitespace character are a token's too, so
+//      refused, though JSX drops a whitespace line; a comment's are admitted); any other whitespace line is unadmitted
+//      and declared as any line is (an empty line's entry has `"text": ""`). Node can place a token otherwise without a
+//      parse error in two readings, the complete set review round 2 of #2621 bounded: `await` followed by `/` in a
+//      `.mjs` or `.mts` file without an import or export (a script to this parse, a module to Node), and `<!--` in a
+//      script (a comment to Node). A move of such a file declares its whitespace lines or reads its templates by hand;
 //   4. a line of comments and whitespace alone, in a file the change adds, above its first import or export statement
 //      (a comment elsewhere is a declared line or a failure);
 // or as a declared line: an entry of the `--declare` file, a JSON array of `{ "file", "side": "added" | "removed",
@@ -170,7 +174,8 @@ function shapeOf(file, text) {
       if (range.pos >= from && range.end <= to) kind.fill(1, range.pos, range.end);
   };
   visit(source);
-  // where TypeScript reports a syntax error, its recovered parse proves no token's place
+  // where TypeScript reports a syntax error, its recovered parse places no token; a clean parse places them as
+  // TypeScript reads the file, which form 3's two readings in the header show is not always as Node does
   const parses = source.parseDiagnostics.length === 0;
   let first = null;
   for (const statement of source.statements) {
