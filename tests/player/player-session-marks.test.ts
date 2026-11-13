@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { NO_MARKS, type HistoryMarks } from "../../player/debug/debug-history-marks.js";
 import { BridgeRequestError } from "../../player/engine-bridge/client.js";
-import { introduceNow } from "../../player/engine-bridge/in-process.js";
+import { introduceNow } from "../helpers/bridge/in-process.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";

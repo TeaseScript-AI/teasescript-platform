@@ -284,7 +284,7 @@ export class HistoryRegistry {
     if (this.entries.get(history) === entry) entry.pending.unshift(...owed);
   }
 
-  /** The innermost open delivery, or `null` for a publication no op makes. */
+  /** The open delivery, or `null` for a publication no op makes. */
   #scope(): Delivery | null {
     try {
       return this.#delivery.scope();

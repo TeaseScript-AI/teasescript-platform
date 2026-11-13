@@ -82,9 +82,9 @@ const SCRIPT = [
 /** One post as the drivers compare it: its op and the session it names. */
 export type PostEntry = readonly [op: string, session: string | null];
 
-/** A page of `at` on a new in-process host, with Debug on (`usePlayerDebug`, both switches) when `debug`. */
+/** A page of `at` on a new Worker, with Debug on (`usePlayerDebug`, both switches) when `debug`. */
 async function page(context: TestContext, at: ReturnType<typeof browser>, debug: boolean) {
-  const transport = await topologyBridge(context, "in-process", { delayMs: 5 });
+  const transport = await topologyBridge(context, "worker");
   const scope = effectScope();
   const player = scope.run(() =>
     usePlayerSession({

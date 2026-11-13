@@ -1,5 +1,0 @@
-// gate-host: editsStorage
-// The gate's storage-edit fixture: a debugging tool edits a script-storage key while the script waits.
-wait 1 s
-say "Waited", instant
-exit

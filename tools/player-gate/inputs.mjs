@@ -18,7 +18,7 @@ const tree = resolve(values.tree);
 const load = (path) => import(pathToFileURL(join(tree, path)).href);
 const { PackageRoot } = await load("dist/playground/package-folder.js");
 const { createInProcessBackend } = await load(
-  "dist/player-test-modules/player/engine-bridge/in-process.js",
+  "dist/player-test-modules/tests/helpers/bridge/in-process.js",
 );
 mkdirSync(values.out, { recursive: true });
 const root = new PackageRoot(resolve(values.packages));

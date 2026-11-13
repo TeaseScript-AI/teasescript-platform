@@ -48,7 +48,7 @@ export interface OpOutcome<R = unknown> {
 export interface HostSessions {
   get(id: string): HostSession | undefined;
   /**
-   * Keeps `session` under a new ID, which it returns, owned by `delivery` (the innermost open one by default) until it
+   * Keeps `session` under a new ID, which it returns, owned by `delivery` (the open one by default) until it
    * is posted (`delivery.ts`).
    */
   add(session: HostSession, delivery?: Delivery): string;
@@ -154,7 +154,7 @@ export type HostOps = typeof HOST_OPS;
  * context: what the op allocates, a session it adds included, is undone when the op throws or its success reply cannot be
  * built, encoded or posted, before the error reply goes. Without its owner, a context's allocations are refused.
  *
- * Returns the host's sessions, which only an in-process backend in the same realm reads (`in-process.ts`).
+ * Returns the host's sessions, which only the tests' in-process backend in the same realm reads.
  *
  * `halt` (a session request) is handled on receipt, ahead of the requests still waiting: from then on every request of
  * that session but `release` is refused as `halted`, so what a Player error stop left queued has no effect. Its reply

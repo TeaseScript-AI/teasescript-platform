@@ -102,10 +102,8 @@ export function useSessionMedia({
   function reportFailedMedia(mediaId: number, phase: "load" | "playback") {
     const shown = session.value;
     if (shown === null) return;
-    // As a call through the facade did: the session's replies still in transit apply first, so a medium an observation
-    // already ended has no origin. With the Worker nothing arrives early, and the latest applied publication answers.
+    // The latest applied publication answers: a medium an observation already ended there has no origin.
     const host = bridgeOf(shown);
-    host.deliverInTransit?.(shown.id);
     const origin = playerRuntimeMediaOrigin(host.latest(shown) ?? shown, mediaId);
     if (!origin) return;
     const missing = resolvePackageAsset(origin.source) === null;
@@ -150,7 +148,7 @@ export function useSessionMedia({
       } catch (error) {
         // Refusals changed nothing. A basis another op since replaced (the observation's) leaves the rest for the retry
         // its publication makes; a stopped session, or a lost Worker, takes nothing more, and the stop clears the queue. Any other error is
-        // the Player's error stop, as a report's throw through the facade was, unless the session no longer owns the UI.
+        // the Player's error stop, unless the session no longer owns the UI.
         if (endsQuietly(error) || (error instanceof BridgeRequestError && error.code === "basis"))
           return;
         if (!isDisposed() && !stopped.value && session.value?.lineage === current.lineage)

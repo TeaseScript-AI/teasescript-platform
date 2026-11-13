@@ -6,7 +6,7 @@ import {
   createPlayerRuntimeSession,
 } from "../../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../../player/engine-bridge/client.js";
-import { heldRecording } from "../../player/engine-bridge/in-process.js";
+import { heldRecording } from "../helpers/bridge/in-process.js";
 import { admissionOf, type HeldMedia } from "../../player/engine-bridge/held-media.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
@@ -206,15 +206,12 @@ async function playTape(bridge: PlayerBridge, recording = false, calls = false) 
   return { steps, session };
 }
 
-test("the input and storage ops (#1873) give the same replies, publications and events in-process and in a Worker", async () => {
+test("the input and storage ops (#1873) answer every input of the tape in a Worker", async () => {
   const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
   try {
-    const local = await playTape(await inProcessBridge());
-    const remote = await playTape(worker);
-    assert.deepEqual(remote.steps, local.steps);
-    // With the call view (L5f) the critical view is the same, and the full view equal across the backends.
-    const full = await playTape(await inProcessBridge(), false, true);
-    assert.deepEqual((await playTape(worker, false, true)).steps, full.steps);
+    const local = await playTape(worker);
+    // With the call view (L5f) the critical view is the same.
+    const full = await playTape(worker, false, true);
     assert.deepEqual(withoutViews(full.steps), withoutViews(local.steps));
     // Every input of the tape answered, so the session ran to its end.
     assert.deepEqual(
@@ -228,7 +225,7 @@ test("the input and storage ops (#1873) give the same replies, publications and 
         ["choice", "completed"],
         ["button", "completed"],
         ["step", "updated"],
-        // A required field refuses to be cleared, on both backends alike.
+        // A required field refuses to be cleared.
         ["clear", "invalidPayload"],
         ["dismiss", "updated"],
         ["step again", "updated"],

@@ -43,7 +43,7 @@ import {
  * at the event. Never posted, a stop or a lost connection undoes it by its origin, without a notice; posted, a stop
  * waits for the final publication, which releases it when it no longer presents the action and undoes it otherwise,
  * and a lost connection undoes it at once without sending it again. A Start of another chat and an unmount drop it,
- * writing nothing. The rows run the real composable and controllers on both topologies, with the post log.
+ * writing nothing. The rows run the real composable and controllers on a Worker, with the post log.
  */
 
 interface SessionHost {
@@ -401,8 +401,7 @@ const CASES = {
   "a chat change before the admission": TOPOLOGIES,
   "an answer in an inspected state": TOPOLOGIES,
   "a retired outcome while freezing": TOPOLOGIES,
-  // In-process, an error stop with no request in flight commits at once (`stopAt`'s `frozen()`): no freeze to miss.
-  "an outcome inside a missed freeze": TOPOLOGIES.filter((topology) => topology === "worker"),
+  "an outcome inside a missed freeze": TOPOLOGIES,
   "a missed stop with nothing pending": TOPOLOGIES,
   "an answer after a missed stop": TOPOLOGIES,
   "a form update after a missed stop": TOPOLOGIES,
@@ -849,11 +848,9 @@ RERUN.rows(
       }
       await until(() => sections.returned.length === 1, "the answer's section returned", "host");
       assert.equal(sections.returned[0], "retired");
-      // In-process, a stop with no request in flight commits at once (`stopAt`'s `frozen()`); otherwise it freezes.
-      if (each.taken || topology === "worker") {
-        assert.equal(player.terminal.value, "freezing");
-        assert.equal(record.stage, "posted", "waits through the freeze");
-      } else assert.equal(player.terminal.value, "stopped");
+      // On a Worker the stop waits for its acknowledgement: it freezes.
+      assert.equal(player.terminal.value, "freezing");
+      assert.equal(record.stage, "posted", "waits through the freeze");
       halted();
       await until(() => player.terminal.value === "stopped", "the final publication", "host");
       await until(() => record.stage === "settled", "the answer settled", "host");

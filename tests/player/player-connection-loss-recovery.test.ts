@@ -45,8 +45,8 @@ import {
 /*
  * What the player sees and can do after the engine's connection is lost (PLAYER-UI "Session end and failure", #1897):
  * the stop offers Continue from the last kept point or Start again, and only the player's click replaces the connection.
- * `recoveryKind`'s family decides what the loss leaves to recover; the rows run the real composable on both topologies
- * (`worker-topology.ts`), its replacements from a factory of the same topology that counts its calls.
+ * `recoveryKind`'s family decides what the loss leaves to recover; the rows run the real composable on a Worker
+ * (`worker-topology.ts`), its replacements from a factory of Workers that counts its calls.
  */
 
 // `recoveryKind`'s family: every feasible state at the loss, each with what it leaves to recover.
@@ -128,7 +128,7 @@ test("recoveryKind gives an undeclared status of the shown session nothing to re
   assert.equal(recoveryKind(state), null);
 });
 
-// The composable, on both topologies.
+// The composable, on a Worker.
 
 interface RecoveryHost {
   readonly session: Readonly<Ref<PlayerSession | null>>;
@@ -383,8 +383,6 @@ const RERUN = rerunRegistry({
   "the trace and random control turned off while lost": TOPOLOGIES,
   "a session import read before the loss": TOPOLOGIES,
   "a keep's publish under way at the loss": TOPOLOGIES,
-  // Only the in-process host can report the loss of a client already ended; a Worker's ended client reports none.
-  "a late loss of the replaced connection": ["in-process"],
   "the reload witness": TOPOLOGIES,
   "a refused keep after a recovered Continue": TOPOLOGIES,
   "a session review finishing after the loss": TOPOLOGIES,
@@ -861,30 +859,6 @@ RERUN.rows(
     gate.held!();
     await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
-    return end();
-  },
-);
-
-RERUN.rows(
-  "a late loss of the replaced connection",
-  "a loss the replaced connection reports late stops nothing on the fresh one",
-  async (context, topology, end) => {
-    const { connections, player, kept } = await page(context, topology);
-    await player.activate();
-    await keptAtTheQuestion(player, kept);
-    await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer", "step");
-    await player.activate();
-    await until(
-      () => player.session.value?.state.foregroundAction != null,
-      "the question again",
-      "step",
-    );
-    await connections.first.lose();
-    await turns(5);
-    assert.equal(player.recovery.value, null);
-    assert.equal(player.hostError.value, null);
-    assert.equal(player.connectionLosses.value, 1);
     return end();
   },
 );

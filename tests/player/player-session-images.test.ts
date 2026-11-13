@@ -695,7 +695,7 @@ test("a debug export whose photo read waits while a new Start retires its activa
   await answer(host, await chosen(host, "second.png"));
   const media: Record<string, unknown> = await loadPlayerModule("player/media/captured-media.ts");
   const facade: Record<string, unknown> = await loadPlayerModule(
-    "player/engine-bridge/in-process.ts",
+    "tests/helpers/bridge/in-process.ts",
   );
   assert.equal(typeof facade.heldTickets, "function");
   // EVIDENCE: validation: the bundle's tickets facade, checked callable above.
@@ -762,7 +762,7 @@ async function heldAdoption(
   context.after(() => scope.stop());
   const bridge = await host.bridge;
   const facade: Record<string, unknown> = await loadPlayerModule(
-    "player/engine-bridge/in-process.ts",
+    "tests/helpers/bridge/in-process.ts",
   );
   // EVIDENCE: validation: the bundle's facades, which the assertions below call.
   const { heldRuns, heldTickets } = facade as {
@@ -847,7 +847,7 @@ test("a Debug mode change whose failure arrives after a Continue of the same lin
   context.after(() => scope.stop());
   const bridge = await host.bridge;
   const facade: Record<string, unknown> = await loadPlayerModule(
-    "player/engine-bridge/in-process.ts",
+    "tests/helpers/bridge/in-process.ts",
   );
   // EVIDENCE: validation: the bundle's facades, which the assertions below call.
   const { heldRuns, heldTickets } = facade as {

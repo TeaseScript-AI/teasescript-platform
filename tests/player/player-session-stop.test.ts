@@ -16,7 +16,7 @@ import {
 } from "../../player/debug/debug-export.js";
 import type { DebugRecording } from "../../player/debug/debug-recorder.js";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
-import type * as InProcess from "../../player/engine-bridge/in-process.js";
+import type * as InProcess from "../helpers/bridge/in-process.js";
 import type * as RuntimeAdapter from "../../player/runtime/runtime-adapter.js";
 import type * as RuntimeView from "../../player/runtime/runtime-view.js";
 import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
@@ -346,12 +346,13 @@ test("a session a Player error stopped shows its calls without a demand, which a
 
 test("a save that settles while the stop waits for its acknowledgement is not issued again when the stop shows", async (context) => {
   stubBrowser(context);
-  const module = await loadPlayerModule("player/engine-bridge/in-process.ts");
+  const module = await loadPlayerModule("tests/helpers/bridge/in-process.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its backend factory.
   const make = module["createInProcessBackend"] as typeof InProcess.createInProcessBackend;
   const bridge = make(
     { commit: null, dirty: null, mode: null, appVersion: null },
-    { delayMs: 200 },
+    // The stop's acknowledgement arrives late, as from a Worker.
+    { delayMs: 200, stopAsWorker: true },
   );
   context.after(() => bridge.client.terminate());
   let finishWrite!: () => void;
@@ -382,8 +383,6 @@ test("a save that settles while the stop waits for its acknowledgement is not is
   await host.activate();
   assert.equal(writes, 1);
   const before = published(host.session.value);
-  // The Worker cannot flush replies early. Reproduce its acknowledgement timing on the delayed test backend.
-  bridge.deliverInTransit = null;
   host.reportHostError(new TypeError("A component failed."));
   assert.equal(host.stopped.value, true);
   assert.equal(bridge.frozen(before), false);

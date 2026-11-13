@@ -11,7 +11,7 @@ import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import { playerRuntimeForeground, type PlayerSession } from "../../player/runtime/runtime-view.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { inProcessBridge } from "../helpers/in-process-bridge.js";
-import { createInProcessBackend, heldRecording } from "../../player/engine-bridge/in-process.js";
+import { createInProcessBackend, heldRecording } from "../helpers/bridge/in-process.js";
 import { HistoryCore } from "../../player/engine-bridge/history/core.js";
 import { connectBridge } from "../../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";

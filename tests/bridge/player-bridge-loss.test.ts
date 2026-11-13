@@ -58,9 +58,8 @@ function endCapture() {
  * (L5g). The cases come from the Player's consumers of bridge requests: those whose handling L5g changed must fail with
  * that handling reverted; the ones that were already safe are controls. The service rows run on a section host, where
  * a loss is injected as the client meets a real one: the client rejects everything pending and posts nothing more
- * (`terminate`), and its loss listeners run in the same tick. The composable's rows run on both topologies
- * (`worker-topology.ts`): in-process with that injected loss, and on a Node Worker whose thread is ended, where the loss
- * arrives with its exit.
+ * (`terminate`), and its loss listeners run in the same tick. The composable's rows run on a Node Worker
+ * (`worker-topology.ts`) whose thread is ended, where the loss arrives with its exit.
  */
 
 /** The changed consumers, each with a request in flight at the loss. */
@@ -324,9 +323,8 @@ const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 type FakeAudio = EventTarget & { src: string };
 
 /*
- * The composable's rows run on both topologies (L5i.7): the in-process host, and the engine's Worker entry in a Node
- * Worker thread, whose loss is the thread's real exit. Each is registered here; the file's end checks every registered
- * row ran on each of its topologies. An in-flight row holds the request's own reply, loses the Worker while it is held,
+ * The composable's rows run on the engine's Worker entry in a Node Worker thread (L5i.7), whose loss is the thread's
+ * real exit. Each is registered here; the file's end checks every registered row ran. An in-flight row holds the request's own reply, loses the Worker while it is held,
  * then lets the held replies go.
  */
 const RERUN = rerunRegistry({
@@ -339,8 +337,7 @@ const RERUN = rerunRegistry({
   "keep's capture in flight": TOPOLOGIES,
   "Continue's restore in flight": TOPOLOGIES,
   "hosted script's preparation in flight": TOPOLOGIES,
-  // Only a Worker thread can exit before it is ready; the in-process host is ready at once.
-  "Worker lost before ready": ["worker"],
+  "Worker lost before ready": TOPOLOGIES,
   // The same schedules without a loss, each its own case, so a control never stands in for its loss row.
   "control: input-section observation in flight": TOPOLOGIES,
   "control: input-section op in flight": TOPOLOGIES,
@@ -401,16 +398,11 @@ const AT_A_CHOICE = 'playAudio async "bell.mp3"\nlet pick = askChoice "Go"\nexit
 const AWAITS_ITS_MEDIUM =
   'playAudio async "bell.mp3"\nsay "after", instant\nshowButton "Done"\nexit';
 
-/** The real composable on `topology`, in-process with replies after `delayMs`, started on `script` with its audio. */
-async function mount(
-  context: TestContext,
-  topology: Topology,
-  delayMs: number,
-  script: string = AT_A_CHOICE,
-) {
+/** The real composable on `topology`, started on `script` with its audio. */
+async function mount(context: TestContext, topology: Topology, script: string = AT_A_CHOICE) {
   const elements = browser(context);
   const hostErrors = hostErrorLog(context);
-  const transport = await topologyBridge(context, topology, { delayMs });
+  const transport = await topologyBridge(context, topology);
   const scope = effectScope();
   const player = scope.run(() =>
     usePlayerSession({
@@ -456,7 +448,7 @@ for (const [consumer, id, run] of [
     `${consumer} in flight when the Worker is lost ends quietly, and the loss is the error stop once`,
     async (context, topology, end) => {
       covered.add(consumer);
-      const { transport, player, hostErrors } = await mount(context, topology, 50);
+      const { transport, player, hostErrors } = await mount(context, topology);
       let result: Awaited<ReturnType<typeof run>> | "pending" = "pending";
       const unhandled = await unhandledDuring(async () => {
         transport.hold("observeInput");
@@ -482,7 +474,7 @@ for (const [consumer, id, run] of [
     `control: ${id}`,
     `control: ${consumer} on the same schedule without a loss succeeds`,
     async (context, topology, end) => {
-      const { transport, player, hostErrors } = await mount(context, topology, 50);
+      const { transport, player, hostErrors } = await mount(context, topology);
       transport.hold("observeInput");
       const pending = run(player);
       await transport.held();
@@ -514,7 +506,7 @@ for (const [consumer, id, run] of [
     `control: ${consumer} at the loss never posts, as the stop ends it first`,
     async (context, topology, end) => {
       covered.add(consumer);
-      const { transport, player, hostErrors } = await mount(context, topology, 0);
+      const { transport, player, hostErrors } = await mount(context, topology);
       // Another section of the session holds it, so this one waits in the client.
       let release = () => {};
       void transport.bridge.section(
@@ -544,7 +536,6 @@ RERUN.rows(
     const { transport, player, elements, hostErrors } = await mount(
       context,
       topology,
-      50,
       AWAITS_ITS_MEDIUM,
     );
     const unhandled = await unhandledDuring(async () => {
@@ -568,7 +559,7 @@ RERUN.rows(
   "a call view request in flight when the Worker is lost ends quietly, and the loss is the error stop once",
   async (context, topology, end) => {
     covered.add("a call view request");
-    const { transport, player, hostErrors } = await mount(context, topology, 50);
+    const { transport, player, hostErrors } = await mount(context, topology);
     const unhandled = await unhandledDuring(async () => {
       // Debug's Now view opens: its call view request is posted, its reply held.
       transport.hold("viewCalls");
@@ -584,12 +575,11 @@ RERUN.rows(
   },
 );
 
-/** A page whose script keeps its session, on `topology` (in-process, replies after `delayMs`). */
+/** A page whose script keeps its session, on `topology`. */
 async function keepingPage(
   context: TestContext,
   kept: KeptSessionStore,
   topology: Topology,
-  delayMs: number,
   script = 'let pick = askChoice "Go"\nsay "x", instant\nexit',
 ) {
   browser(context);
@@ -600,7 +590,7 @@ async function keepingPage(
     replace: async () => {},
     clear: async () => {},
   };
-  const transport = await topologyBridge(context, topology, { delayMs });
+  const transport = await topologyBridge(context, topology);
   const scope = effectScope();
   const player = scope.run(() =>
     usePlayerSession({
@@ -628,7 +618,6 @@ RERUN.rows(
       context,
       kept,
       topology,
-      50,
       'showButton "One", timeout: 300 ms\nlet pick = askChoice "Go"\nsay "x", instant\nexit',
     );
     await player.prepareScript(token, { plan: token, options: () => ({ wallClockMs: 0 }) });
@@ -668,7 +657,7 @@ RERUN.rows(
     covered.add("Continue's restore");
     const kept = memoryKeptSessionStore();
     {
-      const first = await keepingPage(context, kept, "in-process", 0);
+      const first = await keepingPage(context, kept, topology);
       await first.player.prepareScript(first.token, {
         plan: first.token,
         options: () => ({ wallClockMs: 0 }),
@@ -679,7 +668,7 @@ RERUN.rows(
         await turns(1);
       }
     }
-    const { transport, player, token } = await keepingPage(context, kept, topology, 50);
+    const { transport, player, token } = await keepingPage(context, kept, topology);
     const reported: unknown[] = [];
     reportsInto(context, reported);
     const unhandled = await unhandledDuring(async () => {
@@ -711,7 +700,7 @@ RERUN.rows(
   async (context, topology, end) => {
     browser(context);
     const hostErrors = hostErrorLog(context);
-    const transport = await topologyBridge(context, topology, { delayMs: 50 });
+    const transport = await topologyBridge(context, topology);
     const scope = effectScope();
     const player = scope.run(() =>
       usePlayerSession({ bridge: Promise.resolve(transport.bridge) }),
@@ -891,7 +880,6 @@ RERUN.rows(
     const { transport, player, elements, hostErrors } = await mount(
       context,
       topology,
-      50,
       AWAITS_ITS_MEDIUM,
     );
     transport.hold("reportMediaLoad");
@@ -916,7 +904,7 @@ RERUN.rows(
   "control: call view in flight",
   "control: a call view request held and let go without a loss shows the call view",
   async (context, topology, end) => {
-    const { transport, player, hostErrors } = await mount(context, topology, 50);
+    const { transport, player, hostErrors } = await mount(context, topology);
     transport.hold("viewCalls");
     player.demandCallView();
     await transport.held();
@@ -936,7 +924,6 @@ RERUN.rows(
       context,
       kept,
       topology,
-      50,
       'showButton "One", timeout: 300 ms\nlet pick = askChoice "Go"\nsay "x", instant\nexit',
     );
     await player.prepareScript(token, { plan: token, options: () => ({ wallClockMs: 0 }) });
@@ -964,7 +951,7 @@ RERUN.rows(
   async (context, topology, end) => {
     const kept = memoryKeptSessionStore();
     {
-      const first = await keepingPage(context, kept, "in-process", 0);
+      const first = await keepingPage(context, kept, topology);
       await first.player.prepareScript(first.token, {
         plan: first.token,
         options: () => ({ wallClockMs: 0 }),
@@ -975,7 +962,7 @@ RERUN.rows(
         await turns(1);
       }
     }
-    const { transport, player, token } = await keepingPage(context, kept, topology, 50);
+    const { transport, player, token } = await keepingPage(context, kept, topology);
     transport.hold("restoreKept");
     const preparing = player.prepareScript(token, {
       plan: token,
@@ -995,7 +982,7 @@ RERUN.rows(
   async (context, topology, end) => {
     browser(context);
     const hostErrors = hostErrorLog(context);
-    const transport = await topologyBridge(context, topology, { delayMs: 50 });
+    const transport = await topologyBridge(context, topology);
     const scope = effectScope();
     const player = scope.run(() =>
       usePlayerSession({ bridge: Promise.resolve(transport.bridge) }),
@@ -1017,10 +1004,10 @@ RERUN.rows(
 
 test("each connection's post log and reply gate see its own requests alone, with two connections live", async (context) => {
   for (const topology of TOPOLOGIES) {
-    const held = await topologyBridge(context, topology, { delayMs: 5 });
+    const held = await topologyBridge(context, topology);
     // Let go also when an assertion below fails, so the gate holds nothing of a later test.
     context.after(() => held.release());
-    const other = await topologyBridge(context, topology, { delayMs: 5 });
+    const other = await topologyBridge(context, topology);
     const before = held.posts.length;
     held.hold("prepare");
     const reply = other.bridge.client.request("prepare", {
@@ -1036,43 +1023,15 @@ test("each connection's post log and reply gate see its own requests alone, with
   }
 });
 
-test("the in-process host's replies wait the configured delay: not the same turn, not 49 ms, at 50 ms", async (context) => {
-  const transport = await topologyBridge(context, "in-process", { delayMs: 50 });
-  // A first round trip on real time: the connection is ready before mock time starts.
-  await transport.bridge.client.request("planMetadata", { plan: "missing" });
-  context.mock.timers.enable({ apis: ["setTimeout"] });
-  let settled = false;
-  const reply = transport.bridge.client
-    .request("planMetadata", { plan: "missing" })
-    .then(() => void (settled = true));
-  const turns = async () => {
-    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
-  };
-  await turns();
-  assert.equal(settled, false, "the reply does not arrive in the turn of its request");
-  context.mock.timers.tick(49);
-  await turns();
-  assert.equal(settled, false, "49 ms is not the configured 50 ms");
-  context.mock.timers.tick(1);
-  await reply;
-  assert.equal(settled, true);
-});
-
-test("the rows' Worker loss is the thread's real exit, and each topology is the one asked for", async (context) => {
+test("the rows' Worker loss is the thread's real exit", async (context) => {
   for (const topology of TOPOLOGIES) {
-    const transport = await topologyBridge(context, topology, { delayMs: 50 });
+    const transport = await topologyBridge(context, topology);
     transport.assertTopology();
     let reported = "";
     transport.bridge.client.onLoss((error) => (reported = error.message));
     await transport.lose();
-    if (topology === "worker") {
-      // The client ends the thread on any loss, so the exit alone would not tell an injected loss from the thread's own.
-      assert.match(
-        reported,
-        /exited with code/u,
-        "the loss the client reports is the thread's exit",
-      );
-      assert.equal(typeof (await transport.exited), "number");
-    } else assert.equal(transport.exited, null);
+    // The client ends the thread on any loss, so the exit alone would not tell an injected loss from the thread's own.
+    assert.match(reported, /exited with code/u, "the loss the client reports is the thread's exit");
+    assert.equal(typeof (await transport.exited), "number");
   }
 });

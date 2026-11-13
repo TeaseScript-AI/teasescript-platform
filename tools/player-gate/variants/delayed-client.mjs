@@ -2,7 +2,7 @@
 // The `delayed` variant's `engine-bridge/client.ts` for a Worker port: the product module, with `openBridge` and
 // `connectBridge` delivering everything the port receives (replies, stop acknowledgements, `ready`) after
 // `__GATE_DELAY_MS__`, in the order received; requests are not delayed. Terminating the port cancels what is still
-// waiting. The in-process backend's own port is not wrapped (`vite.config.mjs`): its `delayMs` delays it instead.
+// waiting.
 import * as client from "../../../player/engine-bridge/client.ts";
 
 export * from "../../../player/engine-bridge/client.ts";

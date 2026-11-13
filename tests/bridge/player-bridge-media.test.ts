@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../../player/engine-bridge/client.js";
-import { introduceNow } from "../../player/engine-bridge/in-process.js";
+import { introduceNow } from "../helpers/bridge/in-process.js";
 import { instructionFacts } from "../../player/engine-bridge/instruction-facts.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import type { PlanMetadata, PrepareResult } from "../../player/engine-bridge/player-ops.js";
@@ -335,10 +335,9 @@ test("a medium an observation in transit already stopped has no origin once the 
   });
   session = bridge.latest(session)!;
   assert.ok(playerRuntimeMediaOrigin(session, mediaId), "the medium plays");
-  // The observation that reaches `m.stop()` has run in the host; its reply is in transit.
+  // The observation that reaches `m.stop()`: once its reply applied, the medium has no origin.
   const stopping = bridge.request(session, "observeTime", { atMs: 1_500, media: [] });
   assert.ok(playerRuntimeMediaOrigin(bridge.latest(session)!, mediaId), "not yet applied");
-  bridge.deliverInTransit?.(session.id);
-  assert.equal(playerRuntimeMediaOrigin(bridge.latest(session)!, mediaId), null);
   await stopping;
+  assert.equal(playerRuntimeMediaOrigin(bridge.latest(session)!, mediaId), null);
 });

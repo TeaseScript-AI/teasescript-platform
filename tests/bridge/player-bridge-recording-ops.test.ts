@@ -7,7 +7,7 @@ import {
   createPlayerRuntimeSession,
 } from "../../player/runtime/compile-project.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
-import { heldRecording, heldRuns, introduceNow } from "../../player/engine-bridge/in-process.js";
+import { heldRecording, heldRuns, introduceNow } from "../helpers/bridge/in-process.js";
 import { connectBridge, openBridge, type ClientPort } from "../../player/engine-bridge/client.js";
 import {
   closeConnection,

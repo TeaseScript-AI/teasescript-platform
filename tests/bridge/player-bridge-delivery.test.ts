@@ -18,7 +18,7 @@ import {
   hatch,
   heldPlan,
   introduceNow,
-} from "../../player/engine-bridge/in-process.js";
+} from "../helpers/bridge/in-process.js";
 import {
   closeConnection,
   playerBridgeOps,
@@ -606,51 +606,6 @@ test("terminating the in-process backend's client closes its connection: plans a
     () => introduceNow(bridge, () => createPlayerRuntimeSession(PLAN), NO_MARKS),
     DeliveryRefusedError,
   );
-});
-
-/**
- * The facade's delivery and a request's, nested both ways: the request pending when the facade runs, or begun by the
- * facade's own factory (the in-process client posts at once, so the host opens its delivery inside the facade's).
- */
-const SCOPE_AXES = {
-  order: ["requestThenFacade", "facadeThenRequest"],
-  request: ["fails", "succeeds"],
-} as const;
-
-for (const each of product(SCOPE_AXES))
-  test(`a facade call and a request, nested: ${each.order}, the request ${each.request}`, async () => {
-    const bridge = createInProcessBackend(BUILD);
-    // Valid JSON that is no transfer fails after the read's first await; a transfer is read.
-    const text = each.request === "fails" ? "{}" : TRANSFER_TEXT;
-    let pending: Promise<BridgeResult> | null = null;
-    if (each.order === "requestThenFacade")
-      pending = bridge.client.request("readTransfer", { text });
-    const session = introduceNow(
-      bridge,
-      () => {
-        if (each.order === "facadeThenRequest")
-          pending = bridge.client.request("readTransfer", { text });
-        return createPlayerRuntimeSession(PLAN);
-      },
-      NO_MARKS,
-    );
-    const settledRequest = await Promise.allSettled([pending!]);
-    assert.equal(settledRequest[0]!.status, each.request === "fails" ? "rejected" : "fulfilled");
-    assert.ok(
-      hatch(session, (held) => held.plan),
-      "the facade's session stays",
-    );
-    assert.ok(heldPlan(bridge, session.planToken), "and its plan");
-  });
-
-test("the facade nesting cases are every coordinate of their declaration", () => {
-  const owed = [
-    { order: "requestThenFacade", request: "fails" },
-    { order: "requestThenFacade", request: "succeeds" },
-    { order: "facadeThenRequest", request: "fails" },
-    { order: "facadeThenRequest", request: "succeeds" },
-  ];
-  assert.deepEqual(coverageGaps(owed, product(SCOPE_AXES), { tuples: true }), []);
 });
 
 test("a facade call whose handoff fails undoes what it allocated, and keeps what existed before", async () => {

@@ -95,25 +95,25 @@ async function tape(bridge: PlayerBridge) {
   return { ...steps, afterTeardown };
 }
 
-test("the draw's code comes from the sources the Worker compiled, the same in-process and in a Worker", async () => {
+test("the draw's code comes from the sources the Worker compiled", async () => {
   const expected = oracle();
-  const inProcess = await tape(await inProcessBridge());
-  assert.deepEqual(
-    inProcess.source,
-    expected.map(({ code }) => code),
-  );
-  // The sidecar is bound to the plan, not to its token: the same plan restored gets its code.
-  assert.deepEqual(inProcess.sameAsText, inProcess.source);
-  // Another plan's draw gets none from these sources, nor an unknown plan.
-  assert.deepEqual([inProcess.other, inProcess.unknown], [null, null]);
-  assert.deepEqual(inProcess.lines, outcomeLines(['["red", "blue"]', "true"], 4));
-  assert.deepEqual(inProcess.afterTeardown, [null, null]);
   const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(WORKER, BUILD), BUILD));
+  let shown: Awaited<ReturnType<typeof tape>>;
   try {
-    assert.deepEqual(await tape(worker), inProcess);
+    shown = await tape(worker);
   } finally {
     worker.client.terminate();
   }
+  assert.deepEqual(
+    shown.source,
+    expected.map(({ code }) => code),
+  );
+  // The sidecar is bound to the plan, not to its token: the same plan restored gets its code.
+  assert.deepEqual(shown.sameAsText, shown.source);
+  // Another plan's draw gets none from these sources, nor an unknown plan.
+  assert.deepEqual([shown.other, shown.unknown], [null, null]);
+  assert.deepEqual(shown.lines, outcomeLines(['["red", "blue"]', "true"], 4));
+  assert.deepEqual(shown.afterTeardown, [null, null]);
 });
 
 test("a published plan with no sources gives no code", async () => {

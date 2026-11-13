@@ -1,14 +1,18 @@
-import type { InstructionPlan } from "../../src/playback.js";
-import { ensureRun, RetiredRunError, type RunBegin } from "./recording/export-observation.js";
-import type { DebugRecording } from "../debug/debug-recorder.js";
+import type { InstructionPlan } from "../../../src/playback.js";
+import {
+  ensureRun,
+  RetiredRunError,
+  type RunBegin,
+} from "../../../player/engine-bridge/recording/export-observation.js";
+import type { DebugRecording } from "../../../player/debug/debug-recorder.js";
 import {
   createPlayerRuntimeSession,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../runtime/runtime-adapter.js";
-import type { PlayerSession } from "../runtime/runtime-view.js";
-import { PlayerBridge } from "../runtime/player-bridge.js";
-import { openBridge, type ClientPort } from "./client.js";
+} from "../../../player/runtime/runtime-adapter.js";
+import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
+import { PlayerBridge } from "../../../player/runtime/player-bridge.js";
+import { openBridge, type ClientPort } from "../../../player/engine-bridge/client.js";
 import {
   alignTrace,
   closeConnection,
@@ -16,8 +20,8 @@ import {
   playerOpsContext,
   type PlayerOpsContext,
   type TracingIntent,
-} from "./player-ops.js";
-import type { BuildIdentity } from "./protocol.js";
+} from "../../../player/engine-bridge/player-ops.js";
+import type { BuildIdentity } from "../../../player/engine-bridge/protocol.js";
 import {
   beginRecordingAt,
   HeldSession,
@@ -25,21 +29,25 @@ import {
   startRandom,
   type StartOptions,
   type StartRandom,
-} from "./ops/session.js";
-import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
-import type { RandomControlOptions } from "../../src/runtime/random/random-control.js";
-import type { Delivery } from "./delivery.js";
-import { decodeMessage } from "./transport.js";
-import { parseHistoryMarks, type HistoryMarks } from "../debug/debug-history-marks.js";
-import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
+} from "../../../player/engine-bridge/ops/session.js";
+import type { RuntimeDebugContext } from "../../../src/runtime/debug/debug-trace.js";
+import type { RandomControlOptions } from "../../../src/runtime/random/random-control.js";
+import type { Delivery } from "../../../player/engine-bridge/delivery.js";
+import { decodeMessage } from "../../../player/engine-bridge/transport.js";
+import { parseHistoryMarks, type HistoryMarks } from "../../../player/debug/debug-history-marks.js";
+import {
+  startBridgeHost,
+  type HostPort,
+  type HostSessions,
+} from "../../../player/engine-bridge/worker-host.js";
 
 /*
- * The engine's backend in the caller's realm, for tests and the gate kit only: the same host and ops as the engine's
- * Worker (`browser-client.ts`), over a port pair that passes every message through `structuredClone`. A request a
- * session op handles runs when it is posted; replies arrive later, on a microtask or after `delayMs`, as from a Worker.
+ * The engine's backend in the caller's realm, for tests and the gate kit's bridge page: the same host and ops as the
+ * engine's Worker (`player/engine-bridge/browser-client.ts`), over a port pair that passes every message through
+ * `structuredClone`. A request a session op handles runs when it is posted; replies arrive later, on a microtask or after
+ * `delayMs`, as from a Worker. The Player itself always runs its engine in the Worker.
  *
- * The **facade** below reaches the host's sessions synchronously, for tests only. No main-realm module imports this one
- * (`inventory.ts`'s `RATCHET` is empty); the L5 gate requires this module gone, not only RATCHET empty.
+ * The **facade** below reaches the host's sessions synchronously, for tests only.
  */
 
 interface Backend {
@@ -70,7 +78,8 @@ function heldOf(backend: Backend, session: PlayerSession): HeldSession {
 
 /**
  * Starts the in-process backend, ready at once: the Player's ops served on a port pair in this realm. With `delayMs`,
- * replies arrive after that delay instead of on a microtask (the delayed smoke). `historySpill` and `historyBudget` set
+ * replies arrive after that delay instead of on a microtask (the delayed smoke). A stop delivers the session's replies
+ * in transit and its acknowledgement at once, unless `stopAsWorker`: then they arrive as other replies do. `historySpill` and `historyBudget` set
  * Debug's rewind histories' spill store and admission bound (`playerOpsContext`). `wrapPort` wraps the client's end of
  * the port pair, for a test that observes or holds what crosses this connection alone.
  */
@@ -78,6 +87,7 @@ export function createInProcessBackend(
   build: BuildIdentity,
   options: {
     readonly delayMs?: number;
+    readonly stopAsWorker?: boolean;
     readonly wrapPort?: (port: ClientPort) => ClientPort;
   } & NonNullable<Parameters<typeof playerOpsContext>[0]> = {},
 ): PlayerBridge {
@@ -131,8 +141,14 @@ export function createInProcessBackend(
       else toClient?.(transit.splice(index, 1)[0]!.data);
     }
   };
-  // A stop's acknowledgement and the replies before it arrive at once, so the stop is synchronous here.
-  bridge.deliverInTransit = flush;
+  if (options.stopAsWorker !== true) {
+    const halt = bridge.halt.bind(bridge);
+    bridge.halt = (session, stop) => {
+      const acknowledged = halt(session, stop);
+      flush(session.id);
+      return acknowledged;
+    };
+  }
   backends.set(bridge, { bridge, context, sessions, flush });
   return bridge;
 }
@@ -206,8 +222,8 @@ export interface HostFactoryInput {
  * random control. A restore begins without ownership, until an explicit adoption (`adoptRandom`).
  *
  * Its plan and session are owned by a delivery of the facade's own (`delivery.ts`) until the bridge took the session: a
- * fault before that undoes them, and a closed connection admits neither. They are bound to that delivery by name, so an
- * op's delivery that is open meanwhile (one still running, or one a request the factory began opened) never owns them.
+ * fault before that undoes them, and a closed connection admits neither. Like an op, it runs only while no other
+ * delivery is open: while an op is awaited it is refused, and a request its factory begins is refused by the host.
  */
 export function introduceNow(
   bridge: PlayerBridge,
@@ -270,7 +286,6 @@ function introduceIn(
           ...(control === null ? {} : { randomControl: control }),
         });
   const known = [...context.plans].find(([, held]) => held === created.plan)?.[0];
-  // Bound to the facade's delivery: a request the factory began may have opened one inside it, still running.
   const token = known ?? context.hold(created.plan, delivery);
   // A factory may not have installed the control it was given; its first read attaches it in any case.
   const held = new HeldSession(

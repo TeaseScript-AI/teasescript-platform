@@ -9,8 +9,7 @@ import { rebuildRecordedSession } from "../../player/debug/debug-export.js";
 import { DebugRecorder } from "../../player/debug/debug-recorder.js";
 import { BridgeRequestError, connectBridge } from "../../player/engine-bridge/client.js";
 import { admissionOf, type HeldMedia } from "../../player/engine-bridge/held-media.js";
-import type * as InProcess from "../../player/engine-bridge/in-process.js";
-import { heldRecording, introduceNow } from "../../player/engine-bridge/in-process.js";
+import type * as InProcess from "../helpers/bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import type { Introduction } from "../../player/engine-bridge/session-protocol.js";
@@ -43,7 +42,6 @@ import {
 } from "../../player/runtime/runtime-view.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
-import { hatch, inProcessBridge } from "../helpers/in-process-bridge.js";
 import { plainRecording } from "../helpers/bridge/plain-recording.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import {
@@ -67,7 +65,6 @@ import type { EffectSample } from "../helpers/live-host-effects.js";
 import { compareStructures, renderPath } from "../helpers/runtime-state-comparison.js";
 import type * as RuntimeAdapter from "../../player/runtime/runtime-adapter.js";
 import type { RuntimeSnapshot } from "../../src/index.js";
-import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
 import { asMalformed, untypedBridge, untypedClient } from "../helpers/bridge/untyped.js";
 import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
 
@@ -141,14 +138,11 @@ async function prepared(bridge: PlayerBridge, script: string): Promise<string> {
 
 type PlainRecording = NonNullable<ReturnType<typeof plainRecording>>;
 
-/** The connection's recording as plain data: through the facade in-process, through the test op in a Worker. */
-async function recordingOf(bridge: PlayerBridge, inProcess: boolean): Promise<PlainRecording> {
+/** The connection's recording as plain data, through the Worker's test op. */
+async function recordingOf(bridge: PlayerBridge): Promise<PlainRecording> {
   // EVIDENCE: validation: `recordingForTest` replies from the same build with `plainRecording`'s result.
-  const remote = inProcess
-    ? null
-    : ((await untypedClient(bridge.client).request("recordingForTest", null))
-        .result as PlainRecording | null);
-  const recording = inProcess ? plainRecording(heldRecording(bridge)) : remote;
+  const recording = (await untypedClient(bridge.client).request("recordingForTest", null))
+    .result as PlainRecording | null;
   assert.ok(recording !== null, "the connection records");
   return recording;
 }
@@ -238,7 +232,7 @@ const shownOf = (session: Pick<PlayerSession, "state" | "events">) => {
 };
 
 /** The tape over the bridge: each step's result and what shows after it; envelope refusals in between record nothing. */
-async function overBridge(bridge: PlayerBridge, inProcess: boolean) {
+async function overBridge(bridge: PlayerBridge) {
   let session = await bridge.start(await prepared(bridge, SCRIPT), START, true);
   const steps: unknown[] = [shownOf(session)];
   for (const [name, step] of TAPE) {
@@ -248,7 +242,7 @@ async function overBridge(bridge: PlayerBridge, inProcess: boolean) {
     steps.push({ name, result, ...shownOf(session) });
     if (name === "answer") {
       // Refused before the engine: malformed arguments and a stale basis. Neither is an engine call to record.
-      const before = (await recordingOf(bridge, inProcess))?.operations.length;
+      const before = (await recordingOf(bridge))?.operations.length;
       await assert.rejects(
         bridge.request(
           session,
@@ -261,14 +255,10 @@ async function overBridge(bridge: PlayerBridge, inProcess: boolean) {
         bridge.request(session, "observeTime", { atMs: 1, media: [] }, { basis: 0 }),
         (error: unknown) => error instanceof BridgeRequestError && error.code === "basis",
       );
-      assert.equal((await recordingOf(bridge, inProcess))?.operations.length, before);
+      assert.equal((await recordingOf(bridge))?.operations.length, before);
     }
   }
-  return {
-    steps,
-    snapshot: inProcess ? hatch(session, playerRuntimeSnapshot) : null,
-    recording: await recordingOf(bridge, inProcess),
-  };
+  return { steps, recording: await recordingOf(bridge) };
 }
 
 /** The same tape on the adapter itself, with a recorder of its own: the oracle. */
@@ -320,32 +310,22 @@ function onAdapter() {
   };
 }
 
-for (const delayMs of [undefined, 0, 50, 250])
-  test(`the recording of every engine call is the adapter's own, in-process${delayMs === undefined ? " and in a Worker" : ` with replies ${delayMs} ms late`}`, async () => {
-    const oracle = onAdapter();
-    const inProcess = await overBridge(await inProcessBridge(delayMs), true);
-    assert.deepEqual(inProcess.steps, oracle.steps, "every step shows what the adapter shows");
-    assert.deepEqual(inProcess.snapshot, oracle.snapshot);
+test("the recording of every engine call in a Worker is the adapter's own", async () => {
+  const oracle = onAdapter();
+  assert.equal(oracle.recording?.complete, true);
+  const remote = await worker();
+  try {
+    const inWorker = await overBridge(remote);
+    assert.deepEqual(inWorker.steps, oracle.steps, "every step shows what the adapter shows");
     assert.deepEqual(
-      inProcess.recording,
+      inWorker.recording,
       oracle.recording,
       "the host's recorder records what the adapter's does",
     );
-    assert.equal(oracle.recording?.complete, true);
-    if (delayMs !== undefined) return;
-    const remote = await worker();
-    try {
-      const inWorker = await overBridge(remote, false);
-      assert.deepEqual(inWorker.steps, oracle.steps);
-      assert.deepEqual(
-        inWorker.recording,
-        oracle.recording,
-        "the Worker's recorder records the same",
-      );
-    } finally {
-      remote.client.terminate();
-    }
-  });
+  } finally {
+    remote.client.terminate();
+  }
+});
 
 /** A timer block that throws in its middle once the scope IDs are used up, as in the recorder's own tests. */
 const THROWING = [
@@ -359,22 +339,13 @@ const THROWING = [
   "exit",
 ].join("\n");
 
-/**
- * A session of THROWING restored where the next scope ID is the last: in-process through the transitional factory, as
- * the Player restores, in a Worker through its test op.
- */
-async function aboutToThrow(bridge: PlayerBridge, inProcess: boolean): Promise<PlayerSession> {
+/** A session of THROWING restored where the next scope ID is the last, through the Worker's test op. */
+async function aboutToThrow(bridge: PlayerBridge): Promise<PlayerSession> {
   const token = await prepared(bridge, THROWING);
   const snapshotJson = JSON.stringify({
     ...playerRuntimeSnapshot(createPlayerRuntimeSession(THROWING)),
     nextScopeId: Number.MAX_SAFE_INTEGER - 1,
   });
-  if (inProcess)
-    return introduceNow(
-      bridge,
-      (host) => restorePlayerRuntimeSessionAt(host.plan(token), snapshotJson, []),
-      NO_MARKS,
-    );
   const reply = await untypedClient(bridge.client).request("restoreForTest", {
     plan: token,
     snapshotJson,
@@ -390,14 +361,14 @@ test("in a Worker, a failure freezes the recording at it, and an end it cannot e
   try {
     const session = await remote.start(await prepared(remote, FAILING), START, true);
     // Running: the current state cannot be exported, and no earlier state stands in for it.
-    const running = await recordingOf(remote, false);
+    const running = await recordingOf(remote);
     assert.deepEqual(
       [running.complete, running.reason, running.endSnapshot],
       [false, "The current state could not be exported.", null],
     );
     await remote.request(session, "observeTime", { atMs: 5_000, media: [] });
     assert.equal(remote.latest(session)!.state.status, "failed");
-    const failed = await recordingOf(remote, false);
+    const failed = await recordingOf(remote);
     assert.deepEqual(
       [failed.complete, failed.reason, failed.endSnapshot],
       [false, "The state at the error could not be exported.", null],
@@ -421,7 +392,7 @@ test("in a Worker, a call larger than the recorder keeps makes the recording inc
       text: "x".repeat(100),
       input: "enter",
     });
-    const recording = await recordingOf(remote, false);
+    const recording = await recordingOf(remote);
     assert.deepEqual(
       [recording.complete, recording.reason],
       [false, "A recorded call was larger than the recording keeps."],
@@ -431,43 +402,42 @@ test("in a Worker, a call larger than the recorder keeps makes the recording inc
   }
 });
 
-for (const inProcess of [true, false])
-  test(`a new Start's recording replaces the connection's, and a restored session's begins at its restore (${inProcess ? "in-process" : "in a Worker"})`, async () => {
-    const bridge = inProcess ? await inProcessBridge() : await worker();
-    try {
-      const a = await bridge.start(
-        await prepared(bridge, 'say "A", instant\nlet x = askChoice "A1"\nexit'),
-        START,
-        true,
-      );
-      await bridge.halt(a);
-      const atStop = await recordingOf(bridge, inProcess);
-      assert.ok(atStop.operations.length > 0);
-      // The stopped session's recording, as its stop left it, is not the next Start's.
-      await bridge.start(
-        await prepared(bridge, 'say "B", instant\nlet y = askChoice "B1"\nexit'),
-        START,
-        true,
-      );
-      const next = await recordingOf(bridge, inProcess);
-      // Each recording ends at its own session's state: A's offers "A1", B's "B1".
-      assert.ok(JSON.stringify(atStop.endSnapshot).includes('"A1"'));
-      assert.ok(JSON.stringify(next.endSnapshot).includes('"B1"'));
-      assert.ok(!JSON.stringify(next.endSnapshot).includes('"A1"'));
-      assert.equal(next.operations.length, 1, "B's recording begins at B's Start");
-      // A restored session records from its restore: its recording's anchor is the restored state.
-      const restored = await aboutToThrow(bridge, inProcess);
-      await bridge.request(restored, "beginRecording", null);
-      const fromRestore = await recordingOf(bridge, inProcess);
-      assert.equal(fromRestore.operations.length, 0);
-      assert.equal(fromRestore.anchorSnapshot.nextScopeId, Number.MAX_SAFE_INTEGER - 1);
-    } finally {
-      bridge.client.terminate();
-    }
-  });
+test("a new Start's recording replaces the connection's, and a restored session's begins at its restore (in a Worker)", async () => {
+  const bridge = await worker();
+  try {
+    const a = await bridge.start(
+      await prepared(bridge, 'say "A", instant\nlet x = askChoice "A1"\nexit'),
+      START,
+      true,
+    );
+    await bridge.halt(a);
+    const atStop = await recordingOf(bridge);
+    assert.ok(atStop.operations.length > 0);
+    // The stopped session's recording, as its stop left it, is not the next Start's.
+    await bridge.start(
+      await prepared(bridge, 'say "B", instant\nlet y = askChoice "B1"\nexit'),
+      START,
+      true,
+    );
+    const next = await recordingOf(bridge);
+    // Each recording ends at its own session's state: A's offers "A1", B's "B1".
+    assert.ok(JSON.stringify(atStop.endSnapshot).includes('"A1"'));
+    assert.ok(JSON.stringify(next.endSnapshot).includes('"B1"'));
+    assert.ok(!JSON.stringify(next.endSnapshot).includes('"A1"'));
+    assert.equal(next.operations.length, 1, "B's recording begins at B's Start");
+    // A restored session records from its restore: its recording's anchor is the restored state.
+    const restored = await aboutToThrow(bridge);
+    await bridge.request(restored, "beginRecording", null);
+    const fromRestore = await recordingOf(bridge);
+    assert.equal(fromRestore.operations.length, 0);
+    assert.equal(fromRestore.anchorSnapshot.nextScopeId, Number.MAX_SAFE_INTEGER - 1);
+  } finally {
+    bridge.client.terminate();
+  }
+});
 
 /*
- * Replay, over a declared family: three replay kinds × three backends. The cut is a call that throws. Live recovery is
+ * Replay, over a declared family: three replay kinds × two backends. The cut is a call that throws. Live recovery is
  * judged by the complete trace of the publications after the cut, by value, from the cut's cursor (`tapPublications`,
  * #1919), against one oracle: the adapter restored at the publication before the cut, given the live run's requests
  * after it (`adapterReplay`). The frozen tape matches no publication, so it keeps its own oracle, its recorded
@@ -479,7 +449,7 @@ for (const inProcess of [true, false])
  * the composable lives (`withLiveHost`).
  */
 const KINDS = ["successful replay", "frozen failure replay", "live recovery"] as const;
-const BACKENDS = ["in-process", "a Worker", "the composable"] as const;
+const BACKENDS = ["a Worker", "the composable"] as const;
 type Kind = (typeof KINDS)[number];
 type Backend = (typeof BACKENDS)[number];
 
@@ -628,26 +598,18 @@ async function cutAndRecover(
 }
 
 /** A run on the bridge alone, in-process or in a Worker: the test answers the save, the medium and the capture. */
-async function bridgeRun(inProcess: boolean): Promise<JudgedRun> {
-  const bridge = inProcess ? await inProcessBridge() : await worker();
+async function workerRun(): Promise<JudgedRun> {
+  const bridge = await worker();
   const tracker = trackRequests(bridge);
   try {
     const token = await prepared(bridge, REPLAYED);
     const snapshotJson = restoredJson();
-    let session = inProcess
-      ? introduceNow(
-          bridge,
-          (host) => restorePlayerRuntimeSessionAt(host.plan(token), snapshotJson, []),
-          NO_MARKS,
-        )
-      : await (async () => {
-          const reply = await untypedClient(bridge.client).request("restoreForTest", {
-            plan: token,
-            snapshotJson,
-          });
-          // EVIDENCE: validation: the test op replies with the new session's introduction.
-          return bridge.open(reply.session!, reply.view as Introduction);
-        })();
+    const reply = await untypedClient(bridge.client).request("restoreForTest", {
+      plan: token,
+      snapshotJson,
+    });
+    // EVIDENCE: validation: the test op replies with the new session's introduction.
+    let session = bridge.open(reply.session!, reply.view as Introduction);
     await bridge.request(session, "beginRecording", null);
     const send = async (op: string, args: unknown) => {
       await untypedBridge(bridge).request(bridge.latest(session)!, op, args);
@@ -670,20 +632,18 @@ async function bridgeRun(inProcess: boolean): Promise<JudgedRun> {
     // The cut is quiescent, as the oracle's restore at it assumes: nothing in flight, nothing more to publish.
     await quiesce(bridge, session, tracker, () => new Promise((resolve) => setTimeout(resolve, 0)));
     session = bridge.latest(session)!;
-    const atCut = await recordingOf(bridge, inProcess);
-    // The live state before the cut: the host's own, in-process; in a Worker, the adapter's run of the same calls.
-    const before = inProcess ? hatch(session, playerRuntimeSnapshot) : adapterBefore();
+    const atCut = await recordingOf(bridge);
+    // The live state before the cut: the adapter's run of the same calls.
+    const before = adapterBefore();
     const cut = await cutAndRecover(bridge, session, tracker, null);
-    const frozen = await recordingOf(bridge, inProcess);
+    const frozen = await recordingOf(bridge);
     const requests = await cut.recover();
     return await judged(
       {
         before,
         atCut,
         frozen,
-        suffix: {
-          snapshot: inProcess ? hatch(bridge.latest(session)!, playerRuntimeSnapshot) : null,
-        },
+        suffix: { snapshot: null },
         requests,
         trace: cut.trace,
         effects: null,
@@ -697,7 +657,7 @@ async function bridgeRun(inProcess: boolean): Promise<JudgedRun> {
   }
 }
 
-/** The adapter's own run of `bridgeRun`'s calls up to the cut, for the Worker, whose live state the test cannot read. */
+/** The adapter's own run of `workerRun`'s calls up to the cut: the Worker's live state, which the test cannot read. */
 function adapterBefore(): RuntimeSnapshot {
   const plan = compilePlayerProject(REPLAYED).plan!;
   let session = restorePlayerRuntimeSessionAt(plan, restoredJson(), []);
@@ -858,8 +818,7 @@ const runOn = (backend: Backend, start: () => Promise<JudgedRun>) => {
   return runs.get(backend)!;
 };
 const RUNS: Record<Backend, () => Promise<JudgedRun>> = {
-  "in-process": () => bridgeRun(true),
-  "a Worker": () => bridgeRun(false),
+  "a Worker": () => workerRun(),
   // The control run first, whose effect samples the recovery run's are judged against while its host lives.
   "the composable": async () => composableRun(await controlRun()),
 };
@@ -928,7 +887,7 @@ const bundle = () =>
     return {
       modules: { usePlayerSession, capturedMediaStore },
       // EVIDENCE: validation: the bundle's in-process backend, whose sessions the composable's facade reaches.
-      facade: (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof InProcess,
+      facade: (await loadPlayerModule("tests/helpers/bridge/in-process.ts")) as typeof InProcess,
       // EVIDENCE: validation: the bundle's adapter, whose sessions the bundle's host holds.
       adapter: (await loadPlayerModule(
         "player/runtime/runtime-adapter.ts",

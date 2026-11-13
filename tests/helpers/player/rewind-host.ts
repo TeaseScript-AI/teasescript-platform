@@ -196,7 +196,7 @@ before(async () => {
     "player/vue/src/debug/usePlayerDebug.ts",
   );
   const facade: Record<string, unknown> = await loadPlayerModule(
-    "player/engine-bridge/in-process.ts",
+    "tests/helpers/bridge/in-process.ts",
   );
   const client: Record<string, unknown> = await loadPlayerModule("player/engine-bridge/client.ts");
   assert.equal(typeof facade.createInProcessBackend, "function");

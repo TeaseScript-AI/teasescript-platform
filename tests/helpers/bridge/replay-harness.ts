@@ -274,7 +274,6 @@ export async function quiesce(
   settle: () => Promise<void>,
 ): Promise<void> {
   for (let turn = 0; turn < 200; turn += 1) {
-    bridge.deliverInTransit?.(session.id);
     const revision = bridge.latest(session)?.revision;
     await settle();
     if (tracker.inFlight() === 0 && bridge.latest(session)?.revision === revision) return;
@@ -313,7 +312,7 @@ const presented =
       ? { session, outcome: { kind: "staleAction", actionId: args["actionId"] } }
       : answer(session, args);
 
-export const ADAPTER_OPS = {
+const ADAPTER_OPS = {
   observeTime: (session, args) => {
     // EVIDENCE: validation: the host accepted `atMs` as a scene time (`ops/session.ts`).
     const atMs = args["atMs"] as number;
@@ -331,9 +330,8 @@ export const ADAPTER_OPS = {
       ? select(session)
       : answeredByPlayerInput(session, input, () => select(session));
   }),
-  // The ops the L5 gate's K/F tapes send (`tests/gate/candidates.ts`), each as its host op calls the adapter, from the
-  // arguments the host accepted (`ops/input.ts`, `ops/resources.ts`, `ops/media.ts`, `ops/session.ts`). The tapes send
-  // no `input`, so none is recorded as how the player answered.
+  // The other answer ops, each as its host op calls the adapter, from the arguments the host accepted (`ops/input.ts`,
+  // `ops/resources.ts`, `ops/media.ts`, `ops/session.ts`), with no `input` recorded as how the player answered.
   submitComposer: presented((session, args) => {
     // EVIDENCE: validation: the host accepted `text` as a string.
     const text = args["text"] as string;
@@ -416,7 +414,7 @@ export const ADAPTER_OPS = {
 } satisfies Readonly<Record<string, AdapterCall>>;
 
 /** `ADAPTER_OPS` by op name, for a request whose op is a string: `undefined` for an op the oracle has no path for. */
-export function adapterCall(op: string): AdapterCall | undefined {
+function adapterCall(op: string): AdapterCall | undefined {
   const calls: Readonly<Record<string, AdapterCall>> = ADAPTER_OPS;
   return Object.hasOwn(calls, op) ? calls[op] : undefined;
 }

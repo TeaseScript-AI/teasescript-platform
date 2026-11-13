@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../../player/engine-bridge/client.js";
-import { hatch } from "../../player/engine-bridge/in-process.js";
+import { hatch } from "../helpers/bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import type { CheckpointCapture, KeepCapture } from "../../player/engine-bridge/ops/persistence.js";
 import { playerBridgeOps, type PrepareResult } from "../../player/engine-bridge/player-ops.js";
