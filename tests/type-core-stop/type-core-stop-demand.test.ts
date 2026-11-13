@@ -600,6 +600,31 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
   );
 });
 
+const reversed = <T>(make: () => T): T =>
+  withSolverSeam({ reverseWorklist: true }, () =>
+    withConsumerOrder((list) => [...list].reverse(), make),
+  );
+const modes: readonly (readonly [string, <T>(make: () => T) => T])[] = [
+  ["forward", (make) => make()],
+  ["reversed", reversed],
+  ["forward, unshared", (make) => withoutSharing(make)],
+  ["reversed, unshared", (make) => withoutSharing(() => reversed(make))],
+];
+const globals = ["hostValue", "hostOther"];
+const place = (source: string, name: string) => {
+  const request = coreRequest([{ path: "main.tease", source }], globals);
+  assert.ok(request !== null);
+  return {
+    request,
+    id: new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === name,
+    )!.id,
+  };
+};
+const passes = (answers: Answers): number => answers.budget.counts.get("stopPasses") ?? 0;
+const items = (list: readonly { tag: string; reasons: number }[]) =>
+  list.map((item) => `${item.tag}/${item.reasons}`);
+
 /**
  * a pass in which a decision stops is not settled; the next, from the same rejections, starts with that key stopped
  * (`Contract.stop`), so no result read the key before its stop, in any order. `pair`'s stored literal holds a read of
@@ -613,30 +638,6 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
  * as in #1194's witness below of a second stop; the plain gate declines it (#2080 part 2).
  */
 test("a pass in which a decision stops is not settled: the next starts with its key stopped", () => {
-  const reversed = <T>(make: () => T): T =>
-    withSolverSeam({ reverseWorklist: true }, () =>
-      withConsumerOrder((list) => [...list].reverse(), make),
-    );
-  const modes: readonly (readonly [string, <T>(make: () => T) => T])[] = [
-    ["forward", (make) => make()],
-    ["reversed", reversed],
-    ["forward, unshared", (make) => withoutSharing(make)],
-    ["reversed, unshared", (make) => withoutSharing(() => reversed(make))],
-  ];
-  const globals = ["hostValue", "hostOther"];
-  const place = (source: string, name: string) => {
-    const request = coreRequest([{ path: "main.tease", source }], globals);
-    assert.ok(request !== null);
-    return {
-      request,
-      id: new CoreProgram(request).places.find(
-        ({ kind }) => kind.kind === "binding" && kind.name === name,
-      )!.id,
-    };
-  };
-  const passes = (answers: Answers): number => answers.budget.counts.get("stopPasses") ?? 0;
-  const items = (list: readonly { tag: string; reasons: number }[]) =>
-    list.map((item) => `${item.tag}/${item.reasons}`);
   const dependent =
     [
       "let tally = 1",
