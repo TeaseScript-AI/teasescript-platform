@@ -4,7 +4,7 @@ Pending actions: what a script waits for or keeps running, and how each kind beh
 
 - `model.ts`: the serializable pending-action and settlement contracts.
 - `interrupts.ts`: the action policy: what blocks and the host do about each kind of foreground action.
-- `action-validation.ts`: restore validation of pending actions, settlements, pacing gates, and handoffs.
+- `validation/`: restore validation of pending actions, settlements, pacing gates, and handoffs, one file per subject.
 - `capture.ts`: what the host vouches for about captured media and stored files.
 - `choice-options.ts`: the buttons of a prepared `askChoice`.
 - `delay.ts`: the domain of a session time.
