@@ -17,10 +17,10 @@
 //   2. a bare `export` keyword added to a moved declaration: an added line where a top-level declaration starts with
 //      its `export` modifier, paired with a removed line where the same declaration starts without one, the rest of
 //      the two lines equal, indentation aside, each removed line paired once;
-//   3. a line of whitespace alone whose line break before it lies outside every token's text (a template literal's,
-//      a string's or JSX text's lines are its content; a comment's are not), in a file the check parses: in any other
-//      file such a line is unadmitted, and its reader declares it with the reason (an empty line's entry has
-//      `"text": ""`);
+//   3. a line of whitespace alone whose line break before it lies outside every token's text, in a file the check
+//      parses without a syntax error (a template literal's or a string's lines are its content; JSX text's are a
+//      token's too, so refused, though JSX drops a whitespace line; a comment's are admitted); any other whitespace
+//      line is unadmitted and declared as any line is (an empty line's entry has `"text": ""`);
 //   4. a line of comments and whitespace alone, in a file the change adds, above its first import or export statement
 //      (a comment elsewhere is a declared line or a failure);
 // or as a declared line: an entry of the `--declare` file, a JSON array of `{ "file", "side": "added" | "removed",
@@ -132,7 +132,7 @@ function gitLines(text) {
  * A blob's shape by Git's lines (a newline alone ends one), each line's whole content classified: its import and
  * re-export lines, holding nothing else but whitespace and comments; the lines of comments and whitespace alone above
  * its first import or export statement; its lines of whitespace alone whose line break before them lies outside every
- * token's text (`layoutBlanks`); and the lines where a top-level declaration starts, each with whether it starts with
+ * token's text, in a parse without a syntax error (`layoutBlanks`); and the lines where a top-level declaration starts, each with whether it starts with
  * its `export` modifier. A file the check does not parse has none of them.
  */
 function shapeOf(file, text) {
@@ -160,12 +160,9 @@ function shapeOf(file, text) {
     }
     // both scans at the token's full start: a comment before the next newline is a trailing one to the scanner
     const [from, to] = [node.getFullStart(), node.getStart(source)];
-    for (
-      let at = text.indexOf("\n", to);
-      at !== -1 && at < node.getEnd();
-      at = text.indexOf("\n", at + 1)
-    )
-      inToken.add(lineOf(at + 1));
+    // each line whose LF lies inside the token's text makes the line after it the token's
+    for (let line = lineOf(to); line < starts.length && starts[line] - 1 < node.getEnd(); line += 1)
+      inToken.add(line + 1);
     for (const range of [
       ...(ts.getLeadingCommentRanges(text, from) ?? []),
       ...(ts.getTrailingCommentRanges(text, from) ?? []),
@@ -173,6 +170,8 @@ function shapeOf(file, text) {
       if (range.pos >= from && range.end <= to) kind.fill(1, range.pos, range.end);
   };
   visit(source);
+  // where TypeScript reports a syntax error, its recovered parse proves no token's place
+  const parses = source.parseDiagnostics.length === 0;
   let first = null;
   for (const statement of source.statements) {
     const start = statement.getStart(source);
@@ -218,7 +217,7 @@ function shapeOf(file, text) {
       else if (!/\s/u.test(text[at])) code = true;
     }
     if (statement && !code) importLines.add(line);
-    if (/^\s*$/u.test(text.slice(from, to)) && !inToken.has(line)) layoutBlanks.add(line);
+    if (parses && /^\s*$/u.test(text.slice(from, to)) && !inToken.has(line)) layoutBlanks.add(line);
     if (first !== null && line < first && comment && !code && !statement) headerComments.add(line);
   }
   return { importLines, headerComments, layoutBlanks, declarationStarts };

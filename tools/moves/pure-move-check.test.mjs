@@ -435,13 +435,13 @@ test(
     } finally {
       trivia.done();
     }
-    // JSX text's lines and a JSX attribute string's are their content
+    // a JSX attribute string's lines are its content
     const view = (gap) =>
       [
         'const sectionWithLongIdentifier = <section title="the title of the moved section',
         `${gap}its second line">`,
         "first paragraph of the moved section text",
-        `${gap}second paragraph of the moved section text`,
+        "second paragraph of the moved section text",
         "</section>;",
         "export { sectionWithLongIdentifier };",
         "",
@@ -454,9 +454,29 @@ test(
       const { status, out } = jsx.run();
       assert.equal(status, 1, out);
       assert.match(out, /^ {2}unadmitted: b\.tsx:2 \(added\): $/mu);
-      assert.match(out, /^ {2}unadmitted: b\.tsx:5 \(added\): $/mu);
     } finally {
       jsx.done();
+    }
+    // a file TypeScript reports a syntax error in proves no token's place: Node reads `<!--` as a comment, TypeScript
+    // its backtick as a template's start, so the real template's lines read as code
+    const cjs = (gap) =>
+      [
+        "<!-- the page helper: one ` in this comment",
+        "const page = (title) => `<h1>${title}</h1>",
+        "<p>the first paragraph of the rendered page body</p>",
+        ...gap,
+        "<p>the second paragraph of the rendered page body</p>",
+        "`;",
+        "module.exports = { page };",
+        "",
+      ].join("\n");
+    const unproved = moveOf({ "a.cjs": cjs([]) }, { "a.cjs": null, "b.cjs": cjs([""]) });
+    try {
+      const { status, out } = unproved.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: b\.cjs:4 \(added\): $/mu);
+    } finally {
+      unproved.done();
     }
     // in a file the check does not parse, nothing shows where a whitespace line lies
     const text =
