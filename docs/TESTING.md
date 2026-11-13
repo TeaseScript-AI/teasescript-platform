@@ -142,7 +142,7 @@ published commit.
 The shadow comparison compiles every source of a set through both public routes of one built tree, the legacy backend
 and the constraint backend ([architecture](ARCHITECTURE.md#static-type-analysis)), in the four modes. It is a campaign
 that finds defects in the constraint backend, run when it is expected to find some, and not the switch's condition.
-Every difference it finds is explained as an error or as a note
+Every difference it finds is explained as a defect or as a note
 ([owner escalation](DEVELOPMENT-WORKFLOW.md#proportional-repair-and-owner-escalation)). Its sets are the 15,406-source
 set (`corpus`, its cases file named by `CASES_JSON`), the type-core fixture (`fixture`) and each maintained family
 (`copies`, `joins`, `messages`, `property`, `rings`, `stops`). It classifies every legacy/core pair, and every source's
