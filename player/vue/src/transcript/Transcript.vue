@@ -184,6 +184,8 @@ const LIVE_UPDATE_MS = 250;
 const reducedMotion = usePreferredReducedMotion();
 const historyElement = ref<HTMLElement | null>(null);
 const entrances = new ConversationEntrances(() => performance.now());
+// DIAG
+const entr = (entry: Record<string, unknown>) => { const w = window as unknown as { __entr?: unknown[] }; (w.__entr ??= []).push({ at: Math.round(performance.now()), ...entry }); };
 const glide = new ConversationGlide(
   () => performance.now(),
   () => virtualizer.value.scrollRect?.height ?? 0,
@@ -260,11 +262,13 @@ watch(
       shown.revision <= (props.jumpedRevision ?? -1) ||
       added.length > ENTERING_AT_MOST
     ) {
+      entr({ t: "history", init: initialPositioning, opening, reduce: reducedMotion.value === "reduce", newList: props.entries !== previous.entries, jumped: shown.revision <= (props.jumpedRevision ?? -1), added: added.map(rowKey) });
       liveUntil = 0;
       entrances.clear();
       glide.stop();
       return;
     }
+    entr({ t: "admit", added: added.map(rowKey), pending: shown.pending });
     liveUntil = performance.now() + LIVE_UPDATE_MS;
     entrances.admit(
       added.flatMap((entry) =>
@@ -305,6 +309,7 @@ function measureRenderedRows() {
   const rows = [...renderedRows].filter(([element]) => element.isConnected);
   renderedRows.clear();
   for (const [element] of rows) virtualizer.value.measureElement(element);
+  entr({ t: "play", ids: rows.map(([, id]) => id) });
   for (const [element, id] of rows) entrances.play(id, element);
 }
 const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
@@ -343,6 +348,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
             following.value = false;
             heldAtNewEntry.value = true;
             // More than the transcript shows at once shows directly.
+            entr({ t: "clear-stop" });
             liveUntil = 0;
             entrances.clear();
             glide.stop();
@@ -364,6 +370,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
               element.scrollTop - before,
             )
           ) {
+            entr({ t: "clear-glide" });
             liveUntil = 0;
             entrances.clear();
           }
