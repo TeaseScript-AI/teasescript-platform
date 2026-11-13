@@ -15,6 +15,7 @@ import type { SourceSpan } from "../../source.js";
 import type { CoreRuntimeChecks, TypeCheckOptions, TypeCheckResult } from "../backend.js";
 import type { WorkLedger } from "./budget.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
+import { retainedModule } from "./retained/retained.js";
 
 /*
  * The analysis's view of a project (#2493, docs/specifications/type-inference-accepted-record/contract.md#r4-452):
@@ -110,12 +111,15 @@ function translated<T extends object>(value: T, translations: Translations<T>, o
   return out;
 }
 
-/** The views made, each by the request it was made of and by its own request, so a view is made once. */
-const VIEWS = new WeakMap<CoreAnalysisRequest, IdentityView>();
+/**
+ * The views made, each by the request it was made of and by its own request, so a view is made once: kept between runs,
+ * so made through the retained API (#1072).
+ */
+const VIEWS = retainedModule<CoreAnalysisRequest, IdentityView>("identity-view.VIEWS", "weakMap");
 
 /** The analysis's view of a request (see the module's comment). */
 export function identityView(request: CoreAnalysisRequest): IdentityView {
-  const known = VIEWS.get(request);
+  const known = VIEWS().get(request);
   if (known !== undefined) return known;
   const names = identityNames(request.files);
   if (names === null) {
@@ -127,7 +131,7 @@ export function identityView(request: CoreAnalysisRequest): IdentityView {
       sourceOf: kept,
       viewOf: kept,
     };
-    VIEWS.set(request, none);
+    VIEWS().set(request, none);
     return none;
   }
   // (the declarations' scan; then a unit per file, each file's walk, and a unit per node translated into the view)
@@ -161,8 +165,9 @@ export function identityView(request: CoreAnalysisRequest): IdentityView {
     sourceOf,
     viewOf,
   };
-  VIEWS.set(request, view);
-  VIEWS.set(view.request, view);
+  const views = VIEWS();
+  views.set(request, view);
+  views.set(view.request, view);
   return view;
 }
 
