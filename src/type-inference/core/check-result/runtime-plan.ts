@@ -183,8 +183,7 @@ function movedChecks(
  * store takes is its own type's. It throws `OutsideContract`, declining the program, where the plan cannot place a
  * check or carry its contract exactly: a loop variable's check, a check no store takes, and the cases of
  * `Contracts.expected`, `Contracts.stored`, `Contracts.direct` and `fallbackPlan`. A question past the analysis's
- * allowance ends it with `BudgetExhausted`, which `asked` answers by asking again of the stopped answers. Its
- * `contracts` are those `Contracts.stored` recorded as it was asked.
+ * allowance ends it with `BudgetExhausted`. Its `contracts` are those `Contracts.stored` recorded as it was asked.
  */
 export function runtimeChecks(
   answers: Answers,
@@ -413,8 +412,7 @@ export function lostCheck(
  * set shows one (#2257's census, sweep and natural sets: `store` and `fallback` only). A store's is the registry's,
  * which `notLost` decides. Not caught: a contract the stop left incomplete that a natural producer reads, where the
  * fallback rule owes nothing (#2257: measured 0, not shown impossible), and a store whose destination-type warning the
- * stop removed, where no obligation is owed (#2245). It returns nothing and declines by throwing `OutsideContract`;
- * `lostCheck` calls it last.
+ * stop removed, where no obligation is owed (#2245). It returns nothing and declines by throwing `OutsideContract`.
  */
 function settledOwed(answers: Answers, index: SliceIndex): void {
   const { budget } = answers;

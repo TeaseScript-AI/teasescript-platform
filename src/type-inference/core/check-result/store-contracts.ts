@@ -83,10 +83,7 @@ export class Contracts {
   /** Each checked store's contract result, as `stored` made it; read through `results`. */
   readonly #results = new Map<Store, ContractResult>();
 
-  /**
-   * Each store's contract result, recorded by `stored` as it is asked, where it makes one: only the stores
-   * `runtimeChecks` asks `stored` about have one. The lost-check gate reads it as the published contracts.
-   */
+  /** Each store's contract result, recorded by `stored` as it is asked, where it makes one. */
   public get results(): ReadonlyMap<Store, ContractResult> {
     return this.#results;
   }
@@ -502,8 +499,7 @@ export class Contracts {
     records: readonly Expression[],
   ): CompileTask<TypePlan | null> {
     const found = this.answers.valueAt(at.node, path);
-    // below a written `object` the default's own answer, as a typed call takes its default's kinds (`contract.ts`'s
-    // `typedDefault`): a `null` field stays open there too
+    // below a written `object` the default's own answer: a `null` field stays open there too
     const decision = at.keeps ? defaultKinds(path, false) : null;
     const answer =
       decision === null
@@ -767,7 +763,7 @@ function projectedLiteral(expression: Expression): readonly Expression[] | undef
 /**
  * Whether a stop before admission settled left the value side unproven: a work or depth allowance (the stores admission
  * rejects are not settled, #1767). A stop after admission settled leaves every finished answer standing, and a decision
- * stopped at its demand allowance leaves its own answers `unknown`, which `stoppedItem` finds.
+ * stopped at its demand allowance leaves its own answers `unknown`.
  */
 function stoppedAnalysis(answers: Answers): boolean {
   const { budget } = answers;

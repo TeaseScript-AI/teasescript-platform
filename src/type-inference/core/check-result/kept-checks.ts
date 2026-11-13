@@ -1,5 +1,4 @@
-// Whether an obligation's check is lost at its store (#1526 decision 2): `notLost`, which the lost-check gate
-// (`lostCheck`, `runtime-plan.ts`) asks.
+// Whether an obligation's check is lost at its store (#1526 decision 2): `notLost`.
 import type { Expression } from "../../../ast.js";
 import { type PartCheckPlan, type TypeCheckPlan, type TypePlan } from "../../../plan/model.js";
 import type { RuntimeCheckSite, CoreRuntimeChecks } from "../../backend.js";
@@ -10,21 +9,20 @@ import type { ReceivingObligation, ReceivingResult } from "../admission/receivin
 import { SliceIndex, type Store, nodeOf, unwrap } from "./slice-index.js";
 
 /**
- * Whether an obligation's check is not lost at its store (`lostCheck` declines the program where it is): the published
- * plan carries it there, or the obligation owes none. A shape its value's structure proves (its result not lost), or
- * one a complete store check carries; a contract proved open; a complete store check (settled or received, its whole
- * type); or a contract the completion completed that a published check carries at the obligation's path: a typed
- * parse's or load's reader of the value stored at least as strict as the contract there, the stored literal's own
- * structure, its typed calls' readers and its scalar leaves, at least as strict (`literalCarries`), or, where the
- * natural plan does not check the store whole, its part checks at or below the obligation's path, at least one, each
- * equal to the contract there where it has a type, and each level it passes over built by the stored value's own
- * literal (`builtContainers`, #1682, #2231). With no result, a completion past its allowance or a stop of the analysis,
- * only a complete store check carries it, else it is lost (#1832). A stricter reader is never a lost check: it accepts
- * no more values than the natural reader. A check against bare `unknown` where the contract owes a domain carries
- * nothing. A stopped decision's own mark owes no check (`docs/RESOURCE-LIMITS.md`'s NoCheck) where the completion owes
- * nothing at its store (#2080): its result complete, this pass's completion ran its own destination-type check at the
- * obligation's path, no completed check at the stored value and no destination-type warning of the completion at the
- * store (`warned`).
+ * Whether an obligation's check is not lost at its store: the published plan carries it there, or the obligation owes
+ * none. A shape its value's structure proves (its result not lost), or one a complete store check carries; a contract
+ * proved open; a complete store check (settled or received, its whole type); or a contract the completion completed
+ * that a published check carries at the obligation's path: a typed parse's or load's reader of the value stored at
+ * least as strict as the contract there, the stored literal's own structure, its typed calls' readers and its scalar
+ * leaves, at least as strict (`literalCarries`), or, where the natural plan does not check the store whole, its part
+ * checks at or below the obligation's path, at least one, each equal to the contract there where it has a type, and
+ * each level it passes over built by the stored value's own literal (`builtContainers`, #1682, #2231). With no result,
+ * a completion past its allowance or a stop of the analysis, only a complete store check carries it, else it is lost
+ * (#1832). A stricter reader is never a lost check: it accepts no more values than the natural reader. A check against
+ * bare `unknown` where the contract owes a domain carries nothing. A stopped decision's own mark owes no check
+ * (`docs/RESOURCE-LIMITS.md`'s NoCheck) where the completion owes nothing at its store (#2080): its result complete,
+ * this pass's completion ran its own destination-type check at the obligation's path, no completed check at the stored
+ * value and no destination-type warning of the completion at the store (`warned`).
  */
 export function notLost(
   answers: Answers,
