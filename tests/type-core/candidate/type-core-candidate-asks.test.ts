@@ -372,7 +372,7 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       );
 });
 
-test("a choice's buttons, counted as today's checker counts them by each option's origin: more than a request shows, or none, is today's TSV029 and the route's refusal", () => {
+test("a choice's buttons, counted as today's checker counts them, for an option of seven origins: more than a request shows, or none, is today's TSV029 and the route's refusal", () => {
   // (no operand or field of its own: the count of the buttons, `MAX_INTERACTION_OPTION_ENTRIES`, which today's checker
   // checks of the options as a whole and the route counts alike after the analysis; a choice of none, every option a
   // list written without elements, the same)
@@ -400,8 +400,8 @@ test("a choice's buttons, counted as today's checker counts them by each option'
     ["refused", "plans", "plans", "refused"],
   );
   assert.equal(judged("let r = askChoice [], []\nexit\n"), "refused");
-  // after a list of 0, 4,094, 4,095 or 4,096 elements, an option of each origin: one button where its kinds are known,
-  // none a collection, beside `null`; none where it is `null` or unknown
+  // after a list of 0, 4,094, 4,095 or 4,096 elements, an option of each of these origins: one button where its kinds
+  // are known, none a collection, beside `null`; none where it is `null` or unknown
   for (const [prelude, option, counted] of [
     ["", "0", true],
     ["let n = 1\n", "n", true],
