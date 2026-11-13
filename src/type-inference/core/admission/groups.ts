@@ -30,15 +30,14 @@ import {
   keptPath,
   keptPathText,
   keptPrefixes,
-  keyOf,
   keyPlace,
   type Definition,
   type Key,
 } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
-import { dictList } from "../method-categories.js";
 import type { Item } from "../items.js";
 import { decided } from "./decision.js";
+import { freshStore } from "./fresh.js";
 import { heldMeetings } from "./held.js";
 import { offending, SCALAR } from "./kinds.js";
 import { landingIndex } from "./landing-index.js";
@@ -76,31 +75,6 @@ export function stores(admission: Admission): readonly Definition[] {
     );
   }
   return admission.storeList;
-}
-
-/**
- * #2378: a store through a dict's list read in place (`freshRead`): the list's read is a store into it before this
- * one, as its copy twin's declaration is, so the store is never its list's only one.
- */
-function freshStore(admission: Admission, d: Definition): boolean {
-  const { program, contract } = admission.pass;
-  if (!d.path.some((step) => dictList(step) !== undefined)) return false;
-  for (let into = d.into; into !== undefined;) {
-    const projection = program.projOf.get(into);
-    if (projection === undefined) return false;
-    const list = dictList(projection.step);
-    if (list !== undefined) {
-      program.work.charge("indexSteps");
-      const index = d.path.lastIndexOf(projection.step);
-      if (index < 0) return false;
-      const owner = withoutEmpty(
-        admission.run(contract.contractOf(keyOf(d.place, d.path.slice(0, index)))),
-      );
-      return owner.some((item) => item.tag === "dict");
-    }
-    into = projection.owner;
-  }
-  return false;
 }
 
 /**
