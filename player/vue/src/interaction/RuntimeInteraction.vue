@@ -34,8 +34,8 @@ import { imagePickerAccept, type ImageFileFilters } from "../../../media/image-f
 import { openUrlTab } from "../../../url-tab.js";
 import type { InputSectionHost } from "../session/runtime-input";
 import { composerDescriptor, descriptorKey, useComposerState } from "./useComposerState";
+import { QUESTION_GONE } from "./answerNotices";
 import {
-  QUESTION_GONE,
   useAnswerSubmission,
   type PendingAnswer,
   type SessionTerminal,
@@ -297,7 +297,7 @@ function unansweredMessage() {
 }
 // The composer's slots and the answers given, each with its own controller: the composer's text changes only by the
 // player's edits and these controllers (useComposerState), and an answer is checked at once and settled by the runtime
-// (useAnswerSubmission).
+// (useAnswerSubmission). The three reach each other only through the closures below, which run once all three exist.
 const composerState = useComposerState({
   draft: (draft) => formUpdates.draft(draft),
   holdDrafts: () => !!props.holdFormDrafts || !props.inputSection,
@@ -334,8 +334,7 @@ const formUpdates = useFormUpdates({
   session: () => props.session,
   chat: () => props.chat ?? 0,
   epoch: () => props.epoch?.() ?? 0,
-  inputEpoch: () => props.inputEpoch?.() ?? 0,
-  terminal: () => props.terminal ?? null,
+  closed: () => submission.closed(),
   inputSection: () => props.inputSection,
   run: (id, intent) => submission.run(id, intent),
   publish: (session) => emit("update:session", session),
@@ -810,12 +809,12 @@ function escape() {
           :jumped-revision="jumpedRevision ?? -1"
           :removed-rows="removedRows ?? []"
           :pending="submission.predicted.value"
-          :asked-again="consumed === null || consumed !== actionId ? questionAgain : null"
+          :asked-again="consumed !== actionId ? questionAgain : null"
           :bottom-inset="bottomInset"
         >
           <template #foreground>
             <!-- An answered interaction's controls go at once; a refusal shows them again. -->
-            <template v-if="consumed === null || consumed !== actionId">
+            <template v-if="consumed !== actionId">
               <FormControls
                 v-if="form && foreground?.kind === 'form'"
                 :key="actionId ?? 0"

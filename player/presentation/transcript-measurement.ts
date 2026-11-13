@@ -21,7 +21,7 @@ export interface MeasuringVirtualizer {
 }
 
 export class ChangedContentMeasurement {
-  // The content each row's size was last taken with: a message's content event, or `undefined`.
+  // The content each row's size was last taken with: a message's content event, an answer's entry id, or `undefined`.
   readonly #content = new Map<Key, string | undefined>();
   // The measurement taken last, which the virtualizer asks about next if its size changed.
   #current: { readonly key: Key; readonly changed: boolean } | null = null;

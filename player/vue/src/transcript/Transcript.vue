@@ -170,8 +170,7 @@ watch(
 const measureEntry: typeof measureElement<HTMLElement> = (element, entry, instance) => {
   const key = element.dataset.rowKey;
   if (key === unmeasuredFirst) unmeasuredFirst = null;
-  if (key !== undefined)
-    measurement.measured(key, element.dataset.contentSequence, entry !== undefined);
+  if (key !== undefined) measurement.measured(key, element.dataset.content, entry !== undefined);
   return measureElement(element, entry, instance);
 };
 // What live play adds enters the conversation, and while the reader follows the newest content, the conversation glides
@@ -401,7 +400,7 @@ watch(
       []) {
       const key = element.dataset.rowKey;
       if (key === undefined) continue;
-      measurement.rendered(key, element.dataset.contentSequence, sizes.get(key), () =>
+      measurement.rendered(key, element.dataset.content, sizes.get(key), () =>
         Math.round(element.getBoundingClientRect().height),
       );
     }
@@ -670,7 +669,7 @@ onMounted(() => {
                 :data-index="item.index"
                 :data-message-id="entry.id"
                 :data-row-key="rowKey(entry)"
-                :data-content-sequence="contentOf(entry)"
+                :data-content="contentOf(entry)"
                 :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
                 role="listitem"
                 :aria-posinset="item.index + 1"

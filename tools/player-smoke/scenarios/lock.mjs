@@ -385,7 +385,7 @@ export async function passwordCompositionScenario(cdp, origin) {
 }
 
 /**
- * The composer's edit path (decision 1 of 2026-11-11/12): an input method's composition under way belongs to the field it
+ * The composer's edit path (#2430): an input method's composition under way belongs to the field it
  * is typed in. A switch to another field ends it there first, so a timer's password field over the chat, or a lock's over
  * a form field, starts empty and the composed text waits in its own field; nothing is written after the switch. A send
  * while composing, by Send or by the Enter of a keyboard that does not commit with Enter, sends the whole text shown,

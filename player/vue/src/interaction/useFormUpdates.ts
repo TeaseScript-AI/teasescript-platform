@@ -12,26 +12,36 @@ import {
   type InputResult,
   type InputSectionHost,
 } from "../session/runtime-input.js";
-import { questionGone, refusalMessage, type SessionTerminal } from "./useAnswerSubmission.js";
+import { questionGone, refusalMessage } from "./answerNotices.js";
 import type { ComposerState, FormDraft } from "./useComposerState.js";
 
 /*
  * A form's updates (PLAYER-UI "Forms"): a field's step, toggle or cycle, a typed field's commit, Back,
- * Clear and the draft timer's store. They are no answers: no pending record, nothing consumed, no undo, never greyed;
- * each goes in click order through the session's input sections, and a refusal shows the notice. A typed field's
- * commit keeps its field read-only, not greyed, until the form took it or refused it. The updates sent and not yet
- * answered are counted per form action: the form's Submit and Cancel read that count (`useAnswerSubmission`, rule 6).
+ * Clear and the draft timer's store. They are no answers: no pending record, nothing consumed, never greyed, and a
+ * refusal undoes nothing but a field's label typed in the chat, whose text comes back; each goes in click order through
+ * the session's input sections, and a refusal shows the notice. A typed field's commit keeps its field read-only, not
+ * greyed, until the form answered it (took or refused it) or input closed. The updates sent and not yet
+ * answered are counted per form action: the form's Submit and Cancel read that count (`useAnswerSubmission`'s
+ * `submitForm`) and skip their local check while it is above zero.
  */
+
+/** The form `session` presents, with its answers so far; `null` for any other interaction or none. */
+export function presentedForm(
+  session: PlayerSession | null,
+): RuntimeInteractionActionSnapshot | null {
+  const action = session ? activePlayerRuntimeInteraction(session.state) : null;
+  return action?.ui.kind === "form" && action.form !== undefined ? action : null;
+}
 
 export function useFormUpdates(host: {
   readonly composer: ComposerState;
   /** The shown session; `null` once stopped or without one. */
   readonly session: () => PlayerSession | null;
   readonly chat: () => number;
-  /** The session's activation token and the one the shown session was shown under (`usePlayerSession`). */
+  /** The session's activation token (`usePlayerSession`'s `epoch`): an outcome after it moved belongs to no shown session. */
   readonly epoch: () => number;
-  readonly inputEpoch: () => number;
-  readonly terminal: () => SessionTerminal;
+  /** Whether input is closed (`useAnswerSubmission`'s `closed`): an update then sends nothing. */
+  readonly closed: () => boolean;
   readonly inputSection: () => InputSectionHost | undefined;
   /** The input section's run for the presented action (`useAnswerSubmission`'s `run`). */
   readonly run: (actionId: number, intent: InputIntent) => Promise<InputResult>;
@@ -44,11 +54,10 @@ export function useFormUpdates(host: {
   const showNotice = host.showNotice;
   const clearNotice = host.clearNotice;
   const run = host.run;
-  /** As `useAnswerSubmission`'s: the session stops, or stopped or was replaced since it was shown. */
-  const closed = () => host.terminal() !== null || host.epoch() !== host.inputEpoch();
-  /** Form updates sent and not yet answered, per form action: its Submit then gets no local check (rule 6). */
+  const closed = host.closed;
+  /** Form updates sent and not yet answered, per form action: its Submit then gets no local check. */
   const unacknowledged = new Map<number, number>();
-  /** A typed field's commit under way: its field stays read-only until the form took it or refused it. */
+  /** A typed field's commit under way: its field stays read-only until the form answered it or input closed. */
   const commitWindow = shallowRef<{
     readonly actionId: number;
     readonly fieldId: string;
@@ -56,14 +65,8 @@ export function useFormUpdates(host: {
     readonly revision: number;
   } | null>(null);
 
-  function presentedForm(): RuntimeInteractionActionSnapshot | null {
-    const session = host.session();
-    const action = session ? activePlayerRuntimeInteraction(session.state) : null;
-    return action?.ui.kind === "form" && action.form !== undefined ? action : null;
-  }
-
   /**
-   * A form update, in order with the others; never greyed and no answer (rule 6 counts it). `textBack` when `after` puts
+   * A form update, in order with the others; never greyed, no answer, counted in `unacknowledged`. `textBack` when `after` puts
    * the chat's text back on a refusal.
    */
   async function update(
@@ -95,7 +98,7 @@ export function useFormUpdates(host: {
     }
   }
 
-  /** Enter in a typed form field: checked at once; its field is read-only until the form took the commit. */
+  /** Enter in a typed form field: checked at once; its field is read-only until the form answered the commit. */
   function commitField(action: RuntimeInteractionActionSnapshot, input: "enter" | "send") {
     const draft = host.composer.formDraft();
     if (draft === null || action.ui.kind !== "form" || action.form === undefined) return;
@@ -131,20 +134,15 @@ export function useFormUpdates(host: {
     });
   }
 
-  /** The draft the form's step, Submit or Back takes along, from the field being edited. */
-  function formDraftText(): string | undefined {
-    return host.composer.formDraft()?.text;
-  }
-
   /** A form field's button; typed as its label, the chat's text is the command and comes back on a refusal. */
   function stepField(fieldId: string, typed = false): void {
-    const action = presentedForm();
+    const action = presentedForm(host.session());
     if (action === null || closed()) return;
     const chat = host.chat();
     const sent = typed ? host.composer.takeChat() : null;
     void update(
       action.actionId,
-      intents.formStep(fieldId, formDraftText()),
+      intents.formStep(fieldId, host.composer.formDraft()?.text),
       (result) => {
         const taken =
           result.kind === "answered" &&
@@ -182,12 +180,12 @@ export function useFormUpdates(host: {
   }
 
   function dismissField(): void {
-    const action = presentedForm();
+    const action = presentedForm(host.session());
     if (action === null) return;
     void update(action.actionId, intents.formDismiss);
   }
   function clearField(): void {
-    const action = presentedForm();
+    const action = presentedForm(host.session());
     if (action === null) return;
     void update(action.actionId, intents.formClear);
   }
@@ -195,7 +193,7 @@ export function useFormUpdates(host: {
   return {
     /** The updates of form `actionId` sent and not yet answered. */
     unacknowledged: (actionId: number) => unacknowledged.get(actionId) ?? 0,
-    /** The typed field whose commit is under way, read-only until the form took it. */
+    /** The typed field whose commit is under way, read-only until the form answered it or input closed. */
     commitWindow: computed(() => commitWindow.value),
     commitField,
     stepField,
