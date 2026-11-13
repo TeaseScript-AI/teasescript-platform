@@ -2,13 +2,16 @@
 // its plan's checked stores.
 
 import assert from "node:assert/strict";
-import type { InstructionPlan, TypePlan } from "../../../src/plan/model.js";
-import { type Answers } from "../../../src/type-inference/core/answers.js";
-import { withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
-import { type CoreAnalysisRequest, CoreProgram } from "../../../src/type-inference/core/program.js";
-import type { PlaceId } from "../../../src/type-inference/graph.js";
-import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
-import { coreRequest } from "../type-core-analysis.js";
+import type { InstructionPlan, TypePlan } from "../../../../src/plan/model.js";
+import { type Answers } from "../../../../src/type-inference/core/answers.js";
+import { withConsumerOrder } from "../../../../src/type-inference/core/consumers.js";
+import {
+  type CoreAnalysisRequest,
+  CoreProgram,
+} from "../../../../src/type-inference/core/program.js";
+import type { PlaceId } from "../../../../src/type-inference/graph.js";
+import { withSolverSeam } from "../../../../src/type-inference/core/solver.js";
+import { coreRequest } from "../../type-core-analysis.js";
 
 export function inBothOrders<T>(run: () => T): T {
   const forward = run();

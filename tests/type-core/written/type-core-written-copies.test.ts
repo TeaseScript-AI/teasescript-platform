@@ -23,7 +23,7 @@ import {
   GLOBALS,
   prepare,
   decision,
-} from "../../helpers/type-core/type-core-written-setup.js";
+} from "../../helpers/type-core/written/type-core-written-setup.js";
 
 test("a copy keeps its source's written type past a later copy back, and agrees with its source on a cycle of copies (Sol r2)", () => {
   const levelsOf = (source: string, places: readonly string[], path = ["element"]) => {
