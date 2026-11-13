@@ -1,6 +1,3 @@
-// The row guard's templates (#2500): one source per operand and store position of each open row of the candidate
-// route's syntax table, which `declared-samples.ts` samples.
-
 import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
 
 /** A file of a project the guard compiles: its path and its whole source. */
