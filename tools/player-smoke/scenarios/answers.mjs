@@ -37,7 +37,7 @@ const SHIFTED_CLOCK = `(() => {
 
 /**
  * Holds the engine Worker's replies, once armed, from the one that brings `window.__splitAfter`'s text until the page
- * next scrolls up, then hands them over in a microtask: the rest of an answer's update lands after following stopped at
+ * next scrolls to a place short of its end, as following's stop does, then hands them over in a microtask: the rest of an answer's update lands after following stopped at
  * a block's message and before the browser's `scroll` event reports that stop, as a Worker's separate replies can.
  * Unarmed, replies pass at once; held replies go after two seconds at most.
  */
@@ -51,9 +51,8 @@ const SPLIT_REPLIES = `(() => {
   };
   const scrollTo = Element.prototype.scrollTo;
   Element.prototype.scrollTo = function (...args) {
-    const before = this.scrollTop;
     scrollTo.apply(this, args);
-    if (holding && this.scrollTop < before) queueMicrotask(release);
+    if (holding && this.scrollTop < this.scrollHeight - this.clientHeight - 2) queueMicrotask(release);
   };
   const Base = window.Worker;
   window.Worker = class extends Base {
