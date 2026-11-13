@@ -6,22 +6,25 @@
 //
 // FILEs are test files as the repository names them. A file under `tests/` (`tests/type-core/x.test.ts`) runs as its
 // compiled file under that tree's `dist/` (`dist/tests/type-core/x.test.js`); any other (`tools/x.test.mjs`) runs as it
-// is. OUT is a folder (the job's `$SX_OUT`). A FILE may be on both sides (a split that keeps its file).
+// is. OUT is a folder (the job's `$SX_OUT`). A FILE may be on both sides (a split that keeps its file). A move of
+// helpers, no test file moved, is compared by its importing test files, given as both OLD and NEW.
 //
 // 1. Discovery, when a FILE is under `tests/`, by this tool's rule (`suiteTestFiles` of `tools/test-shards.mjs`) over
 //    each tree's `dist/tests/`: the base's suite holds each OLD file, the head's each NEW file and no OLD file that is
 //    not also NEW, and the suite is otherwise the same on both sides. A difference ends the check (exit 1) before any
-//    test runs.
+//    test runs; agreement is printed, as is a discovery not run.
 // 2. Each side's files run under `node --test` in their tree with two reporters: `tools/test-file-counts.mjs` (the
 //    results of each file in node:test's classes, which `test-output-filter.mjs` counts by; `base-counts.json`,
-//    `head-counts.json`), and this file's default export, which writes each test's and suite's title and nesting, no
-//    result (`base-titles.jsonl`, `head-titles.jsonl`). The counts say how the tests ended; the titles, which tests
-//    they are: a test lost beside one added keeps the counts and changes the titles.
+//    `head-counts.json`, each file by its repository path), and this file's default export, which writes each test's
+//    and suite's title and nesting, no result (`base-titles.jsonl`, `head-titles.jsonl`). The counts say how the
+//    tests ended; the titles, which tests they are: a test lost beside one added keeps the counts and changes the
+//    titles.
 // 3. The comparison (`compare.txt`): equal when the titles are the same, each as many times on both sides (a title may
 //    repeat, in different suites or files), the summed counts are the same in each class, and each side's run exited 0.
 //    The exit status is the only witness of a failed suite or hook, which has no count and whose title is the same.
 // 4. Its own controls, run whenever it finds the two sides equal: the head with one title dropped, and with one
 //    passed test counted as failed, must each compare unequal; if either compares equal, the comparison cannot judge.
+//    Their outcome is printed either way.
 //
 // Exit status: 0 equal; 1 not (discovery, a difference, a failure); 2 cannot run (usage, a FILE that is no test file
 // or that a tree lacks, no test reported, a control that passed).
@@ -157,7 +160,15 @@ function run(tree, files, out, side) {
   writeFileSync(path.join(out, `${side}-stderr.txt`), result.stderr);
   if (!existsSync(countsFile) || !existsSync(titlesFile))
     throw new CannotRun(`the ${side}'s run reported nothing (${side}-stderr.txt)`);
-  const counts = summed(JSON.parse(readFileSync(countsFile, "utf8")));
+  // (the reporter keys each file by its path on the machine that ran it: kept by its path in the repository)
+  const byFile = Object.fromEntries(
+    Object.entries(JSON.parse(readFileSync(countsFile, "utf8"))).map(([file, count]) => [
+      path.relative(tree, path.resolve(tree, file)).split(path.sep).join("/"),
+      count,
+    ]),
+  );
+  writeFileSync(countsFile, `${JSON.stringify(byFile, null, 2)}\n`);
+  const counts = summed(byFile);
   const titles = readFileSync(titlesFile, "utf8")
     .split("\n")
     .filter((line) => line !== "")
@@ -203,7 +214,14 @@ export function main(argv, print = console.log, compare = compareSides) {
       oldNames.length + newNames.length === 0
         ? []
         : discoveryProblems(baseSuite, headSuite, oldNames, newNames);
-    const report = problems.map((problem) => `discovery: ${problem}`);
+    const report =
+      oldNames.length + newNames.length === 0
+        ? ["discovery: not run, no FILE under tests/"]
+        : problems.length > 0
+          ? problems.map((problem) => `discovery: ${problem}`)
+          : [
+              "discovery: the base's suite holds each OLD file, the head's each NEW file and no OLD file that is not NEW, and nothing else changed",
+            ];
     let status = problems.length > 0 ? 1 : 0;
     if (problems.length === 0) {
       const base = run(baseTree, oldPaths, out, "base");
@@ -212,6 +230,10 @@ export function main(argv, print = console.log, compare = compareSides) {
       // (the controls guard a verdict of equal: only there can a comparison that sees nothing pass)
       const controls = equal ? controlFailures(base, head, compare) : [];
       report.push(...lines, ...controls.map((failure) => `control: ${failure}`));
+      if (equal && controls.length === 0)
+        report.push(
+          "control: a dropped title and a passed test counted as failed each compared unequal",
+        );
       status = controls.length > 0 ? 2 : equal ? 0 : 1;
     }
     report.push(`verdict: ${["equal", "not equal", "cannot judge"][status]}`);
