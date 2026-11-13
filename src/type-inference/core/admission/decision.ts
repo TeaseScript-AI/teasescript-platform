@@ -45,13 +45,12 @@ import { dictStepsRead, spellsValues } from "./structure.js";
 import { inputsAt, inputsOf, scanAt } from "./scan.js";
 import { compareKeys, stopsOf, writtenSource } from "./walk.js";
 
-// The decision of one place at one path (§5), and its comparison under the member-answer oracle.
+// The decision of one place at one path, and its comparison under the member-answer oracle.
 
 /**
- * S6-CARRIERS §4.1's member-answer oracle (the orchestrator's condition (a)), for the tests: while `withMemberOracle`
- * runs, every decided path compares each alias member's own answer with its class representative's, each with its own
- * guard applied (`marked` where a test of the read's path holds its node), and reports every difference and every
- * comparison made.
+ * The member-answer oracle, for the tests: while `withMemberOracle` runs, every decided path compares each alias
+ * member's own answer with its class representative's, each with its own guard applied (`marked` where a test of the
+ * read's path holds its node), and reports every difference and every comparison made.
  */
 let memberOracle: { readonly report: (difference: string | null) => void } | null = null;
 
@@ -106,9 +105,10 @@ export function compareLanded(admission: Admission): void {
 }
 
 /**
- * A decision that stopped at its demand allowance (S3 §5): what it had made of its key is taken back, so the key is
+ * A decision that stopped at its demand allowance: what it had recorded of its key is taken back, so the key is
  * undecided, and its contract answers every read of it, or of a key below it, `unknown` with the reason `budget`
- * (`Contract.stop`).
+ * (`Contract.stop`). Its unrecorded decision (`decisions`) and `attempted` stay, so a store above it is still checked
+ * against the type a copy decided it by (`Decided.copied`, `storeRequirement`).
  */
 export function stopDecision(admission: Admission, at: DecidedAt): void {
   const { key } = atOf(admission, at);
@@ -123,7 +123,7 @@ export function stopDecision(admission: Admission, at: DecidedAt): void {
 }
 
 /**
- * #1526 phase C: the receiving closure invalidated the decision of `key` (a decision it read was made after it read it
+ * #1526: the receiving closure invalidated the decision of `key` (a decision it read was made after it read it
  * unmade, `Closure.made`): what it made of its key goes, so the next read that asks for it makes it again (`admitted`'s
  * pull), as a lazily decided path.
  */
@@ -152,7 +152,7 @@ export function budgetUndecidedKey(admission: Admission, at: DecidedAt): boolean
  * element in its own evaluation).
  */
 export function decisionStoppedAt(admission: Admission, at: DecidedAt): boolean {
-  // (a completion pass carries no stopped key, #1526 phase C: nothing is asked, no path made a cursor to ask it)
+  // (a completion pass carries no stopped key, #1526: nothing is asked, no path made a cursor to ask it)
   if (admission.pass.closure && !admission.pass.contract.anyStopped) return false;
   if (budgetUndecidedKey(admission, at)) return true;
   return at.key === undefined
@@ -161,8 +161,8 @@ export function decisionStoppedAt(admission: Admission, at: DecidedAt): boolean 
 }
 
 /**
- * A decided path in its identity (G3 stage 1): its key (`keyAt`: a wrapper's family's its cursor, the legacy text's
- * charge else) and, where that key is text, its steps; a cursor's depth from the arena.
+ * A decided path in its identity: its key (`keyAt`: a wrapper's family's its cursor, else the text key, charged) and,
+ * where that key is text, its steps; a cursor's depth from the arena.
  */
 type At =
   | { readonly root: PlaceId; readonly key: KeyId; readonly path: null; readonly depth: number }
@@ -190,7 +190,7 @@ function decidedAtOf(at: At): DecidedAt {
 
 /**
  * The written type a copy decides a key by in this pass's decision of it, whole below it (`Decided.copied`), or `null`;
- * the key in its identity, as `decide` records it (a wrapper family's its cursor, G3 stage 1).
+ * the key in its identity, as `decide` records it (a wrapper family's its cursor).
  */
 export function copiedAt(admission: Admission, asked: Key): TypeTerm | null {
   const key = admission.pass.contract.canonicalKey(asked);
@@ -198,7 +198,10 @@ export function copiedAt(admission: Admission, asked: Key): TypeTerm | null {
   return admission.decisions.get(key)?.copied ?? null;
 }
 
-/** The kinds this pass's decision of a key decided it by, or A3 settled it by (`Decided.settled`), or `null`. */
+/**
+ * The kinds this pass's decision of a key decided it by, or that its settled single-family contract gives
+ * (`Decided.settled`), or `null`.
+ */
 export function kindsAt(admission: Admission, asked: Key): readonly ItemTag[] | null {
   const key = admission.pass.contract.canonicalKey(asked);
   admission.pass.closure?.took("decision", key);
@@ -210,13 +213,13 @@ export function kindsAt(admission: Admission, asked: Key): readonly ItemTag[] | 
 }
 
 /**
- * The decision of one place at one path (§5), or `null` where nothing is checked: no store reaches it, it lies below
- * a reference (F19a), a settled family needs no scan (A3), or nothing decides. The decision is recorded for the
- * boundary checks' `against` (C9). `lazily`: a path of a copy `groups` leaves to be decided where an answer asks for
+ * The decision of one place at one path, or `null` where nothing is checked: no store reaches it, it lies below a
+ * reference, a settled single-family contract needs no scan, or nothing decides. The decision is recorded for the
+ * boundary checks' `against`. `lazily`: a path of a copy `groups` leaves to be decided where an answer asks for
  * it (`lazily`): recorded, its candidates owe nothing (`hotSets`) and are not taken.
  */
 export function decide(admission: Admission, asked: DecidedAt, lazily = false): Decision | null {
-  // (#1444(b,c): a decision's scans are its own, never the written-decider summary's, `Admission.deciding`)
+  // (#1444: a decision's scans are its own, never the written-decider summary's, `Admission.deciding`)
   admission.deciding += 1;
   try {
     return decisionOf(admission, asked, lazily);
@@ -256,7 +259,8 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
   admission.deciderSites.set(key, found.site);
   if (lazily) return null;
   const offends = (items: readonly Item[]): boolean => offending(items, found);
-  // A5: the direct stores, and the prefixes' whole stores whose source's contract at the path holds an offending kind
+  // the candidates: the direct stores, and the prefixes' whole stores whose source's contract at the path holds an
+  // offending kind
   const candidates = new Map<string, Candidate>();
   work.charge("checks", direct.length);
   for (const candidate of direct)
@@ -274,8 +278,8 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
         candidates.set(keptParts(admission.work, d.uid, path!), { d, at: path! });
   for (const { key: prefix, rest: ref } of prefixes) {
     const stored = contract.prefixStores(prefix);
-    // (an array's rest as before, a record's steps as theirs; a cursor's span, its steps made only for a store taken as
-    // a candidate)
+    // (a cursor's span as it is, its steps made only for a store taken as a candidate; an array's or a record's steps
+    // read as a rest, `stepsRest`)
     const rest: Rest = ref.kind === "span" ? ref : stepsRest(ref.steps());
     const take = (d: Definition): void => {
       // (a span's steps made through the charged boundary, only for a store taken)
@@ -308,7 +312,7 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
     };
     // (#2065: below an ordinary property, where the prefix's index is made, only the stores that may hold it and those
     // unproved (`entriesHolding`); until then each store holding nothing there is counted, a read the index saves. The
-    // layers below read every store, as before)
+    // layers below read every store)
     const holding = entriesHolding(admission, prefix, rest, stored);
     const holders =
       holding === null ? (admission.pass.receivingDomain.holders.get(prefix) ?? null) : null;
@@ -327,7 +331,7 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
         work.charge("checks");
         if (offends(admission.run(contract.subAt(sub.key, rest)))) takeAll(sub.defs);
       }
-    // A6: a rejected store is decided again in every pass, where it was rejected
+    // a rejected store is decided again in every pass, where it was rejected
     const retaken = admission.retaken.get(key) ?? [];
     work.charge("checks", retaken.length);
     for (const d of retaken)
@@ -339,8 +343,8 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
         take(d);
   }
   // (a member its class's candidate holds is checked there only, never as its own candidate too: an add is a direct
-  // candidate at its element as well as its list's store, a return into a written result its root's at every path
-  // (A9), a rejected member is retaken; each charged where it was taken, #1077)
+  // candidate at its element as well as its list's store, a return into a written result its root's at every path, a
+  // rejected member is retaken; each charged where it was taken, #1077)
   for (const [key, candidate] of candidates) {
     const representative = admission.representative.get(candidate.d);
     if (
@@ -378,7 +382,7 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
 }
 
 /**
- * A place's decision at a path as `decide` takes it (§5), unrecorded and without its candidates: `null` where no store
+ * A place's decision at a path as `decide` takes it, unrecorded and without its candidates: `null` where no store
  * reaches the path; `tags` `null` where nothing is checked, with `unknown` where an unrestricted part decides nothing.
  * Once per key and pass, so the paths `groups` tests (`hotAt`) and their decisions share it.
  */
@@ -393,9 +397,9 @@ export function decided(
 
 /** `decided` of a decided path in its identity, its inputs found (`inputsAt`). */
 function decidedOf(admission: Admission, at: At, inputs: Inputs | null): Decided | null {
-  // (a text key made again, as its legacy site made it, its text charged)
+  // (a text key made again, its text charged)
   const key = at.path === null ? at.key : keptKeyAt(admission.pass.contract, at.root, at.path);
-  // (in a completion pass a decision is a cell of the receiving closure: its reads its own, a hit read, #1526 phase C)
+  // (in a completion pass a decision is a cell of the receiving closure: its reads its own, a hit read, #1526)
   const closure = admission.pass.closure ?? null;
   const known = admission.decisions.get(key);
   if (known !== undefined) {
@@ -423,10 +427,10 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   // (a cursor's family's place is unwritten: its shape requires it; its steps made where one is not)
   const term = written === null ? null : permittedAt(written, path ?? keyStepsIn(contract, key));
   const none = { key, own: term !== null, transfer: false, tags: null } as const;
-  // A9, C7: every argument and return into a written parameter or result is a candidate
+  // every argument and return into a written parameter or result is a candidate
   const transfer =
     term !== null && (place.kind.kind === "parameter" || place.kind.kind === "result");
-  // F19a: below a reference nothing is admitted
+  // below a reference nothing is admitted
   if (depth > 0 && admission.run(contract.refReceiver(key))) {
     work.charge("checksSkipped");
     return { ...NOTHING, ...none };
@@ -436,7 +440,8 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   if (term === null && openAboveAt(admission, at))
     return { ...NOTHING, ...none, tags: ["unknown"], byWritten: true };
   if (depth > 0 && term === null) {
-    // A3: a settled family needs no scan, where no store on the path was rejected
+    // a settled single-family contract needs no scan, where no store on the path was rejected; its kinds are read as
+    // they stand, one possible only through external data too (#2727)
     const clean = isClean(admission, at);
     const kinds = clean ? withoutEmpty(admission.run(contract.contractOf(key))) : [];
     if (
@@ -459,13 +464,14 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   let published = false;
   let deciderHost = false;
   let copied: TypeTerm | null = null;
-  // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store
+  // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store; each store's
+  // kinds are its `quietKinds`, one possible only through external data counted (#2727)
   if (tags === null && depth === 0 && !admission.a4Keys.has(keyOf(root, []))) {
     let plain = true;
     const all: ItemTag[] = [];
     for (const { d, at } of direct) {
       work.charge("checks");
-      // a multi-site argument decides nothing (F21); a single-site one is the parameter's start value
+      // a multi-site argument decides nothing; a single-site one is the parameter's start value
       if (d.how === "argument" && !lists.singleSite(d.fn)) continue;
       const kinds = at.length === 0 ? admission.quietKinds(d.value) : null;
       if (kinds === null || !kinds.every((tag) => SCALAR.has(tag) || tag === "null")) {
@@ -479,9 +485,9 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
       return { ...NOTHING, ...none };
     }
   }
-  // A2: a path whose contract holds no kind (an unknown, a null) has no definite contribution to decide it, and no
-  // store needs a scan (the contract holds every live store's kinds); a copy of a written binding on the path still
-  // decides (A4), and a store rejected there is decided again (A6)
+  // a path whose contract holds no kind (an unknown, a null) has no definite contribution to decide it, and no store
+  // needs a scan (the contract holds every live store's kinds); a copy of a written binding on the path still decides,
+  // and a store rejected there is decided again
   if (
     tags === null &&
     isClean(admission, at) &&
@@ -492,7 +498,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   }
   if (tags === null) {
     const found = drive(admission, scanAt(admission, direct, prefixes, key));
-    // (#2289: a literal element a stop left undecided leaves the path undecided; C9's branch is not asked)
+    // (#2289: a literal element a stop left undecided leaves the path undecided; the published branch is not asked)
     if (found?.stopped === true) {
       admission.budgetUndecided.set(contract.canonicalKey(key), {
         place: root,
@@ -505,7 +511,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
       deciderHost = found.host === true;
       copied = optionalOf(found.copied, found.nullable);
     } else {
-      // C9: where no contribution decides, but the contract holds kinds beside external data, those
+      // where no contribution decides, but the contract holds kinds beside external data, those
       // kinds are the type the place is published with, so external data a store brings into it owes its check
       // there, named as well as inline (`published`)
       const kinds = withoutEmpty(admission.run(contract.contractOf(key)));
@@ -517,7 +523,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
     }
   }
   if (tags === null) return { ...NOTHING, ...none };
-  // the decided family (ADR 1.2): an integer decider with a number admitted at the path decides numbers; a
+  // the decided family (ADR 0021 1.2): an integer decider with a number admitted at the path decides numbers; a
   // number possible solely through external data admits nothing
   if (
     !tags.includes("unknown") &&
@@ -554,7 +560,7 @@ function compareMembers(
   const report = memberOracle!.report;
   // (a member read through a chain of copies, or its class's, carries its own links' writers, provenance and not the
   // answer: that pair's answers are compared with them set aside, the published records' writers guarded apart)
-  // (and its admission: the written type A4 decides it by at the path,
+  // (and its admission: the written type a copy decides it by at the path,
   // docs/specifications/type-inference-accepted-record/sharing.md#r4-72)
   const answer = (
     d: Definition,
@@ -578,7 +584,7 @@ function compareMembers(
     marked(admission.valueAt(d, rest))
       .map((item) => itemText(item, writers))
       .sort();
-  // (a prefix's whole stores' classes and, below an element step, its adds', §4.5)
+  // (a prefix's whole stores' classes and, below an element step, its adds')
   for (const { key: prefix, rest } of prefixes) {
     // (the oracle's rest made, its steps through the charged boundary for a span)
     const below = stepsArray(rest.steps());
@@ -623,7 +629,7 @@ function concreteSite(
   prefixes: readonly { readonly key: Key; readonly rest: PathRef }[],
 ): SourceSite | null {
   const { program, values } = admission.pass;
-  // (each its path's text: a span's its record's, `textOf`; an array's made plain, as before)
+  // (each its path's text: a span's its record's, `textOf`; an array's made plain)
   const tried: { readonly d: Definition; readonly text: string }[] = [
     ...direct.map(({ d, at }) => ({ d, text: stepsText(at) })),
     ...prefixes.flatMap(({ key, rest }) =>
@@ -652,12 +658,12 @@ function concreteSite(
 }
 
 /**
- * Whether no store on the path or a prefix of it was rejected (A6) or copies a written binding (A4): G3 3b, by one walk
- * of the path down those keys' trie (`Admission.dirty`), never a key made per prefix.
+ * Whether no store on the path or a prefix of it was rejected or copies a written binding, by one walk of the path down
+ * those keys' trie (`Admission.dirty`), never a key made per prefix.
  */
 function isClean(admission: Admission, at: At): boolean {
   // (a cursor's path walked as its span, one step at a time: a wrapper's own cell that copies a written binding lands
-  // below its place's own key, A4, G3 stage 1)
+  // below its place's own key)
   if (
     admission.dirty.along(
       at.root,
@@ -666,7 +672,7 @@ function isClean(admission: Admission, at: At): boolean {
     ).length > 0
   )
     return false;
-  // (#2378: a dict's values list below its own level is the dict's elements, where A4's copies land: walked as the
+  // (#2378: a dict's values list below its own level is the dict's elements, where written copies land: walked as the
   // dict's path too, its `values` steps read by their owners' contracts, `dictStepsRead`)
   if (!spellsValues(admission, at.key)) return true;
   const steps = keyStepsIn(admission.pass.contract, at.key);

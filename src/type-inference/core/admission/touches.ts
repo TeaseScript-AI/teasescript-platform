@@ -92,7 +92,7 @@ export function touchOf(admission: Admission, place: PlaceId): TouchPlace {
  * A place's landings alone, once per pass: its seeds and every copy into it, live or rejected, each its source's
  * landings at its strip, landed where the copy lands it (a cycle whose copies add or take steps: its listed landing
  * set). A rejected copy brings these into a place's trie and nothing else: what it lands stays landed (the landing
- * view, `landed`, as A6 finds the rejection again; Sol's review r3 F1), while what it held is gone. A place met again
+ * view, `landed`, as the next pass decides the rejected store again), while what it held is gone. A place met again
  * while its own is being built lands its root (a cycle of landings, as `landed` ends a walk met again).
  */
 function landingOf(admission: Admission, place: PlaceId): Touch | null {
@@ -158,16 +158,15 @@ function touchTask(admission: Admission, place: PlaceId): TouchTask {
   const work = admission.pass.program.work;
   const whole = wholes.get(place);
   const feeder = fed.get(place);
-  // (a cycle of whole copies has one trie, its members' all, Astra's B3; only the members its live copies join,
-  // Astra's recheck r3 F1 and N1)
+  // (a cycle of whole copies has one trie, its members' all; only the members its live copies join)
   const group = whole !== undefined || feeder !== undefined ? liveGroup(admission, place) : null;
   const members = group?.members ?? [place];
   const parts: TouchPart[] = [];
   const lander = (at: PlaceId, path: readonly string[]): void => {
     parts.push({ kind: "leaf", path, ref: touchRef(admission, at, path, true), opaque: false });
   };
-  // (B2: a store rejected by the previous pass is dead in this one, as the value side has it: a copy it makes brings
-  // its landings alone, Sol's review r3 F1)
+  // (a store rejected by the previous pass is dead in this one, as the value side has it: a copy it makes brings its
+  // landings alone)
   const copy = (each: InheritedCopy, live = liveCopy(admission, each)): void => {
     parts.push({ kind: "copy", from: each.from, strip: each.strip, at: each.path, live });
   };
@@ -225,7 +224,7 @@ function touchTask(admission: Admission, place: PlaceId): TouchTask {
     } else if (feeder === undefined) for (const each of copiesOf(admission, place)) copy(each);
   }
   // (a fed cycle's made-up copy of its feeder is live where a live copy of the feeder lands in the group, as the
-  // value side has it, Astra's recheck r3 N1)
+  // value side has it)
   if (feeder !== undefined) copy({ place, path: [], from: feeder, strip: [] }, group!.fedLive);
   for (const member of members) {
     const own = liveOwn(admission, member);
@@ -346,7 +345,7 @@ function liveCopy(admission: Admission, copy: InheritedCopy): boolean {
 
 /**
  * The members of a place's cycle of whole copies that hold each other through copies live stores make (strongly
- * connected by them), and whether a live copy from outside lands in one of them (Astra's recheck r3 F1, N1). The whole
+ * connected by them), and whether a live copy from outside lands in one of them. The whole
  * cycle where they all are, as before any rejection; once per cycle. Its members' contents are equal only there, so
  * only there do they share a trie; its landings stay the cycle's (historical, `landed`).
  */
