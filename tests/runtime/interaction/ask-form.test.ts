@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../../../src/compiler.js";
+import { MAX_INTERACTION_AGGREGATE_UTF8_BYTES } from "../../../src/interaction-limits.js";
 import { parseMessageMarkup } from "../../../src/message-markup.js";
 import type { InstructionPlan } from "../../../src/plan/model.js";
 import {
   deserializeCheckpoint,
   createCheckpoint,
+  restoreCheckpoint,
   serializeCheckpoint,
 } from "../../../src/runtime/snapshot/checkpoint.js";
+import { validateRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-validation.js";
 import { run } from "../../../src/runtime/engine.js";
+import { interpreterEventProblem } from "../../../src/runtime/event-validation.js";
 import type { InterpreterEvent } from "../../../src/runtime/events.js";
 import { completeAction } from "../../../src/runtime/operations/complete-action.js";
 import { updateInteraction } from "../../../src/runtime/operations/update-interaction.js";
@@ -834,4 +838,63 @@ test("a form's answers are the script's own copy, which the kept settlement and 
         ],
       }),
     );
+});
+
+test("a form that submits at its time limit restores only with a value in every required field", () => {
+  const plan = compileValidPlan(
+    'let answers = askForm fields: { level: { value: 5, min: 1, max: 10 }, note: { type: "text", value: "Soft", optional: true } }, timeout: 30 s, onTimeout: "submit"\nexit',
+  );
+  const { snapshot } = opened(plan);
+  // An optional field may be cleared before the form submits by itself.
+  const cleared = updateInteraction(plan, snapshot, {
+    actionId: snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "form",
+    update: { kind: "clear", fieldId: "note" },
+  });
+  assert.equal(cleared.outcome.kind, "updated");
+  assert.equal(validateRuntimeSnapshot(cleared.snapshot, plan).valid, true);
+  // A required field has had a value since the form opened, and no edit takes it away.
+  const emptied = structuredClone(cleared.snapshot);
+  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: the test edits a persisted record to an invalid state.
+  (emptied.foregroundAction as any).form.values[0] = null;
+  // Today such a state restores, and times out into an answer its own settlement check refuses.
+  assert.equal(validateRuntimeSnapshot(emptied, plan).valid, true);
+  const restored = restoreCheckpoint({
+    ...createCheckpoint(plan, cleared.snapshot),
+    snapshot: emptied,
+  }).snapshot;
+  const timedOut = observeTime(plan, restored, 30_000).snapshot;
+  const settlement = timedOut.lastSettlement;
+  assert.ok(settlement?.actionKind === "interaction" && settlement.settlementKind === "timedOut");
+  assert.deepEqual(settlement.result, {
+    kind: "object",
+    properties: [
+      { name: "level", value: null },
+      { name: "note", value: null },
+    ],
+  });
+  assert.equal(validateRuntimeSnapshot(timedOut, plan).valid, false);
+});
+
+test("a stored answer event keeps a form UI only as the engine shows one", () => {
+  const plan = compileValidPlan(
+    'let a = askForm "Settings", fields: { enabled: false }, submit: "Go"\nexit',
+  );
+  const { snapshot } = opened(plan);
+  const { events } = submitted(plan, snapshot);
+  const completion = events.find((event) => event.kind === "actionCompleted");
+  assert.ok(completion?.kind === "actionCompleted");
+  assert.equal(interpreterEventProblem(JSON.parse(JSON.stringify(completion))), null);
+  for (const [name, change] of [
+    ["a blank accessible name", { accessibleName: { kind: "text", text: " " } }],
+    ["another kind's default name", { accessibleName: { kind: "localizedDefault", key: "password" } }],
+    ["a name without its text", { accessibleName: { kind: "text" } }],
+    ["texts over the interaction's limit", { hint: "x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1) }],
+  ] as const) {
+    const stored = JSON.parse(JSON.stringify(completion));
+    Object.assign(stored.settlement.ui, change);
+    // Today the host's check of a stored event accepts each.
+    assert.equal(interpreterEventProblem(stored), null, name);
+  }
 });
