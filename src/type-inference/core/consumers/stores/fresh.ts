@@ -17,17 +17,15 @@ import { placeText, storeRoot, storeSteps, storeWarning } from "../reports/warni
 /**
  * The stores' obligations in the finishing path where admission had not settled, reading no decision (a later
  * admission pass may admit a store this one rejected, so its decisions may be narrower than the settled ones). It runs
- * every derivation of admission's that creates an obligation (`OBLIGATION_SITES`, with each one's exits), as admission
- * runs it, reading what the stop retained as every consumer does (one derivation), in this order: every store and
+ * every derivation of admission's that creates an obligation (`OBLIGATION_SITES`, with each one's exits), reading what
+ * the stop retained, in this order: every store and
  * transfer into a place with no written type at its path marked at its site, its type undecided, a mark standing for
  * its records within its value; ADR 0021 1.3's mixed literal elements (`literalElements`), a literal whose element
  * needs a decision marked through its holders or itself (`markHolder`), and a list join's mixed operands
  * (`joinElements`, #1272) where its operands' own kinds decide them, a join with an operand read through a decision
  * marked as a literal is (`markValue`); the stores against a written type at their path (`admittedStores`); the ingress
- * stores' boundaries against written types (`publish`); the typed calls no store takes in (`ingressStores`). The walk
- * that runs before it (`Consumers.finish`) finishes every unit and its read boundaries. No syntax decision is made
- * here: admission decides an inferred place from its contract, which a fresh pass has not solved, so only a settled
- * stop's finishing read asks the stores' syntax, after the decision admission retained.
+ * stores' boundaries against written types (`publish`); the typed calls no store takes in (`ingressStores`). No syntax
+ * decision is made here: admission decides an inferred place from its contract, which a fresh pass has not solved.
  */
 export function freshStores(walk: Consumers): void {
   const { program, definitions } = walk.pass;

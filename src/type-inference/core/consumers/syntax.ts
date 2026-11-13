@@ -22,8 +22,7 @@ import {
 } from "./model.js";
 import { readKey } from "./names.js";
 
-// What the stores' syntax decides after a stop (the finishing read's last source before `STOPPED`): the shape below a
-// read's key by syntax, built once per path.
+// What the stores' syntax decides after a stop: the shape below a read's key by syntax, built once per path.
 
 /** The property names a type term gives, through its unions. */
 function termNames(term: TypeTerm): string[] {
@@ -164,7 +163,7 @@ export function syntaxRead(
  * where every store into the key or a key above it gives a value its syntax tells there: a literal (its own types
  * there, a `null` deciding nothing but admitting `null`), a copy of a place with a written type (that type there), a
  * typed parse or load by its default, or a host value (external, deciding nothing). Integers beside numbers decide
- * numbers, as admission's family does (ADR 1.2); `null` where any other store, or only `null`s, reach it, or where
+ * numbers (ADR 1.2); `null` where any other store, or only `null`s, reach it, or where
  * object literals with other properties or a store of another kind meet it. Asks no demand; made once per key and path
  * from each key's shape, which each store's syntax enters once. A path admission left undecided is one it decides
  * lazily; a decision that stopped at its allowance, at the key or above it, is undecided by the stop, and syntax
@@ -704,7 +703,7 @@ function cheapShapeOf(walk: Consumers, key: Key): CheapShape {
       }
       continue;
     }
-    // a typed parse or load: what its default's syntax gives, as its typed default reads it (a written
+    // a typed parse or load: what its default's syntax gives (a written
     // destination's type is the store's own); none without a default
     const fallback = typedFallback(walk, value);
     if (fallback !== null) {

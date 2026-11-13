@@ -59,7 +59,7 @@ export function typedCall(
  * A read in the finishing path, answered from the retained state only, the first source that decides it winning, in
  * this order: below a literal, its children's own reads, each through every source; a leaf's own kind (`leafKind`),
  * which no proof decides (an error found there stands, a host read's boundary check forms); the read's own answer as
- * the analysis had finished it before the stop (`run`: the solver answers only from what had finished); where that is
+ * the analysis had finished it before the stop; where that is
  * unfinished at a projection of a literal no place holds, the literal's cells along its steps (`placelessCells`), each
  * read as a value of its own; a typed parse's or load's expected type (`typedRead`); its key's finished contract; its
  * binding's written type at its path, else, where admission settled, the admitted type admission retained at its key's
@@ -226,7 +226,7 @@ function laterSources(
   // the value at the read: its own finished answer
   const exact = finishedAnswer(walk, value, node, rest);
   if (exact !== null) return exact;
-  // else its own syntax: a typed parse's or load's expected type, as the route's stopped answers read it; a type, so a
+  // else its own syntax: a typed parse's or load's expected type; a type, so a
   // domain like those below (a typed list may be empty), but external data where no type reaches it
   const typed = typedRead(walk, value, rest);
   if (typed !== null && typed.some(isExternal)) return typed;
@@ -354,7 +354,7 @@ function laterKeySources(walk: Consumers, key: Key, node: FlowNode): readonly It
 
 /**
  * A key's domain in the finishing path: its finished contract, else its written or retained admitted type, `STOPPED`
- * where none decides it: a receiver's read (`finishingKeyRead`).
+ * where none decides it.
  */
 function keyDomain(walk: Consumers, key: Key): readonly Item[] {
   const decided = keyDecided(walk, key);
@@ -372,7 +372,7 @@ function keyDomain(walk: Consumers, key: Key): readonly Item[] {
  * What decides a key in the finishing path, in order: its finished contract (`contract`), where it holds no item a
  * stop left unsettled; else its place's written type at its path; else, where admission settled, what admission
  * retained there (`Admission.retained`: a decision, or a copy's written type, `inherited`), its tags empty where it
- * retained none; else `null`. `keyDomain` and `labelDomain` both read it.
+ * retained none; else `null`.
  */
 function keyDecided(
   walk: Consumers,

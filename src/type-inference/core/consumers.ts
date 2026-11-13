@@ -98,13 +98,14 @@ export type { Omission } from "./consumers/reports/left-out.js";
 
 /*
  * The consumers of the type core: every use that needs a kind asks its operand's items. The quiet path answers first: a
- * consumer that every kind of the contract fits, with no `unknown`, asks nothing more. Otherwise: all items definite
- * and none fits is an error; some item does not fit, or an `unknown` is present, a warning with one obligation per
- * offending kind; all fit, quiet. Here: whole-number uses, conditions, operator operands, receivers and element
- * selections, shown values, dict keys, a `for`'s iterable, speaker field accesses, ADR 1.5's null default, stores and
- * arguments against their place's written or decided type (with admission's decisions and rejections), fallbacks and
- * defaults, and, where a consumer meets external data, the boundary check at its ingress. Saves are the storage
- * module's.
+ * consumer that every kind of the contract fits, with no `unknown`, asks nothing more. Otherwise, as a rule: all items
+ * definite and none fits is an error; some item does not fit, or an `unknown` is present, a warning with one
+ * obligation per offending kind; all fit, quiet. A read of a place written `number` at a whole-number use
+ * (`writtenNumberUse`), and a store none of whose kinds fits a written type or one decided earlier (`admittedStores`,
+ * ADR 1.7), are errors even where its items are possible. Here: whole-number uses, conditions, operator operands,
+ * receivers and element selections, shown values, dict keys, a `for`'s iterable, speaker field accesses, ADR 1.5's
+ * null default, stores and arguments against their place's written or decided type (with admission's decisions and
+ * rejections), fallbacks and defaults, and, where a consumer meets external data, the boundary check at its ingress.
  */
 
 /** Whether two passes reject the same stores (`settled`: a pass rejects those it started with, or is the last). */
@@ -266,35 +267,29 @@ export class Consumers {
   #callableNodes: Map<unknown, number> | null = null;
   /** The order the consumers visit each list in: as the list is given, or a test's order (`withConsumerOrder`). */
   readonly order: <T>(list: readonly T[]) => T[];
-  // The per-pass memos below each name the module that reads them; this class holds them for the pass.
-  /** Each `get` result's receiver, made in the constructor (names.ts). */
+  /** Each `get` result's receiver. */
   readonly getOf = new Map<PlaceId, PlaceId>();
   /**
    * A removing method's result by its receiver, and whether it is always the element it removed (`removeFirst()`,
-   * `removeAt(i)`); else (`remove`) a list's or set's gives `null` and a dict's its value, by the receiver; made in the
-   * constructor (names.ts).
+   * `removeAt(i)`); else (`remove`) a list's or set's gives `null` and a dict's its value, by the receiver.
    */
   readonly removedOf = new Map<PlaceId, { readonly receiver: PlaceId; readonly always: boolean }>();
-  /** Each call result's place of its function's result, made in the constructor (names.ts, host-frontier.ts). */
+  /** Each call result's place of its function's result. */
   readonly resultOfCall = new Map<PlaceId, PlaceId>();
-  /** Each value's label's recipe (`keyLabel`, names.ts), made once from its owner's. */
+  /** Each value's label's recipe (`keyLabel`), made once from its owner's. */
   readonly labels = new Map<PlaceId, Label>();
   /**
-   * What a label's walk up a projection chain asks, once per value (names.ts): the element step below each owner, and
-   * whether each chain passes a derived list or starts at no place.
+   * What a label's walk up a projection chain asks, once per value: the element step below each owner, and whether
+   * each chain passes a derived list or starts at no place.
    */
   readonly elementSteps = new Map<PlaceId, string>();
   readonly derivedChains = new Map<PlaceId, boolean>();
   readonly anonymousChains = new Map<PlaceId, boolean>();
-  /**
-   * Per value read in the finishing path, the written type at its own path (`writtenRead`, finishing.ts), or `null`.
-   */
+  /** Per value read in the finishing path, the written type at its own path (`writtenRead`), or `null`. */
   readonly writtenReads = new Map<PlaceId, TypeTerm | null>();
-  /** Per value read, its key (`readKey`, names.ts), `null` for none. */
+  /** Per value read, its key (`readKey`), `null` for none. */
   readonly readKeys = new Map<PlaceId, Key | null>();
-  /**
-   * Per receiver key and property, whether its sources have the property (`propertyPresence`, operations/receivers.ts).
-   */
+  /** Per receiver key and property, whether its sources have the property (`propertyPresence`). */
   readonly presence = new Map<
     string,
     {
@@ -303,19 +298,16 @@ export class Consumers {
       readonly unknown: boolean;
     }
   >();
-  /**
-   * Per key and node, the unwritten parameter its read reaches through copies (`defaultSource`,
-   * operations/fallbacks.ts).
-   */
+  /** Per key and node, the unwritten parameter its read reaches through copies (`defaultSource`). */
   readonly defaults = new Map<
     string,
     { readonly key: CanonicalKey; readonly at: FlowNode } | null
   >();
-  /** The cheap deciders' shapes and frontiers, one per key, and their decisions, one per key and path (syntax.ts). */
+  /** The cheap deciders' shapes and frontiers, one per key, and their decisions, one per key and path. */
   readonly cheapShapes = new Map<Key, CheapShape>();
   readonly cheapFrontiers = new Map<Key, CheapFrontier>();
   readonly cheapDecisions = new Map<Key, CheapDecision | null>();
-  /** The places the script stores into, at any path (`copySource`, syntax.ts). */
+  /** The places the script stores into, at any path (`copySource`). */
   storedRoots: Set<PlaceId> | null = null;
 
   public constructor(
@@ -404,10 +396,7 @@ export class Consumers {
     );
   }
 
-  /**
-   * After a stop, a value's items at a node and a path as the finishing read answers them (`finishingRead`), for the
-   * route's questions (`CoreAnswers.#items`): one derivation with the consumers'.
-   */
+  /** After a stop, a value's items at a node and a path as the finishing read answers them. */
   public finishedItems(
     value: PlaceId,
     node: FlowNode | null,
@@ -416,7 +405,7 @@ export class Consumers {
     return finishingRead(this, value, node, rest);
   }
 
-  /** Per value and path, a typed parse's or load's expected type after a stop (`typedRead`, finishing.ts). */
+  /** Per value and path, a typed parse's or load's expected type after a stop (`typedRead`). */
   readonly typedReads = new Map<string, readonly Item[] | null>();
 
   /**
@@ -471,7 +460,7 @@ export class Consumers {
     };
   }
 
-  /** Each host global's stores, made once (`storedAbove`, finishing.ts). */
+  /** Each host global's stores, made once (`storedAbove`). */
   hostStores: Map<PlaceId, Definition[]> | null = null;
 
   /** Whether a finishing walk asks the solver nothing (`run`): nested past the limit, or after an unsettled stop. */
@@ -521,8 +510,7 @@ export class Consumers {
    * its own allowance, or none, `STOPPED`). Nothing the stopped demand left unfinished is kept, so a later demand of the
    * same key, in either order, computes it again with its own allowance. In the finishing path after a stop the solver
    * answers only from what had finished, else `STOPPED`; it is not asked at all where nothing stopped (the units nested
-   * past the nesting limit) nor where admission had not settled (a fresh pass, nothing finished: as the route's
-   * questions, `CoreAnswers.#run`).
+   * past the nesting limit) nor where admission had not settled (a fresh pass, nothing finished).
    */
   public run(work: Work<readonly Item[]>, contract?: () => Work<readonly Item[]>): readonly Item[] {
     if (this.finishing) return this.asksNothing() ? STOPPED : this.solve(work);
@@ -583,8 +571,7 @@ export class Consumers {
    * The stores and transfers at a key whose decision stopped: the stop stands for their obligations, so each owes its
    * check at its site when the script runs, against its destination's complete type where admission
    * proves it apart from the stopped decision (#1440: the written type, or the one the declaration's start value copies
-   * there), else marked with its type undecided, as a stop before admission settled marks every store into an inferred
-   * place: `requiredStores`, as for the stores above a stop. A key below it is asked on its own, so a key a restarted
+   * there), else marked with its type undecided. A key below it is asked on its own, so a key a restarted
    * pass carried stopped keeps its stores' checks (#1310); each key once a pass, so a receiver asking it again scans no
    * store again.
    */
@@ -731,12 +718,11 @@ export class Consumers {
 
   /**
    * The capture (#1526): once admission settled, before the walk, the contract of each destination whose store
-   * admission owes a check so far (its store warnings and its ingress stores), read level by level
-   * through the answers' own level reader (`admittedLevel`), so each level's decision and contract are made and kept while
-   * the solver still runs. Each request is an owing site and the place and path the `let` or assignment holding it stores
-   * into (its statement's first live store, else its first, as `Answers.at` reads one), each destination once, in the
-   * consumers' order; its result is kept (`captured`). A program outside the candidate slice's syntax (`slice-syntax.ts`,
-   * the rule the candidate route declines by before its analysis) gets no store check, so the capture makes no request
+   * admission owes a check so far (its store warnings and its ingress stores), read level by level through the answers'
+   * own level reader (`admittedLevel`), so each level's decision and contract are made and kept while the solver still
+   * runs. Each request is an owing site and the place and path the `let` or assignment holding it stores into (its
+   * statement's first live store, else its first), each destination once, in the consumers' order; its result is kept
+   * (`captured`). A program outside the candidate slice's syntax gets no store check, so the capture makes no request
    * and charges nothing there: its analysis is main's. In a pass that starts with frozen keys, its receiving
    * obligations are completed later, in a completion pass of their own after everything that can stop (`receive`, from
    * `asked`), so this pass publishes what it would without them.
@@ -769,9 +755,8 @@ export class Consumers {
   #storeSites: readonly { readonly site: SourceSite; readonly stopped: boolean }[] | null = null;
 
   /**
-   * The receiving obligations of a pass whose admission settled, found once, without a completion (#1526): what a
-   * published plan's gate reads after a stop where no receiving completion ran (`Answers.gated`); `null` where
-   * admission did not settle. Every store and slot visited charged, as `receive` charges them.
+   * The receiving obligations of a pass whose admission settled, found once, without a completion (#1526); `null` where
+   * admission did not settle. Every store and slot visited charged.
    */
   public stopObligations(): readonly ReceivingObligation[] | null {
     if (this.#storeSites === null) return null;
@@ -845,8 +830,7 @@ export class Consumers {
   }
 
   /**
-   * #1526: the pass's receiving obligations (`admission/receiving.ts`: the store checks the walk owes, a stopped
-   * decision's stores among them, every live store that brings external data), each completed in the completion pass
+   * #1526: the pass's receiving obligations, each completed in the completion pass
    * (`#completeFor`) and kept with its result (`receiving`), in the stable source order, then `again` (the questions
    * asked again with the completed contracts, `asked`), whose result it returns. It runs after everything of the
    * analysis that can stop (#1637): once, on an analysis whose admission settled carrying a stopped key
@@ -1033,8 +1017,7 @@ export class Consumers {
     // settled pass's inputs leaves every obligation whose proof read it lost with that cause: never a refusal, a
     // widening or a changed settled answer. Each decision the completion made has its stores checked as the walk checks
     // them (`admittedStores`), its rejections heard against the stores the settled pass rejected there: the frontier's,
-    // and each one made after them, as retargeting's reads pull a receiver's decision, to the fixed point (#2184). The
-    // keys checked are the record `Answers.completionRan` reads (`#ran`, `completion.ran`).
+    // and each one made after them, as retargeting's reads pull a receiver's decision, to the fixed point (#2184).
     const { receivers, moved } = retargeted(this.admission);
     for (const key of receivers) closure.mark(key, "retarget");
     const rejected = new Set<number>();
@@ -1216,9 +1199,8 @@ export class Consumers {
   /**
    * The receiving closure's completion where one ran (`receive`): the units it charged to the total from its start (its
    * obligations found, its completion pass and the questions asked again), its counters and decisions, else `null`; and
-   * `ran`, the decisions at which its own store check ran, with the epoch of the pass it completed, which the plan
-   * reads to keep a stopped decision's mark with no check (`Answers.completionRan`, #2080, #2184): `null` where it
-   * reached its allowance, wherever in it; none where it left the slice.
+   * `ran`, the decisions at which its own store check ran, with the epoch of the pass it completed (#2080, #2184):
+   * `null` where it reached its allowance, wherever in it; none where it left the slice.
    */
   completion: {
     readonly units: number;
@@ -1232,15 +1214,14 @@ export class Consumers {
 
   /**
    * The sites at which the receiving completion's own check of its decisions' stores (`#completeIn`) owes a runtime
-   * check, by `siteKey`: where the unstopped analysis checks a store, which a store's check there takes from the
-   * completion (#1526).
+   * check, by `siteKey` (#1526).
    */
   readonly completedChecks = new Set<string>();
 
   /**
    * The store warnings the receiving completion's own check of its decisions' stores made (`#completeIn`), the
    * natural walk's obligations of those decisions on the settled pass's inputs (#1682): none where the completion lost a
-   * result (the whole loss), reached its allowance or left the slice. Only a store's part checks read them.
+   * result (the whole loss), reached its allowance or left the slice.
    */
   readonly completedWarnings: CompletedWarning[] = [];
 
@@ -1332,7 +1313,7 @@ export class Consumers {
     this.rule = 4 + stage;
   }
 
-  /** What the stores' syntax decides at `path` of `root` after a stop (syntax.ts), for the answers' level reader. */
+  /** What the stores' syntax decides at `path` of `root` after a stop. */
   public cheapDecided(root: PlaceId, path: readonly string[]): CheapDecision | null {
     return cheapDecided(this, root, path);
   }
@@ -1346,7 +1327,6 @@ export class Consumers {
     enclosingStores(this);
   }
 
-  // stores/enclosing.ts:
   /** The destinations `enclosingStores` resolved this pass, a whole store's key and an add's receiver's apart. */
   readonly enclosed = new Set<Key>();
   readonly enclosedAdds = new Set<Key>();
@@ -1355,9 +1335,6 @@ export class Consumers {
   /** Each such destination's complete type, which its stores' checks carry into the plan whole (`Answers.requirement`). */
   readonly requirements = new Map<Key, TypeTerm>();
 
-  // stores/fresh.ts: the stores and transfers it marked (`storeMark`), their values' spans by file (`inMarkedValue`),
-  // the values and typed calls marked at their own sites (`literalMark`, `ingressMark`), and each held value's cell and
-  // each value's stores (`markValue`).
   readonly marked = new Set<number>();
   markedSpans: Map<number, Laminar<null>> | null = null;
   readonly markedLiterals = new Set<PlaceId>();
@@ -1369,33 +1346,27 @@ export class Consumers {
     return withFacts(this, diagnostic);
   }
 
-  /** `readsAbsent`'s answer per expression (reports/diagnostics.ts). */
+  /** `readsAbsent`'s answer per expression. */
   readonly absentReads = new Map<Expression, boolean>();
 
-  /** `expected`'s answer per site (reports/expected.ts). */
+  /** `expected`'s answer per site. */
   readonly expectations = new Map<string, SiteExpectation>();
 
-  /** `readsTakeTask`'s answer per place (reports/expected.ts). */
+  /** `readsTakeTask`'s answer per place. */
   readonly placeExpectations = new Map<PlaceId, SiteExpectation>();
 
-  // reports/warnings.ts: per place, its objects' property names (`propertiesOf`) and the property `${...}` shows of
-  // them (`shownProperty`).
   readonly names = new Map<CanonicalKey | PlaceId, readonly string[]>();
   readonly shown = new Map<CanonicalKey | PlaceId, string | null>();
 
-  // stores/reach.ts: each path's first direct read or store (`firstDirect`), each literal's child values by step
-  // (`childrenOf`), and what reaches each value's and each place's levels (`valueReach`, `copiesOnly`).
   directSites: Map<string, SourceSite> | null = null;
   childValuesByLiteral: Map<PlaceId, Map<string, PlaceId[]>> | null = null;
   readonly valueReaches = new Map<PlaceId, Reach>();
   readonly keyReaches = new Map<PlaceId, KeyReach>();
 
-  // stores/mixed.ts: each literal's landing (`landingOf`), the number of landings made, each landing's question
-  // (`landingQuestion`).
   readonly landings = new Map<PlaceId, Landing | null>();
   landingCount = 0;
   readonly questions = new Map<string, LandingQuestion | null>();
 
-  /** Each projection's owner by its site, asked at an index (`indexOwner`, names.ts). */
+  /** Each projection's owner by its site, asked at an index. */
   indexProjections: Map<string, PlaceId> | null = null;
 }

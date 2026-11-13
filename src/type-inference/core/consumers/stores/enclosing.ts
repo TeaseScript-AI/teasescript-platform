@@ -20,10 +20,7 @@ import { storeWarning } from "../reports/warnings.js";
  * context, as `requiredStores` resolves it. A store at or below a stopped key is that key's own (#1275,
  * `stoppedStores`, resolved alike), a sibling's path no store of the stop's. Found by one walk down each stopped path
  * that no other stop lies above (`outermost`), through the stored keys' trie (`Admission.stored`), each destination
- * resolved once a pass whatever number of stops lie below it. Run after admission's groups' decisions, in every pass
- * that carries a stop; a later stop of a target's decision (`Consumers.check`'s own targets) leaves the pass unsettled,
- * and the next pass rebuilds it from the stopped set; the fresh pass rebuilds it from the written types alone
- * (`freshStores`).
+ * resolved once a pass whatever number of stops lie below it.
  */
 export function enclosingStores(walk: Consumers): void {
   const { program, definitions, contract } = walk.pass;

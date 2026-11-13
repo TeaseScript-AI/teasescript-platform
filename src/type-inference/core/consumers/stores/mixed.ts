@@ -421,9 +421,9 @@ function mixedChoice(
 }
 
 /**
- * The mixed choices' check (#1352), the last of `Consumers.check`: `mixedChoice` of every `askChoice` outside the
- * units past the nesting limit, in the consumers' order, each read with its choice's demand allowance and each its own
- * unit (`Consumers.startUnit`: a stop takes back the running choice's findings alone, #1660); run after every other
+ * The mixed choices' check (#1352): `mixedChoice` of every `askChoice` outside the units past the nesting limit, in the
+ * consumers' order, each read with its choice's demand allowance and each its own unit (a stop takes back the running
+ * choice's findings alone, #1660); run after every other
  * consumer's read and the publication, so no read of the pass that can stop at its demand allowance comes after its
  * reads.
  * A choice past the nesting limit has no published warning that reads its record (TSV076 defers them).

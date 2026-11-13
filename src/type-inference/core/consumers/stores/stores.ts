@@ -49,8 +49,7 @@ const writerRank = (writer: Writer | null): number =>
 /**
  * Whether an item is external data for the boundary check: an external unknown, or a kind a type test proved of
  * external data that still carries its ingress (`fromExternal`: the test proves the kind, never the ingress, #1073; a
- * result computed from it brought no data in). Only the boundary requests ask it; a store's warnings stay with the
- * external unknowns.
+ * result computed from it brought no data in).
  */
 function boundaryData(item: Item): boolean {
   return isExternal(item) || item.fromExternal === true;

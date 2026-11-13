@@ -537,12 +537,9 @@ export type Owner = readonly [made: boolean, items: () => readonly Item[]];
 
 /**
  * Which items a stop's discharge left out with their owners (`withoutRecords`): what a domain's item's boundary requests
- * ask (`Consumers.boundariesAt`, #1448). An item is left out when its owner was: each item has one owner per request.
- * `warnGroups`' groups partition the items, or the soft owner is the one; `memberChecks`' unknown warning exists only
- * where `extra` is empty, and every caller passes at most one extra; `operations` keys an operand's unknown items under
- * one owner. Several live owners stand across consumers, each sending its own request: a caller that
- * would declare overlapping owners needs every one of them left out. Each owner looked at once and a left-out owner's
- * items, charged.
+ * ask (#1448). An item is left out when its owner was: each item has one owner per request. Several live owners stand
+ * across consumers, each sending its own request: a caller that would declare overlapping owners needs every one of
+ * them left out. Each owner looked at once and a left-out owner's items, charged.
  */
 export function leftOutBy(walk: Consumers, owners: readonly Owner[]): (item: Item) => boolean {
   if (owners.length === 0) return () => false;

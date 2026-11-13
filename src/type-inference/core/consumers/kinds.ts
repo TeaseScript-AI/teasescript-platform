@@ -119,9 +119,7 @@ function inDomainOrder(kinds: Iterable<ItemTag>): ItemTag[] {
 }
 
 /**
- * The scalar literals whose kind is their own, known from the syntax without solving: the finishing read's leaf kind
- * (`leafKind`), whether a value is a literal's own syntax (`literalSyntax`) and the stores' syntax (`cheapShapeOf`)
- * read it.
+ * The scalar literals whose kind is their own, known from the syntax without solving.
  */
 export const LITERALS: ReadonlySet<string> = new Set([
   "numberLiteral",
@@ -138,8 +136,7 @@ export function unsettledItem(item: Item): boolean {
 }
 
 /**
- * Whether kinds are of one type at most, as admission's `family` reads one: whole numbers with numbers, `null` beside a
- * type, `null` alone, or none.
+ * Whether kinds are of one type at most: whole numbers with numbers, `null` beside a type, `null` alone, or none.
  */
 export function oneType(kinds: readonly ItemTag[]): boolean {
   return kinds.every((kind) => kind === "null") || family(kinds);
@@ -207,7 +204,7 @@ export function anyRecorded(walk: Consumers): boolean {
  * `null` (unproved, the fix in words, never a plain `let`) where every read on the path stopped. The walk's record
  * first (a read after the walk alone answers nothing where a finishing walk ran); where it is `stopped`, the read made
  * again at publication, the proof only where it settles (a local demand stop leaves the facts asked). Asked only where
- * the subject's value is found (`keptChoice` says what a subject not found proves).
+ * the subject's value is found.
  */
 export function keptTypes(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
   const recorded = ANSWERED.get(walk)?.get(value);
