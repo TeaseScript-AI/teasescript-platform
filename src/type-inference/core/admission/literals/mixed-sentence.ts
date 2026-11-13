@@ -318,8 +318,9 @@ export function intermediateDepths(path: readonly string[]): number[] {
 /**
  * #1765: whether each of `depths` along `path` holds `fact` for a side, read by one descent down the path (`layersOf`):
  * through a literal's children and through a carried value's parts alike (#1789). The facts' own levels and leaves,
- * side by side: - `null` (#1765): `mayHoldNull`'s rule; - `dict` (#1762) and `set` (#1825): `collectionOwn` at a
- * value's own level, its items below it (`collectionHeld`).
+ * side by side:
+ * - `null` (#1765): `mayHoldNull`'s rule;
+ * - `dict` (#1762) and `set` (#1825): `collectionOwn` at a value's own level, its items below it (`collectionHeld`).
  */
 export function layersAt(
   admission: Admission,

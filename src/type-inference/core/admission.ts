@@ -1,5 +1,5 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
-import { admitted, deciderAt, inheritsWritten, retained } from "./admission/admitted.js";
+import { admitted, inheritsWritten, retained } from "./admission/admitted.js";
 import {
   boundariesAt,
   boundaryAt,
@@ -17,7 +17,7 @@ import {
   decisionStoppedAt,
   stopDecision,
 } from "./admission/decision.js";
-import { groups, stores } from "./admission/groups.js";
+import { groups } from "./admission/groups.js";
 import { atCopy } from "./admission/held.js";
 import {
   cellSited,
@@ -186,8 +186,9 @@ export function admissionRunsInsideSolverRuns(): number {
  * would close a cycle. The fields are public for those modules; outside them, the consumers and the answers read the
  * rejections (`newlyRejected`, `refused`, `retaken`, `rejections`), the boundary checks (`boundaries`, `readChecks`),
  * `budgetUndecided`, `cycling`, `keyLabels` and `stored`, and `inherited/` reads `members`. The getters and setters
- * forward to the pass's `ReceivingDomain` (the state of the written domain copies inherit), which `inherited/` also
- * reads through them.
+ * but `dirty`, `stored` and `work` forward to the pass's `ReceivingDomain` (the state of the written domain copies
+ * inherit), which `inherited/` also reads through them; `dirty` and `stored` are admission's own tries, made at first
+ * use, and `work` is the program's ledger.
  */
 export class Admission {
   /** The decider's kinds per key. */
@@ -590,7 +591,8 @@ export class Admission {
   }
 
   /**
-   * The keys a store was rejected at or a copy of a written binding lands at, which `isClean` asks along a path; and
+   * The keys a store was rejected at or a copy of a written or inheriting binding lands at (`copyLandingKeys`), which
+   * `isClean` asks along a path; and
    * the keys whole stores or adds (or dead arguments) reach, `inputsOf`'s prefixes: as tries, each walked down a
    * decision's path as far as it holds it.
    */
@@ -805,10 +807,6 @@ export class Admission {
     return labelPlainText(this.labelOf(place, path, written));
   }
 
-  public stores(): readonly Definition[] {
-    return stores(this);
-  }
-
   storeList: readonly Definition[] | null = null;
 
   public groups(): readonly DecidedAt[] {
@@ -935,10 +933,6 @@ export class Admission {
 
   public inheritsWritten(place: PlaceId, path: readonly string[]): boolean {
     return inheritsWritten(this, place, path);
-  }
-
-  public deciderAt(place: PlaceId, path: readonly string[]): SourceSite | null {
-    return deciderAt(this, place, path);
   }
 
   /**
