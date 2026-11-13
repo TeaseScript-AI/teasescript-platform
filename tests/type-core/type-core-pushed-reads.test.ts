@@ -324,10 +324,7 @@ test("a pushed read's graph is built as shared work: counted to the total, never
   let outside = 0;
   let inside = 0;
   WorkLedger.prototype.charge = function (this: WorkLedger, ...args) {
-    if (
-      args[0] === "structureSteps" &&
-      /frontier\.js|contract\/frontier\//u.test(new Error().stack!)
-    )
+    if (args[0] === "structureSteps" && /frontier(\.js|\/)/u.test(new Error().stack!))
       if (this.sharing) inside += 1;
       else outside += 1;
     charge.apply(this, args);
