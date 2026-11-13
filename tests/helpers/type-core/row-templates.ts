@@ -128,6 +128,14 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
     spoken(declaration("alias", '"pet"')),
     spoken(declaration("gender", '"female"')),
     `if hostValue == null {\n  speaker boss {\n    displayName: "Boss"\n  }\n}\nsay as boss "a"`,
+    // a speaker declared in another file speaks in the first
+    [
+      main('say as boss "Hi"\nshowButton as boss "Go"\nexit\n'),
+      {
+        path: "other.tease",
+        source: 'speaker boss {\n  displayName: hostValue\n  color: "#336699"\n}\nexit\n',
+      },
+    ],
   ],
   // a transfer by each target form the row holds (a quoted glob of one file among them), a typed store of the host global
   // in every file; then a nullable stored

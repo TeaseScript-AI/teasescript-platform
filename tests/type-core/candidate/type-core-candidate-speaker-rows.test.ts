@@ -1,5 +1,5 @@
 // Speaker declarations and `say as` on the candidate route (#2572): stores through a speaker refused at its name, the
-// built-in fields' values published only where today's compiler publishes them, a declaration in a second file.
+// built-in fields' values published only where today's compiler publishes them.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -21,7 +21,6 @@ import {
   withTestDemandAllowance,
 } from "../../../src/type-inference/core/budget.js";
 import { HELD_MODES } from "../../helpers/type-core-held-host.js";
-import { runGlobals } from "../../helpers/type-core-route.js";
 
 /*
  * A speaker's name is no value of the slice (the `identifier` row's closed set), so every read and store through a
@@ -229,20 +228,4 @@ test("the field table names exactly today's built-in speaker properties, and eac
     const text = readFileSync(check.file, "utf8");
     assert.match(text, new RegExp(`^(export )?function ${check.function}\\(`, "mu"), field);
   }
-});
-
-test("a speaker declared in a second file speaks in the first, published and run as today's", () => {
-  const files: Files = [
-    { path: "main.tease", source: 'say as boss "Hi"\nshowButton as boss "Go"\nexit\n' },
-    {
-      path: "other.tease",
-      source: 'speaker boss {\n  displayName: hostValue\n  color: "#336699"\n}\nexit\n',
-    },
-  ];
-  const today = compileProject(files, OPTIONS);
-  const route = compileProjectWithBackend(files, OPTIONS, CORE_BACKEND);
-  assert.ok(today.plan !== null && route.plan !== null);
-  assert.deepEqual(errors(route), errors(today));
-  for (const hostValue of ["Boss", 2, null, true])
-    assert.deepEqual(runGlobals(route.plan, { hostValue }), runGlobals(today.plan, { hostValue }));
 });
