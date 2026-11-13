@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { compileProject, compileProjectWithBackend } from "../../../src/compiler.js";
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
-import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
 import { syntaxOf } from "../../helpers/type-core/derived/type-core-derived.js";
 import { derive } from "../../helpers/type-core/derived/type-core-derived-checks.js";
@@ -139,11 +139,9 @@ test("the oracle across files predicts the route's runs: a path no text, a path 
   ]);
 });
 
-test("a path of a written type holding text and null: today's TSV043; the route transfers with text and stops null at the call", () => {
-  const files = [
-    { path: "main.tease", source: "let m: string? = hostValue\ngoto script(m)\nexit\n" },
-    ...NAMED,
-  ];
+test("a path of a written type holding text and null: today's TSV043; the route refuses it at the path (#2488's step 1½)", () => {
+  const source = "let m: string? = hostValue\ngoto script(m)\nexit\n";
+  const files = [{ path: "main.tease", source }, ...NAMED];
   const today = compileProject(files, OPTIONS);
   assert.equal(today.plan, null);
   assert.deepEqual(
@@ -152,17 +150,15 @@ test("a path of a written type holding text and null: today's TSV043; the route 
       .map(({ code }) => code),
     ["TSV043"],
   );
-  for (const mode of HELD_MODES) {
-    const { plan } = mode.run(() => compileProjectWithBackend(files, OPTIONS, CORE_BACKEND));
-    assert.ok(plan !== null, mode.name);
-    // a text it takes starts its file; null fails at `script(m)` before any file starts; a number at the ingress
-    assert.deepEqual(
-      ["part.tease", null, 2].map((hostValue) => {
-        const ran = runGlobals(plan, { hostValue });
-        return `${ran.status} ${ran.failure} ${ran.said.map(({ text }) => text).join(",")}`;
-      }),
-      ["halted null part", "failed TSR058@32:41 ", "failed TSR058@17:26 "],
+  const at = source.indexOf("m)");
+  for (const mode of HELD_MODES)
+    assert.throws(
+      () => mode.run(() => compileProjectWithBackend(files, OPTIONS, CORE_BACKEND)),
+      (error) =>
+        error instanceof CandidateOutsideSlice &&
+        error.what === "an operand its instruction does not take" &&
+        error.site.start === at &&
+        error.site.end === at + 1,
       mode.name,
     );
-  }
 });
