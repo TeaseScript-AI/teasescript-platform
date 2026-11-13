@@ -103,20 +103,90 @@ snapshot for comparing two analyses of the same sources.
   reach it through the candidate compile route, `compileSourceWithBackend` and `compileProjectWithBackend`
   (`src/compiler.ts`, test-only and not exported by `src/index.ts`), with `CORE_BACKEND` (`core/backend.ts`). That
   backend covers a stated slice of the language and throws `CandidateOutsideSlice` at the first construct outside it.
-  Its route:
-  - `CoreProgram` (`core/program.ts`) indexes one analysis's input: the places and constraints of the collector
-    (`collector.ts`, which makes the constraint graph of `graph.ts` in one walk), the flow graph of
-    `core/flow-graph.ts`, where every statement and expression is a node and what literals prove dead is marked, and
-    its dominators.
-  - `analyseCore` (`core/answers.ts`) runs the analysis in admission's passes with the solver (`core/solver.ts`). It
-    publishes frozen answers: per occurrence its items, route, place and obligations; per place its admitted type and
-    contract; and the program's diagnostics, checks and budget.
-  - The consumer (`coreCheckResult`, `core/check-result/check-result.ts`) walks the source with those answers and makes the
-    `TypeCheckResult` that lowering consumes.
+  Its route, in the order a compile runs it, with the owner of each part; the tests are under
+  [`tests/type-core/`](../tests/type-core/) by subject (a production rerun in
+  [`tests/type-core-production/`](../tests/type-core-production/)), their helpers under
+  [`tests/helpers/type-core/`](../tests/helpers/type-core/) and in [`tests/helpers/`](../tests/helpers/) as
+  `type-core-*.ts`:
+  - **The syntax table**, [`core/slice-syntax.ts`](../src/type-inference/core/slice-syntax.ts): one row per AST kind,
+    `refused`, `modelled` or `pass`, which says whether the route takes that construct and on what conditions, read by
+    `CORE_BACKEND` before the analysis and by the consumers, so both decide from one walk. In its rows' `visit`s, the
+    file's functions they reach and the functions that compute the walk's context, each comparison, each operand of `&&`
+    or `||` that is neither a comparison nor another `&&` or `||`, and each `unwrapped(` call has a mutant in
+    [`tools/slice-conditions.json`](../tools/slice-conditions.json);
+    [`tools/slice-conditions.mjs`](../tools/slice-conditions.mjs), run by hand (not part of `npm run check`), refuses
+    one without. A condition of another form, such as a bare call or a negation that is no operand of `&&` or `||`, is
+    not scanned (#2732). Its tests: its own,
+    [`type-core-syntax-table.test.ts`](../tests/type-core/type-core-syntax-table.test.ts); the guard
+    ([`type-core-row-guard.test.ts`](../tests/type-core/type-core-row-guard.test.ts),
+    [`type-core-declared-positions.test.ts`](../tests/type-core/type-core-declared-positions.test.ts), with its
+    templates [`row-templates.ts`](../tests/helpers/type-core/row-templates.ts) and
+    [`ask-templates.ts`](../tests/helpers/type-core/ask-templates.ts), its declared lists
+    [`declared-samples.ts`](../tests/helpers/type-core/declared-samples.ts) and its records
+    [`row-guard-records.ts`](../tests/helpers/type-core/row-guard-records.ts)); and the route's own tests in
+    [`tests/type-core/candidate/`](../tests/type-core/candidate/).
+  - **The input:** `CoreProgram` ([`core/program.ts`](../src/type-inference/core/program.ts)) indexes the places and
+    constraints of the collector ([`collector.ts`](../src/type-inference/collector.ts), which makes the constraint graph
+    of [`graph.ts`](../src/type-inference/graph.ts) in one walk) and the flow graph
+    ([`core/flow-graph.ts`](../src/type-inference/core/flow-graph.ts), its parts in
+    [`core/flow-graph/`](../src/type-inference/core/flow-graph/)), where every statement and expression is a node and
+    what literals prove dead is marked, with its dominators.
+    [`core/identity-view.ts`](../src/type-inference/core/identity-view.ts) reads a call of an identity function as its
+    argument.
+  - **The analysis:** `analyseCore` ([`core/answers.ts`](../src/type-inference/core/answers.ts)) runs admission's passes
+    with the demand solver ([`core/solver.ts`](../src/type-inference/core/solver.ts)), charging every unit of work to
+    the budget ([`core/budget.ts`](../src/type-inference/core/budget.ts); its stop's warnings in
+    [`core/stop-diagnostics.ts`](../src/type-inference/core/stop-diagnostics.ts)). It publishes frozen answers: per
+    occurrence its items, route, place and obligations; per place its admitted type and contract; and the program's
+    diagnostics, checks and budget ([`core/result.ts`](../src/type-inference/core/result.ts)). Its parts:
+    - admission decides each place's type once, with the boundary checks of external data:
+      [`core/admission.ts`](../src/type-inference/core/admission.ts) and
+      [`core/admission/`](../src/type-inference/core/admission/) (landings, literals, transfers); a written type
+      inherited through copies in [`core/inherited/`](../src/type-inference/core/inherited/); hot-candidate discovery
+      in [`core/touch.ts`](../src/type-inference/core/touch.ts);
+    - the contract, the kinds a key can hold on any run: [`core/contract.ts`](../src/type-inference/core/contract.ts),
+      [`core/contract/`](../src/type-inference/core/contract/) (the frontier, the prefix index), the positioned frontier
+      of a read through wrappers in [`core/positions.ts`](../src/type-inference/core/positions.ts) and a store's
+      required contract in [`core/contract-descriptors.ts`](../src/type-inference/core/contract-descriptors.ts);
+    - a value at a read: [`core/values.ts`](../src/type-inference/core/values.ts),
+      [`core/items.ts`](../src/type-inference/core/items.ts),
+      [`core/definitions.ts`](../src/type-inference/core/definitions.ts),
+      [`core/exact-path.ts`](../src/type-inference/core/exact-path.ts), the search of a value's property names in
+      [`core/property-names.ts`](../src/type-inference/core/property-names.ts) and the carriers, the values that hold
+      another value ([`core/carriers.ts`](../src/type-inference/core/carriers.ts)); an answer shared between equivalent
+      values is shared only while `sharing()` ([`core/sharing.ts`](../src/type-inference/core/sharing.ts)) allows it,
+      which tests turn off with `withoutSharing` to compare;
+    - narrowing: [`core/narrowing/`](../src/type-inference/core/narrowing/), whose every walk is charged through
+      [`core/charged-iteration.ts`](../src/type-inference/core/charged-iteration.ts), and the guard, handler and `+`
+      indexes in [`core/indexes/`](../src/type-inference/core/indexes/);
+    - the consumers, each use that needs a kind asking its operand:
+      [`core/consumers.ts`](../src/type-inference/core/consumers.ts) and
+      [`core/consumers/`](../src/type-inference/core/consumers/) (operations, stores, reports); the checks of
+      interactions in [`core/checks/`](../src/type-inference/core/checks/) and of written types in
+      [`core/written.ts`](../src/type-inference/core/written.ts); the built-ins' facts in
+      [`core/operator-table.ts`](../src/type-inference/core/operator-table.ts) and
+      [`core/method-categories.ts`](../src/type-inference/core/method-categories.ts);
+    - the diagnostics' sentences: [`core/messages.ts`](../src/type-inference/core/messages.ts) and
+      [`core/messages/`](../src/type-inference/core/messages/);
+    - the state kept between solver runs: [`core/retained/`](../src/type-inference/core/retained/)
+      ([Frozen retained state](TESTING.md#frozen-retained-state)).
+  - **The answers' refusals:** after the analysis, `outsideAnswers` in
+    [`core/backend.ts`](../src/type-inference/core/backend.ts) refuses a source the syntax table admitted, on the
+    analysis' own answers and diagnostics, warnings included; the function lists what it refuses.
+  - **The consumer:** `coreCheckResult`
+    ([`core/check-result/check-result.ts`](../src/type-inference/core/check-result/check-result.ts)) walks the source
+    with those answers and makes the `TypeCheckResult` that lowering consumes; the one walk of each file that the
+    backend and the consumer share is
+    [`core/check-result/slice-index.ts`](../src/type-inference/core/check-result/slice-index.ts), and the plan's runtime
+    checks and the lost-check gate are in
+    [`core/check-result/runtime-plan.ts`](../src/type-inference/core/check-result/runtime-plan.ts).
 
-  Other O4 foundations include the built-in result relations (`adapters/`, whose operand types the core reads) and
-  the interned type table (`solver/types.ts`). The condition-shape recognizer
-  (`narrowing-shapes.ts`) is shared: the visitor's branch rules and the core read the same classification.
+  The built-in result relations ([`adapters/`](../src/type-inference/adapters/), whose operand types the core reads)
+  and the interned type table ([`solver/types.ts`](../src/type-inference/solver/types.ts)) are other O4 foundations;
+  the condition-shape recognizer
+  ([`narrowing-shapes.ts`](../src/type-inference/narrowing-shapes.ts)) is shared: the visitor's branch rules and the
+  core read the same classification. The rules the core follows, with their reasons, are the
+  [accepted record](specifications/type-inference-accepted-record/README.md).
 
 - **The switch:** one change makes the constraint backend the compiler's backend in place of the legacy backend, and
   a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's. The
