@@ -221,8 +221,9 @@ test("each open row's templates publish on the route, with today's checks and to
 });
 
 test("a check that no store takes refuses its source, also where the analysis's budget stops it", () => {
-  const refused = DECLARED_REFUSALS.filter(
-    (declared) => declared.text === "a check that no store takes",
+  // (R11's three sources, whichever refusal comes first: a command's operand is the operand table's)
+  const refused = DECLARED_REFUSALS.filter((declared) =>
+    declared.position.endsWith("with a typed default"),
   );
   assert.equal(refused.length, 3);
   for (const declared of refused) {

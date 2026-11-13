@@ -310,31 +310,25 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
     'let m: string? = hostValue\nif m != null {\n  exit\n}\nfor x in [m otherwise m] {\n  let r = askBoolean("q", prefill: x)\n}\nexit\n',
   ])
     refusedAsToday(source, "TSV039", `this ask: ${askOf(source)}`);
-  // a written type only `null` fills, wherever the value goes from it: the slice takes no such type (the lead's R44)
-  for (const [written, at, prefill] of [
-    ["null", "null", "m"],
-    ["null", "null", "[m][0]"],
-    ["null", "null", "m otherwise m"],
-    ["null", "null", "[[m]][0][0]"],
-    ["null", "null", "[m].get(0, default: null)"],
-    ["null?", "null?", "m otherwise m"],
-    ["null[]", "null", "[m[0]][0]"],
-  ] as const)
-    refusedAsToday(
-      `let m: ${written} = hostValue\nlet r = askText("q", prefill: ${prefill})\nexit\n`,
-      "TSV039",
-      `this written type: ${at}`,
-    );
-  refusedAsToday(
+  // a written type only `null` fills, wherever the value goes from it: the prefill is computed, so the ask is refused
+  // (the slice takes the written type since #2488's step 1½)
+  for (const [written, prefill] of [
+    ["null", "m"],
+    ["null", "[m][0]"],
+    ["null", "m otherwise m"],
+    ["null", "[[m]][0][0]"],
+    ["null", "[m].get(0, default: null)"],
+    ["null?", "m otherwise m"],
+    ["null[]", "[m[0]][0]"],
+  ] as const) {
+    const source = `let m: ${written} = hostValue\nlet r = askText("q", prefill: ${prefill})\nexit\n`;
+    refusedAsToday(source, "TSV039", `this ask: ${askOf(source)}`);
+  }
+  for (const source of [
     'let m: null = hostValue\nlet p = m otherwise m\nlet r = askInteger("q", prefill: p)\nexit\n',
-    "TSV039",
-    "this written type: null",
-  );
-  refusedAsToday(
     'let m: null = hostValue\nfor x in [m otherwise m] {\n  let r = askBoolean("q", prefill: x)\n}\nexit\n',
-    "TSV039",
-    "this written type: null",
-  );
+  ])
+    refusedAsToday(source, "TSV039", `this ask: ${askOf(source)}`);
   // text at an ask of another kind, blank or not (blank text is none to the runtime)
   for (const ask of ["askNumber", "askInteger", "askDate", "askTime", "askDateTime", "askBoolean"])
     for (const [prelude, prefill] of [
@@ -372,21 +366,26 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       );
 });
 
-test("a choice of more buttons than a request shows: today's TSV029, the route's run fails at the ask, as the option and element positions' runs do", () => {
+test("a choice of more buttons than a request shows: today's TSV029, and the route refuses it at the ask (#2488's step 1½)", () => {
   // (no operand or field of its own: the count of the buttons, `MAX_INTERACTION_OPTION_ENTRIES`, which today's checker
-  // checks of the options as a whole and `expandChoiceOptions` refuses as the request opens)
+  // checks of the options as a whole and the route counts alike after the analysis)
   const buttons = Array.from({ length: MAX_INTERACTION_OPTION_ENTRIES + 1 }, (_, at) => at + 1);
   const source = `let r = askChoice [${buttons.join(", ")}]\nexit\n`;
   const current = today(source);
   assert.equal(current.plan, null);
   assert.ok(current.errors.includes("TSV029"), current.errors.join(" "));
-  const ask = source.indexOf("askChoice");
-  const end = source.indexOf("\n");
-  for (const mode of HELD_MODES) {
-    const own = route(source, mode);
-    assert.ok("plan" in own && own.plan !== null, mode.name);
-    assert.equal(answered(own.plan, null), `failed TSR052@${ask}:${end} after 0 []`, mode.name);
-  }
+  for (const mode of HELD_MODES)
+    assert.deepEqual(
+      route(source, mode),
+      {
+        refused: `a choice of more buttons than it shows: ${source.slice(source.indexOf("askChoice"), source.indexOf("\n"))}`,
+      },
+      mode.name,
+    );
+  // a list written in place counts its elements, and each other known option one: one more option is too many
+  const split = `let n = 1\nlet r = askChoice [${buttons.slice(1).join(", ")}], n\nexit\n`;
+  assert.equal(today(split).plan, null);
+  for (const mode of HELD_MODES) assert.ok("refused" in route(split, mode), mode.name);
   // one fewer is a choice today's checker takes, and the route's run waits as today's does
   asToday(`let r = askChoice [${buttons.slice(1).join(", ")}]\nexit\n`);
 });
