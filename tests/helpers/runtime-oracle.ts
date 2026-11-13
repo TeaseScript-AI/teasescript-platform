@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 /*
  * The runtime oracle's tools as its test drives them (docs/TESTING.md "Runtime pipeline oracle"): each runs in a process
- * of its own, as `npm run oracle:test` runs it, and reports one JSON document or a reason on standard error.
+ * of its own, as in CI, and reports one JSON document or a reason on standard error.
  */
 
 /** The checkout the compiled test runs from: `dist/tests/helpers` is three levels below it. */
