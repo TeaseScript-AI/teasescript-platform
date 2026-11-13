@@ -17,6 +17,7 @@ import { badRepeatCount } from "../../dist/src/runtime/instructions/loops.js";
 import { collectionTooLong, MAX_COLLECTION_LENGTH } from "../../dist/src/runtime/values/collection-size.js";
 import { NativeNotImplementedError } from "../../dist/src/runtime/native/operations/not-implemented.js";
 import { randomIntegerInRange } from "../../dist/src/runtime/evaluation/draws.js";
+import { nextXorShift32 } from "../../dist/src/runtime/random/random.js";
 import { loweredLogicalOperator } from "../../dist/src/runtime/evaluation/lowered-operands.js";
 import { notBoolean, notLogicalOperand } from "../../dist/src/runtime/evaluation/operators.js";
 import { dictKey, notIndexable } from "../../dist/src/runtime/evaluation/access.js";
@@ -297,6 +298,18 @@ export class Runtime {
       expression.fallbackCheck,
     );
     return value;
+  }
+  /**
+   * `randomInteger(a..b)` with the bounds evaluated: without random control, a trace, a start value or a host random
+   * source, one xorshift draw sampled as today's `sampleRangeInteger`; anything else (and every fault) by today's path.
+   */
+  randInt(expression, name, rangeExpression, start, end) {
+    if (this.control === null && this.trace === null && this.startValue === null && this.capabilities.random === undefined &&
+      Number.isSafeInteger(start) && Number.isSafeInteger(end)) {
+      const length = end - start + (rangeExpression.inclusive ? 1 : 0);
+      if (length >= 1 && Number.isSafeInteger(length)) return start + Math.floor(nextXorShift32(this.snapshot.rng) * length);
+    }
+    return this.randRange(expression, name, this.range(rangeExpression, start, end));
   }
   randRange(expression, name, range) {
     if (!isRange(range))

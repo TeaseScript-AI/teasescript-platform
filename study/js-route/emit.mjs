@@ -432,7 +432,16 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
           e.arguments.length === 1 &&
           e.arguments[0].kind === "positional"
         )
-          return `rt.randRange(${konst(e)}, ${JSON.stringify(name)}, ${own(e.arguments[0].value)})`;
+        {
+          const range = e.arguments[0].value;
+          // A range written in the call: its bounds go to the draw directly (no range value is made).
+          if (range.kind === "range") {
+            const a = x();
+            const b = x();
+            return `(${a} = ${expr(range.start)}, ${b} = ${expr(range.end)}, rt.randInt(${konst(e)}, ${JSON.stringify(name)}, ${konst(range)}, ${a}, ${b}))`;
+          }
+          return `rt.randRange(${konst(e)}, ${JSON.stringify(name)}, ${own(range)})`;
+        }
       }
       const receiver = callee.kind === "property" ? expr(callee.object) : "null";
       const args = [];
