@@ -823,8 +823,8 @@ re-sealed.
 ## Replay through the bridge
 
 `tests/helpers/bridge/replay-harness.ts` is the L5 gate's shared replay harness (#1919). `tests/bridge/player-bridge-recording.test.ts`
-uses it for the replay family: successful replay, frozen failure replay and live recovery, each in-process, in a Node
-Worker, and in the composable on its in-process engine. It has these parts:
+uses it for the replay family: successful replay, frozen failure replay and live recovery, each in a Node Worker and in
+the composable on the tests' in-process backend. It has these parts:
 
 - **`tapPublications`:** the complete trace of the publications a session's store is given after a cut, by value, from
   the cut's revision and event cursor, with what the store holds once it applied each: its state and every event since

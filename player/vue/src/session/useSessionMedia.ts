@@ -148,7 +148,7 @@ export function useSessionMedia({
       } catch (error) {
         // Refusals changed nothing. A basis another op since replaced (the observation's) leaves the rest for the retry
         // its publication makes; a stopped session, or a lost Worker, takes nothing more, and the stop clears the queue. Any other error is
-        // the Player's error stop, as a report's throw through the facade was, unless the session no longer owns the UI.
+        // the Player's error stop, unless the session no longer owns the UI.
         if (endsQuietly(error) || (error instanceof BridgeRequestError && error.code === "basis"))
           return;
         if (!isDisposed() && !stopped.value && session.value?.lineage === current.lineage)

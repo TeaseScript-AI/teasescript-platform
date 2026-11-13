@@ -393,19 +393,14 @@ RERUN.rows(
         await drainTasks();
       }
     };
-    // How long a wait on the host may step the mocked clock. In-process, its replies come on mock time, within `steps`.
-    // A Worker's take real time, which no count of steps bounds and `until` cannot wait on here (the test mocks its
-    // timers), so they get as long as a wait on the host may take.
-    const waiting = (steps: number) => {
-      const within = withinHostTime();
-      let step = 0;
-      return () => (topology === "worker" ? within() : step++ < steps);
-    };
-    for (const more = waiting(2000); !started && !startError && more();) await advance(1);
+    // How long a wait on the host may step the mocked clock: a Worker's replies take real time, which no count of steps
+    // bounds and `until` cannot wait on here (the test mocks its timers), so as long as a wait on the host may take.
+    const waiting = withinHostTime;
+    for (const more = waiting(); !started && !startError && more();) await advance(1);
     if (startError) throw startError;
     assert.equal(started, true, "start reply releases on mock time");
     for (
-      const more = waiting(1000);
+      const more = waiting();
       !player.elements.some((a) => a.src.endsWith("clock.mp3")) && more();
     )
       await advance(1);
@@ -454,7 +449,7 @@ RERUN.rows(
         () => void (replied = true),
         () => void (replied = true),
       );
-      for (const more = waiting(1000); !replied && more();) await advance(1);
+      for (const more = waiting(); !replied && more();) await advance(1);
       assert.equal(replied, true, `${what} replies on mock time`);
       return reading;
     };
