@@ -167,7 +167,6 @@ const MODULE_STATE: Readonly<Record<string, string>> = {
   "delivery.ts › states": "the owners' own state, weakly keyed by its owner",
   "delivery.ts › OwnedMap.#entries": "an owned registry's map, private to it",
   "delivery.ts › OwnedMap.#insertions": "an owned registry's insertion marks, private to it",
-  "in-process.ts › backends": "each bridge's backend, weakly keyed by its bridge",
   "instruction-facts.ts › cache": "immutable facts, weakly keyed by their plan",
   "transport.ts › nativePrototypes": "the transport's memo of native prototypes, weakly keyed",
   "transport.ts › FLAT_KEYS": "a constant table",

@@ -259,7 +259,7 @@ test("a settings change posted before an observation applies to the draws that o
   });
 });
 
-test("a settings change racing a Start applies to the right session: queued, and through the facade", async () => {
+test("a settings change racing a Start applies to the right session", async () => {
   const plan = compiled('let hit = chance(50)\nsay "after", instant\nshowButton "Done"\nexit');
   await onWorker(async (bridge, name) => {
     const token = await prepared(bridge, plan);
@@ -277,22 +277,6 @@ test("a settings change racing a Start applies to the right session: queued, and
     await waiting;
     assert.notEqual(shown(bridge, started).state.randomDraw, null, name);
   });
-  // In-process, a Start in the host carries a newer intent than one still queued: the older one changes nothing.
-  const bridge = await inProcessBridge(5);
-  const token = await prepared(bridge, plan);
-  const blocking = bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
-  const older = control(bridge, intentOf(1, 1, null));
-  const started = introduceNow(
-    bridge,
-    { plan: token, options: START, recording: false },
-    NO_MARKS,
-    undefined,
-    { owner: 1, intent: intentOf(1, 2, []) },
-  );
-  assert.notEqual(started.state.randomDraw, null, "the facade's Start pauses at its first draw");
-  await blocking;
-  await older;
-  assert.notEqual(heldRandom(bridge).control, null, "the older queued intent changed nothing");
 });
 
 test("a reset an intent overtook still resets once, and a repeated watermark resets nothing", async () => {

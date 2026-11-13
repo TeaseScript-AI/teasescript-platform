@@ -522,14 +522,15 @@ for (const kind of [
         compiled = bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
     } else {
       player.setDebugTracing(true);
-      if (kind === "continue-queued")
-        compiled = bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
+      // Introduced before the queued work: the facade, as the host, runs while no op is awaited.
       player.prepareRestore(
         hostIntroduced(
           bridge,
           compiler.createPlayerRuntimeSession('say "restored", instant\nshowButton "Next"\nexit'),
         ),
       );
+      if (kind === "continue-queued")
+        compiled = bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
       if (kind === "continue-in-transit") {
         const request = bridge.client.request;
         context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
