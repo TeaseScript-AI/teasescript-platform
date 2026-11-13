@@ -374,7 +374,7 @@ function parenthesized(source: string): string[] {
   return out;
 }
 
-test("parentheses on the way from the statement to a call in a place slot leave the analysis as it is (#2493, R49)", () => {
+test("parentheses on the way from the statement to a call in a place slot leave the analysis as it is (#2493)", () => {
   for (const [what, marked] of PLACES) {
     const files = placeForm(marked, "pass");
     const variants = parenthesized(files[0]!.source);
