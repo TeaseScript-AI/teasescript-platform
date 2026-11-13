@@ -23,7 +23,7 @@ function* inheritedSteps(
   asked: Rest,
   own?: { value: boolean },
 ): Inheriting<TypeTerm | null> {
-  // (a cursor's span read by its paths' ids: its key a cursor, its prefix and rest views, G3 stage 1)
+  // (a cursor's span read by its paths' ids: its key a cursor, its prefix and rest views)
   const { contract } = admission.pass;
   const path = restRef(contract, asked);
   if (path.length > admission.reach) {
@@ -55,7 +55,7 @@ export function* inheritedInto(
 ): Inheriting<TypeTerm | null> {
   // (past the deepest path a written type reaches, the place's path there is what it waits on, `inheritedAt`)
   const { contract } = admission.pass;
-  // (the decision waiting in its identity, as the cycles hold it: G3 stage 1)
+  // (the decision waiting in its identity, as the cycles hold it)
   const into = asking === null ? null : canonicalKey(contract, asking);
   const path = restRef(contract, asked);
   const source = keyAtRef(
@@ -73,7 +73,10 @@ export function* inheritedInto(
   return term;
 }
 
-/** Whether two decisions wait on each other through copies (`cycles`). */
+/**
+ * Whether two decisions wait on each other through copies (`cycles`), the cycles made again first where the solver
+ * forgot answers between runs (`settledCycles`).
+ */
 function cut(admission: Admission, a: CanonicalKey, b: CanonicalKey): boolean {
   settledCycles(admission);
   return (

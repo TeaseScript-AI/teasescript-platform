@@ -57,8 +57,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `S6c` | the shared-source value work family using one sound class key across discovery paths ([r4-85](sharing.md#r4-85)) |
 | `S7` | historical port step adding runtime support for the discharge map’s new checks |
 | `S8` | the message and budget-fallback work family, including fresh finishing and warning-owned boundary requests ([r4-226](stops-and-finishing.md#r4-226)) |
-| `S8c` | historical port step implementing number-to-integer checks and rounding advice |
-| `S8d` | historical port step restoring existing fix sentences and reviewing their source-preserving forms |
 | `S9b` | the port plan's step S9b, the consumer completion: surviving checks, signatures, storage and side outputs; its design is a document outside the repository |
 | `checkpoint 9` | historical research checkpoint that established the coarse core’s design tables and port baseline |
 | `S10` | the port work family implementing narrowing, preserving loops, and required-check route errors |
