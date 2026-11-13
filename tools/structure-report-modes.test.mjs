@@ -555,3 +555,41 @@ test("without node_modules it links main's before it reports, and stops when the
     rmSync(checkout, { recursive: true, force: true });
   }
 });
+
+test(
+  "--moved leaves out an `export` a moved function's first line gained, and still counts a real edit of that line (#2583)",
+  { timeout: 60_000 },
+  () => {
+    const body = longFunction("big", 400).replace("export function big() {", "");
+    const first = "function big(value: number) {";
+    for (const [what, line, expected] of [
+      [
+        "export added",
+        `export ${first}`,
+        /^ {2}suppressed \(moved\): function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\), 399 moved lines discounted, 1 admitted$/mu,
+      ],
+      [
+        "export added and the parameter renamed",
+        "export function big(other: number) {",
+        /^ {2}function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\)$/mu,
+      ],
+    ]) {
+      const { root, base } = history(
+        { "src/a.ts": `${first}${body}\nexport const small = big(1);\n` },
+        {
+          "src/a.ts": 'import { big } from "./b.js";\n\nexport const small = big(1);\n',
+          "src/b.ts": `${line}${body}\n`,
+        },
+      );
+      try {
+        const moved = execFileSync(process.execPath, [tool, "--diff", base, "--moved"], {
+          cwd: root,
+          encoding: "utf8",
+        });
+        assert.match(moved, expected, `${what}:\n${moved}`);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  },
+);

@@ -52,8 +52,8 @@
 // change) are left out of a function over 150 lines that the change writes into, and out of a file's growth, with the
 // added and removed lines `pure-move-check.mjs`'s forms 1-3 admit (an import or re-export line, a bare `export` on a
 // moved declaration, whitespace: its classification, imported). Each file signal this suppresses is printed with its
-// growth and its moved, admitted and removed lines, and the function signal with its moved lines; every other signal
-// is as without it. Git's detection is heuristic (a moved block below its threshold reads as added).
+// growth and its moved, admitted and removed lines, and the function signal with its moved lines (and `, N admitted`
+// when it left out admitted lines); every other signal is as without it. Git's detection is heuristic (a moved block below its threshold reads as added).
 //
 // With --summary FILE, the files behind two signals, a file over 1000 lines that the change grows and a file gaining
 // over 300 lines, are appended to FILE (CI passes its job summary file) and printed after the report: a heading, the
@@ -436,14 +436,17 @@ function gitLineCounts(mergeBase) {
 /**
  * The signals `file`'s added lines raise (its `HEAD` blob `text`, its added lines `added` in order): a function over
  * the signal's length that they write into, and the file gaining over the signal's lines, by its `growth` (`growthOf`).
- * With --moved, the lines Git marks as moved (`moved`) are left out, and each signal that leaves out is printed as
- * suppressed with its counts.
+ * With --moved, the lines Git marks as moved (`moved`) and those the pure-move check admits (`admitted`) are left out of
+ * the function signal, and each signal that leaves out is printed as suppressed with its counts.
  */
-function addedLinesSignals(file, text, added, moved, growth) {
+function addedLinesSignals(file, text, added, moved, admitted, growth) {
   const found = [];
-  const counted = added.filter((line) => !moved.has(line));
+  const counted = added.filter((line) => !moved.has(line) && !admitted.has(line));
   const discounted = (from, to) =>
     added.filter((line) => line >= from && line <= to && moved.has(line)).length;
+  const admittedIn = (from, to) =>
+    added.filter((line) => line >= from && line <= to && !moved.has(line) && admitted.has(line))
+      .length;
   if (PARSED.test(file))
     for (const fn of longFunctionsOf(file, text)) {
       const end = fn.line + fn.lines - 1;
@@ -453,7 +456,7 @@ function addedLinesSignals(file, text, added, moved, growth) {
       else if (holdsLineIn(added, fn.line, end))
         found.push({
           signal: "suppressed",
-          line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted${nestedOf(fn)}`,
+          line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted${admittedIn(fn.line, end) > 0 ? `, ${admittedIn(fn.line, end)} admitted` : ""}${nestedOf(fn)}`,
         });
     }
   if (growth.growth > SIGNALS.addedLines)
@@ -626,11 +629,12 @@ function changeSignals(base) {
           ? 0
           : lineCount(blob(mergeBase, change.old)));
     const moved = movedAdded.get(file) ?? new Set();
+    const admitted = admittedAdded.get(file) ?? new Set();
     const growth = growthOf(
       added,
       gitRemoved.get(file),
       moved,
-      admittedAdded.get(file) ?? new Set(),
+      admitted,
       admittedRemoved.get(file) ?? 0,
       lines - before(),
     );
@@ -644,7 +648,7 @@ function changeSignals(base) {
           line: `suppressed (moved): ${what}, ${countsOf(growth)}`,
         });
     }
-    for (const signal of addedLinesSignals(file, text, added, moved, growth))
+    for (const signal of addedLinesSignals(file, text, added, moved, admitted, growth))
       found.push(
         signal.signal === "added" ? { ...signal, before: before(), after: lines } : signal,
       );
