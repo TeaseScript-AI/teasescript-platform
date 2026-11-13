@@ -102,15 +102,17 @@ import {
 import {
   builtinCallProblems,
   builtinShapeProblems,
+  expressionLabel,
+  type OperationProblem,
+} from "./builtin-call-checks.js";
+import {
   type Sharing,
   collectionMethodProblems,
-  expressionLabel,
   fallbackFix,
   mayBeMessage,
   dictMethodProblems,
   memberProblems,
   positionalMethodProblems,
-  type OperationProblem,
 } from "./operation-checks.js";
 import {
   emptyListPropertyFailure,
