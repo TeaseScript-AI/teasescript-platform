@@ -362,8 +362,8 @@ export const DECLARED_REFUSALS: readonly {
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
   },
-  // (a case value no value of the subject may equal: today's TSV049, refused after the analysis by today's predicate;
-  // a literal subject, an inferred one, one of a written type with `null`, and a range against text)
+  // (a case value no value of the subject may equal, refused after the analysis; a literal subject, an inferred one,
+  // one of a written type with `null`, and a range against text)
   ...[
     [
       'switch 1 {\n  case "a" {\n    say "a"\n  }\n}',
