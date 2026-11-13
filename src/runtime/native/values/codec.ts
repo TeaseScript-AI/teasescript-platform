@@ -11,12 +11,12 @@ import {
   type NativeLeaf,
   type NativeValue,
 } from "./native-value.js";
-import { appendUniqueMember } from "./native-set.js";
+import { appendToUnindexedSet } from "./native-set.js";
 
 // The two directions between canonical values (`SerializableRuntimeValue`, the form snapshots, checkpoints and hosts
 // use) and native values (`native-value.ts`). Neither direction validates: `fromCanonical` takes a value that was
 // captured and validated where it entered, and `toCanonical` writes a valid one from valid native data. Neither shares a
-// mutable part with its input, and neither recurses natively, so values of any depth convert.
+// mutable part with its input, and neither recurses on the JavaScript call stack, so values of any depth convert.
 
 /** The native value of a validated canonical value; leaf records are copied and frozen. */
 export function fromCanonical(value: SerializableRuntimeValue): NativeValue {
@@ -79,7 +79,7 @@ export function fromCanonical(value: SerializableRuntimeValue): NativeValue {
       case "set": {
         // EVIDENCE: invariant: `convert` pairs a set with a new `NativeSet`; a valid set's items are unique.
         const set = target as NativeSet;
-        for (const item of source.items) appendUniqueMember(set, part(item));
+        for (const item of source.items) appendToUnindexedSet(set, part(item));
         break;
       }
       case "object": {

@@ -6,12 +6,12 @@ import {
   type NativeComposite,
   type NativeValue,
 } from "./native-value.js";
-import { appendUniqueMember } from "./native-set.js";
+import { appendToUnindexedSet } from "./native-set.js";
 
 /**
  * An independent copy of a value: every list, object, dict and set in it is new, and primitives and leaf records, which
  * nothing changes in place, are shared. A copied set builds its index again at its first operation. Deep values are
- * copied without native recursion.
+ * copied without recursion on the JavaScript call stack.
  */
 export function copyNativeValue(value: NativeValue): NativeValue {
   if (!isNativeComposite(value)) return value;
@@ -35,7 +35,7 @@ export function copyNativeValue(value: NativeValue): NativeValue {
     } else if (source instanceof NativeSet) {
       // EVIDENCE: invariant: `emptyCopy` pairs each set with a new set; copies of unique members are unique.
       const set = target as NativeSet;
-      for (const item of source.items) appendUniqueMember(set, copyPart(item));
+      for (const item of source.items) appendToUnindexedSet(set, copyPart(item));
     } else {
       const from = source instanceof NativeObject ? source.properties : source.entries;
       // EVIDENCE: invariant: `emptyCopy` pairs each object with a new object and each dict with a new dict.
