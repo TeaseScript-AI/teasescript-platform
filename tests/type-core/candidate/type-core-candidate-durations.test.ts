@@ -150,7 +150,7 @@ const PLACE_CASES: readonly Case[] = [
  * The sources today's checker plans and the route refuses (an under-offer), by source: an amount whose item is the
  * outside value a typed ingress's check stands for, where only what carries it shows a number to today's checker (an
  * element read, `otherwise`), or only a narrowing does (a read of `integer?` under a null test), which the core gives
- * no read (`amountAdmitted`; step 1½'s R10 form).
+ * no read (`amountAdmitted`, the form step 1½ gives a command's operands).
  */
 const UNDER_OFFERS: ReadonlySet<string> = new Set([
   ...UNITS.flatMap(([unit]) => [

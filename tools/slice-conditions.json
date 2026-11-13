@@ -1068,8 +1068,8 @@
     "scope": "storedLiteral",
     "expression": "typeof value === \"string\"",
     "mutant": "false",
-    "expected": "kill",
-    "witness": "let c = 1.5 calendar months"
+    "expected": "nobuild",
+    "witness": ""
   },
   {
     "id": "duration-literal-kind",
