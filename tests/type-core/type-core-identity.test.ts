@@ -1,3 +1,4 @@
+// pins: listed parentheses-unwrapping sites | line /^ {4}\d+,$|^ {2}"[^"]+": \[\d+, "/u
 // #2493: the type analysis reads a call of an identity function as its argument in parentheses (`identity-view.ts`).
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
