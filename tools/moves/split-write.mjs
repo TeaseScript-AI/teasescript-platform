@@ -37,11 +37,11 @@
 // the body; a file whose declaration reads one placed in another file that is not the setup module; a path outside the
 // repository; a target that exists at REV and is not OLD; a missing header. On success it removes OLD from the working
 // tree unless OLD is a target, and prints each file written with its line count. Prettier is not run: format the
-// written files afterwards. Beside ASSIGN it writes `renames.json`, OLD to every written file, `{ "renames": { OLD: [FILE,
-// …] } }`, the map `pure-move-check --renames` and `move-sweep --renames` read. Last it lists each string in OLD's
-// code outside an import or export declaration that starts with `./` or `../` and went to a file in another folder than
-// OLD's (`relative paths to read: N`, then each with its file and OLD line): a path relative to the file, which the
-// move may break and the tool cannot tell from data, for the builder to read.
+// written files afterwards. Beside ASSIGN it writes `renames.json`, OLD to every written file (`{ "renames": { OLD:
+// [FILE, …] } }`), the map `pure-move-check --renames` and `move-sweep --renames` read. Last it lists each string in
+// OLD's code outside an import or export declaration that starts with `./` or `../` and went to a file in another
+// folder than OLD's (`relative paths to read: N`, then each with its file and OLD line): a path relative to the file,
+// which the move may break and the tool cannot tell from data, for the builder to read.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";

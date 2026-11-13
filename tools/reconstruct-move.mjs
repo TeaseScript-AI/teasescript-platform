@@ -18,15 +18,15 @@
 // each starting at the left margin with nothing after it on its last line but a `//` comment. The first other line (a
 // shebang, a block comment, code) starts the body. A later top-level import declaration that starts and ends so is
 // header too, wherever it stands, on both sides: OLD's need not be taken, NEW's need no OLD line, and no run holds one
-// (a comment above it stays body). Import lines are not compared: their bindings are `pure-move-check`'s rule, a set over
-// all the change's files whose key holds no importing file, and the compiler's where a name is used. An import dropped
-// from a file that uses none of its names, or carried twice, is seen by neither: a reconstructed move is not a proof of
-// its imports. OLD's leading `//` lines (a pin mark, a description) are content:
-// each is carried byte for byte by exactly one NEW file, among the leading `//` lines it opens with, before its own and
-// in OLD's order (repeated texts are taken by the NEW files in their argument order); one dropped, changed, carried
-// twice or after the file's own fails. A NEW file's other leading `//` lines are its own (the split's description of
-// it). A line break inside a token (a string, a template literal's part, a comment) is the token's content; a blank
-// line is layout only when its line break lies outside every token. Then:
+// (a comment above it stays body). Import lines are not compared: their bindings are `pure-move-check`'s rule, a set
+// over all the change's files whose key holds no importing file, and the compiler's where a name is used. An import
+// dropped from a file that uses none of its names, or carried twice, is seen by neither: a reconstructed move is not a
+// proof of its imports. OLD's leading `//` lines (a pin mark, a description) are content: each is carried byte for byte
+// by exactly one NEW file, among the leading `//` lines it opens with, before its own and in OLD's order (repeated
+// texts are taken by the NEW files in their argument order); one dropped, changed, carried twice or after the file's
+// own fails. A NEW file's other leading `//` lines are its own (the split's description of it). A line break inside a
+// token (a string, a template literal's part, a comment) is the token's content; a blank line is layout only when its
+// line break lies outside every token. Then:
 //   - every line of a NEW body that is not a layout blank is a line of OLD's body, equal byte for byte, or, for a line
 //     outside tokens that declares at the left margin (`function`, `function*`, `async function`, `async function*`,
 //     `const`, `let`, `var`, `class`, `abstract class`, `interface`, `type`, `enum`, `declare`), that line with
@@ -56,21 +56,21 @@
 //
 // --edit NEW:A-B=OLD:C-D declares one changed passage: NEW's lines A to B are one unit that takes OLD's lines C to D
 // whole (file line numbers, 1-based, all in each file's body and none an import line of its header; the counts may
-// differ). Nothing in it is compared or discarded: both
-// sides are printed whole, so a reviewer reads each edit. The unit counts in the order check and in keeping a token's
-// lines together as a run does: an edit may take part of a token's lines (one line of a doc comment) only where the run
-// or edit before it and the one after it are its neighbours in NEW and in OLD alike. `OLD:` may be left out (given, it
-// is OLD's path as given; a path holding both `:` and `=` is spelled without it), and `-B` or `-D` for a range of one
-// line: `NEW:LINE=OLDLINE` is one line on each side. An edit that names no body line of a NEW file or of OLD, an empty
-// range, one that holds an import line of the header, or one that overlaps another edit on either side cannot run; a run never takes a declared line, and the runs
+// differ). Nothing in it is compared or discarded: both sides are printed whole, so a reviewer reads each edit. The
+// unit counts in the order check and in keeping a token's lines together as a run does: an edit may take part of a
+// token's lines (one line of a doc comment) only where the run or edit before it and the one after it are its
+// neighbours in NEW and in OLD alike. `OLD:` may be left out (given, it is OLD's path as given; a path holding both `:`
+// and `=` is spelled without it), and `-B` or `-D` for a range of one line: `NEW:LINE=OLDLINE` is one line on each
+// side. An edit that names no body line of a NEW file or of OLD, an empty range, one that holds an import line of the
+// header, or one that overlaps another edit on either side cannot run; a run never takes a declared line, and the runs
 // it cuts are matched as if its lines matched: a run that meets it at its OLD start, or starts after it, keeps to the
 // OLD lines around it.
 //
 // Its own controls, run whenever every line is accounted for: the check again on the NEW files with one line dropped,
 // with that line duplicated in place, and with it and the next line swapped, each of which must fail. The line is the
 // first, in the NEW files' order, of two adjacent lines of one run, neither a layout blank, whose texts OLD holds once
-// each (a repeated text could be matched elsewhere, and a swap with a layout blank changes nothing the check reads). A move with no such pair builds no control and
-// cannot be judged.
+// each (a repeated text could be matched elsewhere, and a swap with a layout blank changes nothing the check reads). A
+// move with no such pair builds no control and cannot be judged.
 //
 // Output: a summary line (`old body lines: N, taken: N; runs: N; export added: N; residue: N old, N new; edits: N`),
 // then each `export` added, each OLD header line carried, each edit, the residue with its verdict, each failure, and

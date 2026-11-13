@@ -34,9 +34,9 @@
 // needs one as `unadmitted: FILE:LINE (SIDE): TEXT`. Read each, and declare those you mean, each with the reason that
 // line changed. A generated file the change rewrites in place is declared whole instead, `{ "file", "whole": true,
 // "reason" }` (the reason naming the command that wrote it): its added and removed lines are not judged but listed, as
-// `not judged (declared whole): FILE (+N -M): reason`, and counted in the shape line, and its import bindings are still
-// compared. A whole entry for a file the change adds, deletes or renames, for a path of the `--renames` map, for none of
-// the change's files, or a second one for a file, cannot run: moved code is never declared away.
+// `not judged (declared whole): FILE (+N -M): reason`, and counted in the shape line, and its import bindings are
+// still compared. A whole entry for a file the change adds, deletes or renames, for a path of the `--renames` map, for
+// none of the change's files, or a second one for a file, cannot run: moved code is never declared away.
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
 // after, a binding being one imported or re-exported name with its target, its local or exported name and whether it is
