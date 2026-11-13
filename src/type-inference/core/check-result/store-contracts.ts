@@ -118,7 +118,8 @@ export class Contracts {
   /**
    * The check of a store: the destination's written type, else the complete type a stop below its path left it to check
    * whole (`Answers.requirement`, #1416), else its contract at the stored path: a complete one's, a lost one's part, none
-   * for an open one. It records the store's contract result in `results`.
+   * for an open one. It records the store's contract result in `results`, and throws `OutsideContract` for a value
+   * whose contract is deeper than the slice follows (`outsideStructure`).
    */
   public stored(store: Store): TypeCheckPlan | null {
     const declaration = declarationOf(this.answers, this.index, this.lets, store);
@@ -241,9 +242,9 @@ export class Contracts {
   /**
    * The type a typed load or `fromJson` reads its value as: the core's own answer at the call, level by level
    * (`#answerTask`); `null` where the call's kinds hold an unknown or no kind, or a load's key is computed. It throws
-   * `OutsideContract`, so the program leaves the slice, where a stop left a level of the answer open (#1767), where the
-   * plan cannot carry the answer exactly (`#answerTask`'s cases), and for a typed parse or load into a copy of a written
-   * type.
+   * `OutsideContract`, so the program leaves the slice, where a stop left a level of the answer open (#1767), also one
+   * that would otherwise give `null`, where the plan cannot carry the answer exactly (`#answerTask`'s cases), and for a
+   * typed parse or load into a copy of a written type.
    */
   public expected(call: CallExpression | LoadExpression): TypePlan | null {
     if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
@@ -316,7 +317,9 @@ export class Contracts {
 
   /**
    * The complete contract of the value a fallback stands in for at `steps` below it (ADR 0021 7.2): a `get`'s value,
-   * an `otherwise`'s left one without `null`, as `#provenanceOf` finds it; `null` for another owner.
+   * an `otherwise`'s left one without `null`, as `#provenanceOf` finds it; `null` for another owner. It throws
+   * `OutsideContract` where the plan cannot carry that contract: a join of different written types that no place admits,
+   * or a value whose structure the slice does not follow.
    */
   public direct(
     owner: BinaryExpression | CallExpression,
