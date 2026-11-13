@@ -169,8 +169,8 @@ export function coreCheckResult(
       const truth = literalTruth(statement.condition);
       paths.set(statement, [truth !== false, truth !== true]);
     } else if (statement.kind === "switchStatement") {
-      // every case, and no case: today's checker rules a way out only by the values the subject's type holds, which these
-      // ways do not read, so none is ruled out (more ways than today's, never fewer)
+      // every case, and no case: these ways do not read the values the subject's type holds, so none is ruled out
+      // (#2660)
       paths.set(statement, [...statement.cases.map(() => true), true]);
     } else if (statement.kind === "repeatStatement") {
       // P7: whether the body runs, and whether it may run not at all
