@@ -108,7 +108,7 @@ let useAnswerSubmission: (host: {
   readonly publish: (session: PlayerSession) => void;
   readonly unansweredMessage: () => string;
   readonly submitLock: (password: string) => void;
-  readonly nextFrame: () => Promise<void>;
+  readonly beforePost: () => Promise<void>;
 }) => AnswerSubmission;
 let useFormUpdates: (host: {
   readonly composer: ComposerState;
@@ -192,7 +192,7 @@ function browser(context: TestContext) {
   context.after(() => void (console.error = log));
 }
 
-/** The painted frame before an answer is sent, which a row may hold to act while the answer is only accepted. */
+/** The wait before an answer is sent (`beforePost`), which a row may hold to act while the answer is only accepted. */
 function frames() {
   let held = false;
   const waiting: (() => void)[] = [];
@@ -316,7 +316,7 @@ async function page(
       publish: (session) => player.update(session),
       unansweredMessage: () => "Nothing answers that.",
       submitLock: () => {},
-      nextFrame: frame.next,
+      beforePost: frame.next,
     });
     const forms: FormUpdates = useFormUpdates({
       composer,
@@ -450,7 +450,8 @@ for (const stage of ["accepted", "fenced", "posted"] as const)
         const record = submission.pending.value;
         assert.ok(record, "the answer is pending");
         assert.equal(composer.chatText.value, "", "the sent text left the chat");
-        if (stage === "accepted") await until(() => frame.waiting() === 1, "the frame", "step");
+        if (stage === "accepted")
+          await until(() => frame.waiting() === 1, "the wait before the post", "step");
         else await connection.held();
         assert.equal(record.stage, stage);
         const chatBefore = player.chat.value;
@@ -657,7 +658,7 @@ RERUN.rows(
 
 RERUN.rows(
   "the origin gone after the yield",
-  "a block that takes the screen during the answer's painted frame refuses it before it is sent: it is undone with the notice",
+  "a block that takes the screen while the answer waits to be sent refuses it before it is sent: it is undone with the notice",
   async (context, topology, end) => {
     const { player, composer, submission, connection, frame } = await page(
       context,
@@ -668,7 +669,7 @@ RERUN.rows(
     frame.hold();
     submission.send("input");
     const record = submission.pending.value!;
-    await until(() => frame.waiting() === 1, "the frame", "step");
+    await until(() => frame.waiting() === 1, "the wait before the post", "step");
     // The scene clock's wake runs the due block while the answer waits for its frame.
     const now = performance.now() + 61_000;
     context.mock.method(performance, "now", () => now);
