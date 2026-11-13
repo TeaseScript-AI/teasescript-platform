@@ -1,0 +1,90 @@
+import type { Expression, Statement } from "../../../../src/ast.js";
+import {
+  serializableEquals,
+  type SerializableRuntimeValue,
+} from "../../../../src/runtime/values/serializable-values.js";
+import { Underivable, unwrap, writtenType } from "./type-core-derived.js";
+import { fitsType } from "./type-core-derived-values.js";
+
+/*
+ * The derived oracle's loops and switches (#2488's step 2b), as `evaluate` runs a block: a `while` tests its condition
+ * before each round and ends when it is `false`; a `switch` runs the first case whose type test its subject passes, or
+ * one of whose values it equals (`==`, structural) or lies in (a range, `in`: a number from its start up to its end,
+ * the end too when inclusive), else its `default`; `break` ends the innermost loop, `continue` its round. Like
+ * `evaluate`, it reads the sources, never the plan. A condition that is not a boolean, and a `while` still running after
+ * `ROUNDS` rounds, are underivable.
+ */
+
+/** `break`, thrown from the statement to the innermost loop's round (`round`). */
+export class Break {}
+
+/** `continue`, thrown from the statement to the innermost loop's round (`round`). */
+export class Continue {}
+
+/** The rounds a `while` may run before the oracle calls it one it does not see end. */
+const ROUNDS = 10_000;
+
+/** Runs a block, as `evaluate` does. */
+type Run = (statements: readonly Statement[]) => void;
+/** An expression's value, as `evaluate` reads it. */
+type Read = (expression: Expression) => SerializableRuntimeValue;
+
+/** One round of a loop's body: whether the loop goes on (`false` after a `break`). */
+export function round(run: Run, body: readonly Statement[]): boolean {
+  try {
+    run(body);
+  } catch (signal) {
+    if (signal instanceof Break) return false;
+    if (signal instanceof Continue) return true;
+    throw signal;
+  }
+  return true;
+}
+
+/** A `while`: its condition before each round. */
+export function runWhile(
+  statement: Extract<Statement, { kind: "whileStatement" }>,
+  run: Run,
+  read: Read,
+): void {
+  for (let rounds = 0; ; rounds += 1) {
+    const condition = read(statement.condition);
+    if (typeof condition !== "boolean")
+      throw new Underivable("a `while` on a value that is not a boolean");
+    if (!condition) return;
+    if (rounds === ROUNDS) throw new Underivable("a `while` the oracle does not see end");
+    if (!round(run, statement.body.statements)) return;
+  }
+}
+
+/** A `switch`: its subject once, then the first case it matches, else its `default`. */
+export function runSwitch(
+  statement: Extract<Statement, { kind: "switchStatement" }>,
+  run: Run,
+  read: Read,
+): void {
+  const subject = read(statement.subject);
+  for (const switchCase of statement.cases) {
+    const test = switchCase.typeTest;
+    const matches =
+      test !== null
+        ? fitsType(subject, writtenType(test.type)) !== test.negated
+        : switchCase.values.some((value) => {
+            const held = read(value);
+            if (unwrap(value).kind !== "rangeExpression") return serializableEquals(subject, held);
+            return (
+              typeof subject === "number" &&
+              typeof held === "object" &&
+              held !== null &&
+              held.kind === "range" &&
+              subject >= held.start &&
+              (held.inclusive ? subject <= held.end : subject < held.end)
+            );
+          });
+    if (matches) {
+      run(switchCase.body.statements);
+      return;
+    }
+  }
+  if (statement.defaultBlock !== null) run(statement.defaultBlock.statements);
+}

@@ -24,6 +24,7 @@ import { isTextMethod, TEXT_METHODS } from "../../text-operations.js";
 import type { SourceSpan } from "../../source.js";
 import {
   askParts,
+  nestedStatements,
   sayOperands,
   showButtonOptions,
   statementExpressions,
@@ -146,9 +147,19 @@ interface SyntaxWalk {
   readonly loaded: Set<string>;
 }
 
+/** A refusal a row places among its children, reached where it stands in source order: a part that is no expression. */
+interface Refusal {
+  readonly kind: "refusal";
+  readonly span: SourceSpan;
+  readonly what: string;
+}
+
+/** A child of a node the walk visits after it. */
+type Child = Statement | Expression | Block | Refusal | null;
+
 /** What a modelled row does at a node: the children walked after it, in source order, or its refusal there. */
 type Visit =
-  | { readonly walk: readonly (Statement | Expression | Block | null)[] }
+  | { readonly walk: readonly Child[] }
   | { readonly refuse: { readonly span: SourceSpan; readonly what: string } };
 
 /**
@@ -179,9 +190,7 @@ type Disposition<K extends SyntaxKind> =
 
 const REFUSED = { row: "refused" } as const;
 /** The children to walk, as one list: never spread into arguments, whose count is bounded below a source's width. */
-const walk = (children: readonly (Statement | Expression | Block | null)[]): Visit => ({
-  walk: children,
-});
+const walk = (children: readonly Child[]): Visit => ({ walk: children });
 const refuse = (span: SourceSpan, what: string): Visit => ({ refuse: { span, what } });
 /** A construct of the slice under no condition of its own, with these children. */
 const modelled = <K extends SyntaxKind>(
@@ -597,12 +606,33 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
             : refuse(node.span, "this assignment"),
   },
   ifStatement: modelled((node) => [node.condition, node.thenBlock, node.elseBlock]),
-  switchStatement: REFUSED,
+  switchStatement: {
+    row: "modelled",
+    // (its subject, then each case's values or type test and its body, then the default, in source order; a type test's
+    // written type judged as a `let`'s, refused where it stands; a case that can never match is refused after the
+    // analysis, `backend.ts`)
+    visit: (node) =>
+      walk([
+        node.subject,
+        ...node.cases.flatMap((switchCase): Child[] => {
+          const written =
+            switchCase.typeTest === null ? null : annotationOutside(switchCase.typeTest.type);
+          return [
+            ...switchCase.values,
+            written !== null
+              ? { kind: "refusal", span: written.span, what: "this written type" }
+              : null,
+            switchCase.body,
+          ];
+        }),
+        node.defaultBlock,
+      ]),
+  },
   repeatStatement: modelled((node) => [node.count, node.body]),
   forStatement: modelled((node) => [node.iterable, node.body]),
-  whileStatement: REFUSED,
-  breakStatement: REFUSED,
-  continueStatement: REFUSED,
+  whileStatement: modelled((node) => [node.condition, node.body]),
+  breakStatement: modelled(),
+  continueStatement: modelled(),
   functionDeclaration: REFUSED,
   returnStatement: REFUSED,
   expressionStatement: {
@@ -737,8 +767,9 @@ export function outsideSyntax(
   const loaded = new Set<string>();
   for (const [file, { program }] of files.entries()) {
     const context: SyntaxWalk = { lets: letNames(program), globals, loaded };
-    const pending: (Statement | Expression)[] = [...program.statements].reverse();
+    const pending: (Statement | Expression | Refusal)[] = [...program.statements].reverse();
     for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+      if (node.kind === "refusal") return { file, span: node.span, what: node.what };
       // EVIDENCE: invariant: a node's row is the row of its own kind, so its `visit` takes that node.
       const row = DISPOSITIONS[node.kind] as Disposition<SyntaxKind>;
       if (row.row === "refused")
@@ -966,33 +997,20 @@ function describe(kind: string): string {
   return kind.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`);
 }
 
-/** The names a file's `let` statements and `for` loops declare, at any depth. */
+/**
+ * The names a file's `let` statements and `for` loops declare, at any depth of the blocks that run as part of a
+ * statement (`nestedStatements`: branches, loop bodies, cases).
+ */
 function letNames(program: Program): Set<string> {
   const names = new Set<string>();
-  const pending: (readonly Statement[])[] = [program.statements];
-  for (let list = pending.pop(); list !== undefined; list = pending.pop())
-    for (const statement of list)
-      switch (statement.kind) {
-        case "letStatement":
-          names.add(statement.name.name);
-          break;
-        case "ifStatement":
-          pending.push(statement.thenBlock.statements);
-          if (statement.elseBlock !== null)
-            pending.push(
-              statement.elseBlock.kind === "block"
-                ? statement.elseBlock.statements
-                : [statement.elseBlock],
-            );
-          break;
-        case "repeatStatement":
-          pending.push(statement.body.statements);
-          break;
-        case "forStatement":
-          names.add(statement.variable.name);
-          if (statement.valueVariable !== null) names.add(statement.valueVariable.name);
-          pending.push(statement.body.statements);
-          break;
-      }
+  const pending: Statement[] = [...program.statements];
+  for (let statement = pending.pop(); statement !== undefined; statement = pending.pop()) {
+    if (statement.kind === "letStatement") names.add(statement.name.name);
+    else if (statement.kind === "forStatement") {
+      names.add(statement.variable.name);
+      if (statement.valueVariable !== null) names.add(statement.valueVariable.name);
+    }
+    for (const nested of nestedStatements(statement)) pending.push(nested);
+  }
   return names;
 }
