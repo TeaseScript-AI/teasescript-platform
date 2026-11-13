@@ -14,9 +14,9 @@ import {
 } from "./helpers/runtime-oracle.js";
 
 // The runtime pipeline oracle (docs/TESTING.md "Runtime pipeline oracle", engine plan's F-oracle): a frozen build of
-// a pinned commit, in a root and a process of its own, that a candidate pipeline is compared with. It runs outside the
-// sharded suite (`npm run oracle:test`; CI's check-1). The provisional seal proves only that the oracle reproduces
-// itself and equals this checkout's pipeline; the semantic freeze is the later seal at the released seam.
+// a pinned commit, in a root and a process of its own, that a candidate pipeline is compared with. It runs on demand,
+// outside the sharded suite and every CI job (`npm run oracle:test`). Its seal proves only that the oracle reproduces
+// itself; this test also requires this checkout's pipeline to equal it.
 
 // EVIDENCE: validation: cases.json is the oracle's own case list, a JSON object whose `cases` have these fields.
 const cases = JSON.parse(
