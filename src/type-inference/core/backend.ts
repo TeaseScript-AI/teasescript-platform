@@ -12,7 +12,7 @@ import {
   OutsideContract,
   SLICE_DEPTH,
 } from "./check-result/slice-index.js";
-import type { ItemTag } from "./items.js";
+import { REASON, type Item, type ItemTag } from "./items.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 import {
   outsideSyntax,
@@ -195,8 +195,9 @@ const SHOWN: readonly string[] = ["string", "integer", "number", "boolean", "nul
 /**
  * The kinds a built-in field of a speaker declaration takes (V30 §37; the fields today's checker types by their own
  * rules, `BUILT_IN_SPEAKER_PROPERTIES`), and the runtime function that refuses a value of another kind (`check`), where
- * one does: a value that may be of a kind outside `takes` is outside the slice, and so is an unknown one where no
- * function is cited, since nothing would refuse it. A built-in field without an entry here is outside for every value.
+ * one does: a value that may be of a kind outside `takes` is outside the slice, and so is an unknown one unless it is of
+ * an external origin and a function is cited, which refuses it at run time if it does not fit. A built-in field without
+ * an entry here is outside for every value.
  */
 interface FieldKinds {
   readonly takes: readonly ItemTag[];
@@ -273,13 +274,17 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       for (const property of statement.properties) {
         if (!BUILT_IN_SPEAKER_PROPERTIES.has(property.name.name)) continue;
         const field = SPEAKER_FIELD_KINDS.get(property.name.name);
-        const takes =
-          field === undefined
-            ? []
-            : field.check === null
-              ? field.takes
-              : [...field.takes, "unknown"];
-        if (field === undefined || beyond(property.value, takes))
+        const items = answers.at(nodeOf(answers, index, property.value))?.items ?? [];
+        // (an unknown is admitted only of an external origin, beside the runtime check the row cites; any other, a stop's
+        // among them, D4 a′, is not shown to fit, and its check is the runtime's, which no plan carries)
+        const admitted = (item: Item): boolean =>
+          item.tag === "empty" ||
+          (field !== undefined &&
+            (field.takes.includes(item.tag) ||
+              (item.tag === "unknown" &&
+                field.check !== null &&
+                item.reasons === REASON.external)));
+        if (field === undefined || !items.every(admitted))
           return {
             file: index.fileOf(property.value),
             span: property.value.span,
