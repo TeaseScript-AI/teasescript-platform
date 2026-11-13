@@ -5,6 +5,7 @@ import type {
   FunctionDeclaration,
   FunctionParameter,
   Statement,
+  TypeAnnotation,
 } from "../../../../src/ast.js";
 import { nestedStatements } from "../../../../src/expression-children.js";
 import type { SerializableRuntimeValue } from "../../../../src/runtime/values/serializable-values.js";
@@ -12,7 +13,7 @@ import {
   type DerivedStore,
   type Syntax,
   Underivable,
-  site,
+  expressions,
   unwrap,
   writtenType,
 } from "./type-core-derived.js";
@@ -81,80 +82,144 @@ function parameterOf(
   return parameter;
 }
 
-/** The returns of a function's body, at any depth of its blocks. */
-function returnsOf(fn: FunctionDeclaration): Extract<Statement, { kind: "returnStatement" }>[] {
-  const found: Extract<Statement, { kind: "returnStatement" }>[] = [];
+/** The statements of a function's body, at any depth of its blocks. */
+function bodyOf(fn: FunctionDeclaration): Statement[] {
+  const found: Statement[] = [];
   const pending: Statement[] = [...fn.body.statements];
   for (let statement = pending.pop(); statement !== undefined; statement = pending.pop()) {
-    if (statement.kind === "returnStatement") found.push(statement);
+    found.push(statement);
     pending.push(...nestedStatements(statement));
   }
   return found;
 }
 
+/** The returns of a function's body, at any depth of its blocks. */
+function returnsOf(fn: FunctionDeclaration): Extract<Statement, { kind: "returnStatement" }>[] {
+  return bodyOf(fn).filter((statement) => statement.kind === "returnStatement");
+}
+
 /**
- * The store at `at` (`start:end` of a stored value) where it is a value stored into a function's place: an author call's
- * argument, a parameter's default or a returned value. Its type is the place's written type; such a value into an untyped
- * parameter or result is underivable. `null` where no function's place takes the value at `at`.
+ * The store of a check at `start:end` with the analysis' `target` where it lies in a value stored into a function's place:
+ * an author call's argument, a parameter's default or a returned value, the one of the place `target` names (the
+ * parameter's `<function>.<parameter>`, the result's `<function>.result`, or below it) whose value holds the site, the
+ * innermost. Its type is the place's written type, checked whole; such a value into an untyped parameter or result is
+ * underivable. `null` where no function's place holds the check.
  */
 export function transferStore(
-  at: string,
+  check: { readonly start: number; readonly end: number; readonly target: string },
   own: Syntax,
   expressions: readonly Expression[],
   project: readonly Syntax[] = [],
 ): DerivedStore | null {
   const functions = visibleFunctions(own.statements, project);
-  const store = (
-    node: { readonly span: Expression["span"] },
-    value: Expression,
-    target: string,
-    written: FunctionParameter["typeAnnotation"],
-  ): DerivedStore => {
-    if (written === null)
-      throw new Underivable(`${target}: a check into a parameter or result without a written type`);
-    return {
-      target,
-      so: node.span.start.offset,
-      eo: node.span.end.offset,
-      valueSo: unwrap(value).span.start.offset,
-      valueEo: unwrap(value).span.end.offset,
-      type: writtenType(written),
-    };
-  };
+  const candidates: {
+    readonly node: { readonly span: Expression["span"] };
+    readonly value: Expression;
+    readonly place: string;
+    readonly label: string;
+    readonly written: FunctionParameter["typeAnnotation"];
+  }[] = [];
+  const parameterPlace = (fn: FunctionDeclaration, parameter: FunctionParameter) => ({
+    place: `${fn.name.name}.${parameter.name.name}`,
+    label: `parameter '${parameter.name.name}' of '${fn.name.name}'`,
+    written: parameter.typeAnnotation,
+  });
   for (const expression of expressions) {
     if (expression.kind !== "callExpression") continue;
     const fn = calleeOf(expression, functions);
-    if (fn === undefined) continue;
-    for (const argument of expression.arguments)
-      if (site(unwrap(argument.value)) === at) {
-        const parameter = parameterOf(fn, expression, argument);
-        return store(
-          argument,
-          argument.value,
-          `parameter '${parameter.name.name}' of '${fn.name.name}'`,
-          parameter.typeAnnotation,
-        );
-      }
+    if (fn !== undefined)
+      for (const argument of expression.arguments)
+        candidates.push({
+          node: argument,
+          value: argument.value,
+          ...parameterPlace(fn, parameterOf(fn, expression, argument)),
+        });
   }
   for (const fn of functions.values()) {
     for (const parameter of fn.parameters)
-      if (parameter.defaultValue !== null && site(unwrap(parameter.defaultValue)) === at)
-        return store(
-          parameter,
-          parameter.defaultValue,
-          `parameter '${parameter.name.name}' of '${fn.name.name}'`,
-          parameter.typeAnnotation,
-        );
+      if (parameter.defaultValue !== null)
+        candidates.push({
+          node: parameter,
+          value: parameter.defaultValue,
+          ...parameterPlace(fn, parameter),
+        });
     for (const returned of returnsOf(fn))
-      if (returned.value !== null && site(unwrap(returned.value)) === at)
-        return store(
-          returned,
-          returned.value,
-          `the result of '${fn.name.name}'`,
-          fn.returnTypeAnnotation,
-        );
+      if (returned.value !== null)
+        candidates.push({
+          node: returned,
+          value: returned.value,
+          place: `${fn.name.name}.result`,
+          label: `the result of '${fn.name.name}'`,
+          written: fn.returnTypeAnnotation,
+        });
   }
-  return null;
+  const holding = candidates
+    .filter(
+      ({ value, place }) =>
+        (check.target === place || check.target.startsWith(`${place}.`)) &&
+        value.span.start.offset <= check.start &&
+        check.end <= value.span.end.offset,
+    )
+    .sort(
+      (a, b) =>
+        a.value.span.end.offset -
+        a.value.span.start.offset -
+        (b.value.span.end.offset - b.value.span.start.offset),
+    )[0];
+  if (holding === undefined) return null;
+  if (holding.written === null)
+    throw new Underivable(
+      `${holding.label}: a check into a parameter or result without a written type`,
+    );
+  return {
+    target: holding.label,
+    so: holding.node.span.start.offset,
+    eo: holding.node.span.end.offset,
+    valueSo: unwrap(holding.value).span.start.offset,
+    valueEo: unwrap(holding.value).span.end.offset,
+    type: writtenType(holding.written),
+  };
+}
+
+/**
+ * The values `statements` store into a place of one of their functions with a written type, with that type: each
+ * argument of a call naming the function, each default, each returned value into a written result, and each assignment
+ * of a parameter in its function's body. Only the functions among `statements` (a file's, as `allStatements` lists
+ * them): a `global function` of another file is not one.
+ */
+export function functionLandings(
+  statements: readonly Statement[],
+): { readonly value: Expression; readonly written: TypeAnnotation }[] {
+  const found: { value: Expression; written: TypeAnnotation }[] = [];
+  const functions = visibleFunctions(statements);
+  for (const fn of functions.values()) {
+    for (const parameter of fn.parameters)
+      if (parameter.typeAnnotation !== null && parameter.defaultValue !== null)
+        found.push({ value: parameter.defaultValue, written: parameter.typeAnnotation });
+    if (fn.returnTypeAnnotation !== null)
+      for (const returned of returnsOf(fn))
+        if (returned.value !== null)
+          found.push({ value: returned.value, written: fn.returnTypeAnnotation });
+    for (const statement of bodyOf(fn))
+      if (statement.kind === "assignmentStatement" && statement.target.kind === "identifier") {
+        const name = statement.target.name;
+        const written = fn.parameters.find(
+          (parameter) => parameter.name.name === name,
+        )?.typeAnnotation;
+        if (written !== undefined && written !== null)
+          found.push({ value: statement.value, written });
+      }
+  }
+  for (const expression of expressions(statements)) {
+    if (expression.kind !== "callExpression") continue;
+    const fn = calleeOf(expression, functions);
+    if (fn !== undefined)
+      for (const argument of expression.arguments) {
+        const written = parameterOf(fn, expression, argument).typeAnnotation;
+        if (written !== null) found.push({ value: argument.value, written });
+      }
+  }
+  return found;
 }
 
 /**
@@ -165,11 +230,7 @@ export function storedPlaceName(statement: Statement, name: string, own: Syntax)
   for (const fn of own.statements) {
     if (fn.kind !== "functionDeclaration") continue;
     if (!fn.parameters.some((parameter) => parameter.name.name === name)) continue;
-    const pending: Statement[] = [...fn.body.statements];
-    for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
-      if (at === statement) return `${fn.name.name}.${name}`;
-      pending.push(...nestedStatements(at));
-    }
+    if (bodyOf(fn).includes(statement)) return `${fn.name.name}.${name}`;
   }
   return name;
 }
@@ -238,14 +299,12 @@ export function functionCalls(context: CallContext): FunctionCalls {
       if (depth >= DEPTH) throw new Underivable(`calls nested deeper than ${DEPTH}`);
       // the call's own names: its parameters and every variable its body declares, the caller's given back after it
       const own = new Set(fn.parameters.map((parameter) => parameter.name.name));
-      const pending: Statement[] = [...fn.body.statements];
-      for (let statement = pending.pop(); statement !== undefined; statement = pending.pop()) {
+      for (const statement of bodyOf(fn)) {
         if (statement.kind === "letStatement") own.add(statement.name.name);
         if (statement.kind === "forStatement") {
           own.add(statement.variable.name);
           if (statement.valueVariable !== null) own.add(statement.valueVariable.name);
         }
-        pending.push(...nestedStatements(statement));
       }
       const caller = new Map([...own].map((name) => [name, env.get(name)]));
       for (const name of own) env.delete(name);
