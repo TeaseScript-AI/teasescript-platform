@@ -632,3 +632,110 @@ test("a move that passes runs its own controls: a dropped, a duplicated and a sw
   assert.equal(repeated.status, 2, repeated.out);
   assert.match(repeated.out, /^control: none built/mu);
 });
+
+/** A rewrap whose closing `);` the next declaration's closing line repeats (#2600's `LITERAL_KINDS`). */
+const CLOSING_OLD = [
+  'const LITERALS = new Set(["a"]);',
+  "",
+  "const LITERAL_KINDS: readonly KindOfTheValue[] = KIND_NAMES_OF_THE_VALUE.filter((kind) => LITERALS.has(kind));",
+  "const WRITTEN_KINDS = KIND_NAMES_OF_THE_VALUE.filter(",
+  "  (kind) => !LITERALS.has(kind),",
+  ");",
+  "",
+  "export const kept = LITERAL_KINDS.length + WRITTEN_KINDS.length;",
+  "",
+].join("\n");
+const CLOSING_PART = [
+  "// The kinds.",
+  "",
+  'export const LITERALS = new Set(["a"]);',
+  "",
+  "export const LITERAL_KINDS: readonly KindOfTheValue[] = KIND_NAMES_OF_THE_VALUE.filter((kind) =>",
+  "  LITERALS.has(kind),",
+  ");",
+  "export const WRITTEN_KINDS = KIND_NAMES_OF_THE_VALUE.filter(",
+  "  (kind) => !LITERALS.has(kind),",
+  ");",
+  "",
+].join("\n");
+const CLOSING_KEPT =
+  'import { LITERAL_KINDS, WRITTEN_KINDS } from "./part.js";\n\nexport const kept = LITERAL_KINDS.length + WRITTEN_KINDS.length;\n';
+
+/** A rewrapped signature whose `): boolean {` and a parameter a later function repeats (#2603's `passed`). */
+const SIGNATURE_OLD = [
+  "function passed(plan: InstructionPlanOfTheTree, ran: RunOfTheTree, span: SpanOfTheSource): boolean {",
+  "  return plan === ran;",
+  "}",
+  "",
+  "function later(",
+  "  plan: InstructionPlanOfTheTree,",
+  "): boolean {",
+  "  return passed(plan, plan, plan);",
+  "}",
+  "",
+  "export const kept = later;",
+  "",
+].join("\n");
+const SIGNATURE_PART = [
+  "// The checks.",
+  "",
+  "export function passed(",
+  "  plan: InstructionPlanOfTheTree,",
+  "  ran: RunOfTheTree,",
+  "  span: SpanOfTheSource,",
+  "): boolean {",
+  "  return plan === ran;",
+  "}",
+  "",
+  "export function later(",
+  "  plan: InstructionPlanOfTheTree,",
+  "): boolean {",
+  "  return passed(plan, plan, plan);",
+  "}",
+  "",
+].join("\n");
+const SIGNATURE_KEPT = 'import { later } from "./part.js";\n\nexport const kept = later;\n';
+
+test("a rewrap whose closing line another old line repeats is admitted without --edit, with its controls (#2583)", (t) => {
+  for (const [what, old, kept, part, closing] of [
+    ["`);`", CLOSING_OLD, CLOSING_KEPT, CLOSING_PART, 7],
+    ["`): boolean {`", SIGNATURE_OLD, SIGNATURE_KEPT, SIGNATURE_PART, 7],
+  ]) {
+    const { status, out } = repository(t, { "src/big.ts": kept, "src/part.ts": part }, old).run();
+    assert.equal(status, 0, `${what}\n${out}`);
+    assert.match(out, /residue: 1 old, \d+ new; edits: 0$/mu, what);
+    assert.match(out, new RegExp(`^ {2}new src/part\\.ts:${closing}: \\)`, "mu"), what);
+    for (const name of ["dropped", "duplicated", "swapped"])
+      assert.match(out, new RegExp(`^control: ${name} src/big\\.ts:\\d+, failed$`, "mu"), what);
+  }
+});
+
+test("a held closing line admits nothing else: a token changed in the rewrap, or the other declaration's closing line edited, still fails (#2583)", (t) => {
+  const cases = {
+    "a token changed": [
+      CLOSING_OLD,
+      CLOSING_KEPT,
+      CLOSING_PART.replace("  LITERALS.has(kind),", "  LITERALS.has(kinds),"),
+    ],
+    "the next declaration's `);` edited": [
+      CLOSING_OLD,
+      CLOSING_KEPT,
+      replaced(CLOSING_PART, 10, ").slice();"),
+    ],
+    "a parameter changed": [
+      SIGNATURE_OLD,
+      SIGNATURE_KEPT,
+      SIGNATURE_PART.replace("  ran: RunOfTheTree,", "  ran: RunOfTheTrees,"),
+    ],
+    "the later function's `): boolean {` edited": [
+      SIGNATURE_OLD,
+      SIGNATURE_KEPT,
+      replaced(SIGNATURE_PART, 13, "): number {"),
+    ],
+  };
+  for (const [name, [old, kept, part]] of Object.entries(cases)) {
+    const { status, out } = repository(t, { "src/big.ts": kept, "src/part.ts": part }, old).run();
+    assert.equal(status, 1, `${name}\n${out}`);
+    assert.match(out, /^failure: /mu, name);
+  }
+});

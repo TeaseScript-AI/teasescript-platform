@@ -44,8 +44,11 @@
 // as TypeScript scans them: comments and literals by their exact text, whitespace between tokens dropped, and a
 // trailing comma (with comments not counted, one before a closing bracket and after an element; never an elision,
 // `tokensOf`) dropped. A group holding a template literal or a `/` is no rewrap (a scan without context cannot tell a
-// regular expression from a division): such a move is declared with --edit. Last, within each NEW file its runs,
-// declared edits and admitted groups follow OLD's order. Anything else fails.
+// regular expression from a division): such a move is declared with --edit. A rewrap's closing line that another OLD
+// line repeats (`);`, `): boolean {`) is first taken by a run of its own: a one-line run right after a group that is no
+// rewrap, or between two of its lines, is held out of the runs and the check run again, and stays held only while its
+// group is then admitted (the OLD line it took must still be taken by another unit). Last, within each NEW file its
+// runs, declared edits and admitted groups follow OLD's order. Anything else fails.
 //
 // This check does not prove scope or brace ownership; compilation rejects malformed or ill-typed results, while
 // behavior requires separate tests or review.
@@ -375,7 +378,7 @@ function placementFailures(oldShape, start, taken, unitsOf, places) {
  * lines equal to untaken OLD lines from where it starts (`taken`, `place` and `places` shared with the other units).
  * Returns the number of runs, the lines that gained `export`, and the lines no OLD line matched.
  */
-function matchRuns({ oldShape, start, taken, places, place }, file, { shape, unit, first }) {
+function matchRuns({ oldShape, start, taken, places, place }, file, { shape, unit, first, held }) {
   const old = oldShape.lines;
   const exported = [];
   const unmatched = [];
@@ -402,6 +405,7 @@ function matchRuns({ oldShape, start, taken, places, place }, file, { shape, uni
       o + n < old.length &&
       !taken.has(o + n) &&
       !unit.has(j + n) &&
+      !held.has(j + n) &&
       fits(o + n, j + n) &&
       !(n > 0 && layoutBlank(shape, j + n - 1) && !/^(?:$|\s)/u.test(lines[j + n]))
     )
@@ -416,6 +420,11 @@ function matchRuns({ oldShape, start, taken, places, place }, file, { shape, uni
   };
   for (let k = first; k < lines.length;) {
     if (layoutBlank(shape, k) || unit.has(k) || shape.imports.has(k)) {
+      k += 1;
+      continue;
+    }
+    if (held.has(k)) {
+      unmatched.push({ file, line: k + 1, text: lines[k] });
       k += 1;
       continue;
     }
@@ -460,8 +469,52 @@ function matchRuns({ oldShape, start, taken, places, place }, file, { shape, uni
  * from, to, oldFrom, oldTo }`: NEW file `file`'s lines `from` to `to` take OLD's lines `oldFrom` to `oldTo`, 1-based and
  * inclusive). Returns the counts, the added exports, the residue and the failures; or `{ refused }`, a message, when an
  * edit names no body lines or overlaps another.
+ *
+ * A one-line run next to a group of left-over NEW lines that is no rewrap (right after it, or between two of its lines)
+ * may have taken the OLD line its group's rewrap ends with (a closing `);` or `): boolean {` that another OLD line
+ * repeats): such runs are held out of the matching and the check runs again, and a held line stays held only while
+ * its group is then admitted as a rewrap. A held line is a left-over line like any other, admitted only by the rewrap
+ * rule, and the OLD line its run took must still be taken by another unit.
  */
 export function reconstruct(oldFile, files, edits = []) {
+  let result = attempt(oldFile, files, edits, new Map());
+  if (result.refused !== undefined) return result;
+  const key = (file, line) => `${file}:${line}`;
+  let held = new Set();
+  for (const { group, run } of result.residue) {
+    if (run !== null) continue;
+    const [low, high] = [group.lines[0].line, group.lines.at(-1).line];
+    for (const unit of result.runs)
+      if (
+        unit.file === group.file &&
+        unit.end === unit.line - 1 &&
+        unit.line > low &&
+        unit.line <= high + 1
+      )
+        held.add(key(unit.file, unit.line));
+  }
+  while (held.size > 0) {
+    const byFile = new Map(files.map(({ file }) => [file, new Set()]));
+    for (const entry of held) {
+      const at = entry.lastIndexOf(":");
+      byFile.get(entry.slice(0, at)).add(Number(entry.slice(at + 1)) - 1);
+    }
+    result = attempt(oldFile, files, edits, byFile);
+    const rewrapped = new Set(
+      result.residue
+        .filter(({ run }) => run !== null)
+        .flatMap(({ group }) => group.lines.map((entry) => key(group.file, entry.line))),
+    );
+    const kept = new Set([...held].filter((entry) => rewrapped.has(entry)));
+    if (kept.size === held.size) break;
+    held = kept;
+    if (held.size === 0) result = attempt(oldFile, files, edits, new Map());
+  }
+  return result;
+}
+
+/** One reconstruction, with the NEW lines `held` (per file, 0-based) held out of the runs. */
+function attempt(oldFile, files, edits, held) {
   const oldShape = structureOf(oldFile.file, oldFile.text);
   const old = oldShape.lines;
   const start = bodyStart(oldShape);
@@ -487,7 +540,7 @@ export function reconstruct(oldFile, files, edits = []) {
     const shape = structureOf(file, text);
     const first = bodyStart(shape);
     shape.imports = importLines(shape);
-    unitsOf.set(file, { shape, unit: new Map(), first });
+    unitsOf.set(file, { shape, unit: new Map(), first, held: held.get(file) ?? new Set() });
   }
   const header = carriedHeader(old, unitsOf);
   failures.push(...header.failures);
