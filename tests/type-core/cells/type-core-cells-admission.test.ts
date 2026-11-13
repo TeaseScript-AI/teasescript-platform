@@ -427,7 +427,7 @@ const programs: readonly (
       `copy-type fallback [integer] boundary @${at("hostValue")}`,
     ],
   ],
-  // G3 2c: the earliest decider read through the carriers' transfers (`admission/transfers.ts`)
+  // G3 2c: the earliest decider read through the carriers' transfers (`admission/transfers/transferred-decider.ts`)
   [
     "nested selections' element of another type",
     'let seed = "s"\nlet xs = [[[[seed, "o"][0], "o"][0], "o"][0], 1]\nexit',
