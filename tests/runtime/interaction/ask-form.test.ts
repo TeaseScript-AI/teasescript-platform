@@ -876,9 +876,15 @@ test("a stored answer event keeps a form UI only as the engine shows one", () =>
   assert.equal(interpreterEventProblem(JSON.parse(JSON.stringify(completion))), null);
   for (const [name, change] of [
     ["a blank accessible name", { accessibleName: { kind: "text", text: " " } }],
-    ["another kind's default name", { accessibleName: { kind: "localizedDefault", key: "password" } }],
+    [
+      "another kind's default name",
+      { accessibleName: { kind: "localizedDefault", key: "password" } },
+    ],
     ["a name without its text", { accessibleName: { kind: "text" } }],
-    ["texts over the interaction's limit", { hint: "x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1) }],
+    [
+      "texts over the interaction's limit",
+      { hint: "x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1) },
+    ],
   ] as const) {
     const stored = JSON.parse(JSON.stringify(completion));
     Object.assign(stored.settlement.ui, change);
