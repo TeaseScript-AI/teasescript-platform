@@ -744,15 +744,23 @@ export class Consumers {
     // before the capture, which can stop, so a settled pass always has its seed and a stop's gate its obligations: an
     // absent seed is never read as an empty one)
     const storeSites: { site: SourceSite; stopped: boolean }[] = [];
+    for (const d of this.#storeWarnings())
+      storeSites.push({ site: d.site, stopped: d.provenance.context === "budget" });
+    this.#storeSites = storeSites;
+    this.#captureOwedContracts();
+  }
+
+  /** The store warnings among the diagnostics so far: each runtime-check of kind `written-target`, rule `store`. */
+  #storeWarnings(): Extract<CoreDiagnostic, { readonly class: "warning-runtime-check" }>[] {
+    const found: Extract<CoreDiagnostic, { readonly class: "warning-runtime-check" }>[] = [];
     for (const d of this.diagnostics)
       if (
         d.class === "warning-runtime-check" &&
         d.kind === "written-target" &&
         d.rule.rule === "store"
       )
-        storeSites.push({ site: d.site, stopped: d.provenance.context === "budget" });
-    this.#storeSites = storeSites;
-    this.#captureOwedContracts();
+        found.push(d);
+    return found;
   }
 
   /** The receiving seed's store sites (`#capture`); `null` in a pass whose admission did not settle. */
@@ -788,14 +796,8 @@ export class Consumers {
     const sites = new Map<string, SourceSite>();
     // (a stopped decision's own marks, the reason `budget`, stand for their stores' checks: the stop owes them, and a
     // stopped key decides nothing to capture)
-    for (const d of this.diagnostics)
-      if (
-        d.class === "warning-runtime-check" &&
-        d.kind === "written-target" &&
-        d.rule.rule === "store" &&
-        d.provenance.context !== "budget"
-      )
-        sites.set(siteKey(d.site), d.site);
+    for (const d of this.#storeWarnings())
+      if (d.provenance.context !== "budget") sites.set(siteKey(d.site), d.site);
     for (const site of this.#ingressSites) sites.set(siteKey(site), site);
     // (a program outside the candidate slice's syntax has no store check to keep: the capture makes no request and
     // charges nothing there, the analysis exactly main's; the syntax walk is the candidate route's own, uncharged as the
