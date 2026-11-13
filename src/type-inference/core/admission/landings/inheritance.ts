@@ -30,7 +30,12 @@ import type {
 } from "../model.js";
 import { levelsOf } from "../permitted.js";
 
-// A4 through copies' landings: where copies land in each place, the copy forest places answer through, cycles of copies.
+// Landings through copies: where copies of written types land in each place and the copies into it, cycles of copies
+// (`inheritance`); the copy forest places answer through (`copyForest`, `nearest`); the paths copies land at or below a
+// prefix (`landedBelow`, its walk `walkLandings`, the walk's `LandingTape` and the listings it keeps); a place's copies
+// along a path and their next-step index (`copiesAlong`, `nextStepCopies`, #1948); and the walk's test counters
+// (`withLandingOps`, `withLandingComparison`, whose state the three module-level `let`s hold). `inheritance` lists a
+// cycle's landings with `landedBelow`, whose walk asks `inheritance` again: one cycle of calls.
 
 const NO_PATHS: ByPath<never> = { under: new Map(), at: new Map() };
 
@@ -74,7 +79,7 @@ function cyclesOf(
   const low = new Map<PlaceId, number>();
   const stack: PlaceId[] = [];
   const onStack = new Set<PlaceId>();
-  // (each place's copies' places, once: Sol's round 4 B2)
+  // (each place's copies' places, once)
   const adjacency = new Map<PlaceId, readonly PlaceId[]>();
   for (const [place, copies] of edges) {
     work.charge("indexSteps", copies.length);
@@ -145,7 +150,7 @@ function landsThrough(admission: Admission, place: PlaceId, prefix: readonly str
     if (own?.has(text) === true) return place;
     lists.push(forest.storing.get(text));
   }
-  // (a key of its own at or below the prefix, from its keys' prefixes: never a scan of its keys, Astra's review B2)
+  // (a key of its own at or below the prefix, from its keys' prefixes: never a scan of its keys)
   const text = keptText(admission.work, prefix);
   admission.pass.program.work.charge("indexSteps");
   if (forest.under.get(place)?.has(text) === true) return place;
@@ -309,7 +314,7 @@ export function copyForest(admission: Admission): CopyForest {
   return admission.forest;
 }
 
-/** A4 through copies' landings (`Inheritance`), once per pass. */
+/** Where copies of written types land, through copies' landings (`Inheritance`), once per pass. */
 export function inheritance(admission: Admission): Inheritance {
   if (admission.inherits !== null) return admission.inherits;
   const work = admission.pass.program.work;
@@ -360,7 +365,7 @@ export function inheritance(admission: Admission): Inheritance {
   const fed = new Map<PlaceId, PlaceId>();
   const wholes = new Map<PlaceId, WholeCycle>();
   admission.inherits = { seeds, into, owned, cycleOf, cycles, fed, order, wholes };
-  // (whether a live store makes each copy, Astra's B2)
+  // (whether a live store makes each copy)
   for (const copy of admission.a4Inherits) {
     const id = keptParts(admission.work, copy.place, copy.path, copy.from, copy.strip);
     if (
@@ -372,7 +377,7 @@ export function inheritance(admission: Admission): Inheritance {
   }
   // a cycle's landed paths, sources before it: a copy from outside it brings its own path and every path landed below
   // its strip, as base; within it a copy brings its source's base paths only, kept base by a whole copy alone, so no
-  // path grows by going round (Sol's round 4 B1)
+  // path grows by going round
   for (const component of order) {
     const cycle = cycleOf.get(component[0]!);
     if (cycle === undefined) continue;
@@ -386,8 +391,7 @@ export function inheritance(admission: Admission): Inheritance {
     };
     // (a cycle of whole copies: each member's base paths reach every other's whole, so its members land one set, their
     // own, their copies' from outside, and the root each whole copy lands)
-    // (fed by whole copies of one place outside it, nothing written of its own: that place's landings, asked of it,
-    // Sol's review r2's independent cycles)
+    // (fed by whole copies of one place outside it, nothing written of its own: that place's landings, asked of it)
     if (wholeCycle(admission, component) && component.every((member) => !seeds.has(member))) {
       const feeding = new Set<PlaceId>();
       let whole = true;
@@ -404,7 +408,7 @@ export function inheritance(admission: Admission): Inheritance {
         continue;
       }
     }
-    // (a cycle of whole copies lands its copies from outside by reference, never listed: Astra's B3)
+    // (a cycle of whole copies lands its copies from outside by reference, never listed)
     if (wholeCycle(admission, component)) {
       const copies: InheritedCopy[] = [];
       const distinct = new Set<string>();
@@ -639,7 +643,7 @@ let comparison:
   | null = null;
 
 /**
- * Test-only: runs `callback` with every `landedBelow` call also walked without the pass's listings (as `main` walks),
+ * Test-only: runs `callback` with every `landedBelow` call also walked without the pass's listings,
  * that walk's work counted apart, and both results given to `onCall`: the oracle that a taken listing gives the paths,
  * in their order, that the walk finds.
  */
@@ -907,7 +911,7 @@ function writtenTask(
  * it brings is one range of the call's tape: a record (the call's root, and each longer prefix of a place with
  * listings) keeps its range, its own paths' and each child's, as a listing, where nothing in it was skipped as walked
  * before it opened (`least` against `mark`, both task orders). A task with a listing takes it: its own range, then each
- * child neither walked nor covered, its range; each child it brings is then covered at the taking task's order (R3): a
+ * child neither walked nor covered, its range; each child it brings is then covered at the taking task's order: a
  * later step skips it as it skips a walked task, at that order, so a cover from before a record opened breaks it.
  */
 function walkLandings(
@@ -963,7 +967,7 @@ function walkLandings(
   const put = (steps: readonly string[], text: string): void => {
     const index = out.get(text);
     if (index === undefined) out.set(text, tape.bring(steps, text));
-    // (a path whose last event lies before the innermost record is that record's too: R2)
+    // (a path whose last event lies before the innermost record is that record's too)
     else if (tape.last[index]! < records.at(-1)!.start.events) tape.repeat(index);
   };
   // whether a task is to be skipped here: walked in this call, or brought by a take (its paths are all brought), a
@@ -1030,7 +1034,7 @@ function walkLandings(
       work.charge("indexSteps");
       add(path);
     };
-    // (a place without listings walks as before: no trie is looked at, #1670's chain)
+    // (a place without listings walks with no trie looked at, #1670's chain)
     const node = listed && task !== root ? trieOf(admission, task.place) : undefined;
     const known = node === undefined ? null : lookup(work, node, task.below);
     if (known !== null) {
@@ -1045,7 +1049,7 @@ function walkLandings(
       continue;
     }
     // (a cycle's landed paths, and the copies at, above or below the prefix, from indexes by path: never every one
-    // for each prefix, Astra's review r2 B2)
+    // for each prefix)
     if (cycleOf.has(task.place) && !fed.has(task.place) && !wholes.has(task.place)) {
       const landing = cycleLanding(admission, task.place);
       for (const path of landing.under.get(keptText(admission.work, task.below)) ?? []) emit(path);
@@ -1209,7 +1213,7 @@ export function copiesAlong(
  * their strips at `step` (`sourceSteps`), and each one whose source's landings are not proved; in the copies' order.
  * A copy left out has a source that lands nothing at its translated path, so `landedOwn`'s frame would take it to a
  * `false`: no answer changes, only the copies tried. The bucket's first scan, and each later one until its scans reach
- * the index's size (its copies and their sources' seeds), takes every copy, as before; the index lasts its receiving
+ * the index's size (its copies and their sources' seeds), takes every copy; the index lasts its receiving
  * domain's admission (`ReceivingDomain.reset`).
  */
 function nextStepCopies(

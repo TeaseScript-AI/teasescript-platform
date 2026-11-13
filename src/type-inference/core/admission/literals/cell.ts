@@ -32,10 +32,11 @@ export interface Descriptor {
 }
 
 /**
- * A cell's answer at a path (B1): `fit`, the kinds every element fits (rule 1 or 2), strict where a declared element
- * has exactly them (rule 5), its term then the earliest such element's; `conflict`, none fits all (rule 3), the
- * earliest element's type counting, and each later element that does not fit it a misfit, by value (`misfits`);
- * `none`, no element decides; `stopped`, an element's value a stop left unknown, so the cell is undecided (#2289).
+ * A cell's answer at a path (`fitOf`'s rules): `fit`, the kinds every element fits (rule 1 or 2), strict where a
+ * declared element has exactly them (rule 5), its term then the earliest such element's; `conflict`, none fits all
+ * (rule 3), the earliest element's type counting, and each later element that does not fit it a misfit, by value
+ * (`misfits`); `none`, no element decides; `stopped`, an element's value a stop left unknown, so the cell is undecided
+ * (#2289).
  */
 export type CellAnswer =
   | {
@@ -201,8 +202,9 @@ function* buildIndex(admission: Admission, body: Body): Reads<NonNullable<Body["
       };
       for (const map of [view.written, view.links])
         for (const text of map.keys()) add(reach, mount(text), scope);
-      // (F2 across the body's elements: a value stop reading a source identity at a snapshot, through the same
-      // operations, that an earlier element's view holds at the same path stands for nothing new, #2289)
+      // (one stop per source identity across the body's elements: a value stop reading a source identity at a snapshot,
+      // through the same operations, that an earlier element's view holds at the same path stands for nothing new,
+      // #2289)
       for (const [text, stops] of view.values) {
         const at = mount(text);
         let fresh = !sharing() || at === "";
@@ -239,7 +241,7 @@ function* buildIndex(admission: Admission, body: Body): Reads<NonNullable<Body["
 }
 
 /**
- * #2289: a literal's cell in its body at the steps below the literal (`rel`; whole, the cell's step first): B1
+ * #2289: a literal's cell in its body at the steps below the literal (`rel`; whole, the cell's step first): `fitOf`
  * over the elements with a stop or link on the path, each element's descriptor its own view's scan (`scanView`) at the
  * rest below it, so a nested literal in it answers by its own body's cell. Answers are shared only as `memoCell` admits.
  */
@@ -578,7 +580,7 @@ function fitsIn(tag: ItemTag, set: readonly ItemTag[]): boolean {
 
 /**
  * Rule 3: whether kinds do not fit the earliest element's type: a declared one's by its kinds (a whole number fits a
- * number, a fraction no whole number), an inferred one's by their family, as a later store widens it (rule 1.2).
+ * number, a fraction no whole number), an inferred one's by their family, as a later store widens it (ADR 0021 1.2).
  */
 export function misfits(earliest: Descriptor, tags: readonly ItemTag[]): boolean {
   const declared = earliest.term !== null;
@@ -595,10 +597,10 @@ function sameKinds(a: readonly ItemTag[], b: readonly ItemTag[]): boolean {
 }
 
 /**
- * B1 over the descriptors of one cell at one path, order-free but for the conflict's earliest and the sites: rule 1
- * (whole numbers and numbers alone are numbers where any is one), rule 2 (the kinds every element fits), rule 3
- * (none), rule 4 (`null` makes optional), rule 5 (strict where a declared element has exactly the kinds). Over the
- * distinct kind sets, so its cost is theirs, not the elements' square.
+ * The cell rule (#2289) over the descriptors of one cell at one path, order-free but for the conflict's earliest and
+ * the sites: rule 1 (whole numbers and numbers alone are numbers where any is one), rule 2 (the kinds every element
+ * fits), rule 3 (none), rule 4 (`null` makes optional), rule 5 (strict where a declared element has exactly the kinds).
+ * Over the distinct kind sets, so its cost is theirs, not the elements' square.
  */
 export function fitOf(admission: Admission, descriptors: readonly Descriptor[]): CellAnswer {
   const work = admission.pass.program.work;

@@ -22,11 +22,11 @@ import { permittedAt } from "./permitted.js";
 import { writtenSourceRead } from "./walk.js";
 import type { Reads } from "../inherited/reads.js";
 
-// Alias classes (S6-CARRIERS §4.1): the class of a whole store or an add, by its stable source path and chain end.
+// Alias classes: the class of a whole store or an add, by its stable source path and chain end.
 
 /**
- * For the tests: while `withoutChains` runs, no chain of copies is resolved (§4.1), so a class is a read's own; the
- * published records, their F28 writers included, are the same either way (the oracle sets a link's writer aside).
+ * For the tests: while `withoutChains` runs, no chain of copies is resolved, so a class is a read's own; the published
+ * records, their writers included, are the same either way (the oracle sets a link's writer aside).
  */
 let chainsOff = false;
 
@@ -50,7 +50,7 @@ export function addRest(d: Definition, rest: Rest): Rest {
 
 /** The key an alias's read stands for at `rest` below its store; `null` beside or above its cell, where no read is. */
 export function aliasKeyAt(contract: Contract, alias: Alias, asked: Rest): Key | null {
-  // (a cursor's span read one step at a time below the alias's cell, its key a cursor's: G3 stage 1)
+  // (a cursor's span read one step at a time below the alias's cell, its key a cursor's)
   const rest = restRef(contract, asked);
   if (rest.length < alias.at.length || alias.at.some((step, index) => rest.at(index) !== step))
     return null;
@@ -58,7 +58,7 @@ export function aliasKeyAt(contract: Contract, alias: Alias, asked: Rest): Key |
 }
 
 /**
- * §8, S6-CARRIERS §4.1, §4.5: a key's whole stores, or its adds, by alias class (`aliasKey`), once per pass, in the
+ * A key's whole stores, or its adds, by alias class (`aliasKey`), once per pass, in the
  * key's own list (`wholeOf`): their earliest as the representative, the later ones its members (`members`); a scan
  * or a check reads the representative, and a member only where it owes something.
  */
@@ -86,11 +86,11 @@ export function* grouped(admission: Admission, list: readonly Definition[]): Rea
 }
 
 /**
- * S6-CARRIERS §4.1: the class a whole store's value, or an add's added value (§4.5: its class by its mode, an element
- * or an `addAll`'s elements), is an alias in: where it is a stable source path (`stablePath`), or a literal whose one
+ * The class a whole store's value, or an add's added value (its class by its mode, an element or an `addAll`'s
+ * elements), is an alias in: where it is a stable source path (`stablePath`), or a literal whose one
  * read cell is one and whose other cells are terms, at that cell's path, the literal's identity beside it (no
  * guard in it). The path, with the read's exact-path signature (`aliasSignature`), the handlers' facts at its node and
- * the written type A4 decides the copy by: stores of one class bring equal answers below the path, their own guards
+ * the written type the copy is decided by: stores of one class bring equal answers below the path, their own guards
  * apart (a literal's only below its cell, `covers`); `null` for any other store (an own entry).
  */
 function* aliasKey(admission: Admission, d: Definition): Reads<string | null> {
@@ -107,8 +107,8 @@ function* aliasKey(admission: Admission, d: Definition): Reads<string | null> {
   } else if (program.hasOf.has(d.value)) {
     // (one read, one guard: equal reads of one source in one literal are one entry, alike guarded or not; and the
     // read the only contribution at and below its path, no term, object or empty collection of the literal's own
-    // there beside it, Codex r22 F5, nor an object on the way to it without its next step, whose `missing` stands
-    // there too, Codex r23 F2: `Contract.loneRead`)
+    // there beside it, nor an object on the way to it without its next step, whose `missing` stands there too:
+    // `Contract.loneRead`)
     const cell = contract.loneRead(d.value);
     if (cell === null) return null;
     const path = pathText(cell.steps);
@@ -125,13 +125,13 @@ function* aliasKey(admission: Admission, d: Definition): Reads<string | null> {
   }
   if (alias === null) return null;
   admission.aliases.set(d, alias);
-  // (§4.1's chains: the class of the read its clean copy's source is, to the chain's end; a member whose own source a
-  // test touches keeps that source in its class, so one key's tests guard each class's members, §4.3)
+  // (chains: the class of the read its clean copy's source is, to the chain's end; a member whose own source a test
+  // touches keeps that source in its class, so one key's tests guard each class's members)
   const end = chainEnd(admission, alias.source, alias.read);
   if (end !== null) alias.chained = true;
   const read = end ?? { ...alias, written };
   return [
-    // (an add's class stands below its added value, element by element or as its elements, §4.5)
+    // (an add's class stands below its added value, element by element or as its elements)
     d.kind === "add" ? `add:${d.how === "elements" ? "elements" : "element"}` : "",
     shape,
     end === null || untested(admission, alias.source) ? "" : alias.source,
@@ -139,20 +139,20 @@ function* aliasKey(admission: Admission, d: Definition): Reads<string | null> {
     read.written,
     lists.aliasSignature(admission.pass.contract.keyText(read.source), read.read),
     handlers.afterSomeCreation(read.read) ? "h" : "",
-    // (the member's own copied binding's written type at its read, A4's decider, whatever its chain resolves to:
-    // `let b: integer[] = raw` is no `let a = raw`,
+    // (the member's own copied binding's written type at its read, which decides the copy, whatever its chain resolves
+    // to: `let b: integer[] = raw` is no `let a = raw`,
     // docs/specifications/type-inference-accepted-record/sharing.md#r4-72)
     yield* writtenDomainKey(admission, alias),
-    // (what its read's narrowing makes of its answer, S10 part 2b)
+    // (what its read's narrowing makes of its answer)
     admission.pass.values.narrowingMark(alias.value),
   ].join("|");
 }
 
 /**
- * The written type an alias's read copies at its path (A4: a copy of a written binding is decided by it), as the class
+ * The written type an alias's read copies at its path (a copy of a written binding is decided by it), as the class
  * key holds it: the name of the type's spelling, or the unwritten place whose own decision it copies with the path
  * into it (`inheritedAt`), `null` where the copied binding has none; the member's own, never its chain's end's
- * (docs/specifications/type-inference-accepted-record/sharing.md#r4-72, Astra r5 B1).
+ * (docs/specifications/type-inference-accepted-record/sharing.md#r4-72).
  */
 function* writtenDomainKey(admission: Admission, alias: Alias): Reads<string> {
   const written = yield* writtenSourceRead(admission, alias.value, []);
@@ -179,8 +179,8 @@ function* writtenDomainKey(admission: Admission, alias: Alias): Reads<string> {
 }
 
 /**
- * §4.1's identity and chains: where a read's exact path is clean (X1–X7 pass: its reaching definition reaches every
- * path below it, with no event between) and that definition's value is itself a stable source path, read where no
+ * Identity and chains: where a read's exact path is clean (the exact-path tests pass: its reaching definition reaches
+ * every path below it, with no event between) and that definition's value is itself a stable source path, read where no
  * test of its keys holds it, the read stands for that read, its rest after it; followed to the chain's end, once per
  * read and pass, each link charged once. `null` where the read is its own end.
  */
@@ -226,9 +226,9 @@ function chainEnd(admission: Admission, source: Key, read: FlowNode): ChainEnd |
   return end;
 }
 
-/** Whether no test touches a source key: none of it, of a prefix of it, or of a key below it (§3.2). */
+/** Whether no test touches a source key: none of it, of a prefix of it, or of a key below it. */
 function untested(admission: Admission, source: Key): boolean {
-  // (a cursor's binding no test names: its family's shape requires it, G3 stage 1)
+  // (a cursor's binding no test names: its family's shape requires it)
   if (isKeyId(source)) return true;
   const { guards, program } = admission.pass;
   const key = recordKey(source);
@@ -241,7 +241,7 @@ function untested(admission: Admission, source: Key): boolean {
 }
 
 /**
- * Whether a class answers as one at `rest` below its stores (§4.1): a copy's everywhere, a literal's below its alias
+ * Whether a class answers as one at `rest` below its stores: a copy's everywhere, a literal's below its alias
  * cell only (beside or above it each literal's own terms stand, with their own writers).
  */
 export function covers(admission: Admission, representative: Definition, asked: Rest): boolean {
@@ -251,7 +251,7 @@ export function covers(admission: Admission, representative: Definition, asked: 
 }
 
 /**
- * §4.1's stable source path a value reads: a binding (no host global) and property steps or literal indexes, the node
+ * The stable source path a value reads: a binding (no host global) and property steps or literal indexes, the node
  * it is read at, and the path as written (distinct literal indexes are distinct paths, one key's `element`).
  */
 function stablePath(
@@ -283,7 +283,7 @@ function stablePath(
   };
 }
 
-/** Whether a test of exactly `key` guards a branch or an operand region anywhere (§3.2). */
+/** Whether a test of exactly `key` guards a branch or an operand region anywhere. */
 export function tested(guards: CorePass["guards"], key: Key): boolean {
   return guards.branchCallables(key) !== undefined || guards.operandCallables(key) !== undefined;
 }
@@ -296,7 +296,7 @@ function literalIndex(node: FlowNode | null): string | null {
   return index.kind === "numberLiteral" && index.numericType === "integer" ? index.raw : null;
 }
 
-/** Whether a projection's step is a plain property step, a stable source path's (S6-CARRIERS §4.1). */
+/** Whether a projection's step is a plain property step, a stable source path's. */
 function propertyOnly(step: string): boolean {
   return (
     step !== "iteration" &&

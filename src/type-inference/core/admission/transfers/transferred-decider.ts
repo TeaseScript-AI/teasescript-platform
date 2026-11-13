@@ -104,7 +104,7 @@ function* writtenOn(
  * Pruned by no written test; once per group and rest, structural.
  */
 export function* literalRoute(admission: Admission, decider: DeciderRoot): Reads<boolean> {
-  // (a program whose every cell has one element at most has none: its paths are main's)
+  // (a program whose every cell has one element at most has none)
   if (!admission.pass.definitions.manyCells) return false;
   return (yield* holdsWritten(admission, decider.root)) && (yield* literalOn(admission, decider));
 }
@@ -302,10 +302,11 @@ function* firstValue(
 }
 
 /**
- * A2, A4, A8: the earliest value that decides a stored value's path (`earliestDecider`), read from its carriers'
- * transfers: `undefined` where a written copy on the path asks a type, which the scan of the stops answers, in its
- * order (its type may wait on another decision, `inheritedInto`); else the first value that decides, with the kinds it
- * decides by, `null` for none.
+ * The earliest value that decides a stored value's path (`earliestDecider`), read from its carriers' transfers:
+ * `undefined` where a written copy on the path asks a type (its type may wait on another decision, `inheritedInto`),
+ * with the root and its rests' ids left in `written`; outside every decision and into no decision's place the
+ * written-decider summary then answers (`writtenDecider`), else the scan of the stops (`earliestDecider`). Else the
+ * first value that decides, with the kinds it decides by, `null` for none.
  * The value's own task and the literals it holds, by path, then each carrier's operands, their roles merged at each
  * common operand in their keys' order, each group's answer once per pass for its rest of the path, whatever value
  * walks to it (`groupOf`).
@@ -349,8 +350,8 @@ export interface DeciderRoot {
 
 export function deciderRoot(admission: Admission, task: Expansion, asked: Rest): DeciderRoot {
   const root = groupOf(admission, [rootMember(task)]);
-  // (an array's rests named as before, all at once; a span's by its rests' path ids as asked, below zero so the two
-  // never meet in a group's answers, G3 stage 1)
+  // (an array's rests named all at once; a span's by its rests' path ids as asked, below zero so the two never meet in
+  // a group's answers)
   const at = restRef(admission.pass.contract, asked);
   let ids: (rest: number) => number;
   if (at.kind === "span") ids = (rest) => -1 - at.from(rest).id();
