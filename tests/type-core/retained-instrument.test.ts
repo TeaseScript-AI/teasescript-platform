@@ -5,6 +5,8 @@ import type { Item } from "../../src/type-inference/core/items.js";
 import {
   amend,
   Retained,
+  retainedCopy,
+  retainedModule,
   withRetainedRecorder,
 } from "../../src/type-inference/core/retained/retained.js";
 import { Solver, type Demand, type Work } from "../../src/type-inference/core/solver.js";
@@ -539,4 +541,125 @@ test("what the indexed program reaches is held as it is, its plain data frozen; 
   assert.deepEqual(steps, ["ok", "ok", "frozen", "frozen"]);
   listed.inner.n = 1;
   assert.equal(listed.inner.n, 1);
+});
+
+test("a maker keeps a copy of the given top level in both regimes; what it reaches stays shared and is frozen at the switch", () => {
+  const given = { n: 0, child: { m: 0 } };
+  const items = [{ m: 0 }];
+  assert.equal(retainedCopy(items)[0], items[0]);
+  const copied = retainedCopy(given);
+  given.n = 1;
+  assert.equal(copied.n, 0);
+  assert.equal(copied.child, given.child);
+  let record: typeof given | undefined;
+  let array: { m: number }[] | undefined;
+  const { steps } = stepped(() => [
+    () => {
+      record = Retained.record("T.copy", given);
+      array = Retained.array("T.copied", items);
+    },
+    () => {
+      given.n = 2;
+      items.push({ m: 1 });
+    },
+    () => (given.child.m = 1),
+    () => (items[0]!.m = 1),
+  ]);
+  assert.deepEqual(steps, ["ok", "ok", "frozen", "frozen"]);
+  assert.equal(record!.n, 1);
+  assert.equal(array!.length, 1);
+});
+
+test("a maker refuses what its copy would not keep: another prototype, a field that is not plain data, an array's other field", () => {
+  const { steps } = stepped(() => [
+    () => Retained.record("T.instance", new InstrumentProbe()),
+    () =>
+      Retained.record("T.fixed", Object.defineProperty({}, "n", { value: 0, enumerable: true })),
+    () => Retained.array("T.named", Object.assign([0], { extra: 1 })),
+    () => Retained.arena("T.plain", [0, 1]),
+  ]);
+  assert.deepEqual(steps, ["refused", "refused", "refused", "ok"]);
+});
+
+test("a registered function's own properties are frozen at its registration", () => {
+  const fn = Object.assign(() => 1, { cache: 0 });
+  const { steps } = stepped(() => [
+    () => Retained.closure("T.cached", fn),
+    () => (fn.cache = 1),
+    () => Object.assign(fn, { added: 1 }),
+  ]);
+  assert.deepEqual(steps, ["ok", "frozen", "frozen"]);
+  assert.equal(fn.cache, 0);
+});
+
+class ProgramPart {
+  readonly #places = new Set<number>([1]);
+  public constructor() {
+    Retained.programPart(this, (part) => ({ places: part.#places }));
+  }
+  public add(place: number): void {
+    this.#places.add(place);
+  }
+}
+
+test("the program's native collections refuse every write, its private ones reached through `programPart`", () => {
+  const program = { natives: new Map([["k", 0]]), members: new WeakSet<object>() };
+  let part: ProgramPart | undefined;
+  const { steps } = stepped(() => [
+    () => {
+      Retained.program(program);
+      part = new ProgramPart();
+    },
+    () => program.natives.set("j", 1),
+    () => program.natives.delete("k"),
+    () => program.natives.clear(),
+    () => program.members.add({}),
+    () => Object.assign(program.natives, { extra: 1 }),
+    () => part!.add(2),
+    () => Map.prototype.get.call(program.natives, "k"),
+  ]);
+  assert.deepEqual(steps, [
+    "ok",
+    "refused",
+    "refused",
+    "refused",
+    "refused",
+    "frozen",
+    "refused",
+    "ok",
+  ]);
+  assert.deepEqual([...program.natives], [["k", 0]]);
+});
+
+test("a refusal is counted where it is thrown, so one a `catch` swallows is still reported", () => {
+  const instrument = new RetainedInstrument();
+  const { steps } = stepped(
+    () => [
+      () => Retained.map<string, unknown>("T.swallowed").set("f", () => 1),
+      () => Retained.record("T.instance", new InstrumentProbe()),
+      () => Retained.record("T.kept", { n: 0 }),
+    ],
+    instrument,
+  );
+  assert.deepEqual(steps, ["refused", "refused", "ok"]);
+  assert.equal(instrument.report().raised, 2);
+  assert.equal(new RetainedInstrument().report().raised, 0);
+});
+
+test("a module's collection is made by its kind, one per recorder", () => {
+  const made = retainedModule<string, number>("T.module", "map");
+  // (production's, or the preload's instrument's where the file runs frozen)
+  const outside = made();
+  assert.equal(made(), outside);
+  const instrument = new RetainedInstrument();
+  withRetainedRecorder(instrument, () => {
+    const recorded = made();
+    assert.notEqual(recorded, outside);
+    assert.equal(made(), recorded);
+    assert.equal(
+      watchWrites(recorded, () => undefined),
+      true,
+    );
+  });
+  assert.equal(instrument.report().made.get("map"), 1);
 });

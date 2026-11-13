@@ -198,7 +198,7 @@ class Frontier {
   }
 }
 
-const FRONTIERS = retainedModule("frontier.FRONTIERS", Retained.weakMap<Contract, Frontier>);
+const FRONTIERS = retainedModule<Contract, Frontier>("frontier.FRONTIERS", "weakMap");
 
 function frontierOf(contract: Contract): Frontier {
   let frontier = FRONTIERS().get(contract);

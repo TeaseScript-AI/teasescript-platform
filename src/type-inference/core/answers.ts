@@ -1148,9 +1148,9 @@ function termProperties(term: TypeTerm): string[] {
 }
 
 /** Each program's kept-variable names by base (`keptName`), one survey for all the answers asked of it. */
-const KEPT_NAMES = retainedModule(
+const KEPT_NAMES = retainedModule<CorePass["program"], Map<string, string>>(
   "answers.KEPT_NAMES",
-  Retained.weakMap<CorePass["program"], Map<string, string>>,
+  "weakMap",
 );
 
 class CoreAnswers implements Answers {

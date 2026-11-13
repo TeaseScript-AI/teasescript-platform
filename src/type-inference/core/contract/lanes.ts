@@ -352,9 +352,9 @@ export function selectLanes(contract: Contract): void {
   }
 }
 
-const READ_FAMILIES = retainedModule(
+const READ_FAMILIES = retainedModule<CoreProgram, readonly (readonly [PlaceId, string])[]>(
   "lanes.READ_FAMILIES",
-  Retained.weakMap<CoreProgram, readonly (readonly [PlaceId, string])[]>,
+  "weakMap",
 );
 
 /** A program's read families, each once in its first read's order: an index of its syntax, made once per program. */

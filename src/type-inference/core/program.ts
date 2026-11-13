@@ -361,7 +361,13 @@ export class CoreProgram {
         if (place !== undefined) this.#consumed(place, { kind: "use", what, span });
       }
     this.#indexed = true;
-    // (#1072 1b: its graph is held as it is from here on)
+    // (#1072 1b: its graph is held as it is from here on, its private fields with it, R61)
+    Retained.programPart(this, (program) => ({
+      functions: program.#functions,
+      functionRegions: program.#functionRegions,
+      parameterPlaces: program.#parameterPlaces,
+      sources: program.#sources,
+    }));
     Retained.program(this);
   }
 

@@ -665,9 +665,9 @@ export function* loadsBelow(
 }
 
 /** #1668: per loads' groups, the inclusions their kept merged answer was made of (`loadsBelow`). */
-const loadsFlows = retainedModule(
+const loadsFlows = retainedModule<readonly OtherGroup[], readonly Inclusion[]>(
   "literal-index.loadsFlows",
-  Retained.weakMap<readonly OtherGroup[], readonly Inclusion[]>,
+  "weakMap",
 );
 
 /**

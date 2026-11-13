@@ -16,7 +16,7 @@ import { concrete } from "./admission/kinds.js";
 import type { AdmittedType, CorePass } from "./answers.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
 import { propertyStep, type CoreProgram } from "./program.js";
-import { Retained, retainedModule } from "./retained/retained.js";
+import { retainedModule } from "./retained/retained.js";
 
 // The contract proof/descriptor service (#1526 phase A): a store's required contract, assembled level by
 // level from the stable admission pass's proofs, as an immutable descriptor one per distinct contract, with whether its
@@ -37,8 +37,8 @@ export const SLICE_DEPTH = 256;
 export type ContractRef = TypePlan;
 
 /** Each analysis's passes so far, and each pass's number among them: the admission epoch its contracts belong to. */
-const PASSES = retainedModule("contract-descriptors.PASSES", Retained.weakMap<CoreProgram, number>);
-const EPOCHS = retainedModule("contract-descriptors.EPOCHS", Retained.weakMap<CorePass, number>);
+const PASSES = retainedModule<CoreProgram, number>("contract-descriptors.PASSES", "weakMap");
+const EPOCHS = retainedModule<CorePass, number>("contract-descriptors.EPOCHS", "weakMap");
 
 /** Numbers a new admission pass of `program` (`createPass`), its contracts' epoch. */
 export function newEpoch(program: CoreProgram, pass: CorePass): number {

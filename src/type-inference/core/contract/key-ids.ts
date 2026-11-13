@@ -806,7 +806,7 @@ export function stepsOfId(contract: Contract, id: KeyId, from = 0): PathSteps {
 }
 
 /** Each `PathSteps`' steps, read by this module alone: no other module can spell them; a view's those it views. */
-const rawSteps = retainedModule("key-ids.rawSteps", Retained.weakMap<PathSteps, readonly string[]>);
+const rawSteps = retainedModule<PathSteps, readonly string[]>("key-ids.rawSteps", "weakMap");
 
 /** Where a view starts in the steps it views (`PathSteps`, set by its class alone). */
 let offsetOf: (steps: PathSteps) => number;

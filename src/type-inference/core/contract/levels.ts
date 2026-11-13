@@ -684,13 +684,10 @@ function ownObjects(contract: Contract, index: LiteralIndex): Map<Writer, string
 }
 
 /** The member lists named so far, per contract (a pass's): their count. */
-const MEMBER_LISTS = retainedModule("levels.MEMBER_LISTS", Retained.weakMap<Contract, number>);
+const MEMBER_LISTS = retainedModule<Contract, number>("levels.MEMBER_LISTS", "weakMap");
 
 /** `ownAbsence`'s maps, per literal index. */
-const OWN_ABSENCE = retainedModule(
-  "levels.OWN_ABSENCE",
-  Retained.weakMap<object, Map<Writer, string>>,
-);
+const OWN_ABSENCE = retainedModule<object, Map<Writer, string>>("levels.OWN_ABSENCE", "weakMap");
 
 /** `groupRead`'s kept scans, per contract (a pass's): by class, the earliest writer. */
 function keptAbsences(contract: Contract): Map<string, Writer | null> {
@@ -699,9 +696,9 @@ function keptAbsences(contract: Contract): Map<string, Writer | null> {
     KEPT_ABSENCES().set(contract, (kept = Retained.map("levels.KEPT_ABSENCES[]")));
   return kept;
 }
-const KEPT_ABSENCES = retainedModule(
+const KEPT_ABSENCES = retainedModule<Contract, Map<string, Writer | null>>(
   "levels.KEPT_ABSENCES",
-  Retained.weakMap<Contract, Map<string, Writer | null>>,
+  "weakMap",
 );
 
 /**
