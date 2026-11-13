@@ -97,7 +97,7 @@ const prefix = (a, b) => a.length <= b.length && a.every((v, i) => v === b[i]);
  * Which stop the store meets, by the compiler's own decisions, and whether its row is judged. A stop at or above the
  * store's path leaves it out of scope (#1440), but under the plan's rule 1440 (`lib/rules.mjs`) a store the source
  * certifies (`lib/certificate.mjs`, recorded as `certified`) is judged on its whole domain, as
- * `tests/helpers/type-core/enclosing/type-core-enclosing-certificates.ts` judges its certified cases; neither judges a store into an inferred place
+ * `tests/helpers/type-core/enclosing/type-core-enclosing-verdicts.ts` judges its certified cases; neither judges a store into an inferred place
  * before admission settled (#1252).
  */
 export function scopeOf(api, request, answer, c, rules = []) {
