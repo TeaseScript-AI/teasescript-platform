@@ -98,13 +98,15 @@ export type { Omission } from "./consumers/reports/left-out.js";
 
 /*
  * The consumers of the type core: every use that needs a kind asks its operand's items. The quiet path answers first: a
- * consumer that every kind of the contract fits, with no `unknown`, asks nothing more. Otherwise: all items definite
- * and none fits is an error; some item does not fit, or an `unknown` is present, a warning with one obligation per
- * offending kind; all fit, quiet. Here: whole-number uses, conditions, operator operands, receivers and element
- * selections, shown values, dict keys, a `for`'s iterable, speaker field accesses, ADR 1.5's null default, stores and
- * arguments against their place's written or decided type (with admission's decisions and rejections), fallbacks and
- * defaults, and, where a consumer meets external data, the boundary check at its ingress. Saves are the storage
- * module's.
+ * consumer that every kind of the contract fits, with no `unknown`, asks nothing more. Otherwise, as a rule: all items
+ * definite and none fits is an error; some item does not fit, or an `unknown` is present, a warning with one
+ * obligation per offending kind; all fit, quiet. A read of a place written `number` at a whole-number use
+ * (`writtenNumberUse`), and a store none of whose kinds fits a written type or one decided earlier (`admittedStores`,
+ * ADR 1.7), are errors even where its items are possible. Here: whole-number uses, conditions, operator operands,
+ * receivers and element selections, shown values, dict keys, a `for`'s iterable, speaker field accesses, ADR 1.5's
+ * null default, stores and arguments against their place's written or decided type (with admission's decisions and
+ * rejections), fallbacks and defaults, and, where a consumer meets external data, the boundary check at its ingress.
+ * Saves are checked outside the type core (type-checker.ts, `save-rules.ts`).
  */
 
 /** Whether two passes reject the same stores (`settled`: a pass rejects those it started with, or is the last). */
