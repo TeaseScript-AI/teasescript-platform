@@ -40,15 +40,15 @@ import { retainedRecorder } from "./retained/retained.js";
  * input: at once outside every component; inside one, the component is solved first with every choice open and, where a
  * choice then changes an answer, again from bottom with the choices held.
  *
- * A demand may prove more than its items (a `ProofDemand`): what a fold selected, where a
- * prefix's walk stands. Its proof is the solver's as its items are: provisional while its run or component is
- * unfinished, reset with them to none (`null`) at each start from bottom, compared by its semantic signature where its
- * items are (a changed proof under unchanged items reruns its readers; a new object or run with the same signature does
- * not), chosen on as they are (a `ProofDecision`, whose held choice may change the proof alone), and kept with them,
- * its slot charged before either is published. A stop forgets the unfinished proofs with the unfinished demands, and a
- * key's decision stopping the finished ones that read the key, with their answers (`forget`); a new pass has a new
- * solver, so nothing of an earlier pass's proofs is read (each admission pass, and a stop's fresh finishing pass). A
- * reader takes a proof only through `proven`, which yields its demand.
+ * A demand may prove more than its items (a `ProofDemand`): what a fold selected, where a prefix's walk stands. Its
+ * proof is the solver's as its items are: provisional while its run or component is unfinished, reset with them to none
+ * (`null`) at each start from bottom, compared by its semantic signature where its items are (a changed proof under
+ * unchanged items reruns its readers; a new object or run with the same signature does not), chosen on as they are (a
+ * `ProofDecision`, whose held choice may change the proof alone), and kept with them, its slot charged before either is
+ * published. A stop forgets the unfinished proofs with the unfinished demands, and a key's decision stopping the
+ * finished ones that read the key, with their answers (`forget`); a new pass has a new solver, so nothing of an earlier
+ * pass's proofs is read (each pass `createPass` makes: an admission pass, a stop's fresh finishing pass, a receiving
+ * completion's). A reader takes a proof only through `proven`, which yields its demand.
  */
 
 /** What a demand asks, which orders the members of one component at one site. */
