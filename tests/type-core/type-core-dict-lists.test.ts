@@ -7,12 +7,13 @@ import { coreMessage, messageSource } from "../../src/type-inference/core/messag
 import { coreRecord } from "../../src/type-inference/core/result.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
+import { SWEEP } from "../helpers/sweep.js";
 
 // #2378 R43, R49, R50: a dict's `values` and `keys` are a new list of copies each time they are read (V30, ADR 0014),
 // so a store into or below such a list goes into nothing. A statement that stores there answers as its deletion twin:
-// the same program with the statement replaced, on its own line, by `let z1 = <its operands>` (`z2` for a second statement). What the operation
-// itself requires of what it reads (an emptiness check, a kind it can order, a compound store's read) stays, judged on
-// the list the dict gives.
+// the same program with the statement replaced, on its own line, by `let z1 = <its operands>` (`z2` for a second
+// statement). What the operation itself requires of what it reads (an emptiness check, a kind it can order, a compound
+// store's read) stays, judged on the list the dict gives.
 
 /**
  * One mode's answer: the outcome, each diagnostic by code, class, line and message, each check by kind, types and line.
@@ -54,28 +55,30 @@ function answer(source: string, globals: readonly string[] = []): Answer {
   return first!;
 }
 
-// (the generated table: each statement that changes a list a dict's `values` or `keys` gives in place, with a value that
-// does not fit, on every dict construction, for each element type, a call's written result and a declared variable, and
-// from host data; the dict, its list and a copy of the list read afterwards. The evidence's 21,768 pairs, `i2378-r5-p7`,
-// run every value, context (a loop body, a function on the dict too) and pairing on every construction; this keeps one
-// of each kind of statement)
+// (the generated table: each statement that changes a list a dict's `values` or `keys` gives in place, on every dict
+// construction, for each element type, a call's written result, a declared variable and host data, alone, twice, before
+// a statement that reads the list, in a loop body and in a function on the dict or on a dict parameter; the dict, its
+// list and a copy of the list read afterwards. `TEASESCRIPT_SWEEP=full` runs it whole; any other run a sample that
+// keeps every statement kind, construction, context, pairing, reader and source, and each statement kind at each
+// element type, at least once: `docs/TESTING.md`, "Sampled sweeps")
 const TYPES: Readonly<
   Record<
     string,
     { readonly v: string; readonly x: readonly string[]; readonly c: readonly string[] }
   >
 > = {
-  integer: { v: "1", x: ["2.5"], c: ["2.5"] },
-  "integer | string": { v: "1", x: ["2.5"], c: ["1"] },
-  "integer[]": { v: "[1]", x: ["[2.5]"], c: ["[2.5]"] },
+  integer: { v: "1", x: ["3", "2.5", '"s"'], c: ["1", "2.5"] },
+  "integer | string": { v: "1", x: ['"s"', "2.5"], c: ["1", "2.5"] },
+  "integer[]": { v: "[1]", x: ["[3]", "[2.5]"], c: ["[3]", "[2.5]"] },
 };
 
 /**
- * A statement that changes the list in place: the list, the statement with `L` for the list, its twin's operands, and
- * whether it stores nothing (a removal, an order change), so what it requires of the list it reads stands at its own
- * line (R50).
+ * A statement that changes the list in place: its kind, the list, the statement with `L` for the list, its twin's
+ * operands, and whether it stores nothing (a removal, an order change), so what it requires of the list it reads stands
+ * at its own line (R50).
  */
 interface Change {
+  readonly name: string;
   readonly list: "values" | "keys";
   readonly statement: string;
   readonly operands: string;
@@ -84,7 +87,8 @@ interface Change {
 
 function changes(type: string): readonly Change[] {
   const { x, c } = TYPES[type]!;
-  const free = (list: Change["list"], statement: string): Change => ({
+  const free = (name: string, list: Change["list"], statement: string): Change => ({
+    name,
     list,
     statement,
     operands: "0",
@@ -92,27 +96,36 @@ function changes(type: string): readonly Change[] {
   });
   return [
     ...x.flatMap((value): Change[] => [
-      { list: "values", statement: `L.add(${value})`, operands: value },
-      { list: "values", statement: `L.addAll([${value}])`, operands: `[${value}]` },
-      { list: "values", statement: `L.remove(${value})`, operands: value },
-      { list: "values", statement: `L[0] = ${value}`, operands: value },
+      { name: "add", list: "values", statement: `L.add(${value})`, operands: value },
+      { name: "addAll", list: "values", statement: `L.addAll([${value}])`, operands: `[${value}]` },
+      { name: "remove", list: "values", statement: `L.remove(${value})`, operands: value },
+      { name: "index store", list: "values", statement: `L[0] = ${value}`, operands: value },
     ]),
     ...c.map((value): Change => ({
+      name: "compound store",
       list: "values",
       statement: `L[0] += ${value}`,
       operands: `L[0] + ${value}`,
     })),
-    { list: "keys", statement: "L.add(2)", operands: "2" },
-    { list: "keys", statement: "L[0] = 2", operands: "2" },
-    ...["L.removeAt(0)", "L.removeFirst()", "L.clear()", "L.sort()"].map((statement) =>
-      free("values", statement),
-    ),
-    free("keys", "L.clear()"),
+    ...['"s"', "2"].flatMap((value): Change[] => [
+      { name: "keys add", list: "keys", statement: `L.add(${value})`, operands: value },
+      { name: "keys index store", list: "keys", statement: `L[0] = ${value}`, operands: value },
+    ]),
+    ...[
+      "removeAt(0)",
+      "removeFirst()",
+      "removeLast()",
+      "clear()",
+      "sort()",
+      "shuffle()",
+      "reverse()",
+    ].map((call) => free(call.slice(0, call.indexOf("(")), "values", `L.${call}`)),
+    free("keys clear", "keys", "L.clear()"),
   ];
 }
 
-/** Each construction's lines before the statements and the dict it makes (five lines each, so lines match). */
-function constructions(type: string, kind: string): readonly (readonly [string, string])[] {
+/** Each construction's name, its lines before the statements and the dict it makes (five lines each, so lines match). */
+function constructions(type: string, kind: string): readonly (readonly [string, string, string])[] {
   const { v } = TYPES[type]!;
   const dict = type.includes("|") ? `(${type}) dict` : `${type} dict`;
   const start = kind.endsWith("host") ? "hostValue" : v;
@@ -122,18 +135,24 @@ function constructions(type: string, kind: string): readonly (readonly [string, 
   const src = kind.startsWith("call") ? "supply(0)" : "item";
   return [
     ...(kind === "call"
-      ? [[`function mk(_x): ${dict} {\n    return dict{a: ${v}}\n}\nlet d = mk(0)\n`, "d"] as const]
+      ? [
+          [
+            "written",
+            `function mk(_x): ${dict} {\n    return dict{a: ${v}}\n}\nlet d = mk(0)\n`,
+            "d",
+          ] as const,
+        ]
       : kind === "variable"
         ? [
-            [`\n\n\nlet d: ${dict} = dict{a: ${v}}\n`, "d"] as const,
-            [`\n\n\n\nlet d = dict{a: ${v}}\n`, "d"] as const,
+            ["written", `\n\n\nlet d: ${dict} = dict{a: ${v}}\n`, "d"] as const,
+            ["plain literal", `\n\n\n\nlet d = dict{a: ${v}}\n`, "d"] as const,
           ]
         : []),
-    [`${head}let d = dict{a: ${src}, b: ${v}}\n`, "d"],
-    [`${head}let d = dict{}\nd["a"] = ${src}\n`, "d"],
-    [`${head}let ds = [dict{a: ${src}, b: ${v}}]\n`, "ds[0]"],
-    [`${head}let dd = dict{k: dict{a: ${src}, b: ${v}}}\n`, 'dd["k"]'],
-    [`${head}let d0 = dict{a: ${src}, b: ${v}}\nlet d = d0\n`, "d"],
+    ["literal of the source", `${head}let d = dict{a: ${src}, b: ${v}}\n`, "d"],
+    ["filled by an index store", `${head}let d = dict{}\nd["a"] = ${src}\n`, "d"],
+    ["a list's element", `${head}let ds = [dict{a: ${src}, b: ${v}}]\n`, "ds[0]"],
+    ["nested", `${head}let dd = dict{k: dict{a: ${src}, b: ${v}}}\n`, 'dd["k"]'],
+    ["a copy of the dict", `${head}let d0 = dict{a: ${src}, b: ${v}}\nlet d = d0\n`, "d"],
   ];
 }
 
@@ -186,30 +205,50 @@ function comparable(
   return [view(program), view(twin)];
 }
 
-test("a statement that changes a list a dict's `values` or `keys` gives in place answers as its deletion twin, alone, twice, before a statement that reads the list, and in a function on a parameter (#2378)", () => {
-  let pairs = 0;
+/** One pair of the table: the program, its deletion twin, the twin's line, and what the pair covers. */
+interface Pair {
+  readonly program: string;
+  readonly twin: string;
+  readonly line: number;
+  readonly free: boolean;
+  readonly globals: readonly string[];
+  readonly covers: readonly string[];
+}
+
+function table(): readonly Pair[] {
+  const pairs: Pair[] = [];
   for (const type of Object.keys(TYPES))
     for (const kind of ["call", "variable", "call host", "variable host"]) {
       if (kind.endsWith("host") && type.endsWith("[]")) continue;
       const globals = kind.endsWith("host") ? ["hostValue"] : [];
       const [first] = TYPES[type]!.c;
-      // (a statement after the store that reads the list the dict gives: its requirement judged on that list, R50)
-      const readers = ["L.removeFirst()", `L[0] += ${first}`, "let w: integer = L[0]"];
-      // (host data on its literal; a function on a dict parameter, the repeats and the readers on a dict filled by an
-      // index store and on a list's element)
-      const all = constructions(type, kind);
-      for (const [pre, dict] of kind.endsWith("host") ? all.slice(0, 1) : all)
+      // (a statement after the change that reads the list the dict gives: its requirement judged on that list, R50)
+      const readers = [
+        ["removeFirst", "L.removeFirst()"],
+        ["sort", "L.sort()"],
+        ["a compound store", `L[0] += ${first}`],
+        ["a typed read", "let w: integer = L[0]"],
+      ] as const;
+      for (const [construction, pre, dict] of constructions(type, kind))
         for (const change of changes(type)) {
-          const shapes: (readonly [string, readonly Change[], number])[] = [["top", [change], 0]];
-          if (kind === "variable" && (pre.includes('d["a"] =') || dict === "ds[0]")) {
+          const shapes: (readonly [string, readonly Change[], number, string])[] = [
+            ["top", [change], 0, "alone"],
+          ];
+          if (kind === "variable") {
             if (change.free === undefined) {
-              shapes.push(["parameter", [change], 0]);
-              shapes.push(["top", [change, change], 1]);
+              for (const context of ["loop", "function", "parameter"])
+                shapes.push([context, [change], 0, "alone"]);
+              shapes.push(["top", [change, change], 1, "twice"]);
             }
-            for (const statement of readers)
-              shapes.push(["top", [change, { list: "values", statement, operands: "0" }], 0]);
+            for (const [reader, statement] of readers)
+              shapes.push([
+                "top",
+                [change, { name: reader, list: "values", statement, operands: "0" }],
+                0,
+                `before ${reader}`,
+              ]);
           }
-          for (const [context, statements, at] of shapes) {
+          for (const [context, statements, at, shape] of shapes) {
             const receiver = context === "parameter" ? "p" : dict;
             const lines = (deleted: number): string[] =>
               statements.map((s, index) =>
@@ -219,21 +258,52 @@ test("a statement that changes a list a dict's `values` or `keys` gives in place
                 ),
               );
             const after = `let n: ${type} = ${dict}["a"]\nlet m: ${type} = ${dict}.values[0]\nlet c = ${dict}.values\nlet k: ${type} = c[0]\nexit\n`;
-            const program = `${pre}${placed(context, dict, lines(-1))}${after}`;
             const twin = `${pre}${placed(context, dict, lines(at))}${after}`;
-            const line =
-              twin.split("\n").findIndex((l) => l.trim().startsWith(`let z${at + 1} = `)) + 1;
-            // (one mode here; the four modes agree on every case in the evidence's records, `i2378-r5-p7`)
-            const [here, there] = [program, twin].map((source) =>
-              inMode(MODES[0]!, () => answerIn(source, globals)),
-            );
-            const [mine, its] = comparable(here!, there!, line, statements[at]!.free === true);
-            assert.deepEqual(mine, its, program);
-            pairs += 1;
+            pairs.push({
+              program: `${pre}${placed(context, dict, lines(-1))}${after}`,
+              twin,
+              line: twin.split("\n").findIndex((l) => l.trim().startsWith(`let z${at + 1} = `)) + 1,
+              free: change.free === true,
+              globals,
+              covers: [
+                `statement ${change.name}`,
+                `construction ${construction}`,
+                `context ${context}`,
+                `shape ${shape}`,
+                `source ${kind}`,
+                `type ${type} ${change.name}`,
+              ],
+            });
           }
         }
     }
-  assert.equal(pairs, 816);
+  return pairs;
+}
+
+/** The pairs a run takes: all under `SWEEP`, else in table order each that covers something no earlier one has. */
+function sample(pairs: readonly Pair[]): readonly Pair[] {
+  if (SWEEP) return pairs;
+  const covered = new Set<string>();
+  return pairs.filter((pair) => {
+    const fresh = pair.covers.filter((item) => !covered.has(item));
+    for (const item of fresh) covered.add(item);
+    return fresh.length > 0;
+  });
+}
+
+test("a statement that changes a list a dict's `values` or `keys` gives in place answers as its deletion twin, alone, twice, before a statement that reads the list, and in a loop or a function (#2378)", () => {
+  const pairs = table();
+  assert.equal(pairs.length, 4638);
+  const taken = sample(pairs);
+  assert.equal(taken.length, SWEEP ? 4638 : 62);
+  for (const { program, twin, line, free, globals } of taken) {
+    // (one mode here; the four modes agree on every case in the evidence's records, `i2378-r5-final`)
+    const [here, there] = [program, twin].map((source) =>
+      inMode(MODES[0]!, () => answerIn(source, globals)),
+    );
+    const [mine, its] = comparable(here!, there!, line, free);
+    assert.deepEqual(mine, its, program);
+  }
 });
 
 test('`d.values.add("s")` on `dict{a: 1}` is valid and `d["a"]` still reads a whole number; its copied form is TSV041 (#2378)', () => {
