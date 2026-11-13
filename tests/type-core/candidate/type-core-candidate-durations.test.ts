@@ -163,7 +163,7 @@ const PLACE_CASES: readonly Case[] = [
  * The sources today's checker plans and the route refuses (an under-offer), sampled by class: an amount whose item is
  * the outside value a typed ingress's check stands for, where only what carries it shows a number to today's checker
  * (an element read, `otherwise`), or only a narrowing does (an `integer?` or `number?` read under a null test), which
- * the core gives no read (`amountAdmitted`, the form step 1½ gives a command's operands); and an amount the core knows
+ * the core gives no read (`amountAdmitted`); and an amount the core knows
  * may hold a value of no number where today's checker reads it as unknown (a `fromJson` with a default of no number, a
  * property stored such a value later).
  */
@@ -257,7 +257,7 @@ const STOPS: Readonly<Record<string, <T>(make: () => T) => T>> = {
   demand: (make) => withTestDemandAllowance(1, make),
 };
 
-test("under a stop as without one, an amount of no number is refused and a number's never publishes where today's checker gives none", () => {
+test("under a stop as without one, an amount of no number never publishes, nor a number's where today's checker gives no plan", () => {
   const amounts = [
     ['let n = "a"\n', "n", false],
     ["let n = 2\n", "n", true],
@@ -291,7 +291,7 @@ test("under a stop as without one, an amount of no number is refused and a numbe
     }
 });
 
-test("the amount's cited check is the evaluator's, which refuses an amount of no number", () => {
+test("the amount's cited check names a function of the evaluator, whose file holds the unit's run-time codes", () => {
   assert.deepEqual(UNIT_AMOUNT.takes, ["integer", "number"]);
   const text = readFileSync(UNIT_AMOUNT.check.file, "utf8");
   assert.match(text, new RegExp(`\\b${UNIT_AMOUNT.check.function}\\(`, "u"));

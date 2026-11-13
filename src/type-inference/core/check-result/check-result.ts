@@ -143,7 +143,7 @@ export function coreCheckResult(
   const { checks, core, contracts, moved } = runtimeChecks(answers, index, request);
   const expected = (call: CallExpression) => core.expected.get(call);
   const known = knownValues(answers, index, expected);
-  // (on known values of its own, so the work its walk spends leaves the checks' budget as it was)
+  // (on known values of its own, so the known-value work its walk spends is not the checks')
   const refused = knownAmountRefused(index, knownValuesOf(answers, index, expected), request);
   if (refused !== null)
     throw new OutsideContract(refused, `this ${KIND_WORDS[refused.kind] ?? "calculation"}`);
@@ -245,10 +245,10 @@ const KIND_WORDS: Readonly<Record<string, string>> = {
 };
 
 /**
- * The first step whose known amount today's checker refuses, by today's own predicates on the core's known values: a
- * step whose known operands give no value it can represent (`findVisibleOverflows`, today's TSV050: in the slice, a unit
- * or an angle of a known amount), then a calendar unit whose known amount gives no whole days or months (`unitValue`,
- * today's TSV043); `null` where none is. Its walk builds known values, which spends their work, so `values` is its own.
+ * The first step whose known operands give no value a run can hold, read on `values` by the predicates today's checker
+ * reports with: a step whose result is too large to represent (`findVisibleOverflows`, TSV050 there; inside the slice
+ * only a unit or an angle), then a calendar unit whose known amount gives no whole days or months (`unitValue`, TSV043
+ * there); `null` where none is. Its walk builds known values, which spends their work, so `values` is its own.
  */
 function knownAmountRefused(
   index: SliceIndex,
