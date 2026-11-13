@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { after, type TestContext } from "node:test";
 import { Worker } from "node:worker_threads";
 import type * as Client from "../../../player/engine-bridge/client.js";
-import type * as InProcess from "../../../player/engine-bridge/in-process.js";
+import type * as InProcess from "../bridge/in-process.js";
 import type { BuildIdentity } from "../../../player/engine-bridge/protocol.js";
 import { decodeMessage } from "../../../player/engine-bridge/transport.js";
 import type * as Bridge from "../../../player/runtime/player-bridge.js";
@@ -10,49 +10,34 @@ import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import { coverageGaps, type Coordinates } from "../family-coverage.js";
 import { loadPlayerModule } from "../player-modules.js";
 import { untypedClient } from "../bridge/untyped.js";
-import { restorePlayerRuntimeSessionAt } from "../../../player/runtime/runtime-adapter.js";
-import { NO_MARKS } from "../../../player/debug/debug-history-marks.js";
 import type { Introduction } from "../../../player/engine-bridge/session-protocol.js";
 import { deserializeCheckpoint } from "../../../src/runtime/snapshot/checkpoint.js";
 import type { RuntimeSnapshot } from "../../../src/index.js";
 import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
 
 /*
- * The composable's engine bridge on either topology (L5i.7): the in-process host, or a Node Worker thread running the
- * engine's Worker entry. Both are built from the test-modules bundle's own client and bridge, the composable's module
- * instances. Each gives the same controls, so one row runs on both:
+ * The composable's engine bridge on a Node Worker thread running the engine's Worker entry (L5i.7), as the Player runs
+ * it, built from the test-modules bundle's own client and bridge, the composable's module instances. Its controls:
  * - `lose()`: the Worker lost, resolving once the client's loss listeners ran (the composable's first, as it registered
- *   at ready). In-process, the client is terminated and its listeners get a `BridgeLostError`, as a real loss; on the
- *   Worker, the thread is terminated, and its `exit` reaches the client as a real loss.
+ *   at ready): the thread is terminated, and its `exit` reaches the client as a real loss.
  * - `hold(op)`, `held(later?)`, `release()`: from the post of the first request of `op` after `hold`, its reply and
- *   every later one are held until `release`; `held()` resolves once that reply is among them, `held(later)` once the
- *   reply to the latest request of `later` is too. Both topologies hold the incoming messages at the client's port, this
- *   connection's alone.
+ *   every later one are held at the client's port, this connection's alone, until `release`; `held()` resolves once
+ *   that reply is among them, `held(later)` once the reply to the latest request of `later` is too.
  * - `posts`: every request the client posted, in order, as it reached the port.
- * - `topology`, checked when the bridge is built and again by `assertTopology()`: on the Worker, `thread` is a real
- *   thread (a positive id) that answered the bridge's handshake, and `deliverInTransit` is `null`; in-process, there
- *   is no thread and `deliverInTransit` is the backend's.
+ * - `assertTopology()`, also checked when the bridge is built: `thread` is a real thread (a positive id) that answered
+ *   the bridge's handshake, and `deliverInTransit` is `null`.
  * `tests/helpers/bridge/sends.ts` decides sends above the client instead; this helper works below it, so the client's
  * own disposition of a post stands, and the log holds only what reached the port.
  */
 
-export type Topology = "in-process" | "worker";
+/** Where a row's engine runs: the Player's only topology, a Worker. Rows keep it in their names. */
+export type Topology = "worker";
 
 /*
- * Two settings of a run, read once when this module loads (docs/TESTING.md "Worker-topology settings"):
- * - `PLAYER_TEST_TOPOLOGY`: `both` (the default) or `worker`. With `worker`, `TOPOLOGIES` and every registry's rows are
- *   the Worker's only, and an in-process-only case is not owed.
- * - `PLAYER_TEST_WORKER_DELAY_MS`: a whole number of milliseconds (default 0) by which every message from a Worker
- *   reaches its client late, in the order the Worker sent it (`delayedDelivery`).
+ * A setting of a run, read once when this module loads (docs/TESTING.md "Worker-topology settings"):
+ * `PLAYER_TEST_WORKER_DELAY_MS`, a whole number of milliseconds (default 0) by which every message from a Worker reaches
+ * its client late, in the order the Worker sent it (`delayedDelivery`).
  */
-
-/** The topologies `setting` selects: `both` or empty for both, `worker` for the Worker's; anything else is refused. */
-export function selectedTopologies(setting: string | undefined): readonly Topology[] {
-  if (setting === undefined || setting === "" || setting === "both")
-    return ["in-process", "worker"];
-  if (setting === "worker") return ["worker"];
-  throw new Error(`PLAYER_TEST_TOPOLOGY is both or worker, not ${JSON.stringify(setting)}.`);
-}
 
 /** The delay `setting` gives every message from a Worker: a whole number of milliseconds, 0 when empty. */
 export function workerDelayMs(setting: string | undefined): number {
@@ -65,9 +50,7 @@ export function workerDelayMs(setting: string | undefined): number {
   return ms;
 }
 
-export const TOPOLOGIES: readonly Topology[] = selectedTopologies(
-  process.env["PLAYER_TEST_TOPOLOGY"],
-);
+export const TOPOLOGIES: readonly Topology[] = ["worker"];
 const WORKER_DELAY_MS = workerDelayMs(process.env["PLAYER_TEST_WORKER_DELAY_MS"]);
 
 // The real timer and monotonic clock, as this module loads: a test that mocks timers, `Date` or `performance` later
@@ -132,10 +115,10 @@ export interface TopologyBridge {
   held(later?: string): Promise<void>;
   release(): void;
   assertTopology(): void;
-  /** On the Worker, resolves with the thread's exit code once it exited; `null` in-process. */
-  readonly exited: Promise<number> | null;
-  /** On the Worker, the thread that runs the host: its id, and how many messages it sent; `null` in-process. */
-  readonly thread: { readonly id: number; readonly messages: () => number } | null;
+  /** Resolves with the thread's exit code once it exited. */
+  readonly exited: Promise<number>;
+  /** The thread that runs the host: its id, and how many messages it sent. */
+  readonly thread: { readonly id: number; readonly messages: () => number };
 }
 
 const BUILD: BuildIdentity = { commit: null, dirty: null, mode: null, appVersion: null };
@@ -148,16 +131,13 @@ const WORKERS = {
 
 let client: typeof Client | null = null;
 let bridgeModule: typeof Bridge | null = null;
-let facade: typeof InProcess | null = null;
 
-/** Loads the bundle's client, bridge and backend: call it in a `before` hook of a file that uses the helper. */
+/** Loads the bundle's client and bridge: call it in a `before` hook of a file that uses the helper. */
 export async function loadTopology(): Promise<void> {
   // EVIDENCE: validation: the bundle's own modules, whose instances the composable runs with.
   client = (await loadPlayerModule("player/engine-bridge/client.ts")) as typeof Client;
   // EVIDENCE: validation: as above.
   bridgeModule = (await loadPlayerModule("player/runtime/player-bridge.ts")) as typeof Bridge;
-  // EVIDENCE: validation: as above.
-  facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof InProcess;
 }
 
 /**
@@ -168,7 +148,7 @@ export async function inProcessBackend(
   options: NonNullable<Parameters<typeof InProcess.createInProcessBackend>[1]> = {},
 ): Promise<PlayerBridge> {
   // EVIDENCE: validation: the bundle's own module, whose instances the composable runs with.
-  const module = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof InProcess;
+  const module = (await loadPlayerModule("tests/helpers/bridge/in-process.ts")) as typeof InProcess;
   return module.createInProcessBackend(BUILD, options);
 }
 
@@ -273,22 +253,15 @@ const postOf = (request: {
   at: performance.now(),
 });
 
-/**
- * A bridge of `topology`, ended after the test. In-process, its replies arrive after `delayMs`, or on a microtask. Its
- * post log and reply gate are this connection's alone, on either topology.
- */
+/** A bridge on a Worker, ended after the test. Its post log and reply gate are this connection's alone. */
 export async function topologyBridge(
   context: TestContext,
   topology: Topology,
-  {
-    delayMs,
-    entry = "engine",
-  }: { readonly delayMs?: number; readonly entry?: keyof typeof WORKERS } = {},
+  { entry = "engine" }: { readonly entry?: keyof typeof WORKERS } = {},
 ): Promise<TopologyBridge> {
-  assert.ok(client && bridgeModule && facade, "call loadTopology first");
-  const delivery = delayedDelivery(topology === "worker" ? WORKER_DELAY_MS : 0);
-  const made =
-    topology === "worker" ? await onWorker(WORKERS[entry], delivery) : inProcess(delayMs);
+  assert.ok(client && bridgeModule, "call loadTopology first");
+  const delivery = delayedDelivery(WORKER_DELAY_MS);
+  const made = await onWorker(WORKERS[entry], delivery);
   // A delivery received before the test's end still reaches the client through the test's own loss, release and
   // waits; at its end, those not yet delivered are dropped.
   context.after(() => {
@@ -296,30 +269,24 @@ export async function topologyBridge(
     delivery.cancel();
   });
   const assertTopology = () => {
-    if (topology === "worker")
-      assert.ok(
-        made.thread !== null && made.thread.id > 0 && made.thread.messages() > 0,
-        "a worker topology's host runs on a thread that answered",
-      );
-    else assert.equal(made.thread, null, "an in-process topology has no thread");
-    assert.equal(made.bridge.deliverInTransit === null, topology === "worker", "the topology");
+    assert.ok(
+      made.thread.id > 0 && made.thread.messages() > 0,
+      "the host runs on a thread that answered",
+    );
+    assert.equal(made.bridge.deliverInTransit, null, "a Worker delivers no reply in transit");
   };
-  // Every row's topology is the one it names: no row can run labelled `worker` without a Worker.
+  // No row can run labelled `worker` without a Worker.
   assertTopology();
   return { ...made, topology, assertTopology };
 }
 
 /**
- * The connections of one Player on `topology`: the first, and each fresh one its `nextConnection` (`next`) opens after a
- * loss, all of `topology` and ended after the test. `calls()` counts `next`'s calls; `failNext()` makes the next call
+ * The connections of one Player on a Worker: the first, and each fresh one its `nextConnection` (`next`) opens after a
+ * loss, each ended after the test. `calls()` counts `next`'s calls; `failNext()` makes the next call
  * reject, as a connection that cannot open; `armNext(step)` runs `step` on the next fresh connection, and waits for it,
  * before `next` gives it. `ends(connection)` counts the calls of its client's `terminate()` during the test.
  */
-export async function topologyConnections(
-  context: TestContext,
-  topology: Topology,
-  options: { readonly delayMs?: number } = {},
-) {
+export async function topologyConnections(context: TestContext, topology: Topology) {
   const ends = new Map<TopologyBridge, number>();
   const counted = (connection: TopologyBridge) => {
     const client = connection.bridge.client;
@@ -331,7 +298,7 @@ export async function topologyConnections(
     };
     return connection;
   };
-  const made: TopologyBridge[] = [counted(await topologyBridge(context, topology, options))];
+  const made: TopologyBridge[] = [counted(await topologyBridge(context, topology))];
   let calls = 0;
   let failing = false;
   let armed: ((fresh: TopologyBridge) => void | Promise<void>) | null = null;
@@ -353,7 +320,7 @@ export async function topologyConnections(
         failing = false;
         throw new Error("The engine Worker could not be opened.");
       }
-      const fresh = counted(await topologyBridge(context, topology, options));
+      const fresh = counted(await topologyBridge(context, topology));
       made.push(fresh);
       const step = armed;
       armed = null;
@@ -426,30 +393,6 @@ function gatedPort(port: Client.ClientPort) {
   };
 }
 
-function inProcess(
-  delayMs: number | undefined,
-): Omit<TopologyBridge, "topology" | "assertTopology"> {
-  const wrapped: { gated?: ReturnType<typeof gatedPort> } = {};
-  const bridge = facade!.createInProcessBackend(BUILD, {
-    ...(delayMs === undefined ? {} : { delayMs }),
-    wrapPort: (port) => (wrapped.gated = gatedPort(port)).port,
-  });
-  const gated = wrapped.gated;
-  assert.ok(gated !== undefined, "the backend took the gated port");
-  const { posts, hold, held, release } = gated;
-  const lose = inProcessLoss(bridge, client!.BridgeLostError);
-  return {
-    bridge,
-    posts,
-    exited: null,
-    thread: null,
-    lose: async () => lose(),
-    hold,
-    held,
-    release,
-  };
-}
-
 async function onWorker(
   entry: URL,
   delivery: ReturnType<typeof delayedDelivery>,
@@ -514,11 +457,8 @@ export class RowEnd {
  * assertions in a branch without returning, completes its row. Only a reading of the body shows those.
  */
 export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, readonly Topology[]>>) {
-  // Only the selected topologies' rows are made and owed (`PLAYER_TEST_TOPOLOGY`).
-  const selected = (topologies: readonly Topology[]) =>
-    topologies.filter((topology) => TOPOLOGIES.includes(topology));
   const feasible: Coordinates[] = Object.entries<readonly Topology[]>(cases).flatMap(
-    ([id, topologies]) => selected(topologies).map((topology) => ({ case: id, topology })),
+    ([id, topologies]) => topologies.map((topology) => ({ case: id, topology })),
   );
   const completed: Coordinates[] = [];
   const registered = new Set<Id>();
@@ -534,7 +474,7 @@ export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, read
       // One registration per case: a second would complete the first's coordinates in its place.
       assert.ok(!registered.has(id), `the case ${id} is registered twice`);
       registered.add(id);
-      for (const topology of selected(cases[id]))
+      for (const topology of cases[id])
         test(`${name} (${topology})`, async (context) => {
           const token = new RowEnd(`${id} (${topology})`);
           const returned = await body(context, topology, () => token);
@@ -545,7 +485,7 @@ export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, read
   };
 }
 
-/** The host's snapshot of `session`, read over the bridge as its checkpoint (`captureCheckpoint`), on either topology. */
+/** The host's snapshot of `session`, read over the bridge as its checkpoint (`captureCheckpoint`). */
 export async function checkpointSnapshot(
   bridge: PlayerBridge,
   session: PlayerSession,
@@ -556,20 +496,13 @@ export async function checkpointSnapshot(
 
 /**
  * A session restored from `snapshotJson` against the held plan `token`, held by the host of `transport` with no events
- * before it, as a test restores one: in-process through the facade, on a Worker through the test entry's
- * `restoreForTest` (open the bridge with `entry: "restore"`).
+ * before it, through the Worker test entry's `restoreForTest` (open the bridge with `entry: "restore"`).
  */
 export async function restoredSession(
   transport: TopologyBridge,
   token: string,
   snapshotJson: string,
 ): Promise<PlayerSession> {
-  if (transport.topology === "in-process")
-    return facade!.introduceNow(
-      transport.bridge,
-      (host) => restorePlayerRuntimeSessionAt(host.plan(token), snapshotJson, []),
-      NO_MARKS,
-    );
   const reply = await untypedClient(transport.bridge.client).request("restoreForTest", {
     plan: token,
     snapshotJson,

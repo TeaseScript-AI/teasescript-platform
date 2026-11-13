@@ -11,7 +11,7 @@ export interface Surface {
 }
 
 export const CLIENT = "player/engine-bridge/client.ts";
-export const FACADE = "player/engine-bridge/in-process.ts";
+export const FACADE = "tests/helpers/bridge/in-process.ts";
 export const SESSION = "player/vue/src/session/usePlayerSession.ts";
 export const CLOCK = "player/vue/src/session/useRuntimeSceneClock.ts";
 
@@ -770,22 +770,22 @@ export const ADOPTIONS: Readonly<
     ["HeldSession.keep", "HeldSession.publish"],
     "publication observation",
   ],
-  "player/engine-bridge/in-process.ts beginRecordingNow": [
+  "tests/helpers/bridge/in-process.ts beginRecordingNow": [
     "facade exception",
     ["HeldSession.keep"],
     "none",
   ],
-  "player/engine-bridge/in-process.ts createInProcessBackend": [
+  "tests/helpers/bridge/in-process.ts createInProcessBackend": [
     "host dispatch",
     ["HeldSession.keep", "HeldSession.publish"],
     "publication observation",
   ],
-  "player/engine-bridge/in-process.ts hatch": [
+  "tests/helpers/bridge/in-process.ts hatch": [
     "facade exception",
     ["HeldSession.keep", "HeldSession.publish"],
     "publication observation",
   ],
-  "player/engine-bridge/in-process.ts introduceNow": [
+  "tests/helpers/bridge/in-process.ts introduceNow": [
     "facade exception",
     ["HeldSession.publish"],
     "introduction",

@@ -1133,7 +1133,7 @@ for (const script of SCRIPT_NAMES)
       preloadCase(script, reply),
       `the lock preload of a script with ${script}, its reply ${reply === "current" ? "taken while its pair is serviced" : `arriving with ${reply}`}, loads ${reply === "current" ? `what the script needs (${PRELOADED[script].join(", ") || "nothing"})` : "nothing"}`,
       async (context, topology, end) => {
-        const transport = await topologyBridge(context, topology, { delayMs: 20 });
+        const transport = await topologyBridge(context, topology);
         transport.assertTopology();
         const replies = metadataReplies(context, transport.bridge);
         const serviced = await startedAt(transport.bridge, PRELOAD_SCRIPTS[script]);

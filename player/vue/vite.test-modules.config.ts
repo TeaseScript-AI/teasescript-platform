@@ -11,7 +11,7 @@ const modules = [
   "player/media/captured-media.ts",
   "player/runtime/compile-project.ts",
   "player/engine-bridge/client.ts",
-  "player/engine-bridge/in-process.ts",
+  "tests/helpers/bridge/in-process.ts",
   "player/runtime/player-bridge.ts",
   "player/runtime/runtime-adapter.ts",
   "player/runtime/runtime-view.ts",

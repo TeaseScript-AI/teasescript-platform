@@ -5,7 +5,7 @@ import { DebugHistoryView, rewindFutureOf } from "../../player/debug/debug-histo
 import { openDebugHistorySpill } from "../../player/debug/debug-history-indexeddb.js";
 import { CANNOT_KEEP, type HistoryTimeline } from "../../player/engine-bridge/history/core.js";
 import type { DebugHistorySpill } from "../../player/engine-bridge/history/snapshots.js";
-import { createInProcessBackend } from "../../player/engine-bridge/in-process.js";
+import { createInProcessBackend } from "../helpers/bridge/in-process.js";
 import {
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeForm,

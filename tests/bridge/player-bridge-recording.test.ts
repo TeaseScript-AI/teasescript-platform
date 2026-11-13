@@ -9,8 +9,8 @@ import { rebuildRecordedSession } from "../../player/debug/debug-export.js";
 import { DebugRecorder } from "../../player/debug/debug-recorder.js";
 import { BridgeRequestError, connectBridge } from "../../player/engine-bridge/client.js";
 import { admissionOf, type HeldMedia } from "../../player/engine-bridge/held-media.js";
-import type * as InProcess from "../../player/engine-bridge/in-process.js";
-import { heldRecording, introduceNow } from "../../player/engine-bridge/in-process.js";
+import type * as InProcess from "../helpers/bridge/in-process.js";
+import { heldRecording, introduceNow } from "../helpers/bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import type { Introduction } from "../../player/engine-bridge/session-protocol.js";
@@ -431,43 +431,42 @@ test("in a Worker, a call larger than the recorder keeps makes the recording inc
   }
 });
 
-for (const inProcess of [true, false])
-  test(`a new Start's recording replaces the connection's, and a restored session's begins at its restore (${inProcess ? "in-process" : "in a Worker"})`, async () => {
-    const bridge = inProcess ? await inProcessBridge() : await worker();
-    try {
-      const a = await bridge.start(
-        await prepared(bridge, 'say "A", instant\nlet x = askChoice "A1"\nexit'),
-        START,
-        true,
-      );
-      await bridge.halt(a);
-      const atStop = await recordingOf(bridge, inProcess);
-      assert.ok(atStop.operations.length > 0);
-      // The stopped session's recording, as its stop left it, is not the next Start's.
-      await bridge.start(
-        await prepared(bridge, 'say "B", instant\nlet y = askChoice "B1"\nexit'),
-        START,
-        true,
-      );
-      const next = await recordingOf(bridge, inProcess);
-      // Each recording ends at its own session's state: A's offers "A1", B's "B1".
-      assert.ok(JSON.stringify(atStop.endSnapshot).includes('"A1"'));
-      assert.ok(JSON.stringify(next.endSnapshot).includes('"B1"'));
-      assert.ok(!JSON.stringify(next.endSnapshot).includes('"A1"'));
-      assert.equal(next.operations.length, 1, "B's recording begins at B's Start");
-      // A restored session records from its restore: its recording's anchor is the restored state.
-      const restored = await aboutToThrow(bridge, inProcess);
-      await bridge.request(restored, "beginRecording", null);
-      const fromRestore = await recordingOf(bridge, inProcess);
-      assert.equal(fromRestore.operations.length, 0);
-      assert.equal(fromRestore.anchorSnapshot.nextScopeId, Number.MAX_SAFE_INTEGER - 1);
-    } finally {
-      bridge.client.terminate();
-    }
-  });
+test("a new Start's recording replaces the connection's, and a restored session's begins at its restore (in a Worker)", async () => {
+  const bridge = await worker();
+  try {
+    const a = await bridge.start(
+      await prepared(bridge, 'say "A", instant\nlet x = askChoice "A1"\nexit'),
+      START,
+      true,
+    );
+    await bridge.halt(a);
+    const atStop = await recordingOf(bridge, false);
+    assert.ok(atStop.operations.length > 0);
+    // The stopped session's recording, as its stop left it, is not the next Start's.
+    await bridge.start(
+      await prepared(bridge, 'say "B", instant\nlet y = askChoice "B1"\nexit'),
+      START,
+      true,
+    );
+    const next = await recordingOf(bridge, false);
+    // Each recording ends at its own session's state: A's offers "A1", B's "B1".
+    assert.ok(JSON.stringify(atStop.endSnapshot).includes('"A1"'));
+    assert.ok(JSON.stringify(next.endSnapshot).includes('"B1"'));
+    assert.ok(!JSON.stringify(next.endSnapshot).includes('"A1"'));
+    assert.equal(next.operations.length, 1, "B's recording begins at B's Start");
+    // A restored session records from its restore: its recording's anchor is the restored state.
+    const restored = await aboutToThrow(bridge, false);
+    await bridge.request(restored, "beginRecording", null);
+    const fromRestore = await recordingOf(bridge, false);
+    assert.equal(fromRestore.operations.length, 0);
+    assert.equal(fromRestore.anchorSnapshot.nextScopeId, Number.MAX_SAFE_INTEGER - 1);
+  } finally {
+    bridge.client.terminate();
+  }
+});
 
 /*
- * Replay, over a declared family: three replay kinds × three backends. The cut is a call that throws. Live recovery is
+ * Replay, over a declared family: three replay kinds × two backends. The cut is a call that throws. Live recovery is
  * judged by the complete trace of the publications after the cut, by value, from the cut's cursor (`tapPublications`,
  * #1919), against one oracle: the adapter restored at the publication before the cut, given the live run's requests
  * after it (`adapterReplay`). The frozen tape matches no publication, so it keeps its own oracle, its recorded
@@ -479,7 +478,7 @@ for (const inProcess of [true, false])
  * the composable lives (`withLiveHost`).
  */
 const KINDS = ["successful replay", "frozen failure replay", "live recovery"] as const;
-const BACKENDS = ["in-process", "a Worker", "the composable"] as const;
+const BACKENDS = ["a Worker", "the composable"] as const;
 type Kind = (typeof KINDS)[number];
 type Backend = (typeof BACKENDS)[number];
 
@@ -858,7 +857,6 @@ const runOn = (backend: Backend, start: () => Promise<JudgedRun>) => {
   return runs.get(backend)!;
 };
 const RUNS: Record<Backend, () => Promise<JudgedRun>> = {
-  "in-process": () => bridgeRun(true),
   "a Worker": () => bridgeRun(false),
   // The control run first, whose effect samples the recovery run's are judged against while its host lives.
   "the composable": async () => composableRun(await controlRun()),
@@ -928,7 +926,7 @@ const bundle = () =>
     return {
       modules: { usePlayerSession, capturedMediaStore },
       // EVIDENCE: validation: the bundle's in-process backend, whose sessions the composable's facade reaches.
-      facade: (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof InProcess,
+      facade: (await loadPlayerModule("tests/helpers/bridge/in-process.ts")) as typeof InProcess,
       // EVIDENCE: validation: the bundle's adapter, whose sessions the bundle's host holds.
       adapter: (await loadPlayerModule(
         "player/runtime/runtime-adapter.ts",

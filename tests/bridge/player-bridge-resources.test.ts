@@ -4,7 +4,7 @@ import test from "node:test";
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../../player/engine-bridge/client.js";
 import { admissionOf, heldMedia, isHeldMedia } from "../../player/engine-bridge/held-media.js";
-import { heldRecording } from "../../player/engine-bridge/in-process.js";
+import { heldRecording } from "../helpers/bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import { PlayerBridge } from "../../player/runtime/player-bridge.js";

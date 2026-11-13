@@ -43,7 +43,7 @@ import {
  * at the event. Never posted, a stop or a lost connection undoes it by its origin, without a notice; posted, a stop
  * waits for the final publication, which releases it when it no longer presents the action and undoes it otherwise,
  * and a lost connection undoes it at once without sending it again. A Start of another chat and an unmount drop it,
- * writing nothing. The rows run the real composable and controllers on both topologies, with the post log.
+ * writing nothing. The rows run the real composable and controllers on a Worker, with the post log.
  */
 
 interface SessionHost {

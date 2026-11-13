@@ -41,11 +41,10 @@ import {
 
 /*
  * The composable's boundaries on the engine's Worker (#2321, the L5 activation's Worker rows): one representative case
- * per boundary that #2308's final review found with in-process rows only, each run on both topologies through the real
- * composable. A row asserts only what the public path shows (the shown session and its transcript, the requests that
- * reached the port, the stores), never the in-process facade, so it means the same on either topology. The in-process
- * families keep their full axes; these rows show that a real realm boundary (a structured clone, a reply a real turn
- * later, a stop acknowledged a round trip later) keeps each boundary's behaviour.
+ * per boundary that #2308's final review found with in-process rows only, each run through the real composable on a
+ * Worker. A row asserts only what the public path shows (the shown session and its transcript, the requests that reached
+ * the port, the stores), never the in-process facade. These rows show that a real realm boundary (a structured clone, a
+ * reply a real turn later, a stop acknowledged a round trip later) keeps each boundary's behaviour.
  */
 
 /** A session import's review, which a row passes back to the import as it got it. */
@@ -248,7 +247,6 @@ const RERUN = rerunRegistry({
   "W10 catch-up": TOPOLOGIES,
   "W10b catch-up behind an answer": TOPOLOGIES,
   "W11 failure export": TOPOLOGIES,
-  "W12 going back": TOPOLOGIES,
 });
 
 RERUN.rows(
@@ -640,44 +638,6 @@ RERUN.rows(
       !JSON.stringify(normal.events).includes("Then two."),
       "the normal room's session stays",
     );
-    return end();
-  },
-);
-
-RERUN.rows(
-  "W12 going back",
-  "W12: a session kept and a session exported on one topology continue and import, with its saved values, on the other",
-  async (context, topology, end) => {
-    stubBrowser(context);
-    const other: Topology = topology === "worker" ? "in-process" : "worker";
-    // Kept on `topology`, continued on the other.
-    const at = keptBrowser();
-    const first = await page(context, topology, at);
-    await playToSecondQuestion(first.host);
-    await keptWith(at, "Got one.");
-    const shown = said(first.host);
-    const { transfer } = await first.host.exportSession();
-    first.stop();
-    const second = await page(context, other, at);
-    await until(
-      () => second.host.activation.value === "continue",
-      "the other topology offers Continue",
-      "step",
-    );
-    await second.host.activate();
-    assert.deepEqual(said(second.host), shown, "Continue on the other topology");
-    second.stop();
-    // Exported on `topology`, imported on the other, in a fresh browser.
-    const elsewhere = keptBrowser();
-    const third = await page(context, other, elsewhere);
-    await importAndContinue(third.host, transfer);
-    // What the importing side received: the script's saved values, and the session.
-    assert.equal(
-      elsewhere.entries.get("visits"),
-      1,
-      "the import's saved values on the other topology",
-    );
-    assert.deepEqual(said(third.host), shown, "the import on the other topology");
     return end();
   },
 );

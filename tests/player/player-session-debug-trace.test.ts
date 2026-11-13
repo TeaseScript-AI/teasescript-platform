@@ -9,7 +9,7 @@ import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { DebugView, DebugViewRequest } from "../../player/debug/debug-view.js";
-import type * as InProcess from "../../player/engine-bridge/in-process.js";
+import type * as InProcess from "../helpers/bridge/in-process.js";
 import {
   hostTrace,
   loadHostFacade,
@@ -87,7 +87,7 @@ before(async () => {
   const views = await loadPlayerModule("player/vue/src/debug/useDebugView.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its composable.
   useDebugView = views.useDebugView as typeof useDebugView;
-  const facade = await loadPlayerModule("player/engine-bridge/in-process.ts");
+  const facade = await loadPlayerModule("tests/helpers/bridge/in-process.ts");
   // EVIDENCE: validation: the bundle's backend factory, whose host the composable then uses.
   createInProcessBackend = facade.createInProcessBackend as typeof createInProcessBackend;
   const loaded = {

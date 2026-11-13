@@ -114,7 +114,7 @@ after(() => {
 before(async () => {
   await loadHostFacade();
   const facade: Record<string, unknown> = await loadPlayerModule(
-    "player/engine-bridge/in-process.ts",
+    "tests/helpers/bridge/in-process.ts",
   );
   assert.equal(typeof facade.heldPlan, "function");
   // EVIDENCE: validation: the bundle facade's `heldPlan`, checked as a function above.

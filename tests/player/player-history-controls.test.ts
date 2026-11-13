@@ -12,7 +12,7 @@ import {
 import type { DebugHistorySpill } from "../../player/engine-bridge/history/snapshots.js";
 import { decodeMessage } from "../../player/engine-bridge/transport.js";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
-import type * as InProcess from "../../player/engine-bridge/in-process.js";
+import type * as InProcess from "../helpers/bridge/in-process.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import { playerRuntimeForeground, type PlayerSession } from "../../player/runtime/runtime-view.js";
@@ -200,7 +200,7 @@ before(async () => {
   // EVIDENCE: validation: as above, the Debug features' composable.
   usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
   // EVIDENCE: validation: the bundle the composable runs in, whose backend it uses.
-  facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
+  facade = (await loadPlayerModule("tests/helpers/bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
   compiler = (await loadPlayerModule("player/runtime/compile-project.ts")) as typeof compiler;
   input = await runtimeInput();

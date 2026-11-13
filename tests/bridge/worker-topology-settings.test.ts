@@ -6,34 +6,27 @@ import {
   delayedDelivery,
   rerunRegistry,
   RowEnd,
-  selectedTopologies,
-  TOPOLOGIES,
   withinHostTime,
   workerDelayMs,
 } from "../helpers/player/worker-topology.js";
 
 /*
  * The Worker-topology settings (docs/TESTING.md "Worker-topology settings"): the delayed delivery's order, real time
- * and lifetime, the settings refused when malformed, and the registries' rows under each selection. The selection runs
- * this file again in a child process as its own fixture (`SELECTION_FIXTURE`), with the settings in its environment.
+ * and lifetime, a setting refused when malformed, and the registry's owed rows. The registry runs this file again in a
+ * child process as its own fixture (`SELECTION_FIXTURE`).
  */
 
 const FIXTURE = process.env["SELECTION_FIXTURE"];
 
 if (FIXTURE !== undefined) {
-  // A registered case on both topologies, one on the in-process host only, and a standalone test per topology. With
-  // `fails` or `early`, the Worker row of the first case throws or returns without its end.
-  const RERUN = rerunRegistry({ both: TOPOLOGIES, "in-process only": ["in-process"] });
-  RERUN.rows("both", "fixture both", async (_context, topology, end) => {
-    if (topology === "worker" && FIXTURE === "fails") throw new Error("the fixture's row fails");
+  // A registered case. With `fails` or `early`, its row throws or returns without its end.
+  const RERUN = rerunRegistry({ row: ["worker"] });
+  RERUN.rows("row", "fixture row", async (_context, _topology, end) => {
+    if (FIXTURE === "fails") throw new Error("the fixture's row fails");
     // Another row's end, as a body that returns without its own.
-    if (topology === "worker" && FIXTURE === "early") return new RowEnd("another row");
+    if (FIXTURE === "early") return new RowEnd("another row");
     return end();
   });
-  RERUN.rows("in-process only", "fixture in-process only", async (_context, _topology, end) =>
-    end(),
-  );
-  for (const topology of TOPOLOGIES) test(`fixture standalone (${topology})`, () => {});
 } else {
   /** Waits on real time, which a mocked `setTimeout` does not move, until `check` holds. */
   const realTime = async (check: () => boolean, label: string) => {
@@ -107,12 +100,7 @@ if (FIXTURE !== undefined) {
     assert.deepEqual(order, ["at once"]);
   });
 
-  test("malformed settings are refused", () => {
-    for (const setting of [undefined, "", "both"])
-      assert.deepEqual(selectedTopologies(setting), ["in-process", "worker"], String(setting));
-    assert.deepEqual(selectedTopologies("worker"), ["worker"]);
-    for (const setting of ["in-process", "Worker", "all"])
-      assert.throws(() => selectedTopologies(setting), /PLAYER_TEST_TOPOLOGY/u, setting);
+  test("a malformed delay is refused", () => {
     for (const [setting, ms] of [
       [undefined, 0],
       ["", 0],
@@ -131,7 +119,7 @@ if (FIXTURE !== undefined) {
     const run = spawnSync(
       process.execPath,
       ["--test", "--test-reporter=tap", fileURLToPath(import.meta.url)],
-      { encoding: "utf8", env: { ...inherited, PLAYER_TEST_TOPOLOGY: "", ...environment } },
+      { encoding: "utf8", env: { ...inherited, ...environment } },
     );
     const passed = [...run.stdout.matchAll(/^\s*ok \d+ - (fixture .*)$/gmu)].map(
       (match) => match[1],
@@ -139,35 +127,14 @@ if (FIXTURE !== undefined) {
     return { status: run.status, passed: passed.sort(), output: run.stdout + run.stderr };
   };
 
-  test("the default selection runs and owes both topologies' rows", () => {
+  test("a registered row runs, and one that fails or returns without its end is still owed", () => {
     const run = fixture({ SELECTION_FIXTURE: "passes" });
     assert.equal(run.status, 0, run.output);
-    assert.deepEqual(run.passed, [
-      "fixture both (in-process)",
-      "fixture both (worker)",
-      "fixture in-process only (in-process)",
-      "fixture standalone (in-process)",
-      "fixture standalone (worker)",
-    ]);
-  });
-
-  test("the Worker selection runs and owes the Worker's rows only, standalone ones included", () => {
-    const run = fixture({ SELECTION_FIXTURE: "passes", PLAYER_TEST_TOPOLOGY: "worker" });
-    assert.equal(run.status, 0, run.output);
-    assert.deepEqual(run.passed, ["fixture both (worker)", "fixture standalone (worker)"]);
-  });
-
-  test("a selected row that fails or returns without its end is still owed", () => {
+    assert.deepEqual(run.passed, ["fixture row (worker)"]);
     for (const mode of ["fails", "early"]) {
-      const run = fixture({ SELECTION_FIXTURE: mode, PLAYER_TEST_TOPOLOGY: "worker" });
-      assert.equal(run.status, 1, run.output);
-      assert.match(run.output, /registered rows/u, mode);
+      const failed = fixture({ SELECTION_FIXTURE: mode });
+      assert.equal(failed.status, 1, failed.output);
+      assert.match(failed.output, /registered rows/u, mode);
     }
-  });
-
-  test("a malformed setting stops the run that reads it", () => {
-    const run = fixture({ SELECTION_FIXTURE: "passes", PLAYER_TEST_TOPOLOGY: "bogus" });
-    assert.notEqual(run.status, 0, run.output);
-    assert.match(run.output, /PLAYER_TEST_TOPOLOGY is both or worker/u);
   });
 }

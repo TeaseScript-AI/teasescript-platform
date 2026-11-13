@@ -563,7 +563,7 @@ test("Debug turned on while an ended normal session is being kept keeps it in th
     else Reflect.deleteProperty(globalThis, "Audio");
   });
   const facade: Record<string, unknown> = await loadPlayerModule(
-    "player/engine-bridge/in-process.ts",
+    "tests/helpers/bridge/in-process.ts",
   );
   // EVIDENCE: validation: the bundle facade's backend factory, which the composable's sessions run on.
   const backend = facade.createInProcessBackend as (

@@ -1,7 +1,0 @@
-// The gate's file-store fixture: a stored file from Base64, read back and hashed. The tapes' table answers each
-// file-store request as failed (`tests/gate/candidates.ts`); the successes are L5e's evidence.
-let picture = fileFromBase64("iVBORw0KGgoAAAAN", default: "")
-let back = fileToBase64(picture)
-let digest = hashFile(picture)
-say "Stored, read and hashed", instant
-exit

@@ -4,9 +4,9 @@
  * reaches, the imports that still reach Worker-side code, and the exports of `runtime-adapter.ts` and `runtime-view.ts`.
  *
  * `RATCHET` only shrinks: a family's PR removes the entries tagged with its family and adds none (its reviewers check
- * this). The one exception is L5b's: it added the main realm's imports of the transition facade (`in-process.ts`), each
- * tagged with the family that removes that importer's last use. Since the activation (#2321) `RATCHET` is empty: the main
- * realm constructs no in-process backend. The L5 gate requires `in-process.ts`'s facade gone, not only its entries.
+ * this). The one exception was L5b's: it added the main realm's imports of the transition facade (`in-process.ts`), each
+ * tagged with the family that removes that importer's last use. Since the activation (#2321) `RATCHET` is empty, and the
+ * in-process backend is the tests' (`tests/helpers/bridge/in-process.ts`).
  */
 
 /** The bridge families of the L5 series that move engine work into the Worker. */
@@ -137,7 +137,7 @@ export const ALLOWED_SOURCE: readonly {
   },
 ];
 
-/** The Player modules that run in the engine Worker. */
+/** The modules that hold the engine: the Player's that run in its Worker, and the tests' in-process backend. */
 export const WORKER_MODULES: readonly string[] = [
   "player/runtime/runtime-adapter.ts",
   "player/runtime/script-identity.ts",
@@ -148,7 +148,7 @@ export const WORKER_MODULES: readonly string[] = [
   "player/debug/debug-export.ts",
   "player/debug/debug-view.ts",
   "player/debug/random-decisions.ts",
-  "player/engine-bridge/in-process.ts",
+  "tests/helpers/bridge/in-process.ts",
 ];
 
 /** A main-realm import of a value from Worker-side code, and the bridge family it belongs to. */

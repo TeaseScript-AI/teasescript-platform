@@ -225,19 +225,16 @@ function memoryStorage(scope: string) {
 
 /**
  * Plays `source` in a mounted Player with `storage` and `repository` until it ends, and gives its variables, read from
- * the host's checkpoint. With `topology`, on that topology (in-process, replies after `delayMs`); else the Player's own.
+ * the host's checkpoint. With `topology`, on a Worker; else on the in-process backend.
  */
 async function playInPlayer(
   context: TestContext,
   source: string,
   storage: ScriptStorageProvider,
   repository: FakeMediaRepository,
-  { topology, delayMs }: { readonly topology?: Topology; readonly delayMs?: number } = {},
+  { topology }: { readonly topology?: Topology } = {},
 ) {
-  const transport =
-    topology === undefined
-      ? null
-      : await topologyBridge(context, topology, delayMs === undefined ? {} : { delayMs });
+  const transport = topology === undefined ? null : await topologyBridge(context, topology);
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
@@ -274,8 +271,7 @@ async function playInPlayer(
 }
 
 /*
- * The rows that run on both topologies (L5i.7), in-process and on a Worker; the late replies' row in-process at 50 ms
- * and on a Worker once. The file's end checks every registered row ran.
+ * The rows on a Worker (L5i.7), whose replies come as they come. The file's end checks every registered row ran.
  */
 const RERUN = rerunRegistry({
   "stores and reads files": TOPOLOGIES,
@@ -473,7 +469,7 @@ RERUN.rows(
       ].join("\n"),
       provider,
       new FakeMediaRepository(),
-      { topology, delayMs: 50 },
+      { topology },
     );
     const { picture, data, hash } = played.variables;
     assert.ok(typeof picture === "string" && played.host.resolveAsset(picture) !== null);

@@ -25,8 +25,8 @@ This is a local inspection route, not the production cross-origin Player/host pr
   published state with its transcript, which `persistence/session-store.ts` builds from each reply; `runtime/player-bridge.ts` sends the
   requests; it serves one live Player at a time (`claim`), and a later Player may reuse it. The host runs in the
   engine's module Worker (`engine-bridge/engine.worker.ts`, started by `engine-bridge/browser-client.ts`): `vue/src/main.ts`
-  opens the first Worker and supplies the hosted Player's replacement factory; the in-process backend (`engine-bridge/in-process.ts`) and its facade serve tests
-  and the gate kit only; `engine-bridge/inventory.ts` lists what the main realm may load.
+  opens the first Worker and supplies the hosted Player's replacement factory; the tests' in-process backend
+  (`tests/helpers/bridge/in-process.ts`) is no product path; `engine-bridge/inventory.ts` lists what the main realm may load.
   The player's input reaches the host from one section of the shown session (`vue/src/session/runtime-input.ts`): it observes,
   checks that the session still owns the UI and that the action the player acted on is still presented, then posts the
   control's op. Input's ops read no basis; an answer to another action is refused by its action ID.
