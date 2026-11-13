@@ -95,6 +95,8 @@ const AMOUNTS: readonly (readonly [string, string])[] = [
   ["", "[1][4]"],
   ["let m: integer = hostValue\n", "[m][0]"],
   ["let m: string = hostValue\n", "[m][0]"],
+  ['let v = fromJson(hostValue, default: "a")\n', "v"],
+  ['let o = {v: hostValue}\no.v = "a"\n', "o.v"],
 ];
 
 /** A unit or an angle after each amount, stored and then passed over. */
@@ -124,6 +126,14 @@ const LITERAL_CASES: readonly Case[] = [
   refusal: literal.endsWith("deg") || literal.endsWith("rad") ? ANGLE : LITERAL,
 }));
 
+/** An `integer?` read under each form of null test that leaves it a number, as the amount of a unit. */
+const NARROWED: readonly string[] = [
+  "let n: integer? = hostValue\nif n != null {\n  let d = n s\n  wait d\n}",
+  "let n: integer? = hostValue\nif null != n {\n  let d = n s\n  wait d\n}",
+  "let n: integer? = hostValue\nif n == null {\n  exit\n}\nlet d = n s",
+  'let n: integer? = hostValue\nif n == null {\n  say "none"\n} else {\n  let d = n s\n}',
+];
+
 /** A duration or an angle where the slice uses one: a command's operand, a typed store, a collection, a default. */
 const PLACE_CASES: readonly Case[] = [
   "wait 2 s",
@@ -142,22 +152,30 @@ const PLACE_CASES: readonly Case[] = [
   'let d: duration = load "k", default: 2 s\nwait d',
   "let t = toJson(2 s)",
   "let d = 1 s\nd = 2 s\nwait d",
-  "let n: integer? = hostValue\nif n != null {\n  let d = n s\n  wait d\n}",
   "let n = 2\nif hostValue == null {\n  n = 1.5\n}\nlet c = n calendar months",
+  ...NARROWED,
+  // (no duration, unit or angle: the refusal's own walk of known values leaves the checks' work as it was)
+  'let a = ("x".repeat(9999995))\nlet b = "abcdefghij".substring(50)',
+  'let a = ("x".repeat(9999995))\nlet b = ["abcdefghij"].get(0, default: "").substring(50)',
 ].map((source) => ({ source: `${source}\nsay "AFTER"`, refusal: null }));
 
 /**
  * The sources today's checker plans and the route refuses (an under-offer), by source: an amount whose item is the
  * outside value a typed ingress's check stands for, where only what carries it shows a number to today's checker (an
- * element read, `otherwise`), or only a narrowing does (a read of `integer?` under a null test), which the core gives
- * no read (`amountAdmitted`, the form step 1½ gives a command's operands).
+ * element read, `otherwise`), or only a narrowing does (an `integer?` read under a null test), which the core gives no
+ * read (`amountAdmitted`, the form step 1½ gives a command's operands); and an amount the core knows may hold text where
+ * today's checker reads it as unknown (a `fromJson` with a text default, a property stored text later).
  */
 const UNDER_OFFERS: ReadonlySet<string> = new Set([
-  ...UNITS.flatMap(([unit]) => [
-    `let m: integer = hostValue\nlet d = [m][0] ${unit}\nsay "AFTER"`,
-    `let x: integer? = hostValue\nlet d = (x otherwise 1) ${unit}\nsay "AFTER"`,
-  ]),
-  'let n: integer? = hostValue\nif n != null {\n  let d = n s\n  wait d\n}\nsay "AFTER"',
+  ...UNITS.flatMap(([unit]) =>
+    [
+      `let m: integer = hostValue\nlet d = [m][0] ${unit}`,
+      `let x: integer? = hostValue\nlet d = (x otherwise 1) ${unit}`,
+      `let v = fromJson(hostValue, default: "a")\nlet d = v ${unit}`,
+      `let o = {v: hostValue}\no.v = "a"\nlet d = o.v ${unit}`,
+    ].map((source) => `${source}\nsay "AFTER"`),
+  ),
+  ...NARROWED.map((source) => `${source}\nsay "AFTER"`),
 ]);
 
 /** The judge's failures for one case's record. */
