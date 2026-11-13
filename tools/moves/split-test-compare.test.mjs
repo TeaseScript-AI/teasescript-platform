@@ -104,9 +104,19 @@ test("a split whose files the suite finds, each test kept with its outcome, is e
     readFileSync(join(root, "out/head-titles.jsonl"), "utf8").trim().split("\n").length,
     2,
   );
-  assert.equal(
-    Object.keys(JSON.parse(readFileSync(join(root, "out/head-counts.json"), "utf8"))).length,
-    2,
+  // (each file by its repository path, not the path of the machine that ran it)
+  assert.deepEqual(
+    Object.keys(JSON.parse(readFileSync(join(root, "out/head-counts.json"), "utf8"))).sort(),
+    ["dist/tests/split/one.test.js", "dist/tests/split/two.test.js"],
+  );
+  // (a discovery and controls that pass say so)
+  assert.match(
+    result.out,
+    /^discovery: the base's suite holds each OLD file, the head's each NEW file/mu,
+  );
+  assert.match(
+    result.out,
+    /^control: a dropped title and a passed test counted as failed each compared unequal$/mu,
   );
 });
 
@@ -129,6 +139,7 @@ test("any lists of test files: two moved into one, and a file outside tests/ run
   outside("head", 'import test from "node:test";\ntest("tool", () => {});\n');
   const result = tools.run(["tools/x.test.mjs"], ["tools/x.test.mjs"]);
   assert.equal(result.status, 0, result.out + result.err);
+  assert.match(result.out, /^discovery: not run, no FILE under tests\/$/mu);
 });
 
 test("a test lost, added, failing or skipped is not equal, each by its own rule", (t) => {

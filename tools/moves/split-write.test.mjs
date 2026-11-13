@@ -82,15 +82,25 @@ function repository(t, old = OLD, extra = {}) {
     });
     return { status: result.status, out: result.stdout, err: result.stderr };
   };
+  const tool = (...args) => {
+    const result = spawnSync(process.execPath, [TOOL, ...args], { cwd: fixture, encoding: "utf8" });
+    return { status: result.status, out: result.stdout, err: result.stderr };
+  };
   const read = (file) => readFileSync(join(fixture, file), "utf8");
   const changed = () => git("status", "--short", "--", "tests");
-  return { fixture, base, run, read, changed };
+  return { fixture, base, run, tool, read, changed };
 }
 
 test("a split is written as assigned: lines verbatim in OLD's order, exports, imports by name, headers, the pin mark", (t) => {
   const r = repository(t);
   const result = r.run(ASSIGN);
   assert.equal(result.status, 0, result.err);
+  // (the renames map beside the assignment; no relative path changes folder, an import's specifier being rewritten)
+  assert.equal(
+    r.read("renames.json"),
+    `${JSON.stringify({ renames: { [OLD_PATH]: [A, B, SETUP].sort() } }, null, 2)}\n`,
+  );
+  assert.match(result.out, /^relative paths to read: 0$/mu);
   assert.equal(
     r.read(SETUP),
     [
@@ -173,13 +183,59 @@ test("a helper-module split: OLD keeps its tests, and ranges move its helpers in
   assert.equal(check.status, 0, check.stdout + check.stderr);
 });
 
-test("--list prints each statement: a test's number and title, a declaration's names and what it reads", (t) => {
+test("--list OLD prints each statement, and the comments above the first, with no assignment (#2564)", (t) => {
   const r = repository(t);
-  const listed = r.run(ASSIGN, "--list");
+  const listed = r.tool("--list", OLD_PATH);
   assert.equal(listed.status, 0, listed.err);
+  assert.match(listed.out, /^7-7 comment above the first statement\n8-10 One reads: $/mu);
   assert.match(listed.out, /^15-17 twice reads: ONE$/mu);
   assert.match(listed.out, /^27-30 test 2: one$/mu);
   assert.equal(r.changed(), "");
+  // (the old form, an assignment with --list, is refused by name with the new one)
+  for (const old of [r.run(ASSIGN, "--list"), r.tool("--list", "assign.json")]) {
+    assert.equal(old.status, 2);
+    assert.match(old.err, /--list takes OLD, the file to split, not an assignment: --list OLD/u);
+  }
+});
+
+test("a string that may be a path relative to the file is listed when its file changes folder, never an import (#2564)", (t) => {
+  const old = [
+    'import test from "node:test";',
+    'import { a } from "./a.js";',
+    "",
+    'const DATA = "./data.json";',
+    "",
+    'test("deep", () => {',
+    '  const url = new URL("../x.js", import.meta.url);',
+    '  const template = `../${"y"}.js`;',
+    "  return [DATA, url, template, a];",
+    "});",
+    "",
+    'test("same", () => {',
+    '  return "./same.txt";',
+    "});",
+    "",
+  ].join("\n");
+  const r = repository(t, old);
+  const deep = "tests/split/deeper/deep.test.ts";
+  const written = r.run({
+    old: OLD_PATH,
+    setup: { path: SETUP, header: "Shared." },
+    files: { [deep]: { header: null, tests: [1] }, [B]: { header: "Same.", tests: [2] } },
+  });
+  assert.equal(written.status, 0, written.err);
+  assert.ok(
+    written.out.includes(
+      [
+        "relative paths to read: 3",
+        `  ${deep} (old 4): const DATA = "./data.json";`,
+        `  ${deep} (old 7): const url = new URL("../x.js", import.meta.url);`,
+        `  ${deep} (old 8): const template = \`../\${"y"}.js\`;`,
+        "",
+      ].join("\n"),
+    ),
+    written.out,
+  );
 });
 
 test("an assignment the split cannot follow is refused, and nothing is written", (t) => {
@@ -258,6 +314,8 @@ test("an assignment the split cannot follow is refused, and nothing is written",
     assert.equal(r.changed(), "", name);
   }
   assert.equal(r.run(ASSIGN, "--other").status, 2);
+  // (a refusal writes no renames map)
+  assert.equal(existsSync(join(r.fixture, "renames.json")), false);
 });
 
 test("a statement that is neither a test nor a declaration, or a declaration no test reaches, is refused unless a range places it", (t) => {
@@ -400,7 +458,7 @@ test("a JavaScript OLD is read as TypeScript is: a property read on a call lists
       "tools/probe-two.test.mjs": { header: "Two.", tests: [2] },
     },
   };
-  const listed = r.run(assign, "--list");
+  const listed = r.tool("--list", "tools/probe.test.mjs");
   assert.equal(listed.status, 0, listed.err);
   // (`.c` is a property name: `a` reads no `c`; and `c` reads nothing, not the last declared name)
   assert.match(listed.out, /^3-3 c reads: $/mu);

@@ -2,11 +2,14 @@
 // above it, copied verbatim into the file an assignment gives it, in OLD's order. It does not choose the seam: the
 // assignment names every test's file, and the declarations follow their readers by one rule.
 //
-//   node tools/moves/split-write.mjs ASSIGN [--base REV] [--list]
+//   node tools/moves/split-write.mjs ASSIGN [--base REV]
+//   node tools/moves/split-write.mjs --list OLD [--base REV]
 //
 // OLD is read from commit REV (default HEAD), so the split can be written again after a change to ASSIGN; paths are
-// relative to the repository's top folder. `--list` prints OLD's statements, writes nothing: each with its lines, a
-// test with its number and title, a declaration with its names and the top-level names it reads.
+// relative to the repository's top folder. `--list` prints OLD's statements and writes nothing, to write the assignment
+// from: each with its lines, a test with its number and title, a declaration with its names and the top-level names it
+// reads; and the comment lines above OLD's first statement after its imports (a docblock, which goes with that
+// statement, to the setup module when it is a shared declaration, unless a range gives it to a file).
 //
 // ASSIGN is a JSON file, kept with the split's evidence:
 //   { "old": PATH,
@@ -34,13 +37,18 @@
 // the body; a file whose declaration reads one placed in another file that is not the setup module; a path outside the
 // repository; a target that exists at REV and is not OLD; a missing header. On success it removes OLD from the working
 // tree unless OLD is a target, and prints each file written with its line count. Prettier is not run: format the
-// written files afterwards.
+// written files afterwards. Beside ASSIGN it writes `renames.json`, OLD to every written file (`{ "renames": { OLD:
+// [FILE, …] } }`), the map `pure-move-check --renames` and `move-sweep --renames` read. Last it lists each string in
+// OLD's code outside an import or export declaration that starts with `./` or `../` and went to a file in another
+// folder than OLD's (`relative paths to read: N`, then each with its file and OLD line): a path relative to the file,
+// which the move may break and the tool cannot tell from data, for the builder to read.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ts } from "ts-morph";
 
-const USAGE = "usage: node tools/moves/split-write.mjs ASSIGN [--base REV] [--list]";
+const USAGE =
+  "usage: node tools/moves/split-write.mjs ASSIGN [--base REV] | --list OLD [--base REV]";
 const WIDTH = 120;
 
 class Refused extends Error {}
@@ -149,7 +157,29 @@ function scan(file, text) {
     };
     visit(statement.node);
   }
-  return { imports, statements, tests };
+  // (each string that may be a path relative to the file: an import or export declaration's specifier is rewritten)
+  const relative = [];
+  const strings = (node) => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
+    if (
+      (ts.isStringLiteral(node) ||
+        ts.isNoSubstitutionTemplateLiteral(node) ||
+        ts.isTemplateHead(node)) &&
+      /^\.\.?\//u.test(node.text)
+    )
+      relative.push(lineOf(node.getStart(source)));
+    ts.forEachChild(node, strings);
+  };
+  strings(source);
+  // (the comment lines above the first statement after the imports: a file's docblock)
+  const first = statements[0]?.node;
+  const lead = leadingComments(text.split("\n"));
+  const comments = (
+    first ? (ts.getLeadingCommentRanges(text, first.getFullStart()) ?? []) : []
+  ).filter((range) => lineOf(range.pos) > lead);
+  const docblock =
+    comments.length > 0 ? { from: lineOf(comments[0].pos), to: lineOf(comments.at(-1).end) } : null;
+  return { imports, statements, tests, relative, docblock };
 }
 
 /** The file each of OLD's lines goes to, by the assignment's ranges, tests and the declaration rule. */
@@ -374,20 +404,43 @@ function render(old, lines, assign, { fileOf, lead, byName }) {
 export function main(argv, cwd = process.cwd(), print = console.log) {
   const positional = [];
   let base = "HEAD";
-  let list = false;
+  let list;
   try {
     for (let i = 0; i < argv.length; i += 1) {
       if (argv[i] === "--base" && argv[i + 1] !== undefined) base = argv[++i];
-      else if (argv[i] === "--list") list = true;
-      else {
+      else if (argv[i] === "--list") {
+        list = argv[++i];
+        refuseUnless(
+          list !== undefined && !list.startsWith("-") && !list.endsWith(".json"),
+          `--list takes OLD, the file to split, not an assignment: --list OLD [--base REV]\n${USAGE}`,
+        );
+      } else {
         refuseUnless(!argv[i].startsWith("-"), USAGE);
         positional.push(argv[i]);
       }
     }
-    refuseUnless(positional.length === 1, USAGE);
+    refuseUnless(positional.length === (list === undefined ? 1 : 0), USAGE);
     const git = (...args) =>
       execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     const top = git("rev-parse", "--show-toplevel").trim();
+    const read = (file) => {
+      try {
+        return git("show", `${base}:${file}`);
+      } catch {
+        throw new Refused(`cannot read ${file} at ${base}`);
+      }
+    };
+    if (list !== undefined) {
+      const old = scan(list, read(list));
+      for (const s of old.statements) {
+        if (s === old.statements[0] && old.docblock !== null)
+          print(`${old.docblock.from}-${old.docblock.to} comment above the first statement`);
+        print(
+          `${s.own}-${s.last} ${s.test === undefined ? `${s.names.join(", ") || "(statement)"} reads: ${[...s.reads].join(", ")}` : `test ${s.test}: ${s.title}`}`,
+        );
+      }
+      return 0;
+    }
     let assign;
     try {
       assign = JSON.parse(readFileSync(path.resolve(cwd, positional[0]), "utf8"));
@@ -407,23 +460,12 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
         !path.posix.isAbsolute(file) && !path.posix.normalize(file).startsWith("../"),
         `${file} is not a path inside the repository`,
       );
-    let text;
-    try {
-      text = git("show", `${base}:${assign.old}`);
-    } catch {
-      throw new Refused(`cannot read ${assign.old} at ${base}`);
-    }
+    const text = read(assign.old);
     const lines = text.split("\n");
     if (lines.at(-1) === "") lines.pop();
     const old = scan(assign.old, text);
-    if (list) {
-      for (const s of old.statements)
-        print(
-          `${s.own}-${s.last} ${s.test === undefined ? `${s.names.join(", ") || "(statement)"} reads: ${[...s.reads].join(", ")}` : `test ${s.test}: ${s.title}`}`,
-        );
-      return 0;
-    }
-    const texts = render(old, lines, assign, place(old, lines, assign));
+    const placed = place(old, lines, assign);
+    const texts = render(old, lines, assign, placed);
     for (const file of texts.keys())
       if (file !== assign.old) {
         let tracked = true;
@@ -443,6 +485,18 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
       rmSync(path.join(top, assign.old), { force: true });
       print(`${assign.old}: removed`);
     }
+    const map = path.join(path.dirname(positional[0]), "renames.json");
+    writeFileSync(
+      path.resolve(cwd, map),
+      `${JSON.stringify({ renames: { [assign.old]: [...texts.keys()].sort() } }, null, 2)}\n`,
+    );
+    print(`${map}: the renames map`);
+    const moved = [...new Set(old.relative)].filter(
+      (line) => path.posix.dirname(placed.fileOf.get(line)) !== path.posix.dirname(assign.old),
+    );
+    print(`relative paths to read: ${moved.length}`);
+    for (const line of moved)
+      print(`  ${placed.fileOf.get(line)} (old ${line}): ${lines[line - 1].trim()}`);
     return 0;
   } catch (error) {
     if (!(error instanceof Refused)) throw error;

@@ -32,7 +32,11 @@
 // exactly and stops (exit 2): a file that is not can be moved, but not declared in. Declarations come from that file
 // alone, and no flag admits a line class. To write one, run the check without `--declare`: it lists each line that
 // needs one as `unadmitted: FILE:LINE (SIDE): TEXT`. Read each, and declare those you mean, each with the reason that
-// line changed.
+// line changed. A generated file the change rewrites in place is declared whole instead, `{ "file", "whole": true,
+// "reason" }` (the reason naming the command that wrote it): its added and removed lines are not judged but listed, as
+// `not judged (declared whole): FILE (+N -M): reason`, and counted in the shape line, and its import bindings are
+// still compared. A whole entry for a file the change adds, deletes or renames, for a path of the `--renames` map, for
+// none of the change's files, or a second one for a file, cannot run: moved code is never declared away.
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
 // after, a binding being one imported or re-exported name with its target, its local or exported name and whether it is
@@ -213,24 +217,32 @@ function declarationsOf(path) {
   }
   if (!Array.isArray(entries)) throw new CannotRun(`pure-move-check: ${path} is not a JSON array`);
   for (const entry of entries) {
-    const ok =
-      entry !== null &&
-      typeof entry === "object" &&
+    const whole =
+      entry?.whole === true &&
       typeof entry.file === "string" &&
-      (entry.side === "added" || entry.side === "removed") &&
-      typeof entry.text === "string" &&
-      !entry.text.includes("\n") &&
       typeof entry.reason === "string" &&
       entry.reason.trim() !== "" &&
       !entry.reason.includes("\n") &&
-      Object.keys(entry).every((key) => ["file", "side", "text", "reason"].includes(key));
+      Object.keys(entry).every((key) => ["file", "whole", "reason"].includes(key));
+    const ok =
+      whole ||
+      (entry !== null &&
+        typeof entry === "object" &&
+        typeof entry.file === "string" &&
+        (entry.side === "added" || entry.side === "removed") &&
+        typeof entry.text === "string" &&
+        !entry.text.includes("\n") &&
+        typeof entry.reason === "string" &&
+        entry.reason.trim() !== "" &&
+        !entry.reason.includes("\n") &&
+        Object.keys(entry).every((key) => ["file", "side", "text", "reason"].includes(key)));
     if (entry !== null && typeof entry === "object" && Object.hasOwn(entry, "line"))
       throw new CannotRun(
         `pure-move-check: a declaration names its line by "text" now, not "line": replace "line" with that line's exact text, LF-delimited, in that side's blob (removed: the merge base; added: HEAD), keeping any CR: ${JSON.stringify(entry)}`,
       );
     if (!ok)
       throw new CannotRun(
-        `pure-move-check: a declaration is not { file, side: "added" | "removed", text, reason }: ${JSON.stringify(entry)}`,
+        `pure-move-check: a declaration is not { file, side: "added" | "removed", text, reason } or { file, whole: true, reason }: ${JSON.stringify(entry)}`,
       );
   }
   return entries;
@@ -814,8 +826,47 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
 }
 
 /**
+ * The files declared whole (`entries`, each `{ file, whole, reason }`) among the change's `files`, each `{ file, added,
+ * removed, reason }`; refused for a file the change adds, deletes or renames, one in the renames map (`renames`), one no
+ * file of the change is, or a second entry for a file.
+ */
+function wholeFiles(entries, files, renames) {
+  // (a map path spelled another way, `./a.ts`, is the same path)
+  const mapped = new Set(
+    Object.entries(renames ?? {})
+      .flatMap(([old, to]) => [old, ...[to].flat()])
+      .map((file) => path.posix.normalize(file)),
+  );
+  const wholes = [];
+  for (const { file, reason } of entries) {
+    const change = files.find((c) => c.file === file || c.old === file);
+    const refusal =
+      change === undefined
+        ? "matches no file of the change"
+        : change.old !== change.file
+          ? "is added, deleted or renamed by the change"
+          : mapped.has(file)
+            ? "is a path of the --renames map"
+            : wholes.some((w) => w.file === file)
+              ? "is declared whole twice"
+              : null;
+    if (refusal !== null)
+      throw new CannotRun(
+        `pure-move-check: ${file}, declared whole, ${refusal}: moved code is never declared away`,
+      );
+    wholes.push({
+      file,
+      added: change.addedLines.length,
+      removed: change.removedLines.length,
+      reason,
+    });
+  }
+  return wholes;
+}
+
+/**
  * The check of the change from the merge base of `base` and `HEAD`: `{ mergeBase, unadmitted, declared, stale, refused,
- * covered, unparsed, irregular, bindings, renames, counts }`.
+ * covered, wholes, unparsed, irregular, bindings, renames, counts }`.
  */
 export function checkMove(
   base,
@@ -883,7 +934,14 @@ export function checkMove(
       .filter(([file, mode]) => file !== null && !regular(file, mode))
       .map(([file, mode]) => `${file} (${mode})`),
   );
-  const declarations = declare === null ? [] : declarationsOf(declare);
+  const entries = declare === null ? [] : declarationsOf(declare);
+  const declarations = entries.filter((d) => d.whole !== true);
+  const renameMap = renames === null ? null : renamesOf(renames);
+  const wholes = wholeFiles(
+    entries.filter((d) => d.whole === true),
+    files,
+    renameMap,
+  );
   // a declaration's text is compared exactly, and Git's diff and blobs, read as UTF-8, turn bytes that are not into
   // U+FFFD, which a declaration could then match: each blob a declaration names must decode without loss
   const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -919,12 +977,18 @@ export function checkMove(
     bound.set(index, entry.row.line);
     return declarations[index].reason;
   };
-  const { verdicts, moved } = verdictsOf(mergeBase, "HEAD", files, { cwd, declaredFor });
+  const { verdicts, moved } = verdictsOf(
+    mergeBase,
+    "HEAD",
+    files.filter((change) => !wholes.some((w) => w.file === change.file)),
+    { cwd, declaredFor },
+  );
   const counts = {
     movedAdded: moved.added,
     movedRemoved: moved.removed,
     declared: 0,
     unadmitted: 0,
+    whole: wholes.length,
   };
   for (const form of FORMS) counts[form] = 0;
   const unadmitted = [];
@@ -939,13 +1003,7 @@ export function checkMove(
       unadmitted.push(at);
     } else counts[form] += 1;
   }
-  const bindings = bindingDifferences(
-    mergeBase,
-    "HEAD",
-    files,
-    renames === null ? null : renamesOf(renames),
-    git,
-  );
+  const bindings = bindingDifferences(mergeBase, "HEAD", files, renameMap, git);
   // a refusal is declared by the declaration bound to its line, a changed one or not, else by one of its side and its
   // line's text bound to none, which it binds; each is printed with the refusal reason it covers
   const refused = [];
@@ -976,6 +1034,7 @@ export function checkMove(
     stale,
     refused,
     covered,
+    wholes,
     unparsed,
     irregular,
     bindings,
@@ -993,6 +1052,7 @@ export function reportOf(base, result) {
     stale,
     refused,
     covered,
+    wholes,
     unparsed,
     irregular,
     bindings,
@@ -1014,6 +1074,8 @@ export function reportOf(base, result) {
     out.push(
       `  refused: ${r.file}:${r.line} (${r.side}) "${r.specifier}": ${r.reason}; declare it, the move's compiler run its witness`,
     );
+  for (const w of wholes)
+    out.push(`  not judged (declared whole): ${w.file} (+${w.added} -${w.removed}): ${w.reason}`);
   for (const name of new Set(unparsed)) out.push(`  not compared (unparsed): ${name}`);
   for (const side of new Set(irregular)) out.push(`  not compared (not a regular file): ${side}`);
   for (const b of bindings.differing)
@@ -1029,7 +1091,7 @@ export function reportOf(base, result) {
       `  ${importer} and ${sibling} both change, and a binding between them is on one side only: if the move took code from one into the other, name them one family with --renames FILE, as {"renames":{${JSON.stringify(importer)}:[${JSON.stringify(importer)},${JSON.stringify(sibling)}]}}`,
     );
   out.push(
-    `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}; bindings differing ${bindings.differing.length}; refused ${counts.refused}`,
+    `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}; bindings differing ${bindings.differing.length}; refused ${counts.refused}; declared whole ${counts.whole}`,
   );
   const failed =
     unadmitted.length > 0 ||
