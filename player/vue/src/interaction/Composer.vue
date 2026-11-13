@@ -697,6 +697,7 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
   font-size: 0.875rem;
 }
 .composer-notice-arrow {
+  pointer-events: auto;
   position: absolute;
   bottom: -6px;
   z-index: 1;

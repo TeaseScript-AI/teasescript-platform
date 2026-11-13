@@ -145,32 +145,54 @@ export function playerTemporalContext(
 }
 
 /**
- * The presented question's line, once anything came after it in the conversation, such as a block's messages and
- * answers while it waited: the latest script message created before the interaction was requested, which the Player
- * shows again with the question's controls. `null` while that line is still the latest, without one, and for a popup or
- * an `exportText` dialog, which shows again itself.
+ * The presented question's line, shown again with its controls once the conversation moved on after it was asked, as a
+ * block's messages and answers do while it waits. A closed rule over the runtime's own entries, with Player-made ones
+ * and removed messages left out: its line is the latest entry created before the interaction was requested, only when
+ * that entry is a script message, and it shows again only when an entry was created after the request. `null` in every
+ * other case, and for a popup or an `exportText` dialog, which shows again itself.
  */
 export function playerRuntimeQuestionAgain(
-  session: Pick<PlayerSessionView, "state" | "transcriptEntries" | "transcriptMessageRows">,
+  session: Pick<PlayerSessionView, "state" | "transcriptEntries">,
 ): PlayerMessagePresentation | null {
   const action = activeInteraction(session.state);
-  if (action === null || action.ui.kind === "popup" || action.ui.kind === "export") return null;
-  let created = -1;
-  let row = -1;
-  for (const [sequence, index] of session.transcriptMessageRows)
-    if (sequence < action.requestEventSequence && sequence > created) {
-      created = sequence;
-      row = index;
-    }
+  if (action === null || !asksInChat(action.ui.kind)) return null;
+  let moved = false;
   const entries = session.transcriptEntries;
-  const line = entries[row];
-  if (line?.kind !== "message" || line.removed) return null;
-  for (let index = row + 1; index < entries.length; index++) {
+  for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index]!;
-    if (entry.kind !== "message" || !entry.removed)
-      return { ...line, id: `asked-again-${action.actionId}` };
+    const created = playerRuntimeTranscriptEventSequence(entry.id);
+    if (entry.kind !== "message" || entry.removed || created === null) continue;
+    if (created > action.requestEventSequence) {
+      moved = true;
+      continue;
+    }
+    // A script message has its content event; an answer has none.
+    return moved && entry.contentSequence !== undefined
+      ? { ...entry, id: `asked-again-${action.actionId}` }
+      : null;
   }
   return null;
+}
+
+/** Whether an interaction of `kind` asks in the conversation, so its line can show again; a dialog shows itself. */
+function asksInChat(kind: RuntimeInteractionActionSnapshot["ui"]["kind"]): boolean {
+  switch (kind) {
+    case "text":
+    case "number":
+    case "temporal":
+    case "password":
+    case "choice":
+    case "button":
+    case "url":
+    case "image":
+    case "form":
+      return true;
+    case "popup":
+    case "export":
+      return false;
+    default:
+      return kind satisfies never;
+  }
 }
 
 export function playerRuntimeForeground(
