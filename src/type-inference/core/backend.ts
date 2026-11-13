@@ -276,14 +276,14 @@ export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: 
 };
 
 /**
- * Whether a unit's or an angle's amount holds only numbers (`UNIT_AMOUNT`), as the admitted set with a refusing default:
- * each kind the core gives it is one `UNIT_AMOUNT` takes; a read of a place whose type is written or decided holds that
- * type's kinds (a typed ingress's read is the unknown its store's check stands for); an unknown is admitted only of an
- * external origin, as the host global itself or a direct read of a place whose type is undecided, beside the
+ * Whether a unit's or an angle's amount holds only numbers (`UNIT_AMOUNT`), as the admitted set with a refusing
+ * default: each kind the core gives it is one `UNIT_AMOUNT` takes; a read of a place whose type is written or decided
+ * holds that type's kinds (a typed ingress's read is the unknown its store's check stands for); an unknown is admitted
+ * only of an external origin, as the host global itself or a direct read of a place whose type is undecided, beside the
  * evaluator's check; a missing property is no value there, its read fails first. Any other unknown (one an element, a
- * call or an operation carries, a stop's) is not shown to be a number. So the route declines what today's checker plans where only a narrowing or an `otherwise` shows the amount a number:
- * a read of `n: integer?` under `n != null`, `(n otherwise 1) s`; the core gives no read its narrowing
- * (`OccurrenceAnswer.narrowing`).
+ * call or an operation carries, a stop's) is not shown to be a number. So the route declines what today's checker plans
+ * where only a narrowing or an `otherwise` shows the amount a number: a read of `n: integer?` under `n != null`,
+ * `(n otherwise 1) s`; the core gives no read its narrowing (`OccurrenceAnswer.narrowing`).
  */
 function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression): boolean {
   const answer = answers.at(nodeOf(answers, index, amount));
