@@ -395,12 +395,13 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
     // a prefill, of an ask but `askChoice`, that is only `null`, or that may be text at an ask of another kind: the
     // runtime takes `null` and blank text as none (V30 §20), where today's checker gives TSV039 for a known `null` and
     // for text there; the core's kinds do not tell blank text from other text (the row refuses the literals,
-    // `askPrefillAdmitted`)
+    // `askPrefillAdmitted`; the slice takes no written type a value only `null` fills, `annotationOutside`, so a `null`
+    // is one the core knows)
     const prefill = askPrefill(ask);
     if (prefill === null || ask.interactionKind === "choice") continue;
-    // (judged by its own kinds and by its leaves' (`leaves`), since a typed ingress's read is unknown, with its check at
-    // the ingress, and a list or an `otherwise` around it hides what it holds: each by its kinds, or, for a read of a
-    // place whose admitted type is decided, that type's)
+    // (each by its kinds, or, for a read of a place whose admitted type is decided, that type's; text also by its
+    // leaves', `leaves`, since a typed ingress's read is unknown, with its check at the ingress, and a list or an
+    // `otherwise` around it hides what it holds)
     const kinds = (value: Expression): readonly (readonly string[])[] => {
       const read = answers.at(nodeOf(answers, index, value))?.place ?? null;
       const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
@@ -412,13 +413,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
     const text = (value: Expression): boolean =>
       ask.interactionKind !== "text" && kinds(value).some((tags) => tags.includes("string"));
     const onlyNull = (value: Expression): boolean => kinds(value).some(nullOnly);
-    const parts = leaves(prefill);
-    if (
-      onlyNull(prefill) ||
-      (parts.length > 0 && parts.every(onlyNull)) ||
-      text(prefill) ||
-      parts.some(text)
-    )
+    if (onlyNull(prefill) || text(prefill) || leaves(prefill).some(text))
       return { file: index.fileOf(ask), span: prefill.span, what: "this prefill" };
   }
   // a variable without a written type whose lists nest deeper than the facts follow

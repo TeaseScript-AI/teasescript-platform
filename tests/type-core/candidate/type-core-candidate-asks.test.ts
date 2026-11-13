@@ -202,6 +202,12 @@ test("a prefill that may be null among the kinds its request takes runs as today
     asToday(source);
 });
 
+test("a choice whose buttons are one type by V30's rules runs as today's", () => {
+  // (a whole number with a number, and `null` beside a type, are one type: not R40's mix)
+  for (const ask of ["askChoice 1, 2.5", "askChoice 1, null", "askChoice [1, 2.5]"])
+    asToday(`let r = ${ask}\nsay "after"\nexit\n`);
+});
+
 test("the prefills, choices and asks the route refuses: today's compile error each", () => {
   // `askPassword` takes no prefill (an (S) where the route ran: the request was passed a value it does not take)
   refusedAsToday(
@@ -224,22 +230,45 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       "TSV039",
       `this ask: ${ask}("q", prefill: ${prefill})`,
     );
-  // a prefill that is only null, computed
-  for (const [prelude, prefill] of [
-    ["let m: null = hostValue\n", "m"],
-    ["", "[null][0]"],
-    ["", "null otherwise null"],
-    // (a typed ingress's read wrapped: the refusal judges what the wrapping holds)
-    ["let m: null = hostValue\n", "[m][0]"],
-    ["let m: null = hostValue\n", "m otherwise m"],
-    ["let m: null = hostValue\n", "[[m]][0][0]"],
-    ["let m: null[] = hostValue\n", "[m[0]][0]"],
+  // a prefill that is only null, as the core knows it: computed, or narrowed
+  for (const [source, prefill] of [
+    ['let r = askText("q", prefill: [null][0])\nexit\n', "[null][0]"],
+    ['let r = askText("q", prefill: null otherwise null)\nexit\n', "null otherwise null"],
+    [
+      'let m: string? = hostValue\nif m == null {\n  let r = askText("q", prefill: m)\n}\nexit\n',
+      "m",
+    ],
+    [
+      'let m: string? = hostValue\nif m != null {\n  exit\n}\nlet r = askNumber("q", prefill: [m].get(0, default: null))\nexit\n',
+      "[m].get(0, default: null)",
+    ],
+  ])
+    refusedAsToday(source, "TSV039", `this prefill: ${prefill}`);
+  // a written type only `null` fills, wherever the value goes from it: the slice takes no such type (the lead's R44)
+  for (const [written, at, prefill] of [
+    ["null", "null", "m"],
+    ["null", "null", "[m][0]"],
+    ["null", "null", "m otherwise m"],
+    ["null", "null", "[[m]][0][0]"],
+    ["null", "null", "[m].get(0, default: null)"],
+    ["null?", "null?", "m otherwise m"],
+    ["null[]", "null", "[m[0]][0]"],
   ])
     refusedAsToday(
-      `${prelude}let r = askText("q", prefill: ${prefill})\nexit\n`,
+      `let m: ${written} = hostValue\nlet r = askText("q", prefill: ${prefill})\nexit\n`,
       "TSV039",
-      `this prefill: ${prefill}`,
+      `this written type: ${at}`,
     );
+  refusedAsToday(
+    'let m: null = hostValue\nlet p = m otherwise m\nlet r = askInteger("q", prefill: p)\nexit\n',
+    "TSV039",
+    "this written type: null",
+  );
+  refusedAsToday(
+    'let m: null = hostValue\nfor x in [m otherwise m] {\n  let r = askBoolean("q", prefill: x)\n}\nexit\n',
+    "TSV039",
+    "this written type: null",
+  );
   // a prefill that may be text at an ask of another kind: blank text is none to the runtime, and the core's kinds do not
   // tell blank text from other text
   for (const ask of ["askNumber", "askInteger", "askDate", "askTime", "askDateTime", "askBoolean"])
@@ -251,6 +280,7 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       ['let o = {p: ""}\n', "o.p"],
       ["let m: string = hostValue\n", "[m][0]"],
       ["let m: string = hostValue\n", "m otherwise m"],
+      ["let m: string = hostValue\n", "{p: m}.p"],
     ])
       refusedAsToday(
         `${prelude}let r = ${ask}("q", prefill: ${prefill})\nexit\n`,
