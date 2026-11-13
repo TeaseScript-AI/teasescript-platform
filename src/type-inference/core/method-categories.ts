@@ -17,14 +17,15 @@ import type { ValueKind } from "../../value-kinds.js";
 
 /*
  * What each built-in operation does to the values the core follows, by semantic category (the owner's extensibility
- * criterion, 2026-10-24; PLAN). The generic core (definitions, contract, exact path, values, answers) reads an
- * operation's category, never its name: a new method that uses a mechanism the core already has is a new row of a table
- * (below), with its language rules in the consumers (`consumers.ts`, `consumers/`), and no change to the core. A new
- * mechanism (a new kind of definition, a new transfer, a new loop form, a new certainty rule) is a change to the core.
- * The selections, the conversions, and what a method does to its receiver's elements come from the language's own
- * tables (`list-methods.ts`, `dict-operations.ts`, `conversions.ts`), which the compiler and the runtime read too, so a
- * method that removes or clears is a row of its contracts alone; the other methods' results are rows here, which
- * `type-core-method-categories.test.ts` checks against the contracts.
+ * criterion, 2026-10-24; PLAN). The generic core (definitions, contract, exact path, values, answers) reads a method's,
+ * a conversion's or an interaction's category, never its name (an operator it reads by its symbol, `+` among them): a
+ * new method that uses a mechanism the core already has is a new row of a table (below), with its language rules in the
+ * consumers (`consumers.ts`, `consumers/`), and no change to the core. A new mechanism (a new kind of definition, a new
+ * transfer, a new loop form, a new certainty rule) is a change to the core. The selections, the conversions, and what a
+ * method does to its receiver's elements come from the language's own tables (`list-methods.ts`, `dict-operations.ts`,
+ * `conversions.ts`), which the compiler and the runtime read too, so a method that removes or clears is a row of its
+ * contracts alone; the other methods' results are rows here, which `type-core-method-categories.test.ts` checks against
+ * the contracts.
  */
 
 /** What a method of a collection does and gives. */
