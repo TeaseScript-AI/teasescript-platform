@@ -134,7 +134,7 @@ export interface PlayerOpsContext {
    */
   readonly delivery: DeliveryOwner;
   readonly plans: OwnedMap<string, InstructionPlan>;
-  /** Keeps `plan` under a new token, which it returns, owned by `delivery` (the innermost open one by default). */
+  /** Keeps `plan` under a new token, which it returns, owned by `delivery` (the open one by default). */
   hold(plan: InstructionPlan, delivery?: Delivery): string;
   /** Records the connection's sessions for a debug export; see `DebugRecorder`. */
   readonly recorder: DebugRecorder;

@@ -27,26 +27,27 @@ import { coverageGaps, product, type Coordinates } from "../helpers/family-cover
 // The owner's one deciding function, as a declared table.
 
 /**
- * Where a delivery stands when an event reaches it: open and innermost, open under a nested one, ended (posted or
- * aborted), or another owner's; and whether its owner was closed meanwhile.
+ * Where a delivery stands when an event reaches it: the open one, ended (posted or aborted), or another owner's; and
+ * whether its owner was closed meanwhile. The host runs one op at a time, so at most one delivery is open.
  */
 const OWNER_AXES = {
-  delivery: ["innermost", "outer", "ended", "foreign"],
+  delivery: ["open", "ended", "foreign"],
   owner: ["open", "closed"],
   event: ["own", "posted", "abort", "begin", "close"],
 } as const;
 type OwnerCase = { readonly [Axis in keyof typeof OWNER_AXES]: (typeof OWNER_AXES)[Axis][number] };
 
-/** Closing aborts every open delivery, so a closed owner has none open. */
+/** Closing aborts the open delivery, so a closed owner has none open. */
 const ownerInfeasible = ({ delivery, owner }: Coordinates) =>
-  owner === "closed" && (delivery === "innermost" || delivery === "outer");
+  owner === "closed" && delivery === "open";
 
 /** What the event does: refused, or done, with the undos it runs and whether a new delivery opened. */
 function ownerOutcome({ delivery, owner, event }: OwnerCase): "refused" | "done" | "nothing" {
-  const open = delivery === "innermost" || delivery === "outer";
+  const open = delivery === "open";
   switch (event) {
     case "begin":
-      return owner === "closed" ? "refused" : "done";
+      // A closed owner, or one with a delivery open, admits no other.
+      return owner === "closed" || open ? "refused" : "done";
     case "close":
       return owner === "closed" ? "nothing" : "done";
     case "own":
@@ -67,23 +68,14 @@ for (const each of ownerCases())
   test(`a delivery owner: ${Object.values(each).join(", ")}`, () => {
     const owner = deliveryOwner();
     const undone: string[] = [];
-    const outer = owner.begin();
-    owner.own(outer, () => undone.push("outer"));
-    const inner = owner.begin();
-    owner.own(inner, () => undone.push("inner"));
     const ended = owner.begin();
+    owner.own(ended, () => undone.push("ended"));
     owner.commit(ended);
     const foreign = deliveryOwner().begin();
-    const target: Delivery = { innermost: inner, outer, ended, foreign }[each.delivery];
-    if (each.owner === "closed") {
-      owner.close();
-      assert.deepEqual(
-        undone,
-        ["inner", "outer"],
-        "closing aborts every open delivery, latest first",
-      );
-      undone.length = 0;
-    }
+    const open = each.delivery === "open" ? owner.begin() : null;
+    if (open !== null) owner.own(open, () => undone.push("open"));
+    const target: Delivery = { open, ended, foreign }[each.delivery]!;
+    if (each.owner === "closed") owner.close();
     const event: DeliveryEvent =
       each.event === "own"
         ? { kind: "own", undo: () => undone.push("new") }
@@ -101,26 +93,13 @@ for (const each of ownerCases())
       return;
     }
     run();
-    if (each.event === "abort" && want === "done")
-      assert.deepEqual(
-        undone,
-        [each.delivery === "innermost" ? "inner" : "outer"],
-        "its undos, once",
-      );
-    else if (each.event === "close" && want === "done")
-      assert.deepEqual(undone, ["inner", "outer"]);
+    if ((each.event === "abort" || each.event === "close") && want === "done" && open !== null)
+      assert.deepEqual(undone, ["open"], "the open delivery's undos, once");
     else assert.deepEqual(undone, [], "nothing undone");
-    if (each.event === "abort" || each.event === "posted") {
-      // The delivery ended: it admits nothing more, and the other open one is untouched.
+    if ((each.event === "abort" || each.event === "posted") && want === "done") {
+      // The delivery ended: it admits nothing more, and the owner admits the next one.
       assert.throws(() => owner.own(target, () => {}), DeliveryRefusedError);
-      if (owner.closed === false) {
-        const other = target === inner ? outer : inner;
-        owner.rollback(other);
-        assert.ok(
-          undone.includes(other === inner ? "inner" : "outer"),
-          "the other delivery kept its undos",
-        );
-      }
+      owner.rollback(owner.begin());
     }
   });
 
@@ -183,28 +162,11 @@ test("an owned registry adds only inside a delivery, only a new key, and its und
   map.delete("k");
   map.clear();
   assert.deepEqual(retired, ["new=three", "k=one"]);
-  // A facade names its own delivery, whatever is innermost.
-  const facade = owner.begin();
-  const inner = owner.begin();
-  map.set("facade", "four", facade);
-  owner.rollback(inner);
-  assert.equal(map.get("facade"), "four", "the inner delivery did not own it");
-  owner.rollback(facade);
-  assert.equal(map.has("facade"), false);
-});
-
-test("an undo names its insertion: a key released and set again, even with the same value, is not undone by the old one", () => {
-  const owner = deliveryOwner();
-  const map = new OwnedMap<string, object>(owner);
-  const value = {};
-  const first = owner.begin();
-  map.set("k", value);
-  const second = owner.begin();
-  map.delete("k");
-  map.set("k", value);
-  owner.commit(second);
-  owner.rollback(first);
-  assert.equal(map.get("k"), value, "the committed insertion stays");
+  // A caller may name the open delivery itself.
+  const named = owner.begin();
+  map.set("named", "four", named);
+  owner.rollback(named);
+  assert.equal(map.has("named"), false);
 });
 
 test("a retire that throws is reported, and every other entry that leaves is still retired", () => {
@@ -228,40 +190,19 @@ test("a retire that throws is reported, and every other entry that leaves is sti
   );
 });
 
-/** Two deliveries nested, each setting the same key or cell, ended in either order. */
-const REPLACE_AXES = { registry: ["map", "cell"], aborted: ["outerFirst", "innerFirst"] } as const;
-
-for (const each of product(REPLACE_AXES))
-  test(`an owned ${each.registry}, set by nested deliveries that both abort (${each.aborted}), keeps nothing`, () => {
-    const owner = deliveryOwner();
-    const map = new OwnedMap<string, string>(owner);
-    const cell = new OwnedCell<string>(owner);
-    const outer = owner.begin();
-    const inner = owner.begin();
-    if (each.registry === "map") {
-      map.set("k", "a", outer);
-      // The inner delivery cannot take the key over; it adds its own.
-      assert.throws(() => map.set("k", "b", inner), DeliveryRefusedError);
-      map.set("k2", "b", inner);
-    } else {
-      cell.set("a", outer);
-      cell.set("b", inner);
-    }
-    const [one, other] = each.aborted === "outerFirst" ? [outer, inner] : [inner, outer];
-    owner.rollback(one);
-    owner.rollback(other);
-    assert.deepEqual([...map], [], "nothing aborted comes back");
-    assert.equal(cell.value, null);
-  });
-
-test("the replacement cases are every coordinate of their declaration", () => {
-  const owed = [
-    { registry: "map", aborted: "outerFirst" },
-    { registry: "map", aborted: "innerFirst" },
-    { registry: "cell", aborted: "outerFirst" },
-    { registry: "cell", aborted: "innerFirst" },
-  ];
-  assert.deepEqual(coverageGaps(owed, product(REPLACE_AXES), { tuples: true }), []);
+test("an owned cell holds a value only inside a delivery, and an abort empties it without restoring the last", () => {
+  const owner = deliveryOwner();
+  const cell = new OwnedCell<string>(owner);
+  assert.throws(() => cell.set("outside"), DeliveryRefusedError);
+  const first = owner.begin();
+  cell.set("one");
+  owner.commit(first);
+  const second = owner.begin();
+  cell.set("two");
+  owner.rollback(second);
+  assert.equal(cell.value, null, "an abort empties it; a cache is recomputed when empty");
+  cell.clear();
+  assert.equal(cell.value, null);
 });
 
 test("a reporter that throws, or an error whose inspection throws, never stops the undos or the close", (context) => {
