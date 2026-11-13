@@ -22,7 +22,7 @@
 //      string's lines are its content; JSX text's lines after its first non-whitespace character are a token's too, so
 //      refused, though JSX drops a whitespace line; a comment's are admitted); any other whitespace line is unadmitted
 //      and declared as any line is (an empty line's entry has `"text": ""`). Node can place a token otherwise without a
-//      parse error in two readings, the complete set review round 2 of #2621 bounded: `await` followed by `/` in a
+//      parse error in two readings (#2621): `await` followed by `/` in a
 //      `.mjs` or `.mts` file without an import or export (a script to this parse, a module to Node), and `<!--` in a
 //      script (a comment to Node). A move of such a file declares its whitespace lines or reads its templates by hand;
 //   4. a line of comments and whitespace alone, in a file the change adds, above its first import or export statement
