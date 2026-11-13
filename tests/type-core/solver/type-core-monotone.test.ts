@@ -3,12 +3,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { checkedResult } from "../../src/type-inference/core/check-result/check-result.js";
-import { makeItem, REASON, type Item } from "../../src/type-inference/core/items.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { HELD_MODES } from "../helpers/type-core-held-host.js";
-import { judgeRun, withMonotoneOracle } from "../helpers/type-core/type-core-monotone.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { checkedResult } from "../../../src/type-inference/core/check-result/check-result.js";
+import { makeItem, REASON, type Item } from "../../../src/type-inference/core/items.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { HELD_MODES } from "../../helpers/type-core-held-host.js";
+import { judgeRun, withMonotoneOracle } from "../../helpers/type-core/type-core-monotone.js";
 
 const unknown = (reasons: number, context: Item["context"] = null): Item =>
   makeItem("unknown", null, { reasons, context, cert: "pos" });

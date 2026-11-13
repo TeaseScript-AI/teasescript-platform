@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { sortCost } from "../../src/type-inference/core/definitions.js";
-import { WorkLedger } from "../../src/type-inference/core/budget.js";
+import { sortCost } from "../../../src/type-inference/core/definitions.js";
+import { WorkLedger } from "../../../src/type-inference/core/budget.js";
 import {
   concatenated,
   copied,
@@ -14,7 +14,7 @@ import {
   some,
   sorted,
   steps,
-} from "../../src/type-inference/core/charged-iteration.js";
+} from "../../../src/type-inference/core/charged-iteration.js";
 
 /*
  * The charged helpers' laws (#1747's charging round, `charged-iteration.ts`): each item, prefix, copied element and

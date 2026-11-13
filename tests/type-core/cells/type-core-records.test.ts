@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { readFixture } from "../helpers/type-core/type-core-fixture.js";
+import { readFixture } from "../../helpers/type-core/type-core-fixture.js";
 import {
   readCompactRecord,
   recordDifferences,
   type CompactDiagnostic,
   type CompactRecord,
-} from "../helpers/type-core-records.js";
+} from "../../helpers/type-core-records.js";
 
 /*
  * N10's payloads in the compact records: the fixture's `requiredCheck` is read whole and compared as
@@ -19,7 +19,7 @@ const records = readFixture();
 
 test("the fixture's records carry every N10 payload of its lines", () => {
   const text = readFileSync(
-    new URL("../../../tests/fixtures/type-core/cells.jsonl", import.meta.url),
+    new URL("../../../../tests/fixtures/type-core/cells.jsonl", import.meta.url),
     "utf8",
   );
   const written = text.match(/"requiredCheck":\s*\{/gu)?.length ?? 0;

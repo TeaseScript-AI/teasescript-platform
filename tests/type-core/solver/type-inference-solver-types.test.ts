@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import type { ScalarTypeName } from "../../src/ast.js";
+import type { ScalarTypeName } from "../../../src/ast.js";
 import {
   containsType,
   isAssignable,
@@ -15,13 +15,13 @@ import {
   union,
   type ScalarValue,
   type StaticType,
-} from "../../src/static-types.js";
-import { PropertyTable } from "../../src/static-types/property-tables.js";
-import { assignedType, excludeType, narrowTo } from "../../src/static-types/narrowing.js";
-import { typeKey } from "../../src/storage-types.js";
-import type { TypeTerm } from "../../src/type-inference/graph.js";
-import { TypeTable, type TypeId } from "../../src/type-inference/solver/types.js";
-import { VALUE_KIND_NAMES, type ValueKind } from "../../src/value-kinds.js";
+} from "../../../src/static-types.js";
+import { PropertyTable } from "../../../src/static-types/property-tables.js";
+import { assignedType, excludeType, narrowTo } from "../../../src/static-types/narrowing.js";
+import { typeKey } from "../../../src/storage-types.js";
+import type { TypeTerm } from "../../../src/type-inference/graph.js";
+import { TypeTable, type TypeId } from "../../../src/type-inference/solver/types.js";
+import { VALUE_KIND_NAMES, type ValueKind } from "../../../src/value-kinds.js";
 
 // The type table of O4 stage 3a (work note) against the legacy's algebra in `static-types.ts` and
 // `static-types/narrowing.ts`, over an enumerated catalog: every atom of the registry, null, unknown, never, restricted
@@ -412,7 +412,7 @@ test("a list nested 20,000 deep interns and converts back without native recursi
 
 test("the type table renders no text", () => {
   const source = readFileSync(
-    new URL("../../../src/type-inference/solver/types.ts", import.meta.url),
+    new URL("../../../../src/type-inference/solver/types.ts", import.meta.url),
     "utf8",
   );
   assert.equal(source.includes("typeKey"), false);
