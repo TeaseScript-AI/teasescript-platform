@@ -17,97 +17,9 @@ const {
   makeContext,
   makeGithub,
   artifactFixture,
-  inputFromCore,
   readyEntry,
-  failedEntry,
   authoritativeRegistry,
 } = require("./test-source-bundle-artifact-request-support.cjs");
-
-async function testPrunedDeletedRequestRedeliveryIsANoop() {
-  const context = makeContext("/artifact source main");
-  const entries = Array.from({ length: request.REGISTRY_LIMIT }, (_, index) =>
-    readyEntry({
-      requestId: 600 + index,
-      sourceSha: String(index + 1)
-        .repeat(40)
-        .slice(0, 40),
-      artifactId: 8600 + index,
-      runId: 9600 + index,
-      updatedAt: `2026-08-04T10:${String(index).padStart(2, "0")}:00.000Z`,
-    }),
-  );
-  const registry = authoritativeRegistry(entries);
-  const github = makeGithub(context, { comments: [registry] });
-  github.state.comments = github.state.comments.filter((comment) => comment.id !== 501);
-  const before = registry.body;
-  const core = makeCore();
-  await request.resolveRequest({ github, context, core });
-  assert.deepEqual(core.failures, []);
-  assert.equal(core.outputs.resolved, "false");
-  assert.equal(core.outputs.cache_hit, "false");
-  assert.equal(registry.body, before);
-  assert.deepEqual(github.state.operations, []);
-}
-
-async function testLiveTerminalRequestRedeliveryRetriesCleanupWithoutProduction() {
-  for (const entry of [
-    readyEntry({
-      requestId: 501,
-      artifactId: 8112,
-      runId: 9112,
-      updatedAt: "2026-08-04T10:00:00.000Z",
-    }),
-    failedEntry({ requestId: 501 }),
-  ]) {
-    const context = makeContext("/artifact source main");
-    const registry = authoritativeRegistry([entry]);
-    const github = makeGithub(context, { comments: [registry] });
-    const before = registry.body;
-    const core = makeCore();
-
-    await request.resolveRequest({ github, context, core });
-
-    assert.deepEqual(core.failures, []);
-    assert.equal(core.outputs.resolved, "false");
-    assert.equal(core.outputs.cache_hit, entry.state === "ready" ? "true" : "false");
-    assert.equal(github.state.permissionCalls, 0);
-    assert.equal(github.state.selectorCalls, 0);
-    assert.deepEqual(github.state.deletedCommentIds, [501]);
-    assert.equal(registry.body, before);
-    assert.deepEqual(github.state.operations, ["delete-comment"]);
-  }
-}
-
-async function testMissingCommandBeforeFirstTerminalPublicationFailsClosed() {
-  const artifactId = 8113;
-  const context = makeContext("/artifact source main", { runId: 9113 });
-  const fixture = artifactFixture({
-    artifactId,
-    runId: context.runId,
-    sourceSha: MAIN_SHA,
-    current: true,
-  });
-  const github = makeGithub(context, {
-    artifacts: [[artifactId, fixture.artifact]],
-    runs: [[context.runId, fixture.run]],
-  });
-  const core = makeCore();
-  await request.resolveRequest({ github, context, core });
-  github.state.comments = github.state.comments.filter((comment) => comment.id !== 501);
-
-  await assert.rejects(
-    request.completeRequest({
-      github,
-      context,
-      core,
-      input: inputFromCore(core, context, artifactId, fixture.url),
-    }),
-    /comment not found/,
-  );
-  assert.equal(github.state.createdComments, 0);
-  assert.equal(github.state.updatedComments, 0);
-  assert.deepEqual(github.state.createdStatuses, []);
-}
 
 async function testSpoofedRegistryCannotClaimAuthority() {
   // The documented authoritative registry author is github-actions[bot] with user ID 41898282.
@@ -330,9 +242,6 @@ async function testMultipleAuthoritativeRegistriesFailClosed() {
 }
 
 module.exports = {
-  testPrunedDeletedRequestRedeliveryIsANoop,
-  testLiveTerminalRequestRedeliveryRetriesCleanupWithoutProduction,
-  testMissingCommandBeforeFirstTerminalPublicationFailsClosed,
   testSpoofedRegistryCannotClaimAuthority,
   testRegistryEscapesUntrustedPullHeadRef,
   testDifferentResolvedIdentitiesDoNotDeduplicate,

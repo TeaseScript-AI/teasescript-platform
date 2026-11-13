@@ -19,6 +19,9 @@ const {
   makeContext,
   makeGithub,
   artifactFixture,
+  readyEntry,
+  failedEntry,
+  authoritativeRegistry,
   registryBlock,
   commandOptions,
 } = require("./test-source-bundle-artifact-request-support.cjs");
@@ -371,6 +374,61 @@ async function testDeletedRequestRedeliveryIsIdempotent() {
   assert.equal(github.state.comments.at(-1).body, firstBody);
 }
 
+async function testPrunedDeletedRequestRedeliveryIsANoop() {
+  const context = makeContext("/artifact source main");
+  const entries = Array.from({ length: request.REGISTRY_LIMIT }, (_, index) =>
+    readyEntry({
+      requestId: 600 + index,
+      sourceSha: String(index + 1)
+        .repeat(40)
+        .slice(0, 40),
+      artifactId: 8600 + index,
+      runId: 9600 + index,
+      updatedAt: `2026-08-04T10:${String(index).padStart(2, "0")}:00.000Z`,
+    }),
+  );
+  const registry = authoritativeRegistry(entries);
+  const github = makeGithub(context, { comments: [registry] });
+  github.state.comments = github.state.comments.filter((comment) => comment.id !== 501);
+  const before = registry.body;
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+  assert.deepEqual(core.failures, []);
+  assert.equal(core.outputs.resolved, "false");
+  assert.equal(core.outputs.cache_hit, "false");
+  assert.equal(registry.body, before);
+  assert.deepEqual(github.state.operations, []);
+}
+
+async function testLiveTerminalRequestRedeliveryRetriesCleanupWithoutProduction() {
+  for (const entry of [
+    readyEntry({
+      requestId: 501,
+      artifactId: 8112,
+      runId: 9112,
+      updatedAt: "2026-08-04T10:00:00.000Z",
+    }),
+    failedEntry({ requestId: 501 }),
+  ]) {
+    const context = makeContext("/artifact source main");
+    const registry = authoritativeRegistry([entry]);
+    const github = makeGithub(context, { comments: [registry] });
+    const before = registry.body;
+    const core = makeCore();
+
+    await request.resolveRequest({ github, context, core });
+
+    assert.deepEqual(core.failures, []);
+    assert.equal(core.outputs.resolved, "false");
+    assert.equal(core.outputs.cache_hit, entry.state === "ready" ? "true" : "false");
+    assert.equal(github.state.permissionCalls, 0);
+    assert.equal(github.state.selectorCalls, 0);
+    assert.deepEqual(github.state.deletedCommentIds, [501]);
+    assert.equal(registry.body, before);
+    assert.deepEqual(github.state.operations, ["delete-comment"]);
+  }
+}
+
 module.exports = {
   testCommandGrammar,
   testCommandsOutsideMailboxCreateNothing,
@@ -384,4 +442,6 @@ module.exports = {
   testUnexpectedArtifactApiFailureIsNotTreatedAsMiss,
   testMissingStatusRefIsAConfirmedMiss,
   testDeletedRequestRedeliveryIsIdempotent,
+  testPrunedDeletedRequestRedeliveryIsANoop,
+  testLiveTerminalRequestRedeliveryRetriesCleanupWithoutProduction,
 };

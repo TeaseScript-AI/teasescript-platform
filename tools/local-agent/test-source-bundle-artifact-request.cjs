@@ -13,11 +13,10 @@ const {
   testUnexpectedArtifactApiFailureIsNotTreatedAsMiss,
   testMissingStatusRefIsAConfirmedMiss,
   testDeletedRequestRedeliveryIsIdempotent,
-} = require("./test-source-bundle-artifact-request-requests.cjs");
-const {
   testPrunedDeletedRequestRedeliveryIsANoop,
   testLiveTerminalRequestRedeliveryRetriesCleanupWithoutProduction,
-  testMissingCommandBeforeFirstTerminalPublicationFailsClosed,
+} = require("./test-source-bundle-artifact-request-requests.cjs");
+const {
   testSpoofedRegistryCannotClaimAuthority,
   testRegistryEscapesUntrustedPullHeadRef,
   testDifferentResolvedIdentitiesDoNotDeduplicate,
@@ -26,6 +25,7 @@ const {
   testMultipleAuthoritativeRegistriesFailClosed,
 } = require("./test-source-bundle-artifact-request-registry.cjs");
 const {
+  testMissingCommandBeforeFirstTerminalPublicationFailsClosed,
   testCompletionPublishesRegistryThenCleanupThenStatus,
   testRegistryFailureCannotPublishStatusOrDeleteCommand,
   testStatusFailureReplacesCurrentRunReadyEntry,

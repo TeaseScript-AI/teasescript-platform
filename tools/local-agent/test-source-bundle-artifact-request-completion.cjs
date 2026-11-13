@@ -1,5 +1,6 @@
-// The source-bundle artifact request's tests of completion: the publication order, status and cleanup failures, a
-// changed request, and sequential requests for one SHA. test-source-bundle-artifact-request.cjs runs them.
+// The source-bundle artifact request's tests of completion: a command missing before the first terminal publication,
+// the publication order, status and cleanup failures, a changed request, and sequential requests for one SHA.
+// test-source-bundle-artifact-request.cjs runs them.
 
 "use strict";
 
@@ -23,6 +24,37 @@ const {
   readyEntry,
   authoritativeRegistry,
 } = require("./test-source-bundle-artifact-request-support.cjs");
+
+async function testMissingCommandBeforeFirstTerminalPublicationFailsClosed() {
+  const artifactId = 8113;
+  const context = makeContext("/artifact source main", { runId: 9113 });
+  const fixture = artifactFixture({
+    artifactId,
+    runId: context.runId,
+    sourceSha: MAIN_SHA,
+    current: true,
+  });
+  const github = makeGithub(context, {
+    artifacts: [[artifactId, fixture.artifact]],
+    runs: [[context.runId, fixture.run]],
+  });
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
+  github.state.comments = github.state.comments.filter((comment) => comment.id !== 501);
+
+  await assert.rejects(
+    request.completeRequest({
+      github,
+      context,
+      core,
+      input: inputFromCore(core, context, artifactId, fixture.url),
+    }),
+    /comment not found/,
+  );
+  assert.equal(github.state.createdComments, 0);
+  assert.equal(github.state.updatedComments, 0);
+  assert.deepEqual(github.state.createdStatuses, []);
+}
 
 async function testCompletionPublishesRegistryThenCleanupThenStatus() {
   const artifactId = 8301;
@@ -304,6 +336,7 @@ async function testSequentialSameShaRequestsReuseArtifactAndUpdateOneRegistry() 
 }
 
 module.exports = {
+  testMissingCommandBeforeFirstTerminalPublicationFailsClosed,
   testCompletionPublishesRegistryThenCleanupThenStatus,
   testRegistryFailureCannotPublishStatusOrDeleteCommand,
   testStatusFailureReplacesCurrentRunReadyEntry,
