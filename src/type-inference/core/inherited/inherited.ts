@@ -508,22 +508,13 @@ export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): 
       const step = contract.pathLastSteps[id]!;
       let next = node.below.get(step);
       if (next === undefined) {
-        const terms = [...node.carried];
         const above = contract.pathParents[id]!;
         const prefix = above === 0 ? keyOf(place, []) : keyIdAt(place, above);
         const own = landedKey(admission, place, prefix) ? inheritedAtKey(admission, prefix) : null;
-        if (own !== null && !terms.includes(own)) terms.push(own);
-        let carried: TypeTerm[] | true = [];
-        for (const term of terms) {
-          const below = permittedAt(term, [step]);
-          if (below === null) continue;
-          if (unrestricted(below)) {
-            carried = true;
-            break;
-          }
-          if (!carried.includes(below)) carried.push(below);
-        }
-        node.below.set(step, (next = { carried, below: new Map() }));
+        node.below.set(
+          step,
+          (next = { carried: carriedBelow(node.carried, own, step), below: new Map() }),
+        );
       }
       node = next;
     }
@@ -548,23 +539,35 @@ export function openAbove(admission: Admission, place: PlaceId, path: readonly s
     const step = path[length]!;
     let next = at.below.get(step);
     if (next === undefined) {
-      const terms = [...at.carried];
       const prefix = path.slice(0, length);
       const own = landed(admission, place, prefix) ? inheritedAt(admission, place, prefix) : null;
-      if (own !== null && !terms.includes(own)) terms.push(own);
-      let carried: TypeTerm[] | true = [];
-      for (const term of terms) {
-        const below = permittedAt(term, [step]);
-        if (below === null) continue;
-        if (unrestricted(below)) {
-          carried = true;
-          break;
-        }
-        if (!carried.includes(below)) carried.push(below);
-      }
-      at.below.set(step, (next = { carried, below: new Map() }));
+      at.below.set(
+        step,
+        (next = { carried: carriedBelow(at.carried, own, step), below: new Map() }),
+      );
     }
     at = next;
   }
   return at.carried === true;
+}
+
+/**
+ * The step of `openAbove`'s walk below a step whose written types are `carried`: what those and the prefix's own
+ * inherited type (`own`) leave at `step` (`permittedAt`), each once; `true` where one leaves it unrestricted.
+ */
+function carriedBelow(
+  carried: readonly TypeTerm[],
+  own: TypeTerm | null,
+  step: string,
+): TypeTerm[] | true {
+  const terms = [...carried];
+  if (own !== null && !terms.includes(own)) terms.push(own);
+  const found: TypeTerm[] = [];
+  for (const term of terms) {
+    const below = permittedAt(term, [step]);
+    if (below === null) continue;
+    if (unrestricted(below)) return true;
+    if (!found.includes(below)) found.push(below);
+  }
+  return found;
 }
