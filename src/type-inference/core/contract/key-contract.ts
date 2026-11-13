@@ -70,24 +70,24 @@ import { summaryCount, summaryItems } from "./prefix-index/summaries.js";
 import { termAt, typeAtPath, typeKinds, writtenOf } from "./terms.js";
 import { members } from "./value-kinds.js";
 
-// The contract of a key (§3.2): its demand, its stores' and prefixes' contracts, its receivers, a read's contract.
+// The contract of a key: its demand, its stores' and prefixes' contracts, its receivers, a read's contract.
 
 /** `severalElements`'s answer as its demand's items: one item for several, none for fewer. */
 const SEVERAL: readonly Item[] = Object.freeze([HELD_REFERENCE]);
 
 /**
- * F19a (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): a receiver's kinds (the input)
- * and the choice, on its completed kinds, whether it holds a reference kind, whose members are opaque: `HELD_REFERENCE`
- * beside its kinds where it does. Inside a component it is made once on the completed open solve, in which every
- * receiver is read as a record (a prefix that holds only reference kinds holds nothing a step below), and held for the
- * second; so a receiver whose reference comes only round its own cycle is a reference's.
+ * The receiver decision (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): a receiver's
+ * kinds (the input) and the choice, on its completed kinds, whether it holds a reference kind, whose members are
+ * opaque: `HELD_REFERENCE` beside its kinds where it does. Inside a component it is made once on the completed open
+ * solve, in which every receiver is read as a record (a prefix that holds only reference kinds holds nothing a step
+ * below), and held for the second; so a receiver whose reference comes only round its own cycle is a reference's.
  */
 const RECEIVER: Decision = {
   choose: (input) => (input.some((item) => REFERENCE.has(item.tag)) ? "reference" : "other"),
   answer: (choice, input) => (choice === "reference" ? [...input, HELD_REFERENCE] : input),
 };
 
-/** What a step below an unknown holds: an unknown for the same reasons, from the same ingress (F15, C9). */
+/** What a step below an unknown holds: an unknown for the same reasons, from the same ingress. */
 function belowUnknown(item: Item): Item {
   return makeItem("unknown", item.writer, {
     cert: item.cert,
@@ -99,7 +99,7 @@ function belowUnknown(item: Item): Item {
   });
 }
 
-/** S3 §1's route of a literal's value at a path: the contract's past an element step over a copy (F12). */
+/** How a literal's value at a path is read: by the contract past an element step over a copy, else exactly. */
 export function literalRoute(
   contract: Contract,
   literal: PlaceId,
@@ -109,7 +109,7 @@ export function literalRoute(
   return contract.overCopy.has(joinParts(literal, rest, node?.id ?? "-")) ? "contract" : "exact";
 }
 
-/** The contract of a key (§3.2): a demand, once per key and pass. */
+/** The contract of a key: a demand, once per key and pass. */
 export function* contractOf(
   contract: Contract,
   asked: Key,
@@ -145,7 +145,7 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
   // (a host's keys are text: its steps an array, no copy)
   if (program.isHost(place)) return hostAt(stepsArray(keyStepsIn(contract, key)));
   if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
-  // G3 3a: a key past a wrapper, one step below its parent's position (a cursor's from the arena, no text)
+  // a key past a wrapper, one step below its parent's position (a cursor's from the arena, no text)
   const path = isKeyId(key) ? null : keyPath(key);
   if (positionable(contract, key, path)) {
     const demand = positioned(contract, key, path);
@@ -159,7 +159,7 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
     if (found.kind.kind === "parameter" || found.kind.kind === "result")
       flow!.attach(through, "called");
     else flow!.attach(through);
-  // a parameter's and a result's kinds come through their calls (F20–F22): marked so, as the guard mark travels
+  // a parameter's and a result's kinds come through their calls: marked so, as the guard mark travels
   return found.kind.kind === "parameter" || found.kind.kind === "result"
     ? items.map((item) => (item.tag === "empty" ? item : { ...item, called: true }))
     : items;
@@ -181,7 +181,7 @@ export function* keyListsAt(
   if (heldReference(receiver)) return yield* keyContract(contract, key, flow);
   const path = keyStepsIn(contract, key);
   let unknowns = false;
-  // #1668: I, each member read it makes takes the flow (`keyThrough`)
+  // #1668: each member read it makes takes the flow (`keyThrough`)
   const items = yield* members(
     contract,
     path,
@@ -200,27 +200,27 @@ export function* keyListsAt(
   return items;
 }
 
-/** The contract of a key from its stores and its prefixes' (§3.2). */
+/** The contract of a key from its stores and its prefixes'. */
 export function* keyContract(
   contract: Contract,
   asked: Key,
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const { program } = contract.pass;
-  // (a key in its identity: the levels and the prefixes its walk reads are held by it, G3 stage 1)
+  // (a key in its identity: the levels and the prefixes its walk reads are held by it)
   const key = canonicalKey(contract, asked);
   const walk = keyWalk(contract, key);
   const { place, path } = walk;
   const found = program.place(place);
   if (program.cellOwner.has(place) || program.hasOf.has(place))
     return yield* contract.contractOfLiteral(place, stepsRest(path), flow);
-  // F19a: a reference's member is opaque, whatever is stored through it
+  // a reference's member is opaque, whatever is stored through it
   const receiver = yield* receiverWalk(contract, walk, flow);
   if (receiver.reference) return [unknownItem(REASON.opaque)];
   const written = writtenOf(found.kind);
-  // F2, F22: the written type is the contract; the stores keep M. §3.2: it fixes the kinds, never removes the mark of
-  // what is stored. An unrestricted written domain (`list`'s element) says what may be held, not what is: its unknown
-  // is opaque, so every consumer owes its check (#1501,
+  // the written type is the contract; the stores keep their marks and emptiness: it fixes the kinds, never removes the
+  // mark of what is stored. An unrestricted written domain (`list`'s element) says what may be held, not what is: its
+  // unknown is opaque, so every consumer owes its check (#1501,
   // docs/specifications/type-inference-accepted-record/contract.md#r4-215)
   if (written !== null) {
     const at = termAt(written, path);
@@ -249,15 +249,14 @@ export function* keyContract(
   return mergeItems([...along, ...receiver.below], program.scope);
 }
 
-/** The contract's answer to a read (§3.2): every kind as an item, definite only by P3; the read's word. */
 /**
- * F12: whether an element read at the key's first element step is answered by the contract
+ * Whether an element read at the key's first element step is answered by the contract
  * there, that is where several element-contributing sources, or a literal with several elements, meet at that step;
  * a single exact contribution is no such meeting. Over the collection's own stores and every prefix's, as its
  * contract reads them; a copy's own elements by the same question; once per element step.
  */
 export function* severalElements(contract: Contract, asked: Key): Work<boolean> {
-  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  // (a key in its identity: a wrapper family's text read as its cursor)
   const key = canonicalKey(contract, asked);
   const walk = keyWalk(contract, key);
   const { place, path } = walk;
@@ -267,7 +266,7 @@ export function* severalElements(contract: Contract, asked: Key): Work<boolean> 
   const site = contract.pass.program.places[place]?.site ?? null;
   // a demand per element step, so a chain of collections read from collections (a function's result returning
   // another's) is followed on the solver's explicit stack, and a copy cycle is solved as its component
-  // #1668: N, the several demand counts; nothing of it included
+  // #1668: the several demand counts; nothing of it included
   const several = yield {
     key: joinParts("s", at),
     kind: "contract",
@@ -299,7 +298,7 @@ function* severalWork(contract: Contract, at: Key): Work<readonly Item[]> {
       for (const sub of contract.relevantSubs(stored, below)) {
         if (count >= 2) break;
         contract.pass.program.work.charge("invSteps");
-        // #1668: N, a count
+        // #1668: a count
         if (withoutEmpty(yield* contract.subAt(sub.key, below)).length > 0) count += 1;
       }
   }
@@ -310,10 +309,10 @@ function* severalWork(contract: Contract, at: Key): Work<readonly Item[]> {
 function* elementsOf(contract: Contract, entry: PrefixEntry, below: Rest): Work<number> {
   const { program, definitions } = contract.pass;
   program.work.charge("invSteps");
-  // #1668: N, a count
+  // #1668: a count
   if (withoutEmpty(yield* contract.entryAt(entry, below)).length === 0) return 0;
   if (entry.key !== undefined)
-    // #1668: N, a count
+    // #1668: a count
     return (yield* contract.severalElements(keyBelowRef(contract, entry.key, below))) ? 2 : 1;
   if (entry.value === undefined || entry.elem !== undefined || !program.hasOf.has(entry.value))
     return 1;
@@ -348,8 +347,8 @@ function* elementsOf(contract: Contract, entry: PrefixEntry, below: Rest): Work<
 }
 
 /**
- * P3's condition on where a read stands (`contractRead`): in live code a parameter, a result, or a place whose live
- * declaration is reached and dominates the read; in dead code a declared place.
+ * The definite-read condition on where a read stands (`contractRead`): in live code a parameter, a result, or a place
+ * whose live declaration is reached and dominates the read; in dead code a declared place.
  */
 export function declaredBefore(contract: Contract, place: PlaceId, node: FlowNode): boolean {
   const { program, definitions, lists } = contract.pass;
@@ -365,6 +364,11 @@ export function declaredBefore(contract: Contract, place: PlaceId, node: FlowNod
     : declaration !== undefined;
 }
 
+/**
+ * A key's contract as a read's answer: its items, each definite where the conditions below hold (one known, unguarded
+ * kind, `declaredBefore`, every selection on the way holding an element), else possible, and each with the read's
+ * word, an unknown's from its reasons.
+ */
 export function* contractRead(
   contract: Contract,
   asked: Key,
@@ -372,18 +376,18 @@ export function* contractRead(
   context: ContextWord,
   later = false,
 ): Work<readonly Item[]> {
-  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  // (a key in its identity: a wrapper family's text read as its cursor)
   const key = canonicalKey(contract, asked);
   const { program } = contract.pass;
-  // #1668: K, a reader's word on the contract, no contract slot's answer
+  // #1668: a reader's word on the contract, no contract slot's answer
   const items = yield* contract.contractOf(key);
   const kinds = withoutEmpty(items);
   const walk = keyWalk(contract, key);
   const { place, path } = walk;
-  // P3: one kind, not unknown, no guarded source, the root's declaration dominates the read. The dominance is a flow
-  // fact, which dead code drops (X1): there a declared place's one known kind stays known, so an intrinsic violation
-  // is the error it is in live code (AD-3), unless the kind came through a call (a parameter's, a result's, a copy of
-  // one: `called`), whose marks a dead call's binding would give and does not (F21): that one stays possible
+  // definite only for one kind, not unknown, from no guarded source, where the root's declaration dominates the read.
+  // Dominance is a flow fact that dead code drops: there a declared place's one known kind stays known, so an intrinsic
+  // violation stays the error it is in live code, unless the kind came through a call (a parameter's, a result's, a
+  // copy of one: `called`), whose marks a dead call's binding would give and does not: that one stays possible
   let definite =
     kinds.length === 1 &&
     kinds[0]!.tag !== "unknown" &&
@@ -393,7 +397,7 @@ export function* contractRead(
   // every selection on the way holds an element
   for (let length = 1; length <= path.length && definite; length += 1)
     if (path.at(length - 1) === "element") {
-      // #1668: K, a definiteness test
+      // #1668: a definiteness test
       const elements = yield* contract.contractOf(walk.prefix(length));
       if (
         elements.length === 0 ||
@@ -401,15 +405,16 @@ export function* contractRead(
       )
         definite = false;
     }
-  // §3.4: an unknown's reason word comes before any X context: its own, and a deferred parameter's every item's
+  // an unknown's reason word comes before any context word of the exact path's conditions: its own, and a deferred
+  // parameter's every item's
   const deferred = kinds.some(
     (item) => item.tag === "unknown" && (item.reasons & REASON.deferred) !== 0,
   );
-  // §3.4: the word is the read's first failing condition; where `context` is a later condition's or the value's
-  // arrival (`later`), an element read the contract answers fails X3 before it
+  // the word is the read's first failing condition; where `context` is a later condition's or the value's arrival
+  // (`later`), an element read the contract answers fails the exactness condition before it
   const word: ContextWord = deferred
     ? "deferred-parameter"
-    : // #1668: N, a count
+    : // #1668: a count
       later && stepIndex(path, "element") >= 0 && (yield* contract.severalElements(key))
       ? "member"
       : context;
@@ -424,32 +429,32 @@ export function* contractRead(
   );
 }
 
-/** §3 step 1, F19a: a receiver on the key's path whose contract holds a reference kind (one object behind every alias). */
+/** Whether a receiver on the key's path holds a reference kind in its contract (one object behind every alias). */
 export function* refReceiver(contract: Contract, asked: Key): Work<boolean> {
   const key = canonicalKey(contract, asked);
-  // G3 3b: a positioned key's parent's walk, one receiver more (`advance`); a cursor's parent the arena's
+  // a positioned key's parent's walk, one receiver more (`advance`); a cursor's parent the arena's
   const path = isKeyId(key) ? null : keyPath(key);
   const depth = path === null ? keyDepthIn(contract, key) : path.length;
   if (depth > 1 && positionable(contract, key, path)) {
     const parent =
       path === null ? keyParentIn(contract, key)! : keyOf(keyPlace(key), path.slice(0, -1));
     const from = yield* positionOf(contract, { key: parent, length: depth - 1 });
-    // #1668: R, a receiver decision
+    // #1668: a receiver decision
     if (from !== null) return !from.noRef || heldReference(yield* contract.receiverKinds(parent));
   }
   return (yield* receiverWalk(contract, keyWalk(contract, key))).reference;
 }
 
 /**
- * One walk of a key's receivers (its prefixes, each a `RECEIVER` demand): whether one is decided a reference's
- * (F19a), and else the longest prefix whose kinds hold nothing a step below can be read from (none yet, or
+ * One walk of a key's receivers (its prefixes, each a `RECEIVER` demand): whether one is decided a reference's, and
+ * else the longest prefix whose kinds hold nothing a step below can be read from (none yet, or
  * only scalars, `null`, reference kinds and unknowns: no record or collection, `holdsBelow`), -1 for none, and what
  * a path below it holds instead (`below`: each unknown's own, `belowUnknown`, and a reference's member, the
  * runtime's). A path below such a value holds nothing else, so the contract asks no shorter prefix's stores: the
  * stores through a prefix are followed only for its record and collection alternatives, so a recursive projection is
- * not followed below a receiver without one (Astra B2, B2-r2, and the open solve, which reads every receiver
- * as a record); the read reruns when the prefix gains a kind with a structure (C5 reports a member read the kinds
- * lack).
+ * not followed below a receiver without one (inside a component the open solve reads every receiver as a record,
+ * `RECEIVER`); the read reruns when the prefix gains a kind with a structure (the member-access check reports a member
+ * read the kinds lack).
  */
 export function* receiverWalk(
   contract: Contract,
@@ -485,7 +490,7 @@ export function* receiverWalk(
 }
 
 /**
- * A receiver's contract as a demand of its own, with F19a's decision whether it is a reference's
+ * A receiver's contract as a demand of its own, with the receiver decision (`RECEIVER`) whether it is a reference's
  * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44).
  */
 export function* receiverKinds(
@@ -515,19 +520,19 @@ function* receiverRun(contract: Contract, key: Key): Work<readonly Item[]> {
 }
 
 /**
- * A value's contract as a receiver (a method's, a length's owner), a demand of its own with F19a's decision
+ * A value's contract as a receiver (a method's, a length's owner), a demand of its own with the receiver decision
  * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): the one decision both sides take
  * before an exact answer or a transfer's alternatives.
  */
 export function* valueReceiver(contract: Contract, receiver: PlaceId): Work<readonly Item[]> {
   const site = contract.pass.program.places[receiver]?.site ?? null;
-  // #1668: R, the value receiver decision's demand: never included
+  // #1668: the value receiver decision's demand: never included
   return yield {
     key: joinParts("cv", receiver),
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
-    // #1668: R, the receiver demand's run: never included
+    // #1668: the receiver demand's run: never included
     make: () => contract.contractOfValue(receiver),
     decision: RECEIVER,
   };
@@ -552,13 +557,13 @@ function* contractAlong(
 ): Work<Item[]> {
   const { program, definitions, lists } = contract.pass;
   const out: Item[] = [];
-  // (a record's path read below each prefix as its view; an array sliced as before)
+  // (a record's path read below each prefix as its view; an array sliced)
   const whole: Rest = stepsRest(path);
   for (let length = path.length; length >= from && length > floor; length -= 1) {
     const prefix = prefixOf(length);
     const rest = restFrom(whole, length);
     if (rest.length > 0) {
-      // a prefix's whole stores, shared by every property below it; its literals by level (§4.6), each group of the
+      // a prefix's whole stores, shared by every property below it; its literals by level, each group of the
       // same structure below the path once (with a selection step, every entry by itself)
       const stores = contract.prefixStores(prefix);
       // (a path below a property of a prefix of closed objects from its holders alone, #1456, #1948)
@@ -572,7 +577,7 @@ function* contractAlong(
         for (const group of entryGroups(contract, levels)) {
           const lead = flow?.child() ?? null;
           const first = yield* contract.entryAt(group.entries[0]!, rest, lead);
-          // (an unknown's ingress stores are each entry's own, C9: there every entry answers by itself)
+          // (an unknown's ingress stores are each entry's own: there every entry answers by itself)
           if (
             group.entries.length > 1 &&
             !first.some((item) => item.tag === "unknown" || item.fan !== undefined)
@@ -593,7 +598,7 @@ function* contractAlong(
       }
       // a replaced source's own stores below the prefix, only where they lie: its layers' summary, their sources'
       // answers merged in order (#1466); where it declines, each source by itself, marked as its copies' entries are
-      // (§3.2: a guarded read of a copy of it is a mark of its holder)
+      // (a guarded read of a copy of it is a mark of its holder)
       const summary = yield* summaryItems(contract, stores, rest, flow);
       if (summary !== null) for (const item of summary) out.push(item);
       else
@@ -613,7 +618,7 @@ function* contractAlong(
         out.push(...(d.items ?? []));
         continue;
       }
-      // F5–F7: the collection's kind is unchanged
+      // an add, a clear or a removal leaves the collection's kind unchanged
       if (d.kind !== "whole") continue;
       const parameter = program.place(place).kind;
       if (
@@ -622,7 +627,7 @@ function* contractAlong(
         parameter.written === null &&
         !lists.singleSite(d.fn)
       )
-        // F21: several sites
+        // an unwritten parameter called from several sites
         out.push(unknownItem(REASON.deferred, definitions.writerOf(d)));
       const whole = flow?.child() ?? null;
       // #1655: a chain of property reads of a binding in a copy cycle through a projection, read one step at a time
@@ -652,7 +657,7 @@ export function* subAt(
   rest: Rest,
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
-  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  // (a key in its identity: a wrapper family's text read as its cursor)
   const sub = canonicalKey(contract, asked);
   const site = contract.pass.program.places[keyPlace(sub)]?.site ?? null;
   const slot = joinParts("s", sub, restPart(rest));

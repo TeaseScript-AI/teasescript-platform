@@ -7,7 +7,7 @@ import type { TypeAt } from "./model.js";
 
 // Written types as terms: their kinds, their term at a path, a value's written type and its default.
 
-/** The kinds a written type gives (F2): each V30 type its own tag, `unknown` for a type the core does not model. */
+/** The kinds a written type gives: each V30 type its own tag, `unknown` for a type the core does not model. */
 export function typeTags(term: TypeTerm): ItemTag[] {
   switch (term.kind) {
     case "atom":
@@ -27,7 +27,7 @@ export function typeTags(term: TypeTerm): ItemTag[] {
 /**
  * A written type annotation's kinds in their written order: those `typeTags` gives the term made of it (`T?` is
  * `T | null`), as a type test's narrowed kinds keep them (#1398). One ordered worklist: each node of
- * the annotation and each kind it gives handled once, however deeply its unions and optionals nest (Codex r7 on #1558).
+ * the annotation and each kind it gives handled once, however deeply its unions and optionals nest (#1558).
  */
 export function annotationTags(annotation: TypeAnnotation): ItemTag[] {
   const tags: ItemTag[] = [];
