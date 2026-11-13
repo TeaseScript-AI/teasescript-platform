@@ -233,7 +233,8 @@ export interface FlowGraph {
   expressionAt(site: SourceSite): FlowNode | undefined;
   /**
    * The node of the statement at `site` where it runs: for a `global` with `default:`, the assignment the declaration
-   * performs where it stands; a `global` without one and a speaker have none.
+   * performs where it stands; a `global` without one, a speaker, a function declaration, an `if`, a `switch` and a loop
+   * have none.
    */
   statementAt(site: SourceSite): FlowNode | undefined;
   /** The session-start node of the `global` or speaker declared at `site`, in the startup region. */

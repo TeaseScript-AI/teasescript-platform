@@ -287,9 +287,9 @@ export class NarrowingRoutes extends RouteEntries {
    * compiler proves no such route (the consumer then warns with its check). The witness of a copy or an `otherwise`
    * asks this same query of its source, one memoised query per node and key, resolved without native recursion.
    * `others`: where `tag` is a member of the written union `key` declares, the union's other kinds the use does not
-   * take, which certify the route as `tag` does (#1073: the written domain proves itself). It asks main's query until
-   * `required` has met a program the default holds (`feasible`), and that program's own queries after; public for the
-   * narrowing tests' `routeAt`.
+   * take, which certify the route as `tag` does (#1073: the written domain proves itself). It asks the unrestricted
+   * query until `required` has met a program the default holds (`feasible`), and that program's own queries after;
+   * public for the narrowing tests' `routeAt`.
    */
   public *witness(
     key: Key,
@@ -300,7 +300,7 @@ export class NarrowingRoutes extends RouteEntries {
     this.#work.charge("eventSteps");
     // a chain of copies: each query waits on its source's, the last first
     const waiting: { readonly memo: string; readonly found: Candidate }[] = [];
-    // (a program the default holds asks its own queries, apart from main's: `feasible`)
+    // (a program the default holds asks its own queries, apart from the unrestricted ones: `feasible`)
     let memo =
       this.feasible === null
         ? joinParts(key, node.id, tag, this.#othersText(others))

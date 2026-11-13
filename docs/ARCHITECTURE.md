@@ -106,8 +106,8 @@ snapshot for comparing two analyses of the same sources.
   Its route:
   - `CoreProgram` (`core/program.ts`) indexes one analysis's input: the places and constraints of the collector
     (`collector.ts`, which makes the constraint graph of `graph.ts` in one walk), the flow graph of
-    `core/flow-graph.ts`, where every statement and expression is a node and what literals prove dead is marked, and
-    its dominators.
+    `core/flow-graph.ts`, where every expression and every simple statement is a node (a branch or loop is its
+    branch, join and loop nodes) and what literals prove dead is marked, and its dominators.
   - `analyseCore` (`core/answers.ts`) runs the analysis in admission's passes with the solver (`core/solver.ts`). It
     publishes frozen answers: per occurrence its items, route, place and obligations; per place its admitted type and
     contract; and the program's diagnostics, checks and budget.

@@ -53,10 +53,11 @@ export { literalRounds, literalTruth, type LiteralRounds } from "./flow-graph/li
 /*
  * The control-flow graph of the type core, built from the ASTs, not from the plan: `plan/control-flow.ts` has no node
  * per expression, and the core's exact path answers a read at the expression that makes it. Every expression is a node,
- * and so is every statement but a function or speaker declaration and a `global` (a `global` with `default:` has its
- * assignment's node where it stands; each `global` and speaker also has a node in the startup region), in evaluation
- * order (the shared order helpers of `expression-children.ts`), so a definition and a read can be compared by
- * dominance. type-core-flow-graph.test.ts compares it with the lowering's control flow.
+ * and so is every simple statement (a `statement` node); an `if` or a `switch` is its branches and join, a loop its
+ * head (with the loop's span), body and exit; a function or speaker declaration and a `global` have no node where they
+ * stand (a `global` with `default:` has its assignment's; each `global` and speaker has one in the startup region).
+ * The nodes stand in evaluation order (the shared order helpers of `expression-children.ts`), so a definition and a
+ * read can be compared by dominance. type-core-flow-graph.test.ts compares it with the lowering's control flow.
  *
  * Calls are summarized as the lowering's `PlanControlFlow` does: a call's `call-in` node enters the callee's entry, and
  * a summary edge from it to its `call-out` node stands for the return; no edge leads from a callee's exit back. The
@@ -71,7 +72,8 @@ export { literalRounds, literalTruth, type LiteralRounds } from "./flow-graph/li
 
 /**
  * The graph of a project's files, in project order: `main.tease` first, where the session starts, as the lowering
- * orders them (`compileStableProject`), each with the name pass's picks for its glob targets, as the lowering takes them.
+ * orders them (`compileStableProject`), each with the name pass's picks for its glob targets, as the lowering takes
+ * them.
  */
 export function buildFlowGraph(files: readonly FlowGraphFile[]): FlowGraph {
   return new FlowGraphBuilder(files).build();
@@ -302,7 +304,8 @@ export class FlowGraphBuilder {
    * The node whose state each default's node reads: its outermost typed call's, since a nested typed call's default
    * runs at its call, which no event separates from the outer call. The ranges nest and each is recorded after those
    * inside it, so taken last first an outer range comes before its own: an inner one, whose first node the outer has
-   * set, is skipped, and each node is set once. The same walk notes the calls whose default reads a variable or computes.
+   * set, is skipped, and each node is set once. The same walk notes the calls whose default reads a variable or
+   * computes.
    */
   #snapshotsOf(): Map<FlowNode, FlowNode> {
     const snapshots = new Map<FlowNode, FlowNode>();
@@ -312,8 +315,8 @@ export class FlowGraphBuilder {
       for (let index = first; index < end; index += 1) {
         const node = this.nodes[index]!;
         snapshots.set(node, call);
-        // (literal data, a typed call's own result among it, keeps the contract's walk; a read or a computation needs the
-        // value side's, which reads the snapshot)
+        // (literal data, a typed call's own result among it, keeps the contract's walk; a read or a computation needs
+        // the value side's, which reads the snapshot)
         switch (node.expression?.kind) {
           case undefined:
           case "numberLiteral":

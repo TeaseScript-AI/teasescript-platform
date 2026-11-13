@@ -20,19 +20,20 @@ import type { Work } from "../solver.js";
 
 /*
  * Whether a narrowing definition G still answers a read at n (r4-403): the exact path's conditions as `exact-path.ts`
- * writes them (both live, one nearest boundary, the read's loops, no event between) and its handler veto, taken over
- * G's dependency keys with their events: each dependency key's own events (the location's key with the keys below it,
- * each prefix's own definitions, each index or key variable's), the call sites where an owner of one of them, or a
- * callable holding an invalidation of a collection of the path, lies outside its activation, and the invalidation lists
- * of the path's collections. Another narrowing is never an event. Every event is counted in intervals of the dominator
- * walk by binary search in those existing lists, never in a copy per (key × node). For a read inside a loop that does
- * not enclose G, and between G and the read, a **preserving store** to the refined location itself is no event
- * (r4-129): a store whose value keeps its kinds within G's filtered kinds. That value is the store's own value demand
- * (`ExactPath.defVal`), whose reads of a component location take their G (`Values`) and so ask this test again: the
- * stores whose values depend on one another are one component of the solver, solved from bottom (no items: every store
- * preserving) to its greatest fixpoint and published only when stable. A location's stores (its candidates, sorted)
- * carry one tree of union demands, each node the kinds of its range's values, whatever kind set asks: a query over a
- * range checks O(log c) nodes, and a lost fact re-runs only the nodes above its store and their readers.
+ * writes them (both live, one nearest boundary, the read's loops, no event between, no block's interference: the read
+ * not in code a block may reach, and the handler veto), taken over G's dependency keys with their events: each
+ * dependency key's own events (the location's key with the keys below it, each prefix's own definitions, each index or
+ * key variable's), the call sites where an owner of one of them, or a callable holding an invalidation of a collection
+ * of the path, lies outside its activation, and the invalidation lists of the path's collections. Another narrowing is
+ * never an event. Every event is counted in intervals of the dominator walk by binary search in those existing lists,
+ * never in a copy per (key × node). For a read inside a loop that does not enclose G, and between G and the read, a
+ * **preserving store** to the refined location itself is no event (r4-129): a store whose value keeps its kinds within
+ * G's filtered kinds. That value is the store's own value demand (`ExactPath.defVal`), whose reads of a component
+ * location take their G (`Values`) and so ask this test again: the stores whose values depend on one another are one
+ * component of the solver, solved from bottom (no items: every store preserving) to its greatest fixpoint and published
+ * only when stable. A location's stores (its candidates, sorted) carry one tree of union demands, each node the kinds
+ * of its range's values, whatever kind set asks: a query over a range checks O(log c) nodes, and a lost fact re-runs
+ * only the nodes above its store and their readers.
  */
 
 /** An event list of G with the word a first event in it gives. */
