@@ -50,12 +50,6 @@ export interface Entry {
   readonly header: TreeStatement | null;
 }
 
-/** A store whose stretch, as offsets in its body, holds a jump (`RouteEntries.#stretched`). */
-interface Stretched {
-  readonly start: Candidate;
-  readonly stretch: { readonly from: number; readonly to: number };
-}
-
 /** A jump into an entry, at its point; `order`, its place in `Jumps.list`. */
 interface Jump {
   readonly into: Entry;
@@ -86,11 +80,8 @@ export abstract class RouteEntries extends RouteCandidates {
   readonly #carried = new Map<Key, ReadonlyMap<Entry, Definition>>();
   /** Under the program default, per loop or label statement, whether a run is proved to reach it (R2.2 item 1). */
   readonly #reaches = new Map<TreeStatement, boolean>();
-  /** Under the program default, per store list and name, its stores whose stretch holds a jump (`#stretched`). */
-  readonly #stretches = new Map<
-    ReadonlyMap<TreeBlock, Candidates>,
-    Map<string, readonly Stretched[]>
-  >();
+  /** Under the program default, per store list and name, the jumps its stores' stretches hold (`#held`). */
+  readonly #jumpsHeld = new Map<ReadonlyMap<TreeBlock, Candidates>, Map<string, readonly Jump[]>>();
   /** Which statements hold a variable (r4-451). */
   protected readonly holding: RouteHolding = new RouteHolding(
     this.pass.program.work,
@@ -112,11 +103,11 @@ export abstract class RouteEntries extends RouteCandidates {
   ): Work<Definition | null>;
 
   /**
-   * In a program the default holds, the arms its corridors pass through none of (`RouteTests.feasibility`); `null`
-   * elsewhere. Under it an entry route is taken only by R2.2 (`standsAt`, `reached`), and its relation carries no entry
-   * on (r4-451).
+   * In a program the default holds, the arms its corridors pass through none of (`RouteTests.feasibility`), set by the
+   * first `required` there (`NarrowingRoutes`); `null` elsewhere, where every route query is main's. Under it an entry
+   * route is taken only by R2.2 (`standsAt`, `reached`), and its relation carries no entry on (r4-451).
    */
-  protected abstract defaultHolds(): Feasibility | null;
+  protected feasible: Feasibility | null = null;
 
   /** The candidates a seed may be, by body: the key's stores (`seedAt`'s). */
   protected abstract seedLists(key: Key): Work<readonly ReadonlyMap<TreeBlock, Candidates>[]>;
@@ -161,7 +152,7 @@ export abstract class RouteEntries extends RouteCandidates {
    */
   protected standsAt(entry: Entry, node: FlowNode, chain: readonly Place[]): boolean {
     this.#work.charge("eventSteps");
-    const feasible = this.defaultHolds();
+    const feasible = this.feasible;
     if (feasible === null) return true;
     const at = entry.header ?? (entry.start > 0 ? entry.block.statements[entry.start - 1]! : null);
     return (
@@ -295,7 +286,7 @@ export abstract class RouteEntries extends RouteCandidates {
   ): Work<Definition | "body" | null> {
     this.#work.charge("eventSteps");
     // (under the program default, the relation only once the use stands at an entry, R2.2)
-    const fallback = this.defaultHolds() !== null;
+    const fallback = this.feasible !== null;
     let carried = fallback ? null : yield* this.#relation(key, name);
     const calls = this.pass.definitions.ownedAway(key);
     let level = point.chain.length;
@@ -422,7 +413,7 @@ export abstract class RouteEntries extends RouteCandidates {
       queue.push(jump.into);
     }
     // (under the program default, a seed alone: R2.2 states one entry, so no entry carries on)
-    let next = this.defaultHolds() === null ? 0 : queue.length;
+    let next = this.feasible === null ? 0 : queue.length;
     for (const _ of steps(this.#work, "eventSteps", () => next < queue.length)) {
       const entry = queue[next]!;
       next += 1;
@@ -447,21 +438,49 @@ export abstract class RouteEntries extends RouteCandidates {
     const { byBody } = this.#jumpIndex();
     // (a program without jumps: no store's search, no stretch)
     if (byBody.size === 0) return [];
+    if (this.feasible !== null) {
+      // (under the program default, every jump a store's stretch holds, the same for each key of a list, `seedAt`
+      // certifying its writer: a writer it finds reaches its jump with nothing holding the variable between, so its
+      // stretch holds that jump and it would be tried here; R2.2's jumps are few)
+      const seen = new Set<Jump>();
+      const tried: Jump[] = [];
+      for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
+        for (const jump of each(this.#work, "eventSteps", this.#held(lists, name, calls, byBody)))
+          if (!seen.has(jump)) {
+            seen.add(jump);
+            tried.push(jump);
+          }
+      return sorted(this.#work, "eventSteps", tried, (a, b) => a.order - b.order);
+    }
+    // (the key's stores in bodies that make a jump: each list's bodies or the jumps' bodies, whichever are fewer)
+    const starts: Candidate[] = [];
+    for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
+      if (lists.size < byBody.size) {
+        for (const [body, { list }] of each(this.#work, "eventSteps", lists))
+          if (byBody.get(body) !== undefined)
+            for (const found of each(this.#work, "eventSteps", list)) starts.push(found);
+      } else
+        for (const [body] of each(this.#work, "eventSteps", byBody))
+          for (const found of each(this.#work, "eventSteps", lists.get(body)?.list ?? []))
+            starts.push(found);
     // (per body, its stores' stretches as offsets, merged so that each of its jumps is looked at once)
     const stretches = new Map<TreeBlock, { from: number; to: number }[]>();
-    for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
-      for (const { start, stretch } of each(
-        this.#work,
-        "eventSteps",
-        this.#stretched(lists, name, calls, byBody),
-      )) {
-        // (a store certified only where its stretch holds a jump: the certificate is the costly part)
-        if (!(yield* this.certifies(start, key))) continue;
-        const body = start.chain[0]!.block;
-        const known = stretches.get(body);
-        if (known === undefined) stretches.set(body, [stretch]);
-        else known.push(stretch);
-      }
+    for (const start of each(this.#work, "eventSteps", starts)) {
+      const body = start.chain[0]!.block;
+      const jumps = byBody.get(body)!;
+      const stretch = { from: start.start, to: this.#cut(name, calls, start.chain) };
+      // (a store certified only where its stretch holds a jump: the certificate is the costly part)
+      const first = this.#after(jumps, stretch.from, 0);
+      if (
+        first >= jumps.length ||
+        jumps[first]!.point.at >= stretch.to ||
+        !(yield* this.certifies(start, key))
+      )
+        continue;
+      const known = stretches.get(body);
+      if (known === undefined) stretches.set(body, [stretch]);
+      else known.push(stretch);
+    }
     const tried: Jump[] = [];
     for (const [body, known] of each(this.#work, "eventSteps", stretches)) {
       const jumps = byBody.get(body)!;
@@ -484,44 +503,51 @@ export abstract class RouteEntries extends RouteCandidates {
   }
 
   /**
-   * Of a store list, the stores in bodies that make a jump whose stretch holds one, with their stretches: each list's
-   * bodies or the jumps' bodies, whichever are fewer. Under the program default, made once per list, name and `calls`
-   * (R2.2's jumps are fixed): a prefix's whole stores serve each of its keys alike, so many keys of one record never
-   * scan its stores again.
+   * Under the program default, the jumps any store of a list holds in its stretch, uncertified (as `#tries` finds them
+   * outside it), made once per list, name and `calls`: a prefix's whole stores serve each of its keys alike, so many
+   * keys of one record never scan or certify its stores again.
    */
-  #stretched(
+  #held(
     lists: ReadonlyMap<TreeBlock, Candidates>,
     name: string,
     calls: boolean,
     byBody: ReadonlyMap<TreeBlock, readonly Jump[]>,
-  ): readonly Stretched[] {
+  ): readonly Jump[] {
     this.#work.charge("eventSteps");
-    const memo = this.defaultHolds() === null ? null : `${name}${calls ? "\0calls" : ""}`;
-    const byName = memo === null ? undefined : this.#stretches.get(lists);
-    const known = memo === null ? undefined : byName?.get(memo);
+    const memo = `${name}${calls ? "\0calls" : ""}`;
+    const byName = this.#jumpsHeld.get(lists);
+    const known = byName?.get(memo);
     if (known !== undefined) return known;
-    const starts: Candidate[] = [];
-    if (lists.size < byBody.size) {
-      for (const [body, { list }] of each(this.#work, "eventSteps", lists))
-        if (byBody.get(body) !== undefined)
-          for (const found of each(this.#work, "eventSteps", list)) starts.push(found);
-    } else
-      for (const [body] of each(this.#work, "eventSteps", byBody))
-        for (const found of each(this.#work, "eventSteps", lists.get(body)?.list ?? []))
-          starts.push(found);
-    const made: Stretched[] = [];
-    for (const start of each(this.#work, "eventSteps", starts)) {
-      const jumps = byBody.get(start.chain[0]!.block)!;
-      const stretch = { from: start.start, to: this.#cut(name, calls, start.chain) };
-      const first = this.#after(jumps, stretch.from, 0);
-      if (first < jumps.length && jumps[first]!.point.at < stretch.to)
-        made.push({ start, stretch });
+    const stretches = new Map<TreeBlock, { from: number; to: number }[]>();
+    for (const [body, jumps] of each(this.#work, "eventSteps", byBody))
+      for (const start of each(this.#work, "eventSteps", lists.get(body)?.list ?? [])) {
+        const stretch = { from: start.start, to: this.#cut(name, calls, start.chain) };
+        const first = this.#after(jumps, stretch.from, 0);
+        if (first >= jumps.length || jumps[first]!.point.at >= stretch.to) continue;
+        const list = stretches.get(body);
+        if (list === undefined) stretches.set(body, [stretch]);
+        else list.push(stretch);
+      }
+    const made: Jump[] = [];
+    for (const [body, known] of each(this.#work, "eventSteps", stretches)) {
+      const jumps = byBody.get(body)!;
+      sorted(this.#work, "eventSteps", known, (a, b) => a.from - b.from);
+      let low = 0;
+      for (const { from, to } of each(this.#work, "eventSteps", known)) {
+        low = this.#after(jumps, from, low);
+        for (const _ of steps(
+          this.#work,
+          "eventSteps",
+          () => low < jumps.length && jumps[low]!.point.at < to,
+        )) {
+          made.push(jumps[low]!);
+          low += 1;
+        }
+      }
     }
-    if (memo !== null) {
-      keepText(this.#work, memo.length);
-      if (byName === undefined) this.#stretches.set(lists, new Map([[memo, made]]));
-      else byName.set(memo, made);
-    }
+    keepText(this.#work, memo.length);
+    if (byName === undefined) this.#jumpsHeld.set(lists, new Map([[memo, made]]));
+    else byName.set(memo, made);
     return made;
   }
 
@@ -724,7 +750,7 @@ export abstract class RouteEntries extends RouteCandidates {
     );
     // (under the program default, only the jumps that stand at the loop or label they enter a run reaches, R2.2: the
     // same for every key, so each key's relation tries no other)
-    if (this.defaultHolds() !== null) {
+    if (this.feasible !== null) {
       const standing: Jump[] = [];
       for (const jump of each(this.#work, "indexSteps", list))
         if (this.standsAt(jump.into, jump.point.node, jump.point.chain)) standing.push(jump);

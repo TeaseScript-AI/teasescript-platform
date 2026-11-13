@@ -17,7 +17,7 @@ import { copied, each, holds, mapped, some, sorted, steps } from "../charged-ite
 import { locationOf, pathKey, peel, removes, stablePath, type StablePath } from "./narrowings.js";
 import { countIn, type TreeBlock, type TreeStatement } from "./statement-tree.js";
 import { selectsElement } from "../method-categories.js";
-import type { Feasibility, Place } from "./route-tests.js";
+import type { Place } from "./route-tests.js";
 import type { Candidate, Candidates, Layer } from "./route-candidates.js";
 import {
   RouteEntries,
@@ -122,11 +122,6 @@ export class NarrowingRoutes extends RouteEntries {
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
   /** The program's ledger. */
   readonly #work: WorkLedger = this.pass.program.work;
-  /**
-   * In a program the default holds, the arms its corridors pass through none of (`RouteTests.feasibility`), set by the
-   * first `required` there; `null` elsewhere, where every route query is main's.
-   */
-  #feasible: Feasibility | null = null;
   /** The keys the program saves under, and whether it saves under a computed one (`#ownLoad`), made on first use. */
   #saves: { readonly keys: ReadonlySet<string>; readonly computed: boolean } | null = null;
 
@@ -162,8 +157,8 @@ export class NarrowingRoutes extends RouteEntries {
     if (site === null) return null;
     const node = program.exprAt(site);
     // (a program that holds an arm no run is proved to enter: its route queries pass only entered arms, #1938)
-    if ((yield* this.holdsInfeasible()) && this.#feasible === null)
-      this.#feasible = yield* this.feasibility();
+    if ((yield* this.holdsInfeasible()) && this.feasible === null)
+      this.feasible = yield* this.feasibility();
     // (a value whose node reads no expression, a call's, a `get`'s or a `load`'s result, is its own producer; any other,
     // a compound assignment's operand among them, keeps its warning)
     if (flagged && (node === null || !this.inBody(node))) {
@@ -176,7 +171,7 @@ export class NarrowingRoutes extends RouteEntries {
       const c = program.opOf.get(value)?.kind;
       return (c === "call" || c === "get" || c === "load" || c === "fallback") &&
         (node === null || program.live(node)) &&
-        (this.#feasible === null
+        (this.feasible === null
           ? yield* this.#valueProduces(value, node, [], tag)
           : this.#inlineLoad(value, node, tag))
         ? { writer: site, block: null }
@@ -190,7 +185,7 @@ export class NarrowingRoutes extends RouteEntries {
     if (path === null || (last?.kind === "property" && selectsElement(last.name)))
       return (path !== null || producerAt(expression, program.work)) &&
         !this.checked(node, this.text(site), tag, -1) &&
-        (this.#feasible === null
+        (this.feasible === null
           ? yield* this.#valueProduces(value, node, [], tag)
           : this.#inlineLoad(value, node, tag))
         ? { writer: site, block: null }
@@ -241,12 +236,6 @@ export class NarrowingRoutes extends RouteEntries {
     )
       return null;
     return yield* this.entered(node, key);
-  }
-
-  /** The program default's feasibility, where the default holds (`#feasible`, set by the first `required`). */
-  protected defaultHolds(): Feasibility | null {
-    this.#work.charge("eventSteps");
-    return this.#feasible;
   }
 
   /**
@@ -303,9 +292,9 @@ export class NarrowingRoutes extends RouteEntries {
     this.#work.charge("eventSteps");
     // a chain of copies: each query waits on its source's, the last first
     const waiting: { readonly memo: string; readonly found: Candidate }[] = [];
-    // (a program the default holds asks its own queries, apart from main's: `#feasible`)
+    // (a program the default holds asks its own queries, apart from main's: `feasible`)
     let memo =
-      this.#feasible === null
+      this.feasible === null
         ? joinParts(key, node.id, tag, this.#othersText(others))
         : joinParts(key, node.id, tag, this.#othersText(others), "entered");
     let answer: Definition | null = null;
@@ -333,7 +322,7 @@ export class NarrowingRoutes extends RouteEntries {
       ({ key, tag, node } = source);
       others = [];
       memo =
-        this.#feasible === null
+        this.feasible === null
           ? joinParts(key, node.id, tag, "")
           : joinParts(key, node.id, tag, "", "entered");
     }
@@ -445,7 +434,7 @@ export class NarrowingRoutes extends RouteEntries {
       !CERTIFIED.has(d.how) ||
       !lists.certain(d) ||
       // (a parameter's default is selected by a call that omits it, which a merged answer may not prove, #1938)
-      (this.#feasible !== null && d.how === "parameter default")
+      (this.feasible !== null && d.how === "parameter default")
     )
       return false;
     // a whole store of a prefix answers below it through its literal's properties, else through what its value holds
@@ -494,7 +483,7 @@ export class NarrowingRoutes extends RouteEntries {
     const read = left.length === 0 ? this.#scalarRead(value) : null;
     if (read !== null) return { key: read.key, tag, node: read.node };
     // (in a program the default holds, only a `load`'s literal default proves itself, #1938)
-    if (this.#feasible !== null) return left.length === 0 && this.#ownLoad(value, tag, others);
+    if (this.feasible !== null) return left.length === 0 && this.#ownLoad(value, tag, others);
     // any other producer, a whole copy below the copied path among them, by what its value holds there on some run,
     // neither stopped nor read under a failed test: one answer per read, never a route per field of each copy (W34)
     if (yield* this.#valueProduces(value, d.node, left, tag)) return true;
@@ -617,13 +606,13 @@ export class NarrowingRoutes extends RouteEntries {
     // (in a program the default holds, the writer and the use stand where a route may promote: `#plain`, or at the
     // entry a seed's jump makes, R2.2, the jump already standing there)
     if (
-      this.#feasible !== null &&
+      this.feasible !== null &&
       (into === null
         ? !this.#plain(d.node, found.chain) || !this.#plain(node, chain)
         : !this.standsAt(into, d.node, found.chain))
     )
       return false;
-    const hazards = into === null ? this.#feasible?.hazards : this.#feasible?.entryHazards;
+    const hazards = into === null ? this.feasible?.hazards : this.feasible?.entryHazards;
     const layer = this.#testLayer(key, tag);
     const writer = found.chain;
     let level = 0;
@@ -692,7 +681,7 @@ export class NarrowingRoutes extends RouteEntries {
     // (one unit per prefix the recursion climbs)
     this.#work.charge("indexSteps");
     const memo =
-      this.#feasible === null
+      this.feasible === null
         ? joinParts(key, calls ? "calls" : "leaves")
         : joinParts(key, calls ? "calls" : "leaves", "entered");
     const known = this.#layers.get(memo);
@@ -705,7 +694,7 @@ export class NarrowingRoutes extends RouteEntries {
     const parent =
       prefix !== null
         ? this.#killLayer(prefix, calls)
-        : this.#feasible === null
+        : this.feasible === null
           ? null
           : this.#feasibilityLayer(calls);
     const seeds: TreeStatement[] = [];
@@ -734,7 +723,7 @@ export class NarrowingRoutes extends RouteEntries {
    */
   #testLayer(key: Key, tag: ItemTag): Layer {
     this.#work.charge("indexSteps");
-    const memo = this.#feasible === null ? joinParts(key, tag) : joinParts(key, tag, "entered");
+    const memo = this.feasible === null ? joinParts(key, tag) : joinParts(key, tag, "entered");
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
     const calls = this.pass.definitions.ownedAway(key);
@@ -777,7 +766,7 @@ export class NarrowingRoutes extends RouteEntries {
     const memo = joinParts("feasibility", calls ? "calls" : "leaves");
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
-    const { unentered, owners } = this.#feasible!;
+    const { unentered, owners } = this.feasible!;
     const layer = this.#build(null, calls, owners, (arm) => {
       this.#work.charge("indexSteps");
       return unentered.has(arm);
@@ -797,7 +786,7 @@ export class NarrowingRoutes extends RouteEntries {
    */
   #plain(node: FlowNode, chain: readonly Place[]): boolean {
     this.#work.charge("eventSteps");
-    return this.clear(this.#feasible!, this.#feasible!.hazards, node, chain, null);
+    return this.clear(this.feasible!, this.feasible!.hazards, node, chain, null);
   }
 
   /**
@@ -960,7 +949,7 @@ export class NarrowingRoutes extends RouteEntries {
   ): Work<ReadonlyMap<TreeBlock, Candidates>> {
     this.#work.charge("indexSteps");
     const memo =
-      this.#feasible === null
+      this.feasible === null
         ? joinParts(key, tag, this.#othersText(others))
         : joinParts(key, tag, this.#othersText(others), "entered");
     const known = this.candidates.get(memo);
