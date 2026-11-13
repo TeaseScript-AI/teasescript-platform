@@ -8,11 +8,11 @@ import type { StaticRule } from "../result.js";
 // (TSV062), and the same decision marks those fallbacks as never running, for the ways the plan's checks follow.
 
 /**
- * Whether a left read's answer proves it never `null` (`fallbackUses` in `check-result.ts`): it holds a kind, and none of
- * its kinds is `null` or unknown (external, opaque, a stopped read's: a value of unknown type gets no warning, V30 §18).
- * A possible kind proves as a definite one does: the question is whether `null` can be there, not whether every kind is
- * certain (not the built-in signature check's all-definite test). `null` (no answer at the read) proves nothing. (A
- * function is outside the candidate's slice, so no left side here depends on a parameter.)
+ * Whether a left read's answer proves it never `null`: it holds a kind, and none of its kinds is `null` or unknown
+ * (external, opaque, a stopped read's: a value of unknown type gets no warning, V30 §18). A possible kind proves as a
+ * definite one does: the question is whether `null` can be there, not whether every kind is certain (not the built-in
+ * signature check's all-definite test). `null` (no answer at the read) proves nothing. (A function is outside the
+ * candidate's slice, so no left side here depends on a parameter.)
  */
 export function provesNonNull(items: readonly Item[] | null): boolean {
   if (items === null) return false;
