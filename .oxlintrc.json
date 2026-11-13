@@ -137,6 +137,21 @@
         "typescript/no-base-to-string": "off",
         "typescript/restrict-template-expressions": "off"
       }
+    },
+    {
+      "files": ["**/*.{js,jsx,mjs,cjs}"],
+      "env": { "node": true, "builtin": true },
+      "rules": { "no-undef": "error" }
+    },
+    {
+      "files": ["**/*.mjs"],
+      "rules": {
+        "no-restricted-globals": ["error", "exports", "require", "module", "__filename", "__dirname"]
+      }
+    },
+    {
+      "files": ["tools/player-firefox-camera.mjs", "tools/player-preview-checks.mjs"],
+      "env": { "browser": true }
     }
   ]
 }

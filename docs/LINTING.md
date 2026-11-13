@@ -55,6 +55,17 @@ of 8 to 20, and 46 s with them and the waiting-list check below at a load of 6 t
 about 1.7 GB in each. Inside `tools/check-changed.mjs`, beside its other checks, the lint step took 113 s with these
 rules, and 70 s without them in another run at a similar load. The pre-push check runs lint as CI does.
 
+## Names in JavaScript files
+
+No `tsconfig.json` includes a JavaScript file, so no compiler sees a name such a file reads and does not bind. On every
+`.js`, `.jsx`, `.mjs` and `.cjs` file, `no-undef` refuses a name that is neither declared, imported nor one of Node's
+globals (`env.node`), as `FILE:LINE:COL: 'name' is not defined`. An ES module has none of the five names Node's
+CommonJS wrapper defines, so in a `.mjs` file `no-restricted-globals` refuses `exports`, `require`, `module`,
+`__filename` and `__dirname` unless the file binds them. `tools/player-firefox-camera.mjs` and
+`tools/player-preview-checks.mjs` may also read the browser's globals (`env.browser`): each such read sits in a function
+the tool hands to the page, which runs in the browser. A later tool that hands functions to a page joins that override
+by name.
+
 ## Waiting lists
 
 An `overrides` entry whose rules are all off (`"allow"`, `"off"` or `0`, oxlint's `AllowWarnDeny`) is a waiting list:
