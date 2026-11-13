@@ -39,7 +39,7 @@ import type { Item } from "../items.js";
 import { decided } from "./decision.js";
 import { heldMeetings } from "./held.js";
 import { offending, SCALAR } from "./kinds.js";
-import { landingIndex } from "./landing-index.js";
+import { landingIndex } from "./ingress-landings.js";
 import { byPath, inheritance, landedBelow, wholeCycle } from "./landings/inheritance.js";
 import { landed } from "./landings/landed.js";
 import type { ByPath, DecidedAt, InheritedCopy } from "./model.js";

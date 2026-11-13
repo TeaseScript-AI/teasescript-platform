@@ -29,7 +29,7 @@ import {
   wholeBelow,
 } from "./admission/ingress.js";
 import { copyGraph, inheritedProofOf } from "./inherited/inherited.js";
-import { typedByDefault } from "./admission/landing-index.js";
+import { typedByDefault } from "./admission/ingress-landings.js";
 import { literalElements } from "./admission/literals/elements.js";
 import { joinElements } from "./admission/literals/join.js";
 import { type MixedOptional } from "./admission/literals/mixed-sentence.js";

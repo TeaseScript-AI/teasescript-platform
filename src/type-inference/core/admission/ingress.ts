@@ -16,7 +16,7 @@ import { sortCost, type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { IngressNode, Item } from "../items.js";
 import { concrete, isExternal } from "./kinds.js";
-import { landingIndex, leafIngresses } from "./landing-index.js";
+import { landingIndex, leafIngresses } from "./ingress-landings.js";
 import type { IngressStop, KeyStops, Level, Siting, Stop, StoreIngresses } from "./model.js";
 import { distinctStops, perLink, selects } from "./scan.js";
 import { sourceOf } from "./structure.js";
