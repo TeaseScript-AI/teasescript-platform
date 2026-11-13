@@ -166,7 +166,7 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
 }
 
 /** `keyThrough` at the step `at`, the first of the key's path from its `from` on that a built-in value answers. */
-export function* keyListsAt(
+export function* keyMemberAt(
   contract: Contract,
   key: Key,
   at: number,

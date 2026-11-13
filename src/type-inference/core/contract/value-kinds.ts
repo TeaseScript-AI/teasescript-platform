@@ -94,7 +94,7 @@ function through(
       ? spanMemberStep(contract, ref, from)
       : memberStepOf(contract, restSteps(rest), from);
   if (at < 0) return valueAt(contract, value, rest, flow);
-  return listsAt(contract, value, restSteps(rest), at, from, flow);
+  return memberAt(contract, value, restSteps(rest), at, from, flow);
 }
 
 /** `memberStepOf` for a span: its first member step from `from` on, from its path's kept steps (`memberStepIn`). */
@@ -107,7 +107,7 @@ function spanMemberStep(contract: Contract, ref: PathRef, from: number): number 
  * `through` at the step `at`: the first of `rest` from `from` on that names a member a built-in value answers by itself
  * (a dict's `values` or `keys`, a temporal field, a calendar duration's part: `memberStep`), read by `members`.
  */
-function* listsAt(
+function* memberAt(
   contract: Contract,
   value: PlaceId,
   rest: Steps,
