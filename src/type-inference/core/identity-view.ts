@@ -110,26 +110,48 @@ function translated<T extends object>(value: T, translations: Translations<T>, o
   return out;
 }
 
-/** The views made, each by the request it was made of and by its own request, so a view is made once. */
-const VIEWS = new WeakMap<CoreAnalysisRequest, IdentityView>();
+/**
+ * A view's own request names its view, so the program that reads it takes that view, not a view of it; nothing outside
+ * the request keeps a view (#1072: no state between runs). Every view has its own request, a shallow copy, so the
+ * compiler's request is never written.
+ */
+const VIEWED: unique symbol = Symbol("the identity view this request is");
 
-/** The analysis's view of a request (see the module's comment). */
+/** A request that may name the view it is the own request of. */
+type ViewedRequest = CoreAnalysisRequest & { [VIEWED]?: IdentityView };
+
+/**
+ * The view `request` is the own request of, or `undefined`: a copy of an own request (an object spread copies the
+ * name) is not the view's own request, so it is read as a request of its own.
+ */
+function viewNamed(request: ViewedRequest): IdentityView | undefined {
+  const view = request[VIEWED];
+  return view?.request === request ? view : undefined;
+}
+
+/** A view of `source`, its own request `source` with `fields` that names the view (written once, before it is returned). */
+function madeView(
+  source: CoreAnalysisRequest,
+  fields: Pick<CoreAnalysisRequest, "files" | "options">,
+  rest: Omit<IdentityView, "source" | "request">,
+): IdentityView {
+  const own: ViewedRequest = { ...source, ...fields };
+  const view: IdentityView = { source, request: own, ...rest };
+  own[VIEWED] = view;
+  return view;
+}
+
+/** The analysis's view of a request (see the module's comment), made once per analysis. */
 export function identityView(request: CoreAnalysisRequest): IdentityView {
-  const known = VIEWS.get(request);
-  if (known !== undefined) return known;
+  const named = viewNamed(request);
+  if (named !== undefined) return named;
   const names = identityNames(request.files);
-  if (names === null) {
-    const none: IdentityView = {
-      source: request,
+  if (names === null)
+    return madeView(
       request,
-      calls: 0,
-      steps: 0,
-      sourceOf: kept,
-      viewOf: kept,
-    };
-    VIEWS.set(request, none);
-    return none;
-  }
+      { files: request.files, options: request.options },
+      { calls: 0, steps: 0, sourceOf: kept, viewOf: kept },
+    );
   // (the declarations' scan; then a unit per file, each file's walk, and a unit per node translated into the view)
   let steps = names.steps;
   const back = new Map<SyntaxNode, SyntaxNode>();
@@ -150,20 +172,13 @@ export function identityView(request: CoreAnalysisRequest): IdentityView {
       ? file
       : { ...file, program: viewed.program, picks: nodeMap(file.picks, into) };
   });
-  const view: IdentityView = {
-    source: request,
-    request:
-      calls === 0
-        ? request
-        : { ...request, files, options: translated(request.options, OPTIONS_INTO_VIEW, into) },
-    calls,
-    steps,
-    sourceOf,
-    viewOf,
-  };
-  VIEWS.set(request, view);
-  VIEWS.set(view.request, view);
-  return view;
+  return madeView(
+    request,
+    calls === 0
+      ? { files: request.files, options: request.options }
+      : { files, options: translated(request.options, OPTIONS_INTO_VIEW, into) },
+    { calls, steps, sourceOf, viewOf },
+  );
 }
 
 /**
