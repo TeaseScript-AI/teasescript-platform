@@ -163,7 +163,10 @@ export const NOT_PINS = [
   { file: "tests/runtime/presentation/message-markup.test.ts", is: "character codes" },
   { file: "tests/runtime/engine/runtime-random.test.ts", is: "a generator's expected states" },
   { file: "tests/type-core/messages/type-core-messages-examples.test.ts", is: "random seeds" },
-  { file: "tests/helpers/type-core/type-core-enclosing.ts", is: "sample values of a host global" },
+  {
+    file: "tests/helpers/type-core/enclosing/type-core-enclosing-certificates.ts",
+    is: "sample values of a host global",
+  },
 ];
 
 /** The four pin forms the marks' test finds by their text. */
