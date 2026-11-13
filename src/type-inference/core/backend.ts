@@ -12,6 +12,7 @@ import {
   OutsideContract,
   SLICE_DEPTH,
 } from "./check-result/slice-index.js";
+import { oneType } from "./consumers/kinds.js";
 import { checkedOnSource, identityView, type IdentityView } from "./identity-view.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
@@ -34,7 +35,8 @@ import {
  * The slice: `let` with or without a written type (a named type, `T?` and `T[]` of them; no written union, whose
  * required checks come with narrowing, S10), assignment of a variable or of a property, `if` and `else`, `repeat` with
  * a count, `for` with one or two variables, `say` of plain text or of a value, also `as` a speaker, a speaker's
- * declaration (never a speaker's name as a value), a call as a statement, and `exit`;
+ * declaration (never a speaker's name as a value), a call as a statement, and `exit`; the asks `SLICE_ASKS` holds,
+ * also `as` a speaker, with no prefill or a literal one the request takes (`askPrefillAdmitted`);
  * number, boolean, null, regex and plain text literals, variables, host values, list and object literals, index and
  * property reads, ranges, `otherwise`, a list's `get` with its `default:`, a method of text, a list, a set or a dict that
  * changes nothing in its receiver and a list's `sort`, `toJson` of a value, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
@@ -45,7 +47,8 @@ import {
  * loop's iterable, a method's arguments and the elements `join` and `sort` read); its ingresses are a host value, a load
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
- * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an argument
+ * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an
+ * `askChoice` whose buttons may return more than one type, an argument
  * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested
  * `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a route to the use has no
  * check, else a warning whose use the runtime checks.
@@ -328,6 +331,19 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           what: "an argument that its built-in checks",
         };
     }
+  // (after the values' own refusals) an `askChoice` whose buttons may return values of more than one type (V30 §19: whole
+  // numbers with numbers one type, `null` beside a type): today's checker refuses its answer in a typed place (TSV041)
+  // where the core only warns
+  for (const ask of index.asks)
+    if (
+      ask.interactionKind === "choice" &&
+      !oneType(
+        (answers.at(nodeOf(answers, index, ask))?.items ?? [])
+          .map((item) => item.tag)
+          .filter((tag) => tag !== "unknown" && tag !== "empty"),
+      )
+    )
+      return { file: index.fileOf(ask), span: ask.span, what: "this ask" };
   // a variable without a written type whose lists nest deeper than the facts follow
   for (const statement of index.lets)
     if (statement.typeAnnotation === null) {

@@ -11,8 +11,11 @@ import type { SerializableRuntimeValue } from "../../../src/runtime/values/seria
  * through `tests/families/differential.mjs` on this tree.
  */
 
-/** The host values each plan runs with: a whole number, text, a truth value, a fraction, null (fitting and not). */
-export const DOMAIN: readonly SerializableRuntimeValue[] = [2, "text", true, 2.5, null];
+/**
+ * The host values each plan runs with: a whole number, text, a truth value, a fraction, null (fitting and not), and
+ * blank text, which a prefill takes as none (V30 §20).
+ */
+export const DOMAIN: readonly SerializableRuntimeValue[] = [2, "text", true, 2.5, null, ""];
 
 export interface Check {
   readonly field: string;

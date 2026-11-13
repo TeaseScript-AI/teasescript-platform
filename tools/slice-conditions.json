@@ -799,5 +799,268 @@
     "mutant": "true",
     "expected": "kill",
     "witness": "goto script with a named argument"
+  },
+  {
+    "id": "ask-form",
+    "scope": "row interactionExpression",
+    "expression": "!SLICE_ASKS.has(node.interactionKind)",
+    "mutant": "(SLICE_ASKS.has(node.interactionKind) && false)",
+    "expected": "kill",
+    "witness": "askForm"
+  },
+  {
+    "id": "ask-prefill",
+    "scope": "row interactionExpression",
+    "expression": "!askPrefillAdmitted(node)",
+    "mutant": "(!askPrefillAdmitted(node) && false)",
+    "expected": "kill",
+    "witness": "askPassword prefill"
+  },
+  {
+    "id": "prefill-named",
+    "scope": "askPrefill",
+    "expression": "argument.name.name === \"prefill\"",
+    "mutant": "(argument.name.name === \"prefill\" && false)",
+    "expected": "kill",
+    "witness": "askBoolean prefill null"
+  },
+  {
+    "id": "prefill-none",
+    "scope": "askPrefillAdmitted",
+    "expression": "written === null",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "prefill-password",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"password\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "askPassword prefill"
+  },
+  {
+    "id": "prefill-unwrapped",
+    "scope": "askPrefillAdmitted",
+    "expression": "unwrapped(written)",
+    "mutant": "written",
+    "expected": "kill",
+    "witness": "prefill (null)"
+  },
+  {
+    "id": "prefill-text-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 1,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice \"a\", \"b\", prefill: \"a\""
+  },
+  {
+    "id": "prefill-text-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"text\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askNumber prefill text"
+  },
+  {
+    "id": "prefill-text-blank",
+    "scope": "askPrefillAdmitted",
+    "expression": "!isBlankTextAnswer(\n            prefill.parts.map((part) => (part.kind === \"stringText\" ? part.value : \"\")).join(\"\"),\n          )",
+    "mutant": "!isBlankTextAnswer(\"x\")",
+    "expected": "kill",
+    "witness": "askText prefill blank"
+  },
+  {
+    "id": "prefill-text-part",
+    "scope": "askPrefillAdmitted",
+    "expression": "part.kind === \"stringText\"",
+    "mutant": "(part.kind === \"stringText\" && part.value === \"\")",
+    "expected": "restrict",
+    "witness": "let r = askText(\"q\", prefill: \"a\")"
+  },
+  {
+    "id": "prefill-number-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 2,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice 1, 2, prefill: 1"
+  },
+  {
+    "id": "prefill-number-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"number\"",
+    "mutant": "[\"number\", \"text\"].includes(ask.interactionKind)",
+    "expected": "kill",
+    "witness": "askText prefill number"
+  },
+  {
+    "id": "prefill-integer-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"integer\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askText prefill number"
+  },
+  {
+    "id": "prefill-integer-written",
+    "scope": "askPrefillAdmitted",
+    "expression": "prefill.numericType === \"integer\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askInteger prefill 2.0"
+  },
+  {
+    "id": "prefill-integer-safe",
+    "scope": "askPrefillAdmitted",
+    "expression": "Number.isSafeInteger(prefill.value)",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askInteger prefill unsafe"
+  },
+  {
+    "id": "prefill-boolean-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 3,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice true, false, prefill: true"
+  },
+  {
+    "id": "prefill-boolean-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"boolean\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askText prefill true"
+  },
+  {
+    "id": "prefill-null-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 4,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice 1, 2, prefill: null"
+  },
+  {
+    "id": "null-walk",
+    "scope": "nullOnlyPosition",
+    "expression": "type !== undefined",
+    "occurrence": 1,
+    "mutant": "(type !== undefined && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null? (admitted: no nested type judged)"
+  },
+  {
+    "id": "null-kind-name",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind === \"namedType\"",
+    "mutant": "(type.kind === \"namedType\" && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-kind-optional",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind === \"optionalType\"",
+    "mutant": "(type.kind === \"optionalType\" && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null? (refused at its value, not itself)"
+  },
+  {
+    "id": "null-kind-union",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind === \"unionType\"",
+    "occurrence": 1,
+    "mutant": "(type.kind === \"unionType\" && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: (null | null)? (refused at its union, not itself)"
+  },
+  {
+    "id": "null-name",
+    "scope": "nullOnlyPosition",
+    "expression": "type.name === \"null\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-optional",
+    "scope": "nullOnlyPosition",
+    "expression": "onlyNull.get(type.value) === true",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null? (refused at its value, not itself)"
+  },
+  {
+    "id": "null-union",
+    "scope": "nullOnlyPosition",
+    "expression": "type.members.every((member) => onlyNull.get(member) === true)",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: (null | null)? (refused at its union, not itself)"
+  },
+  {
+    "id": "null-search",
+    "scope": "nullOnlyPosition",
+    "expression": "type !== undefined",
+    "occurrence": 2,
+    "mutant": "(type !== undefined && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-position-own",
+    "scope": "nullOnlyPosition",
+    "expression": "onlyNull.get(type) === true",
+    "mutant": "(onlyNull.get(type) === true && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-position-member",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind !== \"unionType\" || onlyNull.get(part) !== true",
+    "mutant": "(type.kind !== \"unionType\" || onlyNull.get(part) !== true || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "let x: integer | null (refused at its member, not at the union)"
+  },
+  {
+    "id": "null-search-part",
+    "scope": "nullOnlyPosition",
+    "expression": "part !== undefined",
+    "mutant": "(part !== undefined && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null[] (admitted)"
+  },
+  {
+    "id": "null-part-optional",
+    "scope": "typeParts",
+    "expression": "[type.value]",
+    "mutant": "[]",
+    "expected": "kill",
+    "witness": "let x: null[]? (admitted)"
+  },
+  {
+    "id": "null-part-element",
+    "scope": "typeParts",
+    "expression": "[type.element]",
+    "mutant": "[]",
+    "expected": "kill",
+    "witness": "let x: null[] (admitted)"
+  },
+  {
+    "id": "annotation-null-only",
+    "scope": "annotationOutside",
+    "expression": "nullOnly !== null",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null"
   }
 ]

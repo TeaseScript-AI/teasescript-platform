@@ -1115,11 +1115,12 @@ test("the early selector alone (`withTextKeys`, criterion 3's seam): every famil
 });
 
 test("a wrapper's own cell copying a written binding lands below its place's own key (A4): its cursor's path is decided, and the plan checks it, as the text lane does (the corpus's `null/direct` cases)", () => {
+  // (the corpus case writes `typed: null`, which the route does not take: `integer?` holds the same `null`)
   const files = [
     {
       path: "main.tease",
       source:
-        "let typed:null=null\nlet root={f:typed,g:typed}\nlet foreign={f:hostValue,g:typed}\nlet a=foreign\na=a\nlet mid=a\nlet c=root\nc=mid\nc.f=null\nexit\n",
+        "let typed:integer?=null\nlet root={f:typed,g:typed}\nlet foreign={f:hostValue,g:typed}\nlet a=foreign\na=a\nlet mid=a\nlet c=root\nc=mid\nc.f=null\nexit\n",
     },
   ];
   const { result, records } = withKeyRecords(() => publishedRoute(files, GLOBALS));
