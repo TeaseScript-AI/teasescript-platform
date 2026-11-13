@@ -42,7 +42,7 @@ import { inheritance, landedBelow } from "./landings/inheritance.js";
 import type { Alias, Candidate, Decided, DecidedAt, Decision, Inputs } from "./model.js";
 import { permittedAt } from "./permitted.js";
 import { dictStepsRead, spellsValues } from "./structure.js";
-import { inputsAt, inputsOf, scanAt } from "./scan.js";
+import { freshInputs, inputsAt, inputsOf, scanAt } from "./scan.js";
 import { compareKeys, stopsOf, writtenSource } from "./walk.js";
 
 // The decision of one place at one path (§5), and its comparison under the member-answer oracle.
@@ -232,9 +232,11 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
   const at = atOf(admission, asked);
   const { root, key, path } = at;
   admission.attempted.add(key);
-  const inputs = inputsAt(admission, decidedAtOf(at));
+  const asked0 = inputsAt(admission, decidedAtOf(at));
+  // (#2378: below a dict's list changed in place, the list's read is the one prefix: `freshInputs`)
+  const inputs = asked0 === null ? null : readNow(freshInputs(admission, asked0));
   if (inputs === null) return null;
-  const { direct, prefixes } = inputs;
+  const { direct, prefixes, first } = inputs;
   if (memberOracle !== null && !lazily)
     compareMembers(admission, root, stepsArray(path ?? keyStepsIn(contract, key)), prefixes);
   const found = decidedOf(admission, at, inputs);
@@ -272,6 +274,10 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
     ])
       if (lists.live(d) && d.kind === "whole")
         candidates.set(keptParts(admission.work, d.uid, path!), { d, at: path! });
+  // (#2378: a fresh list's read is a store into it, as its copy twin's declaration is, taken as a prefix's whole store
+  // is: where what the contract holds there offends)
+  if (first !== undefined && offends(withoutEmpty(admission.run(contract.contractOf(key)))))
+    candidates.set(keptParts(admission.work, first.d.uid, stepsText(first.at)), first);
   for (const { key: prefix, rest: ref } of prefixes) {
     const stored = contract.prefixStores(prefix);
     // (an array's rest as before, a record's steps as theirs; a cursor's span, its steps made only for a store taken as
@@ -374,6 +380,7 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
     ...(found.deciderHost === true ? { deciderHost: true as const } : {}),
     candidates: ordered,
     published,
+    ...(first === undefined ? {} : { fresh: { list: first.d.site, depth: first.d.path.length } }),
   };
 }
 
@@ -388,7 +395,8 @@ export function decided(
   path: readonly string[],
 ): Decided | null {
   const at = atOf(admission, { root, path });
-  return decidedOf(admission, at, inputsAt(admission, decidedAtOf(at)));
+  const asked = inputsAt(admission, decidedAtOf(at));
+  return decidedOf(admission, at, asked === null ? null : readNow(freshInputs(admission, asked)));
 }
 
 /** `decided` of a decided path in its identity, its inputs found (`inputsAt`). */
@@ -418,8 +426,11 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   const { program, lists, contract } = admission.pass;
   const work = program.work;
   const place = program.place(root);
-  const { direct, prefixes } = inputs;
-  const written = writtenOf(place.kind);
+  const { direct, prefixes, first } = inputs;
+  // (#2378: below a dict's list changed in place, the twin's list, which no written type of the place's own reaches and
+  // whose contract is what the read carries with what the statement stores: `freshRead`)
+  const fresh = first !== undefined;
+  const written = fresh ? null : writtenOf(place.kind);
   // (a cursor's family's place is unwritten: its shape requires it; its steps made where one is not)
   const term = written === null ? null : permittedAt(written, path ?? keyStepsIn(contract, key));
   const none = { key, own: term !== null, transfer: false, tags: null } as const;
@@ -433,9 +444,9 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   }
   // below an unrestricted part of a written type a copy decides above the path every kind fits, whatever decides the
   // path itself, as below the place's own (`openAbove`)
-  if (term === null && openAboveAt(admission, at))
+  if (term === null && !fresh && openAboveAt(admission, at))
     return { ...NOTHING, ...none, tags: ["unknown"], byWritten: true };
-  if (depth > 0 && term === null) {
+  if (depth > 0 && term === null && !fresh) {
     // A3: a settled family needs no scan, where no store on the path was rejected
     const clean = isClean(admission, at);
     const kinds = clean ? withoutEmpty(admission.run(contract.contractOf(key))) : [];
@@ -484,6 +495,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   // decides (A4), and a store rejected there is decided again (A6)
   if (
     tags === null &&
+    !fresh &&
     isClean(admission, at) &&
     !withoutEmpty(admission.run(contract.contractOf(key))).some((item) => concrete(item))
   ) {
@@ -491,7 +503,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
     return { ...NOTHING, ...none };
   }
   if (tags === null) {
-    const found = drive(admission, scanAt(admission, direct, prefixes, key));
+    const found = drive(admission, scanAt(admission, direct, prefixes, key, first));
     // (#2289: a literal element a stop left undecided leaves the path undecided; C9's branch is not asked)
     if (found?.stopped === true) {
       admission.budgetUndecided.set(contract.canonicalKey(key), {
@@ -508,7 +520,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
       // C9: where no contribution decides, but the contract holds kinds beside external data, those
       // kinds are the type the place is published with, so external data a store brings into it owes its check
       // there, named as well as inline (`published`)
-      const kinds = withoutEmpty(admission.run(contract.contractOf(key)));
+      const kinds = contractKinds(admission, key, fresh ? direct : null);
       if (kinds.some((item) => concrete(item)) && kinds.some(isExternal)) {
         tags = [...new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))];
         deciderSite = concreteSite(admission, direct, prefixes);
@@ -523,7 +535,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
     !tags.includes("unknown") &&
     !byWritten &&
     tags.includes("integer") &&
-    withoutEmpty(admission.run(contract.contractOf(key))).some(admitsNumber)
+    contractKinds(admission, key, fresh ? direct : null).some(admitsNumber)
   )
     tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
   return {
@@ -649,6 +661,23 @@ function concreteSite(
         return program.places[stop.value]?.site ?? d.site;
   }
   return first === undefined ? null : first.d.site;
+}
+
+/**
+ * A key's contract, and for a fresh list (`freshRead`) what the statement's own stores hold there too: the twin's
+ * contract holds its stores, a dict's list's holds the dict's alone.
+ */
+function contractKinds(
+  admission: Admission,
+  key: Key,
+  stores: readonly Candidate[] | null,
+): readonly Item[] {
+  const kinds = withoutEmpty(admission.run(admission.pass.contract.contractOf(key)));
+  if (stores === null) return kinds;
+  const all = [...kinds];
+  for (const { d, at } of stores)
+    if (d.value !== undefined) all.push(...withoutEmpty(admission.valueAt(d, stepsRest(at))));
+  return all;
 }
 
 /**

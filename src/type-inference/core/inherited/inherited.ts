@@ -22,7 +22,7 @@ import { keyLane } from "../contract/lanes.js";
 import { landed, landedKey, passThrough, passThroughKey } from "../admission/landings/landed.js";
 import type { Frontier, Inheriting, Stop, Stops, WaitingAnswer } from "../admission/model.js";
 import { permittedAt, unrestricted } from "../admission/permitted.js";
-import { inputsAt, inputsOf, scanAt } from "../admission/scan.js";
+import { freshScanAt, inputsAt, inputsOf } from "../admission/scan.js";
 import { inheritedInto, join, settleCycles, settledCycles } from "./waiting.js";
 import { isRead, read, type Read, type Reads } from "./reads.js";
 import type { Proof, ProofDemand, Proven, Work } from "../solver.js";
@@ -271,14 +271,14 @@ function ownScanOf(admission: Admission, next: CanonicalKey): Inheriting<Waiting
         keptKeyAtRef(contract, through, spanRef(contract, keyIdPath(next))),
       );
     const inputs = inputsAt(admission, { root: place, key: next });
-    return inputs === null ? null : scanAt(admission, inputs.direct, inputs.prefixes, next);
+    return inputs === null ? null : freshScanAt(admission, inputs, next);
   }
   const path = keyPath(next);
   // (a place that answers through a copy above it asks that copy's place, nothing scanned)
   const through = passThrough(admission, place, path);
   if (through !== place) return answerOf(admission, keptKeyAt(contract, through, path));
   const inputs = inputsOf(admission, place, path);
-  return inputs === null ? null : scanAt(admission, inputs.direct, inputs.prefixes, next);
+  return inputs === null ? null : freshScanAt(admission, inputs, next);
 }
 
 /**

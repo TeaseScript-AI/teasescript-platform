@@ -370,6 +370,21 @@ function wholeCheck(
   | undefined {
   // (its landing asked, and charged, only for a place below a collection)
   if (!rule.steps.some((step) => "collection" in step)) return undefined;
+  // (#2378: a dict's list a statement changes in place takes the read as its copy twin's declaration does: the
+  // collections below the list, of no written type)
+  if (rule.fresh !== undefined) {
+    const fresh = rule.steps.slice(rule.fresh.depth);
+    if (fresh.length === 0 || !fresh.every((step) => "collection" in step)) return undefined;
+    if (rule.type.some((kind) => kind === "list" || kind === "set" || kind === "dict"))
+      return undefined;
+    return {
+      words: `every ${fresh
+        .toReversed()
+        .map((step) => ("collection" in step && step.collection === "dict" ? "value" : "element"))
+        .join(" of every ")} of`,
+      leaf: described(rule.type),
+    };
+  }
   const landing = source.landing(site);
   const below = stepsBelow(rule, landing);
   // (a storing method's argument off the place's path, or with no name to its receiver: no level proved, Codex r3 on
@@ -566,7 +581,8 @@ export function warningFix(
       return (
         inPlace(whole.test) ?? checkFix(subject, whole.test, null, { source, site, diagnosed })
       );
-    return variable(subject) !== null || source.target(site)
+    return variable(subject) !== null ||
+      (source.target(site) && rule.rule === "store" && rule.fresh === undefined)
       ? `Check that ${whole.words} '${subject}' is ${whole.leaf} first.`
       : `Keep '${subject}' in a new variable and check that ${whole.words} it is ${whole.leaf} first.`;
   }

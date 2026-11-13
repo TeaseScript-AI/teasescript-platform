@@ -13,7 +13,7 @@ import { admitsNumber, concrete } from "./kinds.js";
 import { inheritance } from "./landings/inheritance.js";
 import { landed } from "./landings/landed.js";
 import { permittedAt, unrestricted } from "./permitted.js";
-import { inputsAt, scanAt } from "./scan.js";
+import { freshScanAt, inputsAt } from "./scan.js";
 
 // The admitted type at a path (C9), the decision retained after a stop, and the deciding contribution's site; each
 // path's key in its identity (`keyAt`: a wrapper family's its cursor, as `decide` records it, G3 stage 1).
@@ -246,10 +246,7 @@ function literalSeed(
   if (admission.pass.program.work.stopped !== null) return null;
   const key = keyAt(admission.pass.contract, place, path);
   const inputs = inputsAt(admission, isKeyId(key) ? { root: place, key } : { root: place, path });
-  const found =
-    inputs === null
-      ? null
-      : drive(admission, scanAt(admission, inputs.direct, inputs.prefixes, key));
+  const found = inputs === null ? null : drive(admission, freshScanAt(admission, inputs, key));
   if (found === null || found.stopped === true || found.tags.length === 0) return null;
   // (a strict answer's complete type with its null; an inferred one's kinds, with null by admission's null rule, as a
   // retained decision's)
@@ -334,7 +331,7 @@ export function deciderAt(
       key,
       inputs === null || below
         ? null
-        : (drive(admission, scanAt(admission, inputs.direct, inputs.prefixes, key))?.site ?? null),
+        : (drive(admission, freshScanAt(admission, inputs, key))?.site ?? null),
     );
   }
   return admission.deciderSites.get(key)!;

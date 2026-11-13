@@ -30,11 +30,13 @@ import {
   keptPath,
   keptPathText,
   keptPrefixes,
+  keyOf,
   keyPlace,
   type Definition,
   type Key,
 } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
+import { dictList } from "../method-categories.js";
 import type { Item } from "../items.js";
 import { decided } from "./decision.js";
 import { heldMeetings } from "./held.js";
@@ -77,6 +79,31 @@ export function stores(admission: Admission): readonly Definition[] {
 }
 
 /**
+ * #2378: a store through a dict's list read in place (`freshRead`): the list's read is a store into it before this
+ * one, as its copy twin's declaration is, so the store is never its list's only one.
+ */
+function freshStore(admission: Admission, d: Definition): boolean {
+  const { program, contract } = admission.pass;
+  if (!d.path.some((step) => dictList(step) !== undefined)) return false;
+  for (let into = d.into; into !== undefined;) {
+    const projection = program.projOf.get(into);
+    if (projection === undefined) return false;
+    const list = dictList(projection.step);
+    if (list !== undefined) {
+      program.work.charge("indexSteps");
+      const index = d.path.lastIndexOf(projection.step);
+      if (index < 0) return false;
+      const owner = withoutEmpty(
+        admission.run(contract.contractOf(keyOf(d.place, d.path.slice(0, index)))),
+      );
+      return owner.some((item) => item.tag === "dict");
+    }
+    into = projection.owner;
+  }
+  return false;
+}
+
+/**
  * Every place and path admission decides: the keys with definitions, below them a literal's structure, written elements.
  * G3 stage 1: each in its identity (`keyAt`): a wrapper's family's path its key's cursor, a projection's one step below
  * its owner's (`projectionCursor`), a parent by the arena (`keyParentIn`), never its path's text or steps.
@@ -113,7 +140,7 @@ export function groups(admission: Admission): readonly DecidedAt[] {
   // copy or a call its source's elements (F2), the deepest once per path it lands at (its prefixes follow below)
   const deepest = new Map<Key, number>();
   for (const d of reaching)
-    if ((stores.get(d.key) ?? 0) > 1) {
+    if ((stores.get(d.key) ?? 0) > 1 || freshStore(admission, d)) {
       const base = joinSteps(d.path, d.kind === "add" && d.how !== "elements" ? ["element"] : []);
       const structure = valueStructure(admission, d.value!);
       for (const path of structure.paths)
