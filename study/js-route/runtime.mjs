@@ -442,6 +442,7 @@ export class Runtime {
     const span = instruction.span;
     const staged = sayStage(instruction, session);
     const events = [];
+    let keptHandle = null;
     this.snapshot = staged;
     this.events = events;
     try {
@@ -481,6 +482,7 @@ export class Runtime {
         // A say used as a value: its message's handle (today's `giveMessageHandle`), taken by the program after the call.
         staged.liveMessages.push({ messageId: said.sequence, sourceText: authoredText });
         this.messageHandle = fromCanonical({ kind: "messageHandle", messageId: said.sequence });
+        keptHandle = { kind: "messageHandle", messageId: said.sequence };
       }
       finishSay(staged, events, span, said, place);
     } finally {
@@ -489,6 +491,7 @@ export class Runtime {
     }
     Object.assign(session, staged);
     session.contextualSpeaker = null;
+    if (keptHandle !== null) this.keep(keptHandle);
     for (const event of events) drive.push(event);
     return session.status === "waiting";
   }
@@ -623,7 +626,23 @@ export class Runtime {
     const index = temporaries.findIndex((temporary) => temporary.id === id);
     if (index < 0) return undefined;
     const [temporary] = temporaries.splice(index, 1);
+    this.keep(temporary.value);
     return fromCanonical(temporary.value);
+  }
+  /**
+   * Today's engine drops a message, timer or media record that nothing in its state reaches (record collection); the
+   * program's variables are outside that state, so each handle the program receives is kept reachable in a state
+   * temporary (2e9). The study's stand-in for giving record collection the program's roots: records are kept longer.
+   */
+  keep(value) {
+    if (value === null || typeof value !== "object" || !/Handle$/.test(value.kind)) return;
+    const temporaries = this.snapshot.temporaries;
+    let kept = temporaries.find((temporary) => temporary.id === 2e9);
+    if (kept === undefined) {
+      kept = { id: 2e9, value: { kind: "list", items: [] } };
+      temporaries.unshift(kept);
+    }
+    kept.value.items.push({ ...value });
   }
   fault(code, message, span) {
     return fault(code, message, span);
