@@ -11,7 +11,7 @@ import { ingressLeafOf } from "../ingress.js";
 import { isKeyId } from "../key-ids.js";
 import { holdsBelow, unknownItem } from "../kinds.js";
 import { lackingAt, pathAt } from "../literal-index.js";
-import { markStep } from "../marks.js";
+import { markStep } from "../mark-automaton.js";
 import type { PrefixEntry } from "../model.js";
 import { amend, Retained } from "../../retained/retained.js";
 import {

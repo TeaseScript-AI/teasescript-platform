@@ -8,7 +8,8 @@ import { marked } from "../../indexes/guards.js";
 import { entered, ingressLeafOf } from "../ingress.js";
 import { hostAt } from "../kinds.js";
 import { pathAt } from "../literal-index.js";
-import { depthOf, markStart, marksNothing, rootAccepts, type MarkResidual } from "../marks.js";
+import { markStart, rootAccepts, type MarkResidual } from "../mark-automaton.js";
+import { depthOf, marksNothing } from "../marks.js";
 import type { PrefixEntry } from "../model.js";
 import { Retained } from "../../retained/retained.js";
 import {

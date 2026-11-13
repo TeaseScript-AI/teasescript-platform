@@ -4,16 +4,14 @@ import test from "node:test";
 import type { CorePass } from "../../src/type-inference/core/answers.js";
 import type { Contract } from "../../src/type-inference/core/contract.js";
 import {
-  collectMarks,
-  depthOf,
   markAccepts,
   markHolders,
   markResidual,
   markStep,
-  marksAt,
   markPrefixVisits,
   markStates,
-} from "../../src/type-inference/core/contract/marks.js";
+} from "../../src/type-inference/core/contract/mark-automaton.js";
+import { collectMarks, depthOf, marksAt } from "../../src/type-inference/core/contract/marks.js";
 import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { Consumers } from "../../src/type-inference/core/consumers.js";
 import {

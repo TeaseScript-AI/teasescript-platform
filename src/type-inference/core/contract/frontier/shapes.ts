@@ -5,7 +5,7 @@ import { joinParts, keep, keptSteps } from "../../budget.js";
 import { makeItem, REASON } from "../../items.js";
 import { holdsBelow, unknownItem } from "../kinds.js";
 import { heldBelow, lackingAt, pathAt } from "../literal-index.js";
-import { markState } from "../marks.js";
+import { markState } from "../mark-automaton.js";
 import type { IndexNode } from "../model.js";
 import { Retained } from "../../retained/retained.js";
 import {
