@@ -40,7 +40,6 @@ export const costlyTestSeconds = {
   "type-core/type-core-positions.test.js": 21,
   "type-core/candidate/type-core-candidate-route.test.js": 20,
   "families-runner/families-stalls.test.js": 19,
-  "type-core/type-core-signatures.test.js": 18,
   "families-runner/families-baseline-fill.test.js": 18,
   "player/player-test-modules.test.js": 17,
   "type-core/type-core-declared-escapes.test.js": 17,
