@@ -641,6 +641,14 @@ export interface Answers {
    * its first), with no value read: `null` for a node that stores nothing.
    */
   storedPlace(node: FlowNode): { readonly id: PlaceId; readonly path: readonly string[] } | null;
+  /**
+   * The place the analysis's definition of an argument, a parameter's default or a returned value (`how`: `argument`,
+   * `parameter default`, `return`) stores the value at `site` into: its first such definition there, `null` for none.
+   */
+  transferPlace(
+    site: SourceSite,
+    how: string,
+  ): { readonly id: PlaceId; readonly path: readonly string[] } | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
   /**
    * The complete type a store into a place at a path is checked against where a decision below the path stopped (S3 §5,
@@ -1242,6 +1250,8 @@ class CoreAnswers implements Answers {
   readonly #written: readonly WrittenTypeError[];
   readonly #obligations = new Map<string, Obligation[]>();
   #stores: Map<FlowNode, Definition> | null = null;
+  /** The first transfer definition of each `how` at each site, built on the first `transferPlace`. */
+  #transfers: Map<string, Map<string, Definition>> | null = null;
   #known: ((expression: Expression) => KnownValue | undefined) | null = null;
   /** The analysis stopped (D4 a′): no question asks the solver, every value read is `unknown` with `budget`. */
   readonly #stopped: boolean;
@@ -1672,6 +1682,22 @@ class CoreAnswers implements Answers {
   ): { readonly id: PlaceId; readonly path: readonly string[] } | null {
     const d = this.#storeAt(node);
     return d === null ? null : { id: d.place, path: d.path };
+  }
+
+  public transferPlace(
+    site: SourceSite,
+    how: string,
+  ): { readonly id: PlaceId; readonly path: readonly string[] } | null {
+    if (this.#transfers === null) {
+      this.#transfers = new Map();
+      for (const d of this.#pass.definitions.transferDefs) {
+        const byHow = this.#transfers.get(d.how) ?? new Map<string, Definition>();
+        this.#transfers.set(d.how, byHow);
+        if (!byHow.has(siteKey(d.site))) byHow.set(siteKey(d.site), d);
+      }
+    }
+    const d = this.#transfers.get(how)?.get(siteKey(site));
+    return d === undefined ? null : { id: d.place, path: d.path };
   }
 
   #storeAt(node: FlowNode): Definition | null {

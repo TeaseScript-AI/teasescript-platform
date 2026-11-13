@@ -181,8 +181,9 @@ function outsideSlice(request: CoreAnalysisRequest, outside: Outside): Candidate
 function argumentKinds(call: CallExpression, argument: CallArgument): readonly string[] | null {
   const kind = sliceCall(call);
   if (kind === null)
-    // (the syntax table admits no other call outside `sliceCall`, so the empty list is reached by no source today: it
-    // refuses every argument of such a call rather than give it another call's rule)
+    // (outside `sliceCall` the syntax table admits only a call of a function the script declares, whose arguments the
+    // caller does not ask about, so the empty list is reached by no source today: it refuses every argument of such a
+    // call rather than give it another call's rule)
     return transferCall(call) ? ["string", "unknown"] : [];
   const named = argument.kind === "namedArgument" ? argument.name.name : null;
   if (
@@ -323,7 +324,10 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       return { file: index.fileOf(load), span: load.span, what: "this load expression" };
   for (const call of index.calls)
     for (const argument of call.arguments) {
-      const allowed = argumentKinds(call, argument);
+      // (an argument of a function the script declares is a store into its parameter, whose check is the stores' rule:
+      // no built-in signature reads it)
+      const allowed =
+        index.parameterOf(argument) === undefined ? argumentKinds(call, argument) : null;
       if (allowed !== null && beyond(argument.value, allowed))
         return {
           file: index.fileOf(call),

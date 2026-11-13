@@ -2,6 +2,7 @@ import type {
   Block,
   CallExpression,
   Expression,
+  FunctionDeclaration,
   InteractionExpression,
   Program,
   Statement,
@@ -127,6 +128,8 @@ interface SyntaxWalk {
   readonly globals: ReadonlySet<string>;
   /** Each key loaded so far, once in the project: the agreement of a key's loads is S9b's (S3 §3). */
   readonly loaded: Set<string>;
+  /** The functions the file's calls may name (`authorFunctions`). */
+  readonly functions: ReadonlyMap<string, FunctionDeclaration>;
 }
 
 /** What a modelled row does at a node: the children walked after it, in source order, or its refusal there. */
@@ -279,8 +282,21 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   whileStatement: REFUSED,
   breakStatement: REFUSED,
   continueStatement: REFUSED,
-  functionDeclaration: REFUSED,
-  returnStatement: REFUSED,
+  functionDeclaration: {
+    row: "modelled",
+    // (its written types are the slice's as a `let`'s; its parameters' defaults, then its body)
+    visit: (node) => {
+      for (const written of [
+        ...node.parameters.map((parameter) => parameter.typeAnnotation),
+        node.returnTypeAnnotation,
+      ]) {
+        const outside = written === null ? null : annotationOutside(written);
+        if (outside !== null) return refuse(outside.span, "this written type");
+      }
+      return walk([...node.parameters.map((parameter) => parameter.defaultValue), node.body]);
+    },
+  },
+  returnStatement: modelled((node) => [node.value]),
   expressionStatement: {
     row: "modelled",
     // (a call for what it does, such as `xs.sort()`)
@@ -328,8 +344,9 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   indexExpression: modelled((node) => [node.object, node.index]),
   callExpression: {
     row: "modelled",
-    visit: (node) =>
-      sliceCall(node) === null
+    // (a call of a function the script declares, `authorCallee`, else one of `sliceCall`'s)
+    visit: (node, { functions }) =>
+      authorCallee(node, functions) === undefined && sliceCall(node) === null
         ? refuse(node.span, "this call expression")
         : walk([
             ...(node.callee.kind === "propertyAccessExpression" ? [node.callee.object] : []),
@@ -408,8 +425,14 @@ export function outsideSyntax(
   globals: ReadonlySet<string>,
 ): Outside | null {
   const loaded = new Set<string>();
+  const functionsOf = authorFunctions(files.map((file) => file.program));
   for (const [file, { program }] of files.entries()) {
-    const context: SyntaxWalk = { lets: letNames(program), globals, loaded };
+    const context: SyntaxWalk = {
+      lets: letNames(program),
+      globals,
+      loaded,
+      functions: functionsOf(file),
+    };
     const pending: (Statement | Expression)[] = [...program.statements].reverse();
     for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
       // EVIDENCE: invariant: a node's row is the row of its own kind, so its `visit` takes that node.
@@ -630,7 +653,7 @@ function describe(kind: string): string {
   return kind.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`);
 }
 
-/** The names a file's `let` statements and `for` loops declare, at any depth. */
+/** The names a file's `let` statements, `for` loops and functions' parameters declare, at any depth. */
 function letNames(program: Program): Set<string> {
   const names = new Set<string>();
   const pending: (readonly Statement[])[] = [program.statements];
@@ -657,6 +680,39 @@ function letNames(program: Program): Set<string> {
           if (statement.valueVariable !== null) names.add(statement.valueVariable.name);
           pending.push(statement.body.statements);
           break;
+        case "functionDeclaration":
+          for (const parameter of statement.parameters) names.add(parameter.name.name);
+          pending.push(statement.body.statements);
+          break;
       }
   return names;
+}
+
+/**
+ * The functions each file's calls may name: the file's own, declared among its statements, and every file's
+ * `global function` (V30 §11), by name; a file's own function before a global one of the same name.
+ */
+export function authorFunctions(
+  programs: readonly Program[],
+): (file: number) => ReadonlyMap<string, FunctionDeclaration> {
+  const global = new Map<string, FunctionDeclaration>();
+  for (const program of programs)
+    for (const statement of program.statements)
+      if (statement.kind === "functionDeclaration" && statement.global)
+        global.set(statement.name.name, statement);
+  const files = programs.map((program) => {
+    const visible = new Map(global);
+    for (const statement of program.statements)
+      if (statement.kind === "functionDeclaration") visible.set(statement.name.name, statement);
+    return visible;
+  });
+  return (file) => files[file] ?? global;
+}
+
+/** The function a call names by a plain name among `functions`, or `undefined` for any other call. */
+export function authorCallee(
+  call: CallExpression,
+  functions: ReadonlyMap<string, FunctionDeclaration>,
+): FunctionDeclaration | undefined {
+  return call.callee.kind === "identifier" ? functions.get(call.callee.name) : undefined;
 }

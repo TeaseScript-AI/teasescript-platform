@@ -13,7 +13,12 @@ import type {
   BinaryExpression,
   InteractionExpression,
   Program,
+  CallArgument,
+  FunctionDeclaration,
+  FunctionParameter,
+  TypeAnnotation,
 } from "../../../ast.js";
+import { authorCallee, authorFunctions } from "../slice-syntax.js";
 import { type SourceSpan } from "../../../source.js";
 import {
   nestedStatements,
@@ -29,8 +34,70 @@ import { type Answers } from "../answers.js";
 import { SLICE_DEPTH } from "../contract-descriptors.js";
 import { type FlowNode } from "../flow-graph.js";
 
-/** The store statement of the slice that brings an expression into its place. */
-export type Store = LetStatement | AssignmentStatement;
+/** The store of the slice that brings an expression into its place: a statement, or a transfer. */
+export type Store = LetStatement | AssignmentStatement | Transfer;
+
+export type ReturnStatement = Extract<Statement, { kind: "returnStatement" }>;
+
+/**
+ * A value stored into a place of a function the script declares: an argument of a call of it, a parameter's default, or
+ * a returned value (`definitions.ts`'s argument, parameter default and return definitions).
+ */
+export type Transfer = CallArgument | FunctionParameter | ReturnStatement;
+
+export function isTransfer(store: Store): store is Transfer {
+  return store.kind !== "letStatement" && store.kind !== "assignmentStatement";
+}
+
+/**
+ * What a store's check reads of the declaration of the place it writes: its kind (a `let`, a function's parameter or its
+ * result), its name and its written type.
+ */
+export interface Declaration {
+  readonly kind: "letStatement" | "functionParameter" | "functionResult";
+  readonly name: Identifier;
+  readonly typeAnnotation: TypeAnnotation | null;
+}
+
+/** The value a store brings into its place (a parameter or a `return` is a store only with its value, `SliceIndex`). */
+export function storedValue(store: Store): Expression {
+  switch (store.kind) {
+    case "letStatement":
+      return store.initializer;
+    case "assignmentStatement":
+    case "positionalArgument":
+    case "namedArgument":
+      return store.value;
+    case "functionParameter":
+      return store.defaultValue!;
+    case "returnStatement":
+      return store.value!;
+  }
+}
+
+/**
+ * The place a store writes, as the answers name it: a statement's by its flow node (`Answers.storedPlace`), a transfer's,
+ * which has no node of its own, where the analysis's definition stores its value (`Answers.transferPlace`); `null`
+ * where they name none.
+ */
+export function storePlace(
+  answers: Answers,
+  index: SliceIndex,
+  store: Store,
+): { readonly id: PlaceId; readonly path: readonly string[] } | null {
+  if (!isTransfer(store)) return answers.storedPlace(nodeOf(answers, index, store));
+  const value = storedValue(store);
+  const how =
+    store.kind === "functionParameter"
+      ? "parameter default"
+      : store.kind === "returnStatement"
+        ? "return"
+        : "argument";
+  return (
+    answers.transferPlace(index.site(unwrap(value)), how) ??
+    answers.transferPlace(index.site(value), how)
+  );
+}
 
 export function siteKey(file: number, span: SourceSpan): string {
   return `${file}:${span.start.offset}:${span.end.offset}`;
@@ -104,9 +171,27 @@ export class SliceIndex {
   readonly #iterables = new Set<Expression>();
   /** The presentations of the `say` statements, whose option names are not written property names. */
   readonly #presentations = new Set<Expression>();
+  /** Each argument of a call of a function the script declares: the function, and the parameter it fills, if any. */
+  readonly #parameterOf = new Map<
+    CallArgument,
+    { readonly fn: FunctionDeclaration; readonly parameter: FunctionParameter | undefined }
+  >();
+  /** The function whose body holds each statement there, and whose list holds each parameter. */
+  readonly #functionOf = new Map<Statement | FunctionParameter, FunctionDeclaration>();
 
   /** `onFile` hears of each file as the walk enters it (S3 §6 keeps the request's progress callback). */
   public constructor(programs: readonly Program[], onFile: (file: number) => void = () => {}) {
+    const functionsOf = authorFunctions(programs);
+    for (const program of programs)
+      for (const fn of program.statements) {
+        if (fn.kind !== "functionDeclaration") continue;
+        for (const parameter of fn.parameters) this.#functionOf.set(parameter, fn);
+        const inner: Statement[] = [...fn.body.statements];
+        for (let statement = inner.pop(); statement !== undefined; statement = inner.pop()) {
+          this.#functionOf.set(statement, fn);
+          inner.push(...nestedStatements(statement));
+        }
+      }
     programs.forEach((program, file) => {
       onFile(file);
       const pending: Entry[] = program.statements.map((statement) => ({ statement })).reverse();
@@ -187,6 +272,25 @@ export class SliceIndex {
             break;
           case "callExpression": {
             this.calls.push(expression);
+            // a call of a function the script declares (as the syntax table reads it, `authorCallee`): each argument a
+            // store of its own into the parameter it fills
+            const author = authorCallee(expression, functionsOf(file));
+            if (author !== undefined) {
+              const positional = expression.arguments.filter(
+                (argument) => argument.kind === "positionalArgument",
+              );
+              for (let at = expression.arguments.length - 1; at >= 0; at -= 1) {
+                const argument = expression.arguments[at]!;
+                const parameter =
+                  argument.kind === "namedArgument"
+                    ? author.parameters.find((each) => each.name.name === argument.name.name)
+                    : author.parameters[positional.indexOf(argument)];
+                this.#parameterOf.set(argument, { fn: author, parameter });
+                this.#file.set(argument, file);
+                pending.push({ expression: argument.value, store: argument, whole: true });
+              }
+              break;
+            }
             for (const argument of expression.arguments)
               if (argument.kind === "namedArgument" && argument.name.name === "default")
                 for (const held of operands(argument.value)) this.#fallbackOf.set(held, expression);
@@ -293,6 +397,21 @@ export class SliceIndex {
           pending.push({ expression: operands[at]!, store: null, whole: false });
         break;
       }
+      case "functionDeclaration":
+        // its body, and each parameter's default a store of its own into the parameter
+        statements(statement.body.statements);
+        for (let at = statement.parameters.length - 1; at >= 0; at -= 1) {
+          const parameter = statement.parameters[at]!;
+          if (parameter.defaultValue === null) continue;
+          this.#file.set(parameter, file);
+          pending.push({ expression: parameter.defaultValue, store: parameter, whole: true });
+        }
+        break;
+      case "returnStatement":
+        // the returned value, a store of its own into the function's result
+        if (statement.value !== null)
+          pending.push({ expression: statement.value, store: statement, whole: true });
+        break;
       case "forStatement":
         this.#iterables.add(statement.iterable);
         statements(statement.body.statements);
@@ -303,18 +422,12 @@ export class SliceIndex {
         // in source order, so the checks that read every expression find them (a record of any program)
         const nested = [
           ...nestedStatements(statement),
-          ...(statement.kind === "functionDeclaration" ? statement.body.statements : []),
           ...handlerBlocks(statement).flatMap((block) => block.statements),
         ];
         statements(nested.sort((a, b) => a.span.start.offset - b.span.start.offset));
         const own = [
           ...(statement.kind === "globalStatement" && statement.assignment === null
             ? [statement.initial]
-            : []),
-          ...(statement.kind === "functionDeclaration"
-            ? statement.parameters.flatMap((parameter) =>
-                parameter.defaultValue === null ? [] : [parameter.defaultValue],
-              )
             : []),
           ...statementExpressions(statement),
         ];
@@ -324,7 +437,21 @@ export class SliceIndex {
     }
   }
 
-  public fileOf(node: Statement | Expression): number {
+  /** An argument's function and the parameter it fills (none for an argument no parameter takes). */
+  public parameterOf(
+    argument: CallArgument,
+  ):
+    | { readonly fn: FunctionDeclaration; readonly parameter: FunctionParameter | undefined }
+    | undefined {
+    return this.#parameterOf.get(argument);
+  }
+
+  /** The function whose body holds a statement, or whose list holds a parameter; `undefined` outside every one. */
+  public functionOf(node: Statement | FunctionParameter): FunctionDeclaration | undefined {
+    return this.#functionOf.get(node);
+  }
+
+  public fileOf(node: Statement | Expression | CallArgument | FunctionParameter): number {
     const file = this.#file.get(node);
     if (file === undefined) throw new Error(`The slice's source has no ${node.kind} there.`);
     return file;
@@ -352,7 +479,11 @@ export class SliceIndex {
   public storeAt(site: SourceSite): Store | undefined {
     const key = `${site.file}:${site.start}:${site.end}`;
     const statement = this.#statementsBySite.get(key);
-    if (statement?.kind === "letStatement" || statement?.kind === "assignmentStatement")
+    if (
+      statement?.kind === "letStatement" ||
+      statement?.kind === "assignmentStatement" ||
+      statement?.kind === "returnStatement"
+    )
       return statement;
     const expression = this.#bySite.get(key);
     return expression === undefined ? undefined : this.#store.get(expression);
@@ -433,7 +564,7 @@ export class SliceIndex {
     return this.#propertyOf.get(expression);
   }
 
-  public site(node: Statement | Expression): SourceSite {
+  public site(node: Statement | Expression | CallArgument | FunctionParameter): SourceSite {
     return { file: this.fileOf(node), start: node.span.start.offset, end: node.span.end.offset };
   }
 }
@@ -474,16 +605,55 @@ export function declarations(answers: Answers, index: SliceIndex): Map<PlaceId, 
   return found;
 }
 
-/** The variable a store writes: its declaration, through the place the analysis reads at the store. */
+/**
+ * The kinds of place an assignment of the slice resolves to a declaration (`declarationOf`), tried in order. A case takes
+ * the assignment and the place the analysis reads at it, and gives that place's declaration, or `undefined` where the
+ * place is not of its kind; a further kind of place is one case more.
+ */
+const DECLARED: readonly ((
+  index: SliceIndex,
+  lets: ReadonlyMap<PlaceId, LetStatement>,
+  store: AssignmentStatement,
+  place: PlaceId,
+) => Declaration | undefined)[] = [
+  // a variable a `let` of the slice declares
+  (_index, lets, _store, place) => lets.get(place),
+  // a parameter of the function whose body holds the store, found by the target's name, not by `place`: no name of the
+  // body or of its file is a parameter's too (TSV001), so the name is the parameter's place
+  (index, _lets, store) => {
+    const fn = index.functionOf(store);
+    const target = store.target;
+    return fn === undefined || target.kind !== "identifier"
+      ? undefined
+      : fn.parameters.find((parameter) => parameter.name.name === target.name);
+  },
+];
+
+/** The declaration of the place an assignment writes, by the first case of `DECLARED` that resolves it. */
+export function declaredAt(
+  index: SliceIndex,
+  lets: ReadonlyMap<PlaceId, LetStatement>,
+  store: AssignmentStatement,
+  place: PlaceId,
+): Declaration | undefined {
+  for (const declared of DECLARED) {
+    const found = declared(index, lets, store, place);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** The declaration of the place a store writes: a `let` its own; an assignment's by the place it writes (`DECLARED`). */
 export function declarationOf(
   answers: Answers,
   index: SliceIndex,
   lets: ReadonlyMap<PlaceId, LetStatement>,
-  store: Store,
-): LetStatement {
+  store: LetStatement | AssignmentStatement,
+): Declaration {
   if (store.kind === "letStatement") return store;
   const place = answers.at(nodeOf(answers, index, store))?.place;
-  const declaration = place === null || place === undefined ? undefined : lets.get(place.id);
+  const declaration =
+    place === null || place === undefined ? undefined : declaredAt(index, lets, store, place.id);
   if (declaration === undefined)
     throw new Error("An assignment of the slice stores into no variable.");
   return declaration;
@@ -495,6 +665,15 @@ export function unwrap(expression: Expression): Expression {
   return current;
 }
 
+/**
+ * A check into a function's parameter or result without a written type: the core's contract there is one over every call
+ * and return (F21), not what the function requires of each call (V30 §11), so the slice publishes no check against it
+ * (#2667's ruling, R1).
+ */
+export const UNTYPED_FUNCTION_PLACE =
+  "a check into a function's parameter or result without a written type";
+/** A part check at an argument, a default or a returned value, which lowering has no place for. */
+export const PART_CHECK_AT_TRANSFER = "a part check of an argument, a default or a returned value";
 /** A typed parse's or load's default whose level a stop left unproven (#1767). */
 export const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
 /** After a settled stop, obligations the analysis cannot find (`lostCheck`). */

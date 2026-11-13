@@ -86,6 +86,30 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
     'let b = hostValue.contains("a")',
     "let xs = [2, 1]\nxs.sort()",
     "let t = toJson(hostValue)",
+    // a call of a function the script declares: its argument, also a call of another one, and one of another file
+    "function f(x: integer) {\n  return x\n}\nlet n: integer = f(hostValue)",
+    "function g(v: integer) {\n  return v\n}\nfunction f(w: integer) {\n  say w\n}\nf(g(hostValue))",
+    [
+      main('check(hostValue)\nsay "back"\nexit\n'),
+      { path: "helpers.tease", source: "global function check(n: integer) {\n  say n\n}\n" },
+    ],
+  ],
+  // a value stored into a parameter: an argument, by position and by name, a written default, supplied and not, and
+  // one holding the host value in a list; an untyped parameter only known values fill, and an untyped default
+  functionDeclaration: [
+    "function f(x: integer) {\n  say x\n}\nf(hostValue)",
+    'function f(x: integer, y: string = "a") {\n  say y\n}\nf(y: hostValue, x: 1)',
+    "function f(x: integer = hostValue) {\n  say x\n}\nf(1)\nf()",
+    "function f(xs: integer?[] = [hostValue, null, 7]) {\n  for x in xs {\n    say x\n  }\n}\nf()",
+    'function shown(v) {\n  say v\n}\nshown(1)\nshown("x")',
+    "function f(x = hostValue) {\n  let y: integer = x\n}\nf()",
+  ],
+  // a value returned into a written result, also a list holding the host value and a bare `return`; an untyped result
+  returnStatement: [
+    "function f: integer {\n  return hostValue\n}\nsay f()",
+    "function f: integer[] {\n  return [hostValue]\n}\nfor x in f() {\n  say x\n}",
+    "function f: integer? {\n  if hostValue == null {\n    return\n  }\n  return 1\n}\nsay f()",
+    "function f(x) {\n  return x\n}\nlet n: integer = f(hostValue)",
   ],
   loadExpression: [
     'let n: integer = load "k", default: hostValue',
@@ -241,11 +265,29 @@ export function spoken(declared: string): string {
 
 /**
  * Sources the guard requires the route to answer as today's compiler does, which gives them a compile error: a `say as`
- * of a name that declares no speaker (the lead's R26).
+ * of a name that declares no speaker (the lead's R26), and a function named like a call `sliceCall` reads (TSV001), so
+ * that no call the route reads as a built-in names a function of the script.
  */
 export const ANSWERED_AS_TODAY: readonly string[] = [
   'say as nobody "a"',
   'let x = 1\nsay as x "a"',
+  ...[
+    "toString",
+    "toNumber",
+    "toInteger",
+    "toBoolean",
+    "toDate",
+    "toTime",
+    "toDateTime",
+    "toAbsoluteDateTime",
+    "toRegex",
+    "toJson",
+    "fromJson",
+    "fileFromBase64",
+    "decryptText",
+    "decryptFile",
+    "script",
+  ].map((name) => `function ${name}(v) {\n  return v\n}`),
 ];
 
 /**

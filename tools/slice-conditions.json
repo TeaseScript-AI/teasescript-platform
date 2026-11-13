@@ -152,12 +152,44 @@
     "witness": "(\"abc\").size"
   },
   {
+    "id": "function-written",
+    "scope": "row functionDeclaration",
+    "expression": "written === null",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "function f(x: integer | string)"
+  },
+  {
+    "id": "function-written-outside",
+    "scope": "row functionDeclaration",
+    "expression": "outside !== null",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "function f: integer | string"
+  },
+  {
     "id": "call-slice",
     "scope": "row callExpression",
     "expression": "sliceCall(node) === null",
     "mutant": "false",
     "expected": "kill",
     "witness": "toInteger(hostValue)"
+  },
+  {
+    "id": "call-author",
+    "scope": "row callExpression",
+    "expression": "authorCallee(node, functions) === undefined",
+    "mutant": "true",
+    "expected": "restrict",
+    "witness": "function f(x: integer) {\n  say x\n}\nf(1)"
+  },
+  {
+    "id": "author-callee-identifier",
+    "scope": "authorCallee",
+    "expression": "call.callee.kind === \"identifier\"",
+    "mutant": "(call.callee.kind === \"identifier\" && Math.random() < 0)",
+    "expected": "restrict",
+    "witness": "function f(x: integer) {\n  say x\n}\nf(1)"
   },
   {
     "id": "call-receiver-walked",

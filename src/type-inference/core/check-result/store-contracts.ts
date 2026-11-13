@@ -25,6 +25,7 @@ import {
   SLICE_DEPTH,
 } from "../contract-descriptors.js";
 import { typedDefault as defaultKinds } from "../contract.js";
+import { transferTarget } from "./transfers.js";
 import { leftOutCompletion } from "../consumers.js";
 import { type FlowNode } from "../flow-graph.js";
 import { type ItemTag, REASON, type Item } from "../items.js";
@@ -35,6 +36,11 @@ import {
   OutsideContract,
   SliceIndex,
   type Store,
+  type Declaration,
+  isTransfer,
+  storedValue,
+  storePlace,
+  declaredAt,
   declarationOf,
   nodeOf,
   outsideStructure,
@@ -118,10 +124,16 @@ export class Contracts {
    * part (decision 2 pending), none for an open one.
    */
   public stored(store: Store): TypeCheckPlan | null {
-    const declaration = declarationOf(this.answers, this.index, this.lets, store);
-    const value = store.kind === "letStatement" ? store.initializer : store.value;
-    const whole = store.kind === "letStatement" || store.target.kind === "identifier";
-    const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
+    // (a transfer's place by its function, labelled as today's checker labels it; a statement's by its declaration)
+    const target = isTransfer(store) ? transferTarget(this.index, store) : null;
+    const declaration: Declaration | undefined = isTransfer(store)
+      ? target?.declaration
+      : declarationOf(this.answers, this.index, this.lets, store);
+    if (declaration === undefined) return null;
+    const value = storedValue(store);
+    const whole =
+      isTransfer(store) || store.kind === "letStatement" || store.target.kind === "identifier";
+    const place = storePlace(this.answers, this.index, store);
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
     this.destination(store);
     const settled =
@@ -154,11 +166,28 @@ export class Contracts {
     // keeps the completion's order.)
     const type =
       settled !== null && result !== settled ? this.#inRecordOrder(checked, [value]) : checked;
+    if (target !== null) return { type, place: target.label };
     const name = [
       declaration.name.name,
       ...(whole ? [] : (place?.path ?? []).map(propertyName)),
     ].join(".");
     return { type, place: `'${name}'` };
+  }
+
+  /**
+   * Whether a store writes a function's parameter or result that has no written type (`UNTYPED_FUNCTION_PLACE`): a
+   * transfer into one, an argument no parameter takes, or an assignment to such a parameter in its function's body.
+   */
+  public untypedFunctionPlace(store: Store): boolean {
+    if (isTransfer(store)) {
+      const declaration = transferTarget(this.index, store).declaration;
+      return declaration === undefined || declaration.typeAnnotation === null;
+    }
+    if (store.kind === "letStatement") return false;
+    const place = storePlace(this.answers, this.index, store);
+    const declaration =
+      place === null ? undefined : declaredAt(this.index, this.lets, store, place.id);
+    return declaration?.kind === "functionParameter" && declaration.typeAnnotation === null;
   }
 
   /**
@@ -168,9 +197,14 @@ export class Contracts {
    */
   public destination(store: Store): string | undefined {
     if (this.#destinations.has(store)) return this.#destinations.get(store);
-    const place = this.answers.storedPlace(nodeOf(this.answers, this.index, store));
-    const declaration =
-      store.kind === "letStatement" ? store : place === null ? undefined : this.lets.get(place.id);
+    const place = storePlace(this.answers, this.index, store);
+    const declaration: Declaration | undefined = isTransfer(store)
+      ? transferTarget(this.index, store).declaration
+      : store.kind === "letStatement"
+        ? store
+        : place === null
+          ? undefined
+          : declaredAt(this.index, this.lets, store, place.id);
     const label =
       place === null || declaration === undefined
         ? undefined
@@ -181,7 +215,7 @@ export class Contracts {
 
   /** Whether the receiving completion completed the contract at a store's destination (`#completed`). */
   public completes(store: Store): boolean {
-    const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
+    const place = storePlace(this.answers, this.index, store);
     return place !== null && this.answers.received(place.id, place.path) !== null;
   }
 
@@ -447,10 +481,9 @@ export class Contracts {
       if (parent === undefined) {
         const store = this.index.storeOf(node);
         const place =
-          store === undefined ||
-          (store.kind === "letStatement" ? store.initializer : store.value) !== node
+          store === undefined || storedValue(store) !== node
             ? null
-            : (this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null);
+            : storePlace(this.answers, this.index, store);
         base = place === null ? null : { id: place.id, path: place.path };
         this.#landings.set(node, base);
         break;

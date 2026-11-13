@@ -7,7 +7,14 @@ import { type Answers } from "../answers.js";
 import { type ContractResult } from "../contract-descriptors.js";
 import { propertyName } from "../program.js";
 import type { ReceivingObligation, ReceivingResult } from "../admission/receiving.js";
-import { SliceIndex, type Store, nodeOf, unwrap } from "./slice-index.js";
+import {
+  SliceIndex,
+  type Store,
+  isTransfer,
+  unwrap,
+  storedValue,
+  storePlace,
+} from "./slice-index.js";
 
 /**
  * Whether the plan keeps an obligation's check at its store (`lostCheck`): a shape the analysis proved, or one a complete
@@ -44,9 +51,7 @@ export function keeps(
     result?.state === "complete" &&
     answers.completionRan(obligation.place, obligation.path, obligation.epoch) &&
     !warned.has(store) &&
-    !answers.completedCheck(
-      index.site(unwrap(store.kind === "letStatement" ? store.initializer : store.value)),
-    )
+    !answers.completedCheck(index.site(unwrap(storedValue(store))))
   )
     return true;
   const own = published.get(store);
@@ -59,12 +64,12 @@ export function keeps(
   // requirement's, which a shape owes no more of)
   if (obligation.extent === "shape" || "shape" in result) return result.state !== "lost" || whole;
   if (result.state === "open" || whole) return true;
-  const value = unwrap(store.kind === "letStatement" ? store.initializer : store.value);
+  const value = unwrap(storedValue(store));
   // (a contract the completion completed is kept only by a published check that carries it at the obligation's path: a
   // typed parse's or load's reader of the value stored, or the store's part checks there; where the natural plan checks
   // the store whole, `completedCheck`, and publication did not, its parts stand for nothing, #1645's whole object)
   const contract = answers.received(obligation.place, obligation.path);
-  const destination = answers.storedPlace(nodeOf(answers, index, store));
+  const destination = storePlace(answers, index, store);
   if (
     result.state !== "complete" ||
     contract?.state !== "complete" ||
@@ -93,7 +98,8 @@ export function keeps(
   // (the part checks at or below the obligation's path, at least one, each the contract's type there where it has one:
   // a weaker one stands for nothing, #1645's whole object; and each level a part check passes over where it holds no
   // object or collection is one the stored value itself builds as one, #2231: a part check skips a value that is not)
-  const parts = (core.partChecks.get(store) ?? []).filter((part) => {
+  // (a transfer has no part checks: `runtimeChecks` declines one that owes any)
+  const parts = (isTransfer(store) ? [] : (core.partChecks.get(store) ?? [])).filter((part) => {
     const steps = part.path.map((step) => ("element" in step ? "[]" : step.property));
     return steps.length >= below.length && below.every((step, at) => steps[at] === step);
   });

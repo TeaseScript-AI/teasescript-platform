@@ -355,6 +355,26 @@ export const DECLARED_REFUSALS: readonly {
       text: "a check that no store takes",
     };
   }),
+  // (a check into a parameter or a result without a written type, whose contract the core reads from every call: the
+  // route publishes none there, #2667's R1; the twin writes the type)
+  {
+    row: "functionDeclaration",
+    position: "an untyped parameter that a known value and the host value fill",
+    refused: "function shown(v) {\n  say v\n}\nshown(1)\nshown(hostValue)",
+    admitted: "function shown(v: integer) {\n  say v\n}\nshown(1)\nshown(hostValue)",
+    gate: "runtimeChecks (src/type-inference/core/check-result/runtime-plan.ts)",
+    text: "a check into a function's parameter or result without a written type",
+  },
+  {
+    row: "returnStatement",
+    position: "an untyped result that a known value and the host value fill",
+    refused:
+      "function f(v) {\n  if v == null {\n    return 1\n  }\n  return hostValue\n}\nsay f(null)\nsay f(2)",
+    admitted:
+      "function f(v): integer {\n  if v == null {\n    return 1\n  }\n  return hostValue\n}\nsay f(null)\nsay f(2)",
+    gate: "runtimeChecks (src/type-inference/core/check-result/runtime-plan.ts)",
+    text: "a check into a function's parameter or result without a written type",
+  },
   // (a host value stored at a written type only `null` fills, at every position: the slice takes no such type, the
   // lead's R44; the twin is the position's template, the host value not stored at a written type)
   ...samples()

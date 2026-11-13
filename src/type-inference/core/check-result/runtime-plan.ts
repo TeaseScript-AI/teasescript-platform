@@ -33,6 +33,10 @@ import {
   UNDECIDED_AT_BUDGET,
   UNESTABLISHED_AT_BUDGET,
   type Store,
+  isTransfer,
+  storedValue,
+  PART_CHECK_AT_TRANSFER,
+  UNTYPED_FUNCTION_PLACE,
   declarations,
   nodeOf,
   unwrap,
@@ -199,7 +203,10 @@ export function runtimeChecks(
     fallbackChecks: new Map<BinaryExpression | CallExpression, TypeCheckPlan>(),
     expected: new Map<CallExpression, TypePlan>(),
     repairs: new Set<LoadExpression>(),
-    partChecks: new Map<Store, readonly PartCheckPlan[]>(),
+    partChecks: new Map<
+      Extract<Store, { kind: "letStatement" | "assignmentStatement" }>,
+      readonly PartCheckPlan[]
+    >(),
   };
   const owers: Owers = { published: new Set(), stopped: new Set() };
   const { owed, fallbacks } = warningChecks(answers, index, core, owers);
@@ -271,6 +278,9 @@ export function runtimeChecks(
     if (held === undefined) atStore.set(store, [obligation]);
     else held.push(obligation);
     if (checks.has(store)) continue;
+    // (#2667's rule: a check is published into a function's place only where it has a written type)
+    if (contracts.untypedFunctionPlace(store))
+      throw new OutsideContract(storedValue(store), UNTYPED_FUNCTION_PLACE);
     const type = contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null);
     if (type !== null) checks.set(store, type);
   }
@@ -310,7 +320,11 @@ export function runtimeChecks(
     const parts = partChecksOf(destination, obligations).filter(
       (part) => whole === null || !reaches(whole, part.path, named),
     );
-    if (parts.length > 0) core.partChecks.set(store, parts);
+    if (parts.length > 0) {
+      // (lowering carries part checks at a `let` or an assignment only)
+      if (isTransfer(store)) throw new OutsideContract(storedValue(store), PART_CHECK_AT_TRANSFER);
+      core.partChecks.set(store, parts);
+    }
   }
   return { checks, core, contracts: contracts.results, moved: movedChecks(checks, core, owers) };
 }
@@ -342,7 +356,7 @@ export function lostCheck(
   // (obligations a settled stop cannot establish: the program is declined at its first store, never read as owing none)
   if (gated === null) {
     const first = index.statements.find(
-      (statement): statement is Store =>
+      (statement): statement is Extract<Store, { kind: "letStatement" | "assignmentStatement" }> =>
         statement.kind === "letStatement" || statement.kind === "assignmentStatement",
     );
     if (first === undefined) return;
@@ -363,11 +377,7 @@ export function lostCheck(
       const expression = index.expressionAt(obligation.site);
       const store = index.storeOf(expression);
       throw new OutsideContract(
-        store === undefined
-          ? expression
-          : store.kind === "letStatement"
-            ? store.initializer
-            : store.value,
+        store === undefined ? expression : storedValue(store),
         UNDECIDED_AT_BUDGET,
       );
     }
@@ -386,10 +396,7 @@ export function lostCheck(
       keeps(answers, index, store, obligation, result, published, checks, core, warned)
     )
       continue;
-    throw new OutsideContract(
-      store.kind === "letStatement" ? store.initializer : store.value,
-      LOST_AT_BUDGET,
-    );
+    throw new OutsideContract(storedValue(store), LOST_AT_BUDGET);
   }
   settledOwed(answers, index);
 }
@@ -530,7 +537,7 @@ function storedKinds(store: Store, kinds: readonly ItemTag[] | null): TypeCheckP
   const target =
     store.kind === "letStatement"
       ? store.name.name
-      : store.target.kind === "identifier"
+      : store.kind === "assignmentStatement" && store.target.kind === "identifier"
         ? store.target.name
         : null;
   return { type, place: target === null ? "the place" : `'${target}'` };
