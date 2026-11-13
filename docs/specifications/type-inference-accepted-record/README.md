@@ -46,6 +46,7 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `PLAN` | the port plan for the new type core, a document outside the repository; its method-category extensibility rules and W34's work-product limits still apply |
 | `G1` | production graph rules govern returnability, reachable registrations, and file-transfer targets ([r4-26](solver-and-work.md#r4-26)) |
 | `G2` | preserve assignment targets in suggested fixes; never replace a store destination with a temporary value |
+| `S2` | the port’s item and result shapes, including shared ingress cells in solver components |
 | `G3` | admission’s shared-query work family for cursors, carrier transfers, and positioned proof frontiers ([r4-164](sharing.md#r4-164)) |
 | `S3` | the port plan's S3 design, a document outside the repository; it defines the answer queries, surviving checks, discharge and budget fallback the core still follows |
 | `S4` | a possible null requires a null check at each consumer; also, historical, the port plan's step S4, the first core build |

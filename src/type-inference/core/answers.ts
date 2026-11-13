@@ -417,7 +417,10 @@ export type Route = "quiet" | "exact" | "contract" | "value";
 
 export interface OccurrenceAnswer {
   readonly items: readonly Item[];
-  /** Which path answered the read; after a stop `contract` for every read of a place, whatever source answered it. */
+  /**
+   * Which path answered the read; after a stop, a read of a place the consumers did not answer quietly is `contract`,
+   * whatever source answered it.
+   */
   readonly route: Route;
   /** The place the occurrence reads, with its path: the collector's place and the steps below it. */
   readonly place: { readonly id: PlaceId; readonly path: readonly string[] } | null;
@@ -1122,7 +1125,7 @@ function withBesides(diagnostics: readonly CoreDiagnostic[]): CoreDiagnostic[] {
  * (`rule`), and one consumer's by their own text, so the order is the same whichever order a consumer visits in and with
  * the sharing on or off. An item's text (its JSON) is made only where its site and rule tie with
  * another's, once per item: serializing flattens the operand text its records share, which a stopped analysis's many
- * records would then each keep (#1734). Exported for the budget and answers tests.
+ * records would then each keep (#1734). Exported for the answers test.
  */
 export function bySite<T extends { readonly site: SourceSite }>(
   list: readonly { readonly item: T; readonly rule: number }[],
@@ -1359,8 +1362,9 @@ class CoreAnswers implements Answers {
   }
 
   /**
-   * A question of a value's items. After a stop the solver computes nothing and answers what it had finished (its
-   * memo) or `STOPPED`; where admission had not settled even those may change, so every value is `STOPPED`.
+   * A question of a value's items. After a stop the solver computes nothing and answers what it had finished (its memo)
+   * or as the demand stopped (`Solver.run`); where admission had not settled even those may change, so every value is
+   * `STOPPED`.
    */
   #run(work: Work<readonly Item[]>): readonly Item[] {
     return this.#stopped && !this.#consumers.settled ? STOPPED : this.#pass.solver.run(work);
@@ -1657,7 +1661,7 @@ class CoreAnswers implements Answers {
     const items = this.#items(value, node, []);
     // a read of a binding or of a path below one; a projection of a literal, a call or an operation is no place
     const target = this.#readPlace(value);
-    // the route the read's answer took, recorded as it was answered; after a stop `contract`
+    // the route the read's answer took, recorded as it was answered; after a stop `contract`, a quiet read's `quiet`
     const route: Route =
       target === null
         ? "value"
