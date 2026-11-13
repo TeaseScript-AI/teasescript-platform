@@ -1,5 +1,5 @@
-// The contracts of the slice's stores (`Contracts`): the type each store's check reads the value as, from the analysis's
-// answers and the written types, and the type plans they are made of.
+// The contracts the plan's checks read a value as (`Contracts`): each store's, a typed parse's or load's, and a
+// fallback's, from the analysis's answers and the written types; and the type-plan helpers they are made of.
 import type {
   Expression,
   LetStatement,
@@ -71,8 +71,8 @@ interface Landing {
 
 /**
  * The contracts the plan content of one program carries, each read from the core's answers, never rebuilt from the
- * source (S3 §4, F18, C9, C10): a place's contract at a path, objects with their decided properties; the type a typed
- * parse or load reads its value as, the core's own answer at the call; where a fallback lands, for C10's `null`. Built
+ * source: a place's contract at a path, objects with their decided properties; the type a typed parse or load reads its
+ * value as, the core's own answer at the call; where a fallback lands, for whether its elements may be `null`. Built
  * on one task stack, so deep values do not deepen the native stack.
  */
 export class Contracts {
@@ -80,7 +80,10 @@ export class Contracts {
   readonly #literals = new Map<Expression, Expression | null>();
   /** The stores' contracts (`ContractDescriptors`), read through the answers' places. */
   readonly #descriptors: ContractDescriptors<readonly Expression[]>;
-  /** Each checked store's contract result, as `stored` made it. */
+  /**
+   * Each store's contract result, recorded by `stored` as it is asked, where it makes one: only the stores
+   * `runtimeChecks` asks `stored` about have one. The lost-check gate reads it as the published contracts.
+   */
   readonly results = new Map<Store, ContractResult>();
   /** Each store's label of the place it stores into (`destination`), once. */
   readonly #destinations = new Map<Store, string | undefined>();
@@ -114,8 +117,9 @@ export class Contracts {
 
   /**
    * The check of a store: the destination's written type, else the complete type a stop below its path left it to check
-   * whole (`Answers.requirement`, #1416), else its contract at the stored path (A1–A9): a complete one's, a lost one's
-   * part (decision 2 pending), none for an open one.
+   * whole (`Answers.requirement`, #1416), else its contract at the stored path: a complete one's, a lost one's part, none
+   * for an open one. It records the store's contract result in `results`, and throws `OutsideContract` for a value
+   * whose contract is deeper than the slice follows (`outsideStructure`).
    */
   public stored(store: Store): TypeCheckPlan | null {
     const declaration = declarationOf(this.answers, this.index, this.lets, store);
@@ -163,8 +167,8 @@ export class Contracts {
 
   /**
    * The label of the place a store stores into (its variable, then the core's steps), as `stored` reads it, once per
-   * store; `undefined` where the answers name no place there. It reads no value and asks for no contract, so a store
-   * whose only owed checks are the receiving completion's is asked nothing (#1682).
+   * store; `undefined` where the answers name no place there. It reads no value and asks for no contract, so a store whose
+   * only owed checks are the receiving completion's is asked nothing (#1682).
    */
   public destination(store: Store): string | undefined {
     if (this.#destinations.has(store)) return this.#destinations.get(store);
@@ -187,8 +191,8 @@ export class Contracts {
 
   /**
    * A store's contract where the settled pass's own is not complete (a decision on its path stopped): the receiving
-   * completion's complete contract there (#1526 phase C step 5), else the settled pass's (a lost one's part, decision 2
-   * pending). A completion's lost result never stands in, so nothing is widened.
+   * completion's complete contract there (`Answers.received`), else the settled pass's (a lost one's part). A
+   * completion's lost result never stands in, so nothing is widened.
    */
   #completed(id: PlaceId, path: readonly string[], settled: ContractResult): ContractResult {
     if (settled.state === "complete" || leftOutCompletion()) return settled;
@@ -237,19 +241,23 @@ export class Contracts {
   }
 
   /**
-   * The type a typed load or `fromJson` reads its value as (F18, S3 §3): the core's own answer at the call, level by
-   * level (`#answerTask`); `null` where the call's kinds hold an unknown or only `null` (F19), or a load's key is
-   * computed; the program leaves the slice where a stop left a level of the answer open (#1767).
+   * The type a typed load or `fromJson` reads its value as: the core's own answer at the call, level by level
+   * (`#answerTask`). Its outcomes, in the order it reaches them: `null` for a load whose key is computed; a throw of
+   * `OutsideContract`, so the program leaves the slice, after a stop before admission settled, for a default that reads
+   * a place, unless the call lands in a written scalar destination; a throw where a stop left a level of the answer
+   * open (#1767); `null` where the call's kinds hold an unknown or no kind; a throw where the plan cannot carry the
+   * answer exactly below the call (`#answerTask`'s other cases); and, for an answer, a throw for a typed parse or load
+   * into a copy of a written type.
    */
   public expected(call: CallExpression | LoadExpression): TypePlan | null {
     if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
     // (after a stop only literal data proves a default, by its own syntax at every level (#1460): below a read the
-    // answer is the value side's, which the stop left unproven (A6: the stores admission rejects are unsettled), so
+    // answer is the value side's, which the stop left unproven (the stores admission rejects are not settled), so
     // the program leaves the slice rather than read what the natural plan may not, #1526 condition 1, #1767)
     const fallback = call.kind === "loadExpression" ? call.defaultValue : defaultOf(call);
     const landing = this.#landing(call);
-    // (a written scalar destination is the reader type itself, whatever its default reads: Codex r5's P2; asked only
-    // after such a stop, so an unstopped compile asks nothing more)
+    // (a written scalar destination is the reader type itself, whatever its default reads; asked only after such a
+    // stop, so an unstopped compile asks nothing more)
     const scalar = (): boolean => {
       const written =
         landing === null ? null : this.answers.place(landing.id, landing.path).admitted;
@@ -269,9 +277,9 @@ export class Contracts {
         [call],
       ),
     );
-    // a copy of a written type is F18's receiving context (A4, (1a)), at every level the call's value
-    // reaches, but the core answers the call by its default there while its later facts follow that answer: the
-    // lowering cannot widen it alone
+    // a copy of a written type inherits its source's written type as the typed call's receiving type, at every level
+    // the call's value reaches, but the core answers the call by its default there while its later facts follow that
+    // answer: the lowering cannot widen it alone
     if (
       landing !== null &&
       expected !== null &&
@@ -311,8 +319,10 @@ export class Contracts {
   };
 
   /**
-   * The complete contract of the value a fallback stands in for at `steps` below it (C10, ADR 0021 7.2): a `get`'s value,
-   * an `otherwise`'s left one without `null`, as `#provenanceOf` finds it; `null` for another owner.
+   * The complete contract of the value a fallback stands in for at `steps` below it (ADR 0021 7.2): a `get`'s value,
+   * an `otherwise`'s left one without `null`, as `#provenanceOf` finds it; `null` for another owner. It throws
+   * `OutsideContract` where the plan cannot carry that contract: a join of different written types that no place admits,
+   * or a value whose structure the slice does not follow.
    */
   public direct(
     owner: BinaryExpression | CallExpression,
@@ -329,9 +339,9 @@ export class Contracts {
       below,
       landing === null ? null : { id: landing.id, path: joinSteps(landing.path, below) },
     );
-    // a written level, or one a copy inherits from a written type (A4, ADR 0021 1.3), keeps its type; any other is checked
-    // in C10's family, whole numbers with numbers (ADR 0021 1.2, 7.2): never stricter than C10 for the same default
-    // written out (Codex r3, r4 on #1539)
+    // a written level, or one a copy inherits from a written type (ADR 0021 1.3), keeps its type; any other is checked
+    // in the fallback rule's family, whole numbers with numbers (ADR 0021 1.2, 7.2): never stricter than the fallback
+    // rule for the same default written out (#1539)
     const checked = contract === null ? null : numberFamily(contract, (levels) => !written(levels));
     return checked === null || owner.kind === "callExpression" || steps.length > 0
       ? checked
@@ -343,7 +353,7 @@ export class Contracts {
    * that: the fallback completion's one lookup. Parentheses give their content's value, as `nodeOf` reads them. A
    * place's value has its place's contract, each level written where the core answers its domain as written or as
    * inherited from a written type. A `get`'s value is its receiver's element. An `otherwise` chain's value joins its
-   * operands' as the core admits a join (A4): a level is written where any operand that brings a collection (a `null` or
+   * operands' as the core admits a join: a level is written where any operand that brings a collection (a `null` or
    * a scalar brings none) is written there; the contract is theirs where they agree, else the core's admitted contract
    * of the place the value at `path` lands in (`landing`, the one its receiving check is against), and none where it
    * lands in none or an operand's is open. Any other value is the core's answer for it by its own text (a literal, an
@@ -376,7 +386,7 @@ export class Contracts {
       if (contract !== null && joined.every((part) => samePlan(part.contract!, contract)))
         return { contract, written: (levels) => joined.some((part) => part.written(levels)) };
       if (contract !== null) {
-        // (operands of written types that differ: the core admits the join where it lands, by its copies, Codex r6)
+        // (operands of written types that differ: the core admits the join where it lands, by its copies)
         if (landing === null)
           throw new OutsideContract(read, "a join of different written types that no place admits");
         return {
@@ -419,7 +429,7 @@ export class Contracts {
   }
 
   /**
-   * Whether an element of a fallback at `steps` below it may be `null` (C10): unless the fallback lands directly in a
+   * Whether an element of a fallback at `steps` below it may be `null`: unless the fallback lands directly in a
    * written place whose type there excludes it.
    */
   public takesNull(owner: Expression, steps: readonly string[]): boolean {
@@ -478,14 +488,15 @@ export class Contracts {
   }
 
   /**
-   * The core's answer at `path` below a call's value as a plan: its kinds (a written target's, else the default's,
-   * F18), integers among numbers as numbers (the decided family, ADR 0021 1.2), a collection's elements and an object's
-   * properties below by the same rule. At the call itself an unknown or only `null` gives no plan; below it such a level
+   * The core's answer at `path` below a call's value as a plan: its kinds (a written target's, else the default's),
+   * integers among numbers as numbers (the decided family, ADR 0021 1.2), a collection's elements and an object's
+   * properties below by the same rule. At the call itself an unknown or no kind gives no plan; below it such a level
    * takes every value (ADR 0021 2.6: `[]` leaves the element type open, a `null` in the default stays unknown). A
    * record's field that some of its sources lack (`missing`) has the kinds the others give, and a missing one is the
-   * default's. The program leaves the slice where the plan cannot carry the core's answer exactly: where the place the
-   * call lands in types such an open level (the core answers the call and the place differently there), where records
-   * of a list a parse reads lack fields no default supplies, and deeper than the slice follows.
+   * default's. The program leaves the slice (`OutsideContract`) where the plan cannot carry the core's answer exactly:
+   * where a stop left a level open (#1767), where the place the call lands in types such an open level (the core
+   * answers the call and the place differently there), where records of a list a parse reads lack fields no default
+   * supplies, and deeper than the slice follows.
    */
   *#answerTask(
     at: AnsweredCall,
@@ -493,8 +504,8 @@ export class Contracts {
     records: readonly Expression[],
   ): CompileTask<TypePlan | null> {
     const found = this.answers.valueAt(at.node, path);
-    // below a written `object` the default's own answer, as F18 takes a default's kinds (`contract.ts`'s `typedDefault`):
-    // a `null` field stays open there too
+    // below a written `object` the default's own answer, as a typed call takes its default's kinds (`contract.ts`'s
+    // `typedDefault`): a `null` field stays open there too
     const decision = at.keeps ? defaultKinds(path, false) : null;
     const answer =
       decision === null
@@ -546,7 +557,7 @@ export class Contracts {
       } else if (tag === "object") {
         // a level the place's written type leaves any object (`object`), and every level below one, keeps every key of
         // the value; its properties are the default's, each by the literal data's own answer, as the call's below a
-        // written `object` takes every value (#1223, the lead's ruling 1)
+        // written `object` takes every value (#1223)
         const opens = !at.keeps && this.#writtenObject(at.landing, path);
         const literal = opens ? this.#literalOf(at.call) : null;
         const inner =
@@ -672,8 +683,8 @@ const STRUCTURED: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object
  * operation but a typed parse or load, or one whose own default does (#1755's test, read after a stop alone and through
  * nested typed calls, #1767). A projection of a literal is the literal data it selects (`projectedLiteral`), where no
  * object literal stands at any level below it: #1460's syntax route proves its items, not an object's names below a
- * projection (Astra r1's B1 and Codex r8–r9 on #1775: `({n: 0}).n`, `[0][i]` and `({p: [load("k", default: 0)]}).p`
- * are literal data, `({p: {n: 0}}).p` and `[{n: 0}][0]` are not).
+ * projection (#1775: `({n: 0}).n`, `[0][i]` and `({p: [load("k", default: 0)]}).p` are literal data, `({p: {n: 0}}).p`
+ * and `[{n: 0}][0]` are not).
  */
 function readsPlace(fallback: Expression): boolean {
   const pending: { at: Expression; projected: boolean }[] = [{ at: fallback, projected: false }];
@@ -706,7 +717,7 @@ function readsPlace(fallback: Expression): boolean {
         break;
       }
       // a typed parse or load inside the default answers by its own default, which the outer call reads through,
-      // whatever its key (Codex r5's B1, r6's P2)
+      // whatever its key
       case "loadExpression":
         if (at.defaultValue !== null) pending.push({ at: at.defaultValue, projected });
         break;
@@ -726,10 +737,10 @@ function readsPlace(fallback: Expression): boolean {
 
 /**
  * What an expression may select through parentheses and projections of literals: an object literal's literal property,
- * or any element of a list literal, whatever the index reads (Codex r9: `[0][load("i", default: 0)]` and
- * `[0][({i: 0}).i]` are elements of `[0]`); a selected part that is itself a projection is followed (Codex r8:
- * `({p: ({n: 0}).n}).p`); an empty list's none. `undefined` where a step leaves the literal's syntax: another receiver,
- * a missing property. Recursive over the syntax alone.
+ * or any element of a list literal, whatever the index reads (`[0][load("i", default: 0)]` and `[0][({i: 0}).i]` are
+ * elements of `[0]`); a selected part that is itself a projection is followed (`({p: ({n: 0}).n}).p`); an empty list's
+ * none. `undefined` where a step leaves the literal's syntax: another receiver, a missing property. Recursive over the
+ * syntax alone.
  */
 function projectedLiteral(expression: Expression): readonly Expression[] | undefined {
   const at = unwrap(expression);
@@ -756,9 +767,9 @@ function projectedLiteral(expression: Expression): readonly Expression[] | undef
 }
 
 /**
- * Whether a stop before admission settled left the value side unproven: a work or depth allowance (A6: the stores
- * admission rejects are unsettled, #1767). A stop after admission settled leaves every finished answer standing, and a
- * decision stopped at its demand allowance leaves its own answers `unknown`, which `stoppedItem` finds.
+ * Whether a stop before admission settled left the value side unproven: a work or depth allowance (the stores admission
+ * rejects are not settled, #1767). A stop after admission settled leaves every finished answer standing, and a decision
+ * stopped at its demand allowance leaves its own answers `unknown`, which `stoppedItem` finds.
  */
 function stoppedAnalysis(answers: Answers): boolean {
   const { budget } = answers;
@@ -847,14 +858,14 @@ function samePlan(a: TypePlan, b: TypePlan): boolean {
   return key(a) === key(b);
 }
 
-/** Whether the core answers a domain as written: its own written type, or one a copy inherits (A4, ADR 0021 1.3). */
+/** Whether the core answers a domain as written: its own written type, or one a copy inherits (ADR 0021 1.3). */
 function writtenDomain(admitted: AdmittedType): boolean {
   return admitted.by === "written" || (admitted.by === "decided" && admitted.inherited);
 }
 
 /**
- * A plan with each whole number a number too (C10's family, ADR 0021 1.2) at each level `widens` says (by its steps below
- * the plan: `element`, a property's step), the levels it does not as they are.
+ * A plan with each whole number a number too (the fallback rule's family, ADR 0021 1.2) at each level `widens` says (by
+ * its steps below the plan: `element`, a property's step), the levels it does not as they are.
  */
 function numberFamily(
   plan: TypePlan,
