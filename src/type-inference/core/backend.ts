@@ -380,9 +380,10 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
  * the core has no sentence for), by today's own predicate (`impossibleCaseMessage`) on the subject's and the value's
  * types: a literal's own kind, as today's checker types one (`caseLiteral`), else the facts' (`expressionTypes`).
  * Admitted, closed: a value the predicate finds a member of the subject's type that may equal, where every unknown the
- * subject holds is of an external origin (the host's or a load's, unknown to today's checker too); an unknown of any
- * other reason, a stop's among them, or a subject without an answer is not shown to be one today's checker cannot type,
- * so its case is refused.
+ * subject holds is of an external origin (the host's or a load's); an unknown of any other reason, a stop's among them,
+ * or a subject without an answer is refused. The types are the core's, which can be wider than today's checker's (a
+ * read of a written place that today's narrowing has narrowed, an external value carried through a typed place): there
+ * a case today refuses is admitted, never matches when it runs, and nothing else differs.
  */
 function neverMatching(answers: Answers, index: SliceIndex): Outside | null {
   const switches = index.statements.filter((statement) => statement.kind === "switchStatement");
