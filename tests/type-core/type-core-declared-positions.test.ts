@@ -53,14 +53,14 @@ import {
 } from "../helpers/type-core/row-templates.js";
 
 /*
- * The command operand table (#2488's step 1½, `COMMAND_OPERANDS`): each command and request operand position holds a
- * value of every kind from every origin (`samples`), compiled by today's checker and by the candidate route in the four
- * held modes, and run with the host global at every value of the domain and, for a typed ingress, at a value of its
- * kind. Where today's checker refuses the source with the position's compile error, the route refuses it at the operand
- * (`outsideAnswers`), as the core has no consumer of its own there. Where today's checker plans, the route publishes with today's checks and runs, but
- * where the value's origin is one the table declines (`DECLINED_ORIGINS`: an outside value carried, R10), which is
- * counted (R11). The same holds in each context (`CONTEXTS`); where the route refuses the value alone there, it refuses
- * the command alike (R16).
+ * The command operand table (#2488's step 1½, `COMMAND_OPERANDS`): each command and request operand position holds each
+ * sample's value (`samples`: each origin with its own kinds), compiled by today's checker and by the candidate route in
+ * the four held modes, and run with the host global at every value of the domain and, for a typed ingress, at a value
+ * of its kind. Where today's checker refuses the source with the position's compile error, the route refuses it at the
+ * operand (`outsideAnswers`), as no consumer of the core judges it there. Where today's checker plans, the route
+ * publishes with today's checks and runs, but where the value's origin is one the table declines (`DECLINED_ORIGINS`:
+ * an outside value carried, R10), which is counted (R11). The same holds in each context (`CONTEXTS`); where the route
+ * refuses the value alone there, it refuses the command alike (R16).
  */
 
 /** The text of the table's refusal (`outsideAnswers`, `src/type-inference/core/backend.ts`). */
