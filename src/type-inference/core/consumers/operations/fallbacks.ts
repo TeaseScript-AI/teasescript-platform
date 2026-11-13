@@ -12,7 +12,7 @@ import { kindsInItsOrder, makeItem, STOPPED, type Item, type ItemTag } from "../
 import type { ValueConstraint } from "../../program.js";
 import { elementStep, offendingKinds, type DiagnosticRule } from "../../result.js";
 import { error } from "../reports/diagnostics.js";
-import { heldHostData } from "../finishing.js";
+import { heldHostData } from "../stores/finishing.js";
 import { unsettledItem } from "../kinds.js";
 import { keyLabel, ownSpan, quietKinds, shownLabel, writtenTermOf } from "../names.js";
 import { obligation, storeRoot, storeWarning, warnGroups } from "../reports/warnings.js";

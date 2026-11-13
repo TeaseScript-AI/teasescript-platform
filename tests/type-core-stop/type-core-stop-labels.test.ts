@@ -5,7 +5,7 @@ import test from "node:test";
 import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { withTestAllowance } from "../../src/type-inference/core/budget.js";
 import { Consumers } from "../../src/type-inference/core/consumers.js";
-import { labelDomain } from "../../src/type-inference/core/consumers/finishing.js";
+import { labelDomain } from "../../src/type-inference/core/consumers/stores/finishing.js";
 import { keyOf } from "../../src/type-inference/core/definitions.js";
 import { REASON } from "../../src/type-inference/core/items.js";
 import type { Obligation } from "../../src/type-inference/core/result.js";

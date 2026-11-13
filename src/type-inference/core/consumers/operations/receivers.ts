@@ -20,7 +20,7 @@ import { propertyName } from "../../program.js";
 import { offendingKinds, type ContextDetail, type DiagnosticRule } from "../../result.js";
 import { error } from "../reports/diagnostics.js";
 import { defaultNull } from "./fallbacks.js";
-import { finishingKeyRead } from "../finishing.js";
+import { finishingKeyRead } from "../stores/finishing.js";
 import { hasMethod } from "../kinds.js";
 import type { Offending } from "../model.js";
 import {

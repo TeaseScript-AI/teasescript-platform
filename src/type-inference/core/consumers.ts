@@ -58,7 +58,7 @@ import {
 } from "./contract-descriptors.js";
 import { withFacts } from "./consumers/reports/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/stores/enclosing.js";
-import { finishedItems, finishingRead, labelDomain } from "./consumers/finishing.js";
+import { finishedItems, finishingRead, labelDomain } from "./consumers/stores/finishing.js";
 import { freshStores, ingressMark, markHolder, markValue } from "./consumers/stores/fresh.js";
 import { mixed, mixedChoices, mixedJoin } from "./consumers/stores/mixed.js";
 import type {
@@ -86,7 +86,7 @@ import { outsideSyntax } from "./slice-syntax.js";
 import { propertyNames } from "./property-names.js";
 import type { CoreDiagnostic, Obligation, SiteExpectation } from "./result.js";
 import type { Work } from "./solver.js";
-export { typedCall } from "./consumers/finishing.js";
+export { typedCall } from "./consumers/stores/finishing.js";
 export {
   leftOutCheck,
   leftOutCompletion,

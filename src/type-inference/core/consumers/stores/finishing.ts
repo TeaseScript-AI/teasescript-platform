@@ -1,13 +1,13 @@
-import type { PlaceId, TypeTerm } from "../../graph.js";
-import { concrete, isExternal } from "../admission.js";
-import type { CorePass } from "../answers.js";
-import { joinSteps, keptParts, keptSlice } from "../budget.js";
-import type { Consumers } from "../consumers.js";
-import { defaultOf, termAt, typedDefault, typeTags, unknownItem, writtenOf } from "../contract.js";
-import { isKeyId, keyOfId } from "../contract/key-ids.js";
-import { keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
-import { withoutEmpty } from "../exact-path.js";
-import type { FlowNode } from "../flow-graph.js";
+import type { PlaceId, TypeTerm } from "../../../graph.js";
+import { concrete, isExternal } from "../../admission.js";
+import type { CorePass } from "../../answers.js";
+import { joinSteps, keptParts, keptSlice } from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { defaultOf, termAt, typedDefault, typeTags, unknownItem, writtenOf } from "../../contract.js";
+import { isKeyId, keyOfId } from "../../contract/key-ids.js";
+import { keyPath, keyPlace, type Definition, type Key } from "../../definitions.js";
+import { withoutEmpty } from "../../exact-path.js";
+import type { FlowNode } from "../../flow-graph.js";
 import {
   EMPTY,
   inItsOrder,
@@ -19,16 +19,16 @@ import {
   type Item,
   type ItemTag,
   type Spelling,
-} from "../items.js";
-import { conversionCategory } from "../method-categories.js";
-import { stepName } from "../program.js";
-import type { Work } from "../solver.js";
-import { stands } from "./stores/fresh.js";
-import { LITERALS, unsettledItem } from "./kinds.js";
-import { readKey } from "./names.js";
-import { placelessCells, syntaxRead } from "./syntax.js";
-import { heldIngress, hostIngress } from "./host-frontier.js";
-import { openness, prefixAt, writtenTags } from "./written-openness.js";
+} from "../../items.js";
+import { conversionCategory } from "../../method-categories.js";
+import { stepName } from "../../program.js";
+import type { Work } from "../../solver.js";
+import { stands } from "./fresh.js";
+import { LITERALS, unsettledItem } from "../kinds.js";
+import { readKey } from "../names.js";
+import { placelessCells, syntaxRead } from "../syntax.js";
+import { heldIngress, hostIngress } from "../host-frontier.js";
+import { openness, prefixAt, writtenTags } from "../written-openness.js";
 
 // The finishing read after a stop (D4 a′): a value's items, a key's, a typed parse's or load's, from what remains.
 

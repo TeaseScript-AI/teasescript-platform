@@ -10,7 +10,7 @@ import { propertyName } from "../../program.js";
 import { explainingItem, type DiagnosticRule } from "../../result.js";
 import { error } from "../reports/diagnostics.js";
 import { defaultNull } from "./fallbacks.js";
-import { literalSyntax } from "../finishing.js";
+import { literalSyntax } from "../stores/finishing.js";
 import { hasProperty, unsettledItem } from "../kinds.js";
 import type { Offending } from "../model.js";
 import {
