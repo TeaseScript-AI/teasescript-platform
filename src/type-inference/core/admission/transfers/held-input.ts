@@ -7,6 +7,7 @@ import type { Expansion } from "../model.js";
 import { contributionOf } from "../own.js";
 import { partOf } from "../walk.js";
 
+/** A task's contributions to A2's held view (`heldMeetings`), each once, by text, at its path below the task's own. */
 export interface HeldInput {
   readonly points: ReadonlyMap<string, readonly string[]>;
   readonly reads: ReadonlyMap<string, { readonly at: readonly string[]; readonly source: Key }>;

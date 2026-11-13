@@ -26,8 +26,6 @@ import { partOfRead, TYPED_ROLES } from "../walk.js";
 // carrier's operands answer once per pass, whatever value walks to them, a literal's cells with their literal, by path,
 // as a walk lists its stops.
 
-/** A task's contributions to A2's held view (`heldMeetings`), each once, by text, at its path below the task's own. */
-
 /**
  * A task as the decider enters it (`transferredDecider`): its lanes (`Stop.deep`, `Stop.single`) and what the
  * operations above it give it, each link's own answer (`chooses`, `TYPED_ROLES`) folded in: whether one is a typed
