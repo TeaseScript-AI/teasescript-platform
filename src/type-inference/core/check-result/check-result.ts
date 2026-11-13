@@ -821,15 +821,16 @@ function factLevels(walk: () => (readonly ItemTag[])[], site: Expression): Stati
   }
 }
 
-/** The facts the core settled on for a program inside the slice, by source site (see `SolvedTypeFacts`). */
-export function coreFacts(
+/**
+ * Each expression's type as the facts give it (`coreFacts`' `values`), read after its operands' (the walk's order
+ * reversed), so nesting needs no native recursion: a read of a place with a written type has that type, else the
+ * occurrence's kinds, a collection's element type from its literal, its place, or the list its index reads; an
+ * expression the index does not hold is `unknown`.
+ */
+export function expressionTypes(
   answers: Answers,
   index: SliceIndex,
-  request: CoreAnalysisRequest,
-): SolvedTypeFacts {
-  void request;
-  // each expression's type after its operands' (the walk's order reversed), so nesting needs no native recursion: the
-  // occurrence's kinds, a collection's element type from its literal, its place, or the list its index reads
+): (expression: Expression) => StaticType {
   const types = new Map<Expression, StaticType>();
   const typeOf = (expression: Expression): StaticType => types.get(expression) ?? UNKNOWN_TYPE;
   for (const expression of [...index.expressions].reverse()) {
@@ -856,6 +857,17 @@ export function coreFacts(
         element = placeType(answers, place.id, [...place.path, "element"], expression);
     types.set(expression, typeOfKinds(tags, element));
   }
+  return typeOf;
+}
+
+/** The facts the core settled on for a program inside the slice, by source site (see `SolvedTypeFacts`). */
+export function coreFacts(
+  answers: Answers,
+  index: SliceIndex,
+  request: CoreAnalysisRequest,
+): SolvedTypeFacts {
+  void request;
+  const typeOf = expressionTypes(answers, index);
   const lets = declarations(answers, index);
   const bySite = (a: { readonly site: FactSite }, b: { readonly site: FactSite }): number =>
     a.site.file - b.site.file || a.site.start - b.site.start || a.site.end - b.site.end;
