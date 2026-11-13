@@ -46,19 +46,18 @@ import type { ReadRoute } from "./values.js";
 import { amend, Retained } from "./retained/retained.js";
 
 /*
- * The exact path of the coarse core (checkpoint 9): a read of key k at node n is answered from one
- * definition D when X1–X7 and the receiver rule R hold: n and D are live (X1), D is the nearest dominating definition
- * over k and its prefixes (X2), D is an exact definition (X3), D and n share their nearest boundary (X4) and their
- * loops (X5), no own event of k lies strictly after D and not after n (X6), and no block can have interfered (X7).
- * Otherwise the read takes the contract, and the first condition that failed is the warning's context word (§3.4).
- * D's value at the path below its key is evaluated at D's node, once per (D, path).
+ * The exact path of the coarse core: a read of key k at node n is answered from one definition D when X1–X7 hold: n and
+ * D are live (X1), D is the nearest dominating definition over k and its prefixes (X2), D is an exact definition, its
+ * receiver certain where it has one (X3, the receiver rule `DefinitionLists.certain`), D and n share their nearest
+ * boundary (X4) and their loops (X5), no own event of k lies strictly after D and not after n (X6), and no block can
+ * have interfered (X7). Otherwise the read takes the contract, and the first condition that failed is the warning's
+ * context word. D's value at the path below its key is evaluated at D's node, once per (D, path).
  */
 
-/** The exact path's answer: D with the path below its key, or the first failing condition's word. */
 /**
  * A read's exact path: its definition and the rest of the path, or the word of its first failing condition; `later`
- * where that word is a condition's after X3 (X4–X7) or the value's arrival (F20), which an element read the contract
- * answers comes before (X3's `member`).
+ * where that word is a condition's after X3 (X4–X7) or the value's arrival (a function's result, `call`), which an
+ * element read the contract answers comes before (X3's `member`).
  */
 export type ExactAnswer =
   | { readonly def: Definition; readonly rest: readonly string[] }
@@ -68,9 +67,9 @@ export type ExactAnswer =
 const ANY_PATH = "*";
 
 /*
- * Three tuning constants: each picks which of two indexes answers a read, never the answer. Four keeps the
- * common shapes on the per-source path; W34's two known products stand where more than four sources, anchors or trees
- * meet at one path (PLAN §6b).
+ * Three tuning constants: each picks which of two indexes answers a read, never the answer. Four keeps the common
+ * shapes on the per-source path; the span indexes answer where more than four sources, anchors or trees meet at one
+ * path.
  */
 
 /** The trees of the copy forest a source with several anchors is listed under one by one; beyond, under all. */
@@ -83,7 +82,7 @@ const FEW_PLACES = 4;
 const FEW_ANCHORS = 4;
 
 /**
- * A whole copy of a place (W34): the copy, the source it reads and where, and what the source holds there for every
+ * A whole copy of a place: the copy, the source it reads and where, and what the source holds there for every
  * path no key below it overlaps (`top`): the copy it comes from (`up`), another whole store, no exact definition (the
  * word), or something only the copy's own reads answer. The copies form a forest toward their origins, walked once.
  */
@@ -104,7 +103,7 @@ interface CopyLink {
   root: CopyLink | null;
   /** The tree of the forest it stands in. */
   tree: number;
-  /** Whether an operand region of a test of its source holds its read (§3.2). */
+  /** Whether an operand region of a test of its source holds its read. */
   operand: boolean;
 }
 
@@ -287,7 +286,9 @@ function exitsOf(
 
 export class ExactPath {
   readonly #memo = Retained.map<string, ExactAnswer>("ExactPath.#memo");
-  /** #1072 1b, a record: its copies' forest, and per source its copies whose reads are reached, per callable (built once). */
+  /**
+   * A record (#1072): its copies' forest, and per source its copies whose reads are reached, per callable (built once).
+   */
   readonly #built = Retained.record<{
     copies: CopyForest | null;
     bySource: Map<PlaceId, Map<Callable | null, CopyLink[]>> | null;
@@ -296,7 +297,7 @@ export class ExactPath {
   readonly #sourceSpans = Retained.map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>(
     "ExactPath.#sourceSpans",
   );
-  /** The route of each definition's value at a path, recorded as it is answered (S3 §1). */
+  /** The route of each definition's value at a path, recorded as it is answered. */
   readonly #defRoutes = Retained.map<string, ReadRoute>("ExactPath.#defRoutes");
   /** Per add, its place in its run of adds of one class (`#repeatOf`): the run's third add, and its own position. */
   readonly #runs = Retained.map<
@@ -337,7 +338,7 @@ export class ExactPath {
     const { program, definitions, lists, handlers } = this.pass;
     program.work.charge("exactQueries");
     if (!program.live(node)) return { fail: "dead-code" }; // X1
-    // F20: a function's result is never the exact path; `call` is the result's word, the value's arrival
+    // a function's result is never the exact path; `call` is the result's word, the value's arrival
     if (program.resultPlaces.has(keyPlace(key))) return { fail: "call", later: true };
     const reaching = lists.reachingDef(key, node, before);
     // X2: no dominating definition; a key with stores is reached from another callable or file
@@ -350,8 +351,8 @@ export class ExactPath {
           : "unknown",
       };
     const d = reaching.def;
-    // X3 with R: a declaration, a whole store, an add, a clear or a removal with a certain receiver, a loop
-    // variable, the binding of a single-site non-recursive callee's parameter
+    // X3 with the receiver rule (`certain`): a declaration, a whole store, an add, a clear or a removal with a certain
+    // receiver, a loop variable, the binding of a single-site non-recursive callee's parameter
     if (
       d.kind === "const"
         ? d.how !== "loop variable"
@@ -362,8 +363,8 @@ export class ExactPath {
             : !lists.certain(d))
     )
       return { fail: "member" };
-    // §3.4: D's value projected past an element step over a copy stops there (F12), X3's `member`, which
-    // comes before any later condition's word
+    // D's value projected past an element step over a copy stops there, X3's `member`, which comes before any later
+    // condition's word
     const word = (found: ContextWord): ExactAnswer => ({
       fail: this.#overCopy(d, reaching.rest) ? "member" : found,
       later: true,
@@ -377,7 +378,7 @@ export class ExactPath {
     // X6
     const event = lists.eventBetween(key, d.node, node);
     if (event !== null) return word(event);
-    // X7: a read in block code or code a block reaches takes the contract (O15); a handler store may have run
+    // X7: a read in block code or code a block reaches takes the contract; a handler store may have run
     if (program.blockReachable(node)) return word("handler");
     if (handlers.handlerTouches(key) && handlers.afterSomeCreation(node)) return word("handler");
     return reaching;
@@ -405,7 +406,7 @@ export class ExactPath {
   }
 
   /**
-   * W34: the forest of whole copies of places, built once. A copy's source answers at the record
+   * The forest of whole copies of places, built once. A copy's source answers at the record
    * level for every path no key below the source overlaps (the exact path of a path no definition names), so a chain
    * is resolved once per copy and projected per field. A test on a source never splits it: the copies a test of their
    * source at a path guards are spans of the forest's walk, indexed per path, so a read finds its chain's marks by one
@@ -536,7 +537,7 @@ export class ExactPath {
       if (!links.has(uid)) {
         const list = tops.get(anchor.place);
         if (list === undefined) tops.set(anchor.place, [...anchor.copies]);
-        // (one by one: a source's copies grow with the source, past one call's arguments, Astra r6 N1)
+        // (one by one: a source's copies grow with the source, past one call's arguments)
         else for (const copy of anchor.copies) list.push(copy);
       }
     const loose = new Map<PlaceId, CopyLink[]>();
@@ -912,7 +913,7 @@ export class ExactPath {
   }
 
   /**
-   * §3.2: whether a test of its source at the path, or at a prefix of it, guards the read of a copy from `link` up to
+   * Whether a test of its source at the path, or at a prefix of it, guards the read of a copy from `link` up to
    * `stop` (excluded): per prefix one search of the spans of the copies a branch holds, and one of those an operand region
    * holds; a choice's selection step as the record key it reads.
    */
@@ -1116,12 +1117,12 @@ export class ExactPath {
     return nested;
   }
 
-  /** The route D's value at a path took (S3 §1): `contract` where it is a chain root's contract or a copy's below. */
+  /** The route D's value at a path took: `contract` where it is a chain root's contract or a copy's below. */
   public defRoute(d: Definition, rest: readonly string[]): ReadRoute {
     return this.#defRoutes.get(joinParts(d.uid, rest)) ?? "exact";
   }
 
-  /** D's value at the path `rest` below its key, at D's node (§3.1's answer): once per (D, path). */
+  /** D's value at the path `rest` below its key, at D's node (the exact path's answer): once per (D, path). */
   public *defVal(d: Definition, rest: readonly string[]): Work<readonly Item[]> {
     return yield {
       key: joinParts("def", d.uid, rest),
@@ -1138,7 +1139,7 @@ export class ExactPath {
     program.work.charge("exactValues");
     if (d.kind === "const") return rest.length === 0 ? (d.items ?? []) : [];
     const writer = definitions.writerOf(d);
-    // W34: a copy at a field is its chain's value there, with the marks of the copies' reads along the chain
+    // a copy at a field is its chain's value there, with the marks of the copies' reads along the chain
     const copy = d.kind === "whole" && rest.length > 0 && !rest.includes("element");
     const forest = copy ? this.#forest() : null;
     const link = forest?.links.get(d.uid);
@@ -1177,7 +1178,7 @@ export class ExactPath {
       this.#defRoutes.set(routeKey, values.valueRoute(d.value!, d.node, rest));
       return mergeItems(withWriter(items, writer), scope);
     }
-    // S6c: an add that repeats the ones before it answers as the earlier one at every path (`#repeatOf`), but where
+    // an add that repeats the ones before it answers as the earlier one at every path (`#repeatOf`), but where
     // its value's class is mixed and the earlier one's own value at the path holds a leaf or an operand's identity
     const repeated = this.#repeatOf(d);
     const mixed = repeated === d ? 0 : this.pass.contract.classMixed(d.value!, true);
@@ -1189,14 +1190,14 @@ export class ExactPath {
     )
       return yield* this.defVal(repeated, rest);
     const before = yield* values.keyItems(keyOf(d.place, joinSteps(d.path, rest)), d.node, true);
-    // F5–F7: the collection's kind is unchanged, and a dict's `values` or `keys` still a list of what it holds, whose
-    // element is the dict's
+    // an add, a clear or a removal: the collection's kind is unchanged, and a dict's `values` or `keys` still a list of
+    // what it holds, whose element is the dict's
     const listed = rest.length > 0 && dictList(rest[0]!) !== undefined ? 1 : 0;
     if (rest.length === listed) return before;
     const element = rest.length === listed + 1 && rest[listed] === "element";
-    // F6: no element
+    // a clear: no element
     if (d.kind === "clear") return element ? [EMPTY] : [];
-    // F7: every element possible, maybe none
+    // a removal: every element possible, maybe none
     if (d.kind === "weaken")
       return element
         ? [...weaken(withoutEmpty(before), "member"), EMPTY]
@@ -1210,7 +1211,7 @@ export class ExactPath {
       ),
       writer,
     );
-    // §3.4: the element read gathers the elements before and the added ones, several elements: `member`
+    // the element read gathers the elements before and the added ones, several elements: `member`
     const several = withoutEmpty(before).length > 0 && withoutEmpty(own).length > 0;
     const worded = (items: readonly Item[]): readonly Item[] =>
       several
@@ -1220,7 +1221,7 @@ export class ExactPath {
               : { ...item, context: firstContext(item.context, "member") },
           )
         : items;
-    // F5: an `add` makes the collection hold an element; an `addAll` leaves its M unchanged, whatever its source
+    // an `add` makes the collection hold an element; an `addAll` leaves its emptiness unchanged, whatever its source
     if (rest.length > 1) return alternatives(worded([...before, ...own]), scope);
     const empty = d.how === "elements" && before.some((item) => item.tag === "empty");
     return alternatives(
@@ -1230,7 +1231,7 @@ export class ExactPath {
   }
 
   /**
-   * S6c: the add whose value D's answer is at every path (`#defVal`): D itself, or, where D stands fourth or later in a
+   * The add whose value D's answer is at every path (`#defVal`): D itself, or, where D stands fourth or later in a
    * run of adds of one class, the run's third. In a run each add's exact read of its receiver before it is the add
    * before it at every path (`#repeats`) and each adds a value of one class (`Contract.classOf`: equal items at every
    * path apart from writers, each a later one: an add's own writer stands for every kind it adds, and a literal's
@@ -1264,10 +1265,10 @@ export class ExactPath {
   }
 
   /**
-   * S6c: the add D repeats, or `null`: D and the add P before it add, in one mode, values of one class
+   * The add D repeats, or `null`: D and the add P before it add, in one mode, values of one class
    * (`Contract.classOf`, never an ingress: equal items at every path) to one receiver key, whose exact read before D
    * is P at every path (P with no rest at the key: every key below it is P's below it, an event below it being one of
-   * the key's own, X6), no guard of the key, a prefix or a key below holds D (no mark), and P's writer comes first.
+   * the key's own), no guard of the key, a prefix or a key below holds D (no mark), and P's writer comes first.
    */
   #repeats(d: Definition): Definition | null {
     const { program, guards, contract, definitions } = this.pass;
@@ -1316,7 +1317,7 @@ export function withoutEmpty(items: readonly Item[]): Item[] {
 
 /**
  * The answer at `rest` below a collection's selected element (`get`, a loop's visit, a removal): a selection consumes
- * only its own emptiness mark, the element's; a demanded descendant's mark passes through (#1027's B1, F12).
+ * only its own emptiness mark, the element's; a demanded descendant's mark passes through (#1027).
  */
 export function belowSelected(
   items: readonly Item[],
@@ -1326,8 +1327,8 @@ export function belowSelected(
 }
 
 /**
- * F28: the store that put the kinds into the key explains them; a property's absence keeps the literal that lacks it
- * (F11), and the emptiness mark has no writer.
+ * The store that put the kinds into the key explains them; a property's absence keeps the literal that lacks it, and
+ * the emptiness mark has no writer.
  */
 export function withWriter(items: readonly Item[], writer: Writer | null): readonly Item[] {
   if (writer === null) return items;
