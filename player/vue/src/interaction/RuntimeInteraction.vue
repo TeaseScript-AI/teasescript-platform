@@ -158,7 +158,8 @@ const foreground = computed(() => {
     id === undefined ? null : { plan: session.planToken, reset: props.reset, actionId: id, value };
   return value;
 });
-// The question's line again after what came after it, such as a block's question: one object per transcript revision.
+// The question's line again (`playerRuntimeQuestionAgain`), worked out anew only when the session's plan, reset,
+// transcript revision or presented action changes, so time observations neither walk the transcript nor re-render it.
 let askedAgain: {
   readonly plan: string;
   readonly reset: number;
