@@ -111,7 +111,7 @@ export const PROJECTS = {
   },
   tools: {
     claims: (path) =>
-      /^tools\/(?:check\/)?[^/]+\.(?:mjs|cjs|js)$/u.test(path) ||
+      /^tools\/(?:check\/|moves\/)?[^/]+\.(?:mjs|cjs|js)$/u.test(path) ||
       path.startsWith("tools/repository-checks/") ||
       path === "knip.json",
     checks: ["test:verification"],

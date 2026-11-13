@@ -24,6 +24,7 @@ const REPRESENTATIVES = {
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
   tools: ["tools/test-shards.mjs", ["tools"]],
   "check runners": ["tools/check/run-check.mjs", ["tools"]],
+  "move tools": ["tools/moves/split-write.mjs", ["tools"]],
   "repository checks": ["tools/repository-checks/regression-cases.mjs", ["tools"]],
   families: [
     "tests/families/copies/copy-admission/named-and-nested-composite-admission.mjs",
