@@ -37,7 +37,7 @@ const REACHING = {
   "tests/helpers/middle.ts": 'export { moved } from "./moved.js";\n',
   "tests/helpers/other.ts": "export const other = 1;\n",
   // reaching: an import, an import of a module that imports it, a reader of every test file, a built path, a string in
-  // a template's code
+  // a template's code, a file name joined to its folder
   "tests/a/direct.test.ts": 'import { moved } from "../helpers/moved.js";\n',
   "tests/a/through.test.ts": 'import { moved } from "../helpers/middle.js";\n',
   "tools/reader.mjs":
@@ -47,6 +47,8 @@ const REACHING = {
   "tools/built.test.mjs": 'import { load } from "./built.mjs";\n',
   "tests/a/spawned.test.ts":
     'const url = (file: string) => JSON.stringify(file);\nexport const source = `import { moved } from ${url("../helpers/moved.js")};`;\n',
+  "tests/a/joined.test.ts":
+    'import { join } from "node:path";\nexport const helper = join(import.meta.dirname, "..", "helpers", "moved.js");\n',
   // not reaching: a path in comments only, another helper, a folder listed with no folder named
   "tests/a/comment.test.ts":
     '// moved to "../helpers/moved.js"\n/* see "../helpers/moved.js" */\nexport const nothing = 1;\n',
@@ -56,13 +58,14 @@ const REACHING = {
   "tools/lister.test.mjs": 'import { list } from "./lister.mjs";\n',
 };
 
-test("the test files reaching a module: by import, through another module, a reader of every test file, a built path and a template's code (#2583)", (t) => {
+test("the test files reaching a module: by import, through another module, a reader of every test file, a built path, a joined path's file name and a template's code (#2583)", (t) => {
   const r = checkout(t, REACHING);
   const result = r.run("tests/helpers/moved.ts");
   assert.equal(result.status, 0, result.err);
   assert.deepEqual(result.out.split("\n"), [
-    "test files reaching: 5",
+    "test files reaching: 6",
     "  tests/a/direct.test.ts -> tests/helpers/moved.ts",
+    "  tests/a/joined.test.ts -> tests/helpers/moved.ts",
     "  tests/a/spawned.test.ts -> tests/helpers/moved.ts",
     "  tests/a/through.test.ts -> tests/helpers/middle.ts -> tests/helpers/moved.ts",
     "  tools/built.test.mjs -> tools/built.mjs -> tests/helpers/moved.ts",

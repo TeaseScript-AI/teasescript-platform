@@ -5,18 +5,22 @@
 //   node tools/moves/test-reach.mjs MODULE… [--tree DIR]
 //
 // MODULE is a tracked file's path from DIR's top folder (default: the current folder's repository). The files are those
-// `git ls-files` lists in DIR; a code file is one ending `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs` or `.cjs`.
-// A code file reaches another when one of its quoted strings outside its comments (`stringsOf`) names it: a path starting `./` or `../` from the file's folder, any other from the top folder or the
-// file's folder, a leading `dist/` dropped, and an extension read as the build maps it (`.js` names a `.ts`, `.tsx`,
-// `.js` or `.jsx` file, `.mjs` a `.mts` or `.mjs`, `.cjs` a `.cts` or `.cjs`; none, any of those). A code file that
-// lists a folder (it calls `readdirSync`, `readdir`, `opendirSync`, `opendir`, `globSync` or `glob`, or holds the string
-// `ls-files`) is a generic reader: it reaches every tracked file under each tracked folder one of its strings names
-// (`"tests"` in `join(root, "tests")`, as `tools/repository-checks/pin-suites.mjs` reads every test file), whether it
-// loads them or reads their text. A test file is a code file under `tests/` ending `.test.ts`, or any ending
-// `.test.js`, `.test.mjs` or `.test.cjs`, as `split-test-compare.mjs` runs them; a MODULE that is one reaches itself.
+// `git ls-files` lists in DIR; a code file is one ending `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs` or
+// `.cjs`. A code file reaches another when one of its quoted strings outside its comments (`stringsOf`) names it: a
+// path starting `./` or `../` from the file's folder, any other from the top folder or the file's folder, a leading
+// `dist/` dropped, and an extension read as the build maps it (`.js` names a `.ts`, `.tsx`, `.js` or `.jsx` file,
+// `.mjs` a `.mts` or `.mjs`, `.cjs` a `.cts` or `.cjs`; none, any of those). A string that is a file name alone with a
+// code extension (`"x.js"`, a piece of a joined path) names every tracked code file of that name, wherever it is. A
+// code file that lists a folder (it calls `readdirSync`, `readdir`, `opendirSync`, `opendir`, `globSync` or `glob`, or
+// holds the string `ls-files`) is a generic reader: it reaches every tracked file under each tracked folder one of its
+// strings names (`"tests"` in `join(root, "tests")`, as `tools/repository-checks/pin-suites.mjs` reads every test
+// file), whether it loads them or reads their text. A test file is a code file under `tests/` ending `.test.ts`, or any
+// ending `.test.js`, `.test.mjs` or `.test.cjs`, as `split-test-compare.mjs` runs them; a MODULE that is one reaches
+// itself.
 //
-// What it cannot see: a path built at run time with no piece of it a quoted string naming the file or a folder above
-// it (a name computed from data), a module loaded by a package's name, and a string in a comment (which loads nothing).
+// What it cannot see: a path built at run time with no quoted piece naming the file by its path or its file name (a name
+// computed from data, unless a generic reader lists its folder), a module loaded by a package's name, and a string in a
+// comment (which loads nothing).
 // Every other reference only adds test files: a type-only import, a folder listed but never read.
 //
 // Output: `test files reaching: N`, then each test file with one chain of files by which it reaches a MODULE. Exit
@@ -154,6 +158,22 @@ export function testsReaching(tree, modules, tracked = trackedFiles(tree)) {
   for (const file of tracked)
     for (let at = file.indexOf("/"); at !== -1; at = file.indexOf("/", at + 1))
       folders.add(file.slice(0, at));
+  // (a file name alone, with a code extension, names every tracked code file of that name: a path joined from pieces)
+  const byFileName = new Map();
+  for (const file of tracked)
+    if (CODE.test(file)) {
+      const name = path.posix.basename(file);
+      if (!byFileName.has(name)) byFileName.set(name, []);
+      byFileName.get(name).push(file);
+    }
+  const byName = (text) => {
+    if (text.includes("/") || !CODE.test(text)) return [];
+    const extension = path.posix.extname(text);
+    const stem = text.slice(0, text.length - extension.length);
+    return [text, ...(SOURCES.get(extension) ?? []).map((source) => `${stem}${source}`)].flatMap(
+      (name) => byFileName.get(name) ?? [],
+    );
+  };
   /** Each file's readers: the code files whose strings name it. */
   const readers = new Map();
   /** Each generic reader's folders. */
@@ -168,7 +188,7 @@ export function testsReaching(tree, modules, tracked = trackedFiles(tree)) {
     }
     const lists = LISTS.test(text);
     for (const value of stringsOf(text))
-      for (const candidate of named(file, value)) {
+      for (const candidate of [...named(file, value), ...byName(value)]) {
         if (tracked.has(candidate) && candidate !== file) {
           if (!readers.has(candidate)) readers.set(candidate, new Set());
           readers.get(candidate).add(file);
