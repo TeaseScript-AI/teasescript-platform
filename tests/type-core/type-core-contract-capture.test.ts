@@ -491,7 +491,7 @@ test("the candidate route's decline and the capture's skip read one syntax rule"
     ['let a = {f: [[1]]}\nlet b = a\nif hostValue < 1 {say "x"}\nb.f = hostValue\nexit\n', false],
     // (its operand walked, its written type the slice's, and only `null` the other side of `==` or `!=`)
     [
-      'let a = {f: [[1]]}\nlet b = a\nif (askBoolean "?") is boolean {say "x"}\nb.f = hostValue\nexit\n',
+      'let a = {f: [[1]]}\nlet b = a\nif (hostValue < 1) is boolean {say "x"}\nb.f = hostValue\nexit\n',
       false,
     ],
     [
