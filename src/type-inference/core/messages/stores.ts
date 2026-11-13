@@ -51,13 +51,15 @@ export function storeSubject(rule: StoreRule, source: MessageSource, later = fal
 }
 
 /**
- * The declared variable a copy-decided store's place copies, where the source proves it (#2289, #2317's closed test):
- * the deciding value is the start value of the root's own `let` or `global` declaration, which stores it alone (its
- * text after its first `=`, one trailing `;` aside, is that value), and read along the place's steps it is one read of
- * a variable or parameter with its own written type, the place's: the value itself, an object literal's property for
- * a property step, every element of a list or set literal or every value of a dict literal for the last step. `of`
- * names it as a sentence does: `'lives', declared 'integer' on line 1`. `null` where any of it is not proved. The
- * declared variable is looked up last, only for a sentence being made (`bindingsOf`).
+ * The declared variable or function a copy-decided store's place copies, where the source proves it (#2289): the
+ * deciding value is the start value of the root's own `let` or `global` declaration, which stores it alone (its text
+ * after its first `=`, one trailing `;` aside, is that value), and read along the place's steps it is one read of a
+ * variable or parameter with its own written type, or one call of a function by its name, whatever its arguments, a
+ * copy of its written result (#2378), the place's type: the value itself, an object literal's property for a property
+ * step, every element of a list or set literal or every value of a dict literal for the last step, each the same name.
+ * `of` names it as a sentence does: `'lives', declared 'integer' on line 1`, or `the result of 'f', declared 'integer'
+ * on line 1`. `null` where any of it is not proved. The declaration is looked up last, only for a sentence being made
+ * (`bindingsOf`).
  */
 function copyOf(
   rule: StoreRule,
@@ -249,10 +251,10 @@ function declarationCode(
 
 /**
  * The owner's sentences (#2289) for a store of numbers into a place that holds whole numbers because a copy of a
- * variable declared `integer` decided it (`copyOf`, A4): a variable declared as a copy of that variable's value, or a
- * list, set or dict declared with elements or values that are copies of it, with the fix that declares the place with
- * `number`, the declaration as written with one type written in; `null` for any other store, whose sentence is
- * `storeSubject`'s with today's fix.
+ * variable declared `integer`, or of the result of a function declared `integer` (#2378), decided it (`copyOf`, A4): a
+ * variable declared as a copy of that value, or a list, set or dict declared with elements or values that are copies
+ * of it, with the fix that declares the place with `number`, the declaration as written with one type written in;
+ * `null` for any other store, whose sentence is `storeSubject`'s with `storeFix`'s fix.
  */
 export function copySentence(
   rule: StoreRule,
@@ -361,7 +363,7 @@ export function storeFix(
  * (`conversionFix`): a number a unit (V30 §13), into an element too; and into a variable, a parameter, a result or a
  * property, text a date or a time with its conversion, and a number or a truth value shown as text; else "". Each code
  * form stands in place of the stored value, where the diagnostic sits, and is offered where `codeAt` proves it there:
- * the value of a kind the conversion takes (a date's text one it reads, Codex r3), and its result one the place takes.
+ * the value of a kind the conversion takes (a date's text one it reads), and its result one the place takes.
  */
 function conversionFix(
   rule: StoreRule,

@@ -157,17 +157,17 @@ function standsAt(code: string, position: Position): boolean {
 }
 
 /**
- * the one test of every code form a fix offers, pasted whole at the site its diagnostic sits on or the
+ * The one test of every code form a fix offers, pasted whole at the site its diagnostic sits on or the
  * position its sentence names. It holds where (1) each operation takes its subject: every value the form reads there
  * when the script runs, every kind of it known, and one the operation takes, a value it holds of a flat structure;
  * every author's text it holds clear of the analysis's other diagnostics, and of any region a stop left unchecked
- * (Astra r3 on #1273); (2) its value fits what the site takes (`site`, read from what consumes the value
+ * (#1273); (2) its value fits what the site takes (`site`, read from what consumes the value
  * there: any value where nothing restricts it), a structured value only there or as a collection of scalars against its
  * elements' kinds, and a value the fix writes itself only where the value is proved not to divide; and (3) it binds
  * there: as the site's whole value, or in parentheses where an operand or a receiver binds tighter than its code; at a
  * position as one statement, parameter or type. A site fact no fact proves gives words, never a form.
- * Its code, so grouped, where it holds; `null` where it does not, and the fix gives its advice in
- * words.
+ * Its code, in parentheses where (3) needs them, where it holds; `null` where it does not, and the fix gives its
+ * advice in words. None inside `inWords`.
  */
 export function codeAt(form: CodeForm, site: SiteExpectation | Position): string | null {
   if (withheld) return null;
@@ -176,7 +176,7 @@ export function codeAt(form: CodeForm, site: SiteExpectation | Position): string
   const fit = (kinds: readonly ItemTag[], takes: readonly ItemTag[]): boolean =>
     proved(kinds) && kinds.every((kind) => takes.some((tag) => fits(kind, tag, true)));
   // (a value held in a place, or landing in one that takes some type, fits by its structure too: the kinds alone prove
-  // it only for a scalar, or a collection of scalars against its elements' kinds, Codex r6)
+  // it only for a scalar, or a collection of scalars against its elements' kinds)
   const flat = (kinds: readonly ItemTag[]): boolean => !kinds.some((kind) => STRUCTURED.has(kind));
   // (the values it reads are there when the script runs: none read, proved, or a warning's own reads, which its program
   // already performs where they stand, wrapped there in place)
@@ -195,7 +195,7 @@ export function codeAt(form: CodeForm, site: SiteExpectation | Position): string
     return null;
   if (typeof site === "string") return standsAt(form.code, site) ? form.code : null;
   // (the predicate proves types, not values: a value the fix writes, such as a fallback's `0`, may stop the run where
-  // the value divides, Astra on #1273; offered only where a fact proves it does not)
+  // the value divides, #1273; offered only where a fact proves it does not)
   if (form.writes && site.divides !== false) return null;
   if (site.takes !== null) {
     if (!fit(form.gives, site.takes) || form.gives.includes("object")) return null;

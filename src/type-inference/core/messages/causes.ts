@@ -52,7 +52,7 @@ export function originSentence(word: ContextWord, name: string): string {
   }
 }
 
-/** A warning's cause: why the value may be of another type at this line (§3.4), its word the read's own. */
+/** A warning's cause: why the value may be of another type at this line, its word the read's own. */
 export function contextSentence(
   word: ContextWord,
   name: string,
@@ -150,9 +150,10 @@ function readBelow(
 
 /**
  * What brings a possible null to the route rule's error's use, in the owner's words (2026-11-11, #2287), from the
- * writer N10 names as its own text parses: one row per expression kind, so a new kind does not compile without its
- * row. An object literal answers through the property the subject reads below it; any other row only where the writer
- * is the subject's own value. `null` gives the first clause alone: a writer that is no form a cause names.
+ * writer the required check names (`RequiredCheck.writer`) as its own text parses: one row per expression kind, so a
+ * new kind does not compile without its row. An object literal answers through the property the subject reads below it;
+ * any other row only where the writer is the subject's own value. `null` gives the first clause alone: a writer that is
+ * no form a cause names.
  */
 function nullCause(
   required: RequiredCheck & { readonly writer: SourceSite },
@@ -257,8 +258,8 @@ function nullCause(
 }
 
 /**
- * The route rule's error's first sentence (AD-1, #1073), from N10's payload: the read, the offending kind,
- * and the writer's line; its fix is the warning's it stands in for (`coreMessage`). A null's names what brings it
+ * The route rule's error's first sentence (#1073), from the required check (`RequiredCheck`): the read, the offending
+ * kind, and the writer's line; its fix is the warning's it stands in for (`coreMessage`). A null's names what brings it
  * (`nullCause`), else nothing past the rule.
  */
 export function requiredSentence(
