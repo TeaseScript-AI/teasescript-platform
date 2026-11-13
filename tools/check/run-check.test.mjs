@@ -14,7 +14,7 @@ import {
   spawnTool,
   slowReader,
   waitFor,
-} from "./runner-test-support.mjs";
+} from "../runner-test-support.mjs";
 
 const tool = fileURLToPath(new URL("./run-check.mjs", import.meta.url));
 
@@ -40,8 +40,8 @@ function fixture(t, exits, waits = null) {
         `{ stdio: 'inherit' }); ${idleBounded}`
       : `process.exit(${exits[name] ?? 0});`);
   const scripts = {
-    "check:pretest": "node tools/run-parallel.mjs lint format",
-    build: "node tools/run-parallel.mjs build:player",
+    "check:pretest": "node tools/check/run-parallel.mjs lint format",
+    build: "node tools/check/run-parallel.mjs build:player",
     "build:player": "node build.mjs",
   };
   for (const name of ["lint", "format"]) {
@@ -49,10 +49,10 @@ function fixture(t, exits, waits = null) {
     scripts[name] = `node ${name}.mjs`;
   }
   writeFileSync(join(cwd, "build.mjs"), part("build"));
-  mkdirSync(join(cwd, "tools"));
+  mkdirSync(join(cwd, "tools", "check"), { recursive: true });
   writeFileSync(join(cwd, "tools", "test-output-filter.mjs"), part("suite"));
   writeFileSync(
-    join(cwd, "tools", "run-parallel.mjs"),
+    join(cwd, "tools", "check", "run-parallel.mjs"),
     readFileSync(new URL("./run-parallel.mjs", import.meta.url)),
   );
   writeFileSync(join(cwd, "package.json"), JSON.stringify({ scripts }));
@@ -108,20 +108,20 @@ test("a run that passes, and one whose suite fails, name every part in the last 
 });
 
 test("the checks before the tests are check:pretest's run-parallel steps, named or listed, and another form is refused", () => {
-  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
   // the repository's: listed in a text file, one per line, so that steps added at different places merge (#2440)
   assert.equal(
     pkg.scripts["check:pretest"],
-    "node tools/run-parallel.mjs --list tools/check-pretest-steps.txt",
+    "node tools/check/run-parallel.mjs --list tools/check/check-pretest-steps.txt",
   );
-  const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+  const read = (file) => readFileSync(new URL(`../../${file}`, import.meta.url), "utf8");
   assert.ok(pretestSteps(pkg, read).includes("test:verification"));
   assert.deepEqual(
-    pretestSteps({ scripts: { "check:pretest": "node tools/run-parallel.mjs a b:c" } }),
+    pretestSteps({ scripts: { "check:pretest": "node tools/check/run-parallel.mjs a b:c" } }),
     ["a", "b:c"],
   );
   const scripts = {
-    "check:pretest": "node tools/run-parallel.mjs --list steps.txt",
+    "check:pretest": "node tools/check/run-parallel.mjs --list steps.txt",
     a: "",
     "b:c": "",
   };
@@ -132,10 +132,10 @@ test("the checks before the tests are check:pretest's run-parallel steps, named 
     ["a\nd\nb:c\n", "steps.txt lists what is not an npm script: d"],
   ])
     assert.throws(() => listed(text), { message });
-  for (const script of [undefined, "npm run a && node tools/run-parallel.mjs b", "npm run a"])
+  for (const script of [undefined, "npm run a && node tools/check/run-parallel.mjs b", "npm run a"])
     assert.throws(() => pretestSteps({ scripts: { "check:pretest": script } }), {
       message:
-        "check:pretest is not one `node tools/run-parallel.mjs <npm script>...` or `--list <file>` call",
+        "check:pretest is not one `node tools/check/run-parallel.mjs <npm script>...` or `--list <file>` call",
     });
 });
 
@@ -255,7 +255,7 @@ test(
     for (const [args, waits, last] of [
       [[tool], "suite", "ran: lint, format, build; failed: none; not run: test suite"],
       [
-        ["tools/run-parallel.mjs", "build:player"],
+        ["tools/check/run-parallel.mjs", "build:player"],
         "build",
         "ran: none; failed: none; not run: build:player",
       ],
