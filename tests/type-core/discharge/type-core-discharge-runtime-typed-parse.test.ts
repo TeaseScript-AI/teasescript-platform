@@ -432,11 +432,12 @@ test("a typed parse or load into a written `object` keeps every key and takes ea
 });
 
 test("a known `null` reads as the `null` type, an unknown stays open, and each record keeps its own fields' order, in three layers, in both orders (S7 review r5 B1, N1)", () => {
-  // a written `null` target, at the root and as a list's elements, on both lowerings
+  // a written `null` target, at the root and as a list's elements, on both lowerings: the decision layer only, as the
+  // route takes no written type with a position only `null` fills
   for (const files of ["", ", files: false"])
-    for (const [written, fallback, expected, fitting, said] of [
-      ["null", "null", "null", "null", "null"],
-      ["null[]", "[null]", "list<null>", "[null]", "null"],
+    for (const [written, fallback] of [
+      ["null", "null"],
+      ["null[]", "[null]"],
     ] as const) {
       const source = `let p: ${written} = fromJson(hostValue, default: ${fallback}${files})\nsay ${written === "null" ? "p" : "p[0]"}\nsay "AFTER"\nexit\n`;
       const parse = at(source, `fromJson(hostValue, default: ${fallback}${files})`);
@@ -444,15 +445,12 @@ test("a known `null` reads as the `null` type, an unknown stays open, and each r
         decision(source).checks.some((check) => check.endsWith(`boundary @${parse}`)),
         source,
       );
-      const plan = candidatePlan(source);
-      assert.ok(
-        contentOf(plan).some((entry) => entry.endsWith(`@${parse} ${expected}`)),
-        `${source}: ${JSON.stringify(contentOf(plan))}`,
-      );
-      assert.deepEqual(ran(runWith(plan, fitting)), halted([said, "AFTER"]), source);
-      assert.deepEqual(
-        ran(runWith(plan, written === "null" ? "3" : "[3]")),
-        halted([said, "AFTER"], [`TSW020@${parse}`]),
+      assert.throws(
+        () => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND),
+        (error) =>
+          error instanceof CandidateOutsideSlice &&
+          error.what === "this written type" &&
+          error.site.start === source.indexOf("null"),
         source,
       );
     }
