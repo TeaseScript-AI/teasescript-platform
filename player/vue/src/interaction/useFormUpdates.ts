@@ -1,5 +1,5 @@
 import { computed, shallowRef } from "vue";
-import { applyFormUpdate } from "../../../../src/runtime/actions/form.js";
+import { applyFormUpdate } from "../../../../src/runtime/actions/form/editing.js";
 import type { RuntimeInteractionActionSnapshot } from "../../../../src/runtime/actions/model.js";
 import {
   activePlayerRuntimeInteraction,
