@@ -263,6 +263,80 @@ test("sets add, find, remove and clear members as today's sets do", () => {
   }
 });
 
+/**
+ * Two lists whose keys (46 long, so hashed) differ but share one cyrb53 hash: the second member of a hashed key's bucket
+ * (found by a birthday search over three code units, review round 1 of #2684).
+ */
+const COLLIDING: readonly SerializableRuntimeValue[] = [
+  { kind: "list", items: [`a\u5059\u375aa${"b".repeat(36)}`] },
+  { kind: "list", items: [`a\u5179\u2caa\u6cd1${"b".repeat(36)}`] },
+];
+
+test("members whose long keys share a hash stay apart, as in today's sets", () => {
+  const [first, second] = COLLIDING as [SerializableRuntimeValue, SerializableRuntimeValue];
+  assert.notEqual(valueKey(first), valueKey(second));
+  const canonical = createCapturedSerializableSet([first]);
+  const native = nativeSetOf([fromCanonical(first)]);
+  const steps: Array<readonly [string, () => boolean, () => boolean]> = [
+    [
+      "has second",
+      () => nativeSetHas(native, fromCanonical(second)),
+      () => serializableSetContains(canonical, second),
+    ],
+    [
+      "add second",
+      () => nativeSetAdd(native, fromCanonical(second)),
+      () => addSerializableSetValue(canonical, second),
+    ],
+    [
+      "add first again",
+      () => nativeSetAdd(native, fromCanonical(first)),
+      () => addSerializableSetValue(canonical, first),
+    ],
+    [
+      "add second again",
+      () => nativeSetAdd(native, fromCanonical(second)),
+      () => addSerializableSetValue(canonical, second),
+    ],
+    [
+      "remove first",
+      () => nativeSetRemove(native, fromCanonical(first)),
+      () => removeSerializableSetValue(canonical, first),
+    ],
+    [
+      "has second after",
+      () => nativeSetHas(native, fromCanonical(second)),
+      () => serializableSetContains(canonical, second),
+    ],
+    [
+      "has first after",
+      () => nativeSetHas(native, fromCanonical(first)),
+      () => serializableSetContains(canonical, first),
+    ],
+    [
+      "remove first again",
+      () => nativeSetRemove(native, fromCanonical(first)),
+      () => removeSerializableSetValue(canonical, first),
+    ],
+  ];
+  for (const [step, mine, today] of steps) {
+    assert.equal(mine(), today(), step);
+    assert.equal(json(toCanonical(native)), json(canonical), step);
+  }
+  const both: SerializableRuntimeValue = { kind: "set", items: [first, second] };
+  const restored = fromCanonical(both);
+  assert.ok(restored instanceof NativeSet);
+  assert.ok(nativeSetRemove(restored, fromCanonical(second)));
+  assert.equal(json(toCanonical(restored)), json({ kind: "set", items: [first] }));
+  assert.equal(
+    nativeEquals(
+      fromCanonical({ kind: "set", items: [first] }),
+      fromCanonical({ kind: "set", items: [second] }),
+    ),
+    false,
+  );
+});
+
 test("values 10,000 deep convert, copy, compare and key without native recursion", () => {
   const kinds = ["list", "set", "object", "dict"] as const;
   let value: SerializableRuntimeValue = 1;

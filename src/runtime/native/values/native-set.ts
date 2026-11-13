@@ -64,8 +64,22 @@ export function nativeSetRemove(set: NativeSet, value: NativeValue): boolean {
     if (bucket!.length === 1) known.records.delete(key);
     else bucket!.splice(at, 1);
   }
-  set.items.splice(set.items.indexOf(member), 1);
+  const position = set.items.indexOf(member);
+  // An indexed member is always among the items; a primitive `indexOf` cannot find (`NaN`) is no valid value.
+  if (position === -1) throw new Error("A set's index holds a member its items do not.");
+  set.items.splice(position, 1);
   return true;
+}
+
+/**
+ * Appends a member to a set whose index is not built yet, such as one a conversion or a copy is filling: the caller
+ * knows the members unique by `==`, as the members of a valid set are. A set whose index exists takes members only
+ * through `nativeSetAdd`.
+ */
+export function appendUniqueMember(set: NativeSet, member: NativeValue): void {
+  if (set.membership !== null)
+    throw new Error("A set with an index takes members through nativeSetAdd.");
+  set.items.push(member);
 }
 
 /** Removes every member. */
