@@ -34,6 +34,7 @@ import { openUrlTab } from "../../../url-tab.js";
 import type { InputSectionHost } from "../session/runtime-input";
 import { composerDescriptor, descriptorKey, useComposerState } from "./useComposerState";
 import {
+  QUESTION_GONE,
   useAnswerSubmission,
   type PendingAnswer,
   type SessionTerminal,
@@ -693,7 +694,7 @@ async function submitImage(files: readonly File[], target: ImageRequestIdentity)
   const { images, capture } = props;
   if (!request || !images || !capture || submission.pending.value || readingImage.value) return;
   if (!presents(target)) {
-    submission.showNotice("This interaction is no longer available.");
+    submission.showNotice(QUESTION_GONE);
     return;
   }
   if (files.length !== 1) {

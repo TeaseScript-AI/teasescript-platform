@@ -202,7 +202,7 @@ export function useSessionMedia({
     const checked = await checkImageFile(file, filters, decodeImage());
     if (!checked.ok) return { message: checked.message };
     // An unmounted Player keeps no media.
-    if (isDisposed()) return { message: "This interaction is no longer available." };
+    if (isDisposed()) return { message: "The question was gone before your answer arrived." };
     const stored = capturedMedia.add("image", checked.data, {
       width: checked.width,
       height: checked.height,
