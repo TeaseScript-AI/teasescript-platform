@@ -76,7 +76,7 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a node's path in the literal it is in, one per cell, as admission keeps (charged)",
   ],
-  "check-result/check-result.ts coreFacts spread": [
+  "check-result/check-result.ts expressionTypes spread": [
     1,
     "a lookup of a place's element levels, not kept",
   ],
