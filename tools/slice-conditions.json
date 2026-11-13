@@ -877,7 +877,7 @@
     "id": "prefill-text-part",
     "scope": "askPrefillAdmitted",
     "expression": "part.kind === \"stringText\"",
-    "mutant": "(part.kind === \"stringText\" && false)",
+    "mutant": "(part.kind === \"stringText\" && part.value === \"\")",
     "expected": "restrict",
     "witness": "let r = askText(\"q\", prefill: \"a\")"
   },
@@ -894,7 +894,7 @@
     "id": "prefill-number-kind",
     "scope": "askPrefillAdmitted",
     "expression": "ask.interactionKind === \"number\"",
-    "mutant": "ask.interactionKind !== \"number\"",
+    "mutant": "[\"number\", \"text\"].includes(ask.interactionKind)",
     "expected": "kill",
     "witness": "askText prefill number"
   },
