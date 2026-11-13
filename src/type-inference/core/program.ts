@@ -11,6 +11,7 @@ import type {
   SourceSite,
 } from "../graph.js";
 import { ledgerFor, NESTING_LIMIT, type WorkLedger } from "./budget.js";
+import { identityView, type IdentityView } from "./identity-view.js";
 import { dominators, type Dominators } from "./flow-graph/dominators.js";
 import {
   buildFlowGraph,
@@ -199,7 +200,9 @@ export class CoreProgram {
   readonly places: readonly Place[];
   readonly constraints: readonly Constraint[];
   readonly syntaxNodes: number;
-  /** The request's files and host values, as the candidate slice's syntax reads them (`slice-syntax.ts`). */
+  /** The analysis's view of the request: each call of an identity function read as its argument (#2493). */
+  readonly identity: IdentityView;
+  /** The view's files and host values, as the candidate slice's syntax reads them (`slice-syntax.ts`). */
   readonly files: readonly CoreFile[];
   readonly globals: ReadonlySet<string>;
   /** The request's built-in names: none a fix may declare (`Answers.keptName`). */
@@ -233,13 +236,16 @@ export class CoreProgram {
   readonly #sources: readonly string[];
 
   /** The input's graphs, built uncharged; `index` charges them and indexes the rest, so a stop there keeps them. */
-  public constructor(request: CoreAnalysisRequest) {
-    const syntax = measureSyntax(request.files.map((file) => file.program));
+  public constructor(asked: CoreAnalysisRequest) {
+    this.identity = identityView(asked);
+    // (the allowance and the nesting are the source's, as its author wrote it)
+    const syntax = measureSyntax(this.identity.source.files.map((file) => file.program));
     this.syntaxNodes = syntax.nodes;
     this.nesting = syntax.nesting;
     this.deep = [...syntax.deep].sort((a, b) => a.file - b.file || a.start - b.start);
     this.work = ledgerFor(this.syntaxNodes);
     this.scope = { work: this.work, ingress: new IngressGraph() };
+    const request = this.identity.request;
     this.#sources = request.files.map((file) => file.source);
     this.files = request.files;
     this.globals = new Set(request.options.globals ?? []);
@@ -260,6 +266,7 @@ export class CoreProgram {
     if (this.#indexed) return;
     this.hasOf.clear();
     this.work.charge("syntaxNodes", this.syntaxNodes);
+    if (this.identity.steps > 0) this.work.charge("identitySteps", this.identity.steps);
     // the graph and its dominators are setup work too: their nodes, their edges, and a step per node and edge of the
     // dominator search
     const edges = this.flow.nodes.reduce((sum, node) => sum + node.successors.length, 0);

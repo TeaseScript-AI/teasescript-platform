@@ -12,6 +12,21 @@ warning and a check against `integer`. In both, `copy` (or `copy.n`) is a copy o
 written `string | integer`, so the copy holds that type (the owner's decision of 2026-11-12, V30 §12) and the store of
 `2` fits it. No other record changed.
 
+## A guarded argument through an identity function (#2493)
+
+The #2493 builder (Opus) edited 11 records of `cells.jsonl` by hand (the lead's R34): each passes a value narrowed by a
+type test through a function that returns its parameter, and now expects the analysis's record, `valid` with no
+diagnostic and no check, in place of a run-time-check warning and its check. The analysis reads such a call as its
+argument in parentheses (accepted record r4.452), so the guarded mark travels as through parentheses
+([section-3-2-guarded](../../../docs/specifications/type-inference-accepted-record/contract.md#section-3-2-guarded)).
+V30 §17: "A returned value that depends on a parameter without a type follows each call". Each new record equals, in
+four modes, the record of the same source with the helper's calls written as text parentheses, which the set expects
+for a direct guarded read (`cp9-cells/r46/guard/branch-is/guarded`). The records:
+`cp9-cells/r46/guard/{result-identity,continuation-composed-transfers}/guarded`;
+`cp9-cells/r46/m3/astra-m3/{guard-result,guard-call/identity,guard-root-copy}`; `cp9-cells/r46/m3/guard-root-copy`;
+`cp9-cells/r46/m3/sol-m3/{guard-call-24,guard-runtime}`; and
+`cp9-cells/r46/m3/sol-m3b/{guard-return-12,guard-return-13,guard-result-member}`. No other record changed.
+
 ## A loop's write that a break follows (#2025)
 
 The S10 builder (Opus) corrected one record of `cells.jsonl` by hand: `cp9-cells/3b/loop/break/changed` expects

@@ -33,6 +33,8 @@ export function allowanceFor(syntaxNodes: number): number {
 export type WorkCounter =
   // the program's size, charged once as setup
   | "syntaxNodes"
+  // the view of identity calls (#2493, `identity-view.ts`): each value its walks visit, none without an identity function
+  | "identitySteps"
   // the graph: nodes, edges, regions, the call graph, liveness and returnability
   | "graphNodes"
   | "graphEdges"

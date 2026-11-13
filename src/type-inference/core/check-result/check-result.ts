@@ -342,10 +342,14 @@ export function asked<T>(answers: Answers, ask: (answers: Answers) => T): T {
 /**
  * Test-only: the core's result for a request, with its checks that owe the runtime nothing, as the compiler reads it
  * (`checkedOf`, `asked`), also for a program outside the candidate's slice: a typed parse the slice does not follow
- * there reads its JSON without its expected type.
+ * there reads its JSON without its expected type. `request` is not read: the answers keep the identity view the analysis
+ * read (#2493); it stays for the 23 calls of this test-only reader, which pass the request they analysed.
  */
 export function checkedResult(answers: Answers, request: CoreAnalysisRequest): CoreResult {
-  const index = new SliceIndex(request.files.map((file) => file.program));
+  void request;
+  // (the analysis read the request through its identity view, which its answers keep)
+  const viewed = answers.identity.request;
+  const index = new SliceIndex(viewed.files.map((file) => file.program));
   return asked(answers, (answers) => {
     let contracts: Contracts | null = null;
     const expected = (call: CallExpression): TypePlan | undefined => {
@@ -624,16 +628,20 @@ function knownConversionError(
 
 /**
  * Test-only: each checked store's contract result (`ContractDescriptors`), by the store's site (`file:start:end`), as
- * the compiler's checks read them (`asked`).
+ * the compiler's checks read them (`asked`). `request` is not read: the answers keep the identity view the analysis read
+ * (#2493); it stays for the 10 calls of this test-only reader, which pass the request they analysed.
  */
 export function storeContracts(
   answers: Answers,
   request: CoreAnalysisRequest,
 ): ReadonlyMap<string, ContractResult> {
-  const index = new SliceIndex(request.files.map((file) => file.program));
+  void request;
+  // (the analysis read the request through its identity view, which its answers keep)
+  const viewed = answers.identity.request;
+  const index = new SliceIndex(viewed.files.map((file) => file.program));
   return asked(answers, (answers) => {
     const out = new Map<string, ContractResult>();
-    for (const [store, result] of runtimeChecks(answers, index, request).contracts)
+    for (const [store, result] of runtimeChecks(answers, index, viewed).contracts)
       out.set(`${index.fileOf(store)}:${store.span.start.offset}:${store.span.end.offset}`, result);
     return out;
   });

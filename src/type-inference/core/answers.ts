@@ -12,6 +12,7 @@ import {
   splitPath,
   type BudgetLimit,
   type WorkCounter,
+  type WorkLedger,
 } from "./budget.js";
 import {
   Consumers,
@@ -106,6 +107,7 @@ import {
 import { admittedLevel } from "./admission/admitted.js";
 import { stopDiagnostics } from "./stop-diagnostics.js";
 import { Retained, retainedModule } from "./retained/retained.js";
+import type { IdentityView } from "./identity-view.js";
 
 // (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
 export { closedType };
@@ -547,6 +549,10 @@ export interface ValueAnswer {
 }
 
 export interface Answers {
+  /** The view of the request the analysis read (`identity-view.ts`): its files are the ones a question's nodes are of. */
+  readonly identity: IdentityView;
+  /** The analysis's ledger, which the questions after it spend too (`asked`): the view's result translation. */
+  readonly work: WorkLedger;
   readonly outcome: CoreOutcome;
   /** One per cell outcome: an error, or a warning with its one obligation (§4). */
   readonly diagnostics: readonly CoreDiagnostic[];
@@ -1214,6 +1220,8 @@ const KEPT_NAMES = retainedModule<CorePass["program"], Map<string, string>>(
 );
 
 class CoreAnswers implements Answers {
+  readonly identity: IdentityView;
+  readonly work: WorkLedger;
   readonly outcome: CoreOutcome;
   readonly diagnostics: readonly CoreDiagnostic[];
   readonly checks: readonly Obligation[];
@@ -1254,6 +1262,8 @@ class CoreAnswers implements Answers {
     // (a stop, not statements nested too deep after an analysis that ran to its end: its answers stand)
     this.#stopped = pass.program.work.stopped !== null;
     const program = pass.program;
+    this.identity = program.identity;
+    this.work = program.work;
     this.graph = program.flow;
     this.dominators = program.dom;
     this.initializers = initializersOf(program);
