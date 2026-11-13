@@ -199,6 +199,36 @@ function spineOf(
 /** The spines whose source decides their destination by its own literal's kinds: integer lists alone keep `form`. */
 const LITERAL_DECIDED: ReadonlySet<Spine> = new Set(["earlier literal", "inferred copy"]);
 
+const controls: readonly (readonly [
+  string,
+  readonly string[],
+  Form,
+  readonly SerializableRuntimeValue[],
+])[] = [
+  [
+    "a later integer[] after a first number[]",
+    [
+      "let first: number[] = [1.5]",
+      "let later: integer[] = [1]",
+      "let box = {slot: first}",
+      "box.slot = later",
+    ],
+    listOf(name("number"), 1),
+    [wrap("list", 1.5), wrap("list", 1), wrap("list", "bad"), "bad"],
+  ],
+  [
+    "a later open list after a first integer[]",
+    [
+      "let first: integer[] = [1]",
+      "let later: list = []",
+      "let box = {slot: first}",
+      "box.slot = later",
+    ],
+    listOf(integer, 1),
+    [wrap("list", 1), wrap("list", "bad"), wrap("list", 1.5), "bad"],
+  ],
+];
+
 /**
  * #1440's family: a store at a destination whose decision stops, at or below it, the destination's
  * complete type proved by the source apart from that decision (`certified`: its written type, or a read of a written
@@ -283,35 +313,6 @@ export function certificateFamily(few = false): EnclosingCase[] {
       }
     }
   // the wrong-choice controls: the first copy decides, a later one never does
-  const controls: readonly (readonly [
-    string,
-    readonly string[],
-    Form,
-    readonly SerializableRuntimeValue[],
-  ])[] = [
-    [
-      "a later integer[] after a first number[]",
-      [
-        "let first: number[] = [1.5]",
-        "let later: integer[] = [1]",
-        "let box = {slot: first}",
-        "box.slot = later",
-      ],
-      listOf(name("number"), 1),
-      [wrap("list", 1.5), wrap("list", 1), wrap("list", "bad"), "bad"],
-    ],
-    [
-      "a later open list after a first integer[]",
-      [
-        "let first: integer[] = [1]",
-        "let later: list = []",
-        "let box = {slot: first}",
-        "box.slot = later",
-      ],
-      listOf(integer, 1),
-      [wrap("list", 1), wrap("list", "bad"), wrap("list", 1.5), "bad"],
-    ],
-  ];
   for (const [title, lines, form, values] of controls)
     add(title, lines, "box.slot = hostValue", "hostValue", {
       into: { binding: "box", path: [propertyStep("slot")] },
