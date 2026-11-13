@@ -26,6 +26,9 @@ const LITERALS: Readonly<Partial<Record<ValueKind, string>>> = {
   range: "1..=2",
   list: "[1]",
   object: "{v: 1}",
+  duration: "2 s",
+  calendarDuration: "1 calendar month",
+  angle: "90 deg",
 };
 
 /**
@@ -182,12 +185,12 @@ const SAY_REFUSED: ReadonlySet<string> = new Set([
   "time",
   "datetime",
   "absoluteDateTime",
+  "duration",
+  "calendarDuration",
+  "angle",
 ]);
 
-/**
- * A fitting value of each declared position: the command with it is a sample's fitting twin (the lead's R12). A duration
- * literal is outside the slice, so a twin with one is compared on today's checker.
- */
+/** A fitting value of each declared position: the command with it is a sample's fitting twin (the lead's R12). */
 const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<string, string>>>>> = {
   showImageStatement: { image: '"a.png"' },
   openUrlStatement: { url: '"https://example.com"', buttonText: '"Go"', alwaysButton: "true" },
@@ -267,6 +270,39 @@ export const DECLARED_REFUSALS: readonly {
     // (`get` on a receiver of unknown kind, which the route refuses after the analysis)
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
+  },
+  // (a duration literal the plan does not store, and a unit's or an angle's amount of no number: today TSV043)
+  {
+    row: "durationLiteral",
+    position: "a calendar amount of no whole months",
+    refused: "let c = 1.5 calendar months",
+    admitted: "let c = 2 calendar months",
+    gate: "the durationLiteral row (src/type-inference/core/slice-syntax.ts)",
+    text: "this duration literal",
+  },
+  {
+    row: "unitExpression",
+    position: "the amount, text",
+    refused: 'let t = "a"\nlet d = t s',
+    admitted: "let t = 2\nlet d = t s",
+    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+    text: "this unit expression",
+  },
+  {
+    row: "unitExpression",
+    position: "the amount, a known fraction of calendar months",
+    refused: "let n = 1.5\nlet c = n calendar months",
+    admitted: "let n = 1\nlet c = n calendar months",
+    gate: "coreCheckResult (src/type-inference/core/check-result/check-result.ts)",
+    text: "this unit expression",
+  },
+  {
+    row: "angleExpression",
+    position: "the amount, a known overflow",
+    refused: "let n = 1e308\nlet a = n rad",
+    admitted: "let n = 1\nlet a = n rad",
+    gate: "coreCheckResult (src/type-inference/core/check-result/check-result.ts)",
+    text: "this angle expression",
   },
   // (a `say`'s value of a kind it shows only by S9b's rules, written in place)
   ...samples()

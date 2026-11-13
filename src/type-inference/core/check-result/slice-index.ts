@@ -13,6 +13,8 @@ import type {
   BinaryExpression,
   InteractionExpression,
   Program,
+  UnitExpression,
+  AngleExpression,
 } from "../../../ast.js";
 import { type SourceSpan } from "../../../source.js";
 import {
@@ -81,6 +83,8 @@ export class SliceIndex {
   readonly shown: Expression[] = [];
   /** The asks, in source order. */
   readonly asks: InteractionExpression[] = [];
+  /** The unit and angle expressions, `n s` and `n deg`, in source order. */
+  readonly units: (UnitExpression | AngleExpression)[] = [];
   /** The `otherwise`, call or load that each fallback or `default:` belongs to, by its operand and what it holds. */
   readonly #fallbackOf = new Map<Expression, BinaryExpression | CallExpression | LoadExpression>();
   /** The property store whose target's receiver each expression is. */
@@ -208,6 +212,16 @@ export class SliceIndex {
               pending.push({ expression: method.object, store, whole: false, parent: expression });
             break;
           }
+          case "unitExpression":
+          case "angleExpression":
+            this.units.push(expression);
+            pending.push({
+              expression: expression.operand,
+              store,
+              whole: false,
+              parent: expression,
+            });
+            break;
           case "interactionExpression": {
             this.asks.push(expression);
             // (a question's presentation options are no properties of the script's values)

@@ -17,7 +17,6 @@ import {
   diagnosed,
   DOMAIN,
   type DifferentialRecord,
-  type Entry,
   errorsOf,
   outcome,
   records,
@@ -102,10 +101,6 @@ function failureOf(run: string): [string, number, number] | null {
   const match = /^failed (\w+)@(\d+):(\d+)$/u.exec(run);
   return match === null ? null : [match[1]!, Number(match[2]), Number(match[3])];
 }
-
-/** The R5 ledger's inherited warnings the route gives where today's checker gives none, and the other way round. */
-const ROUTE_ONLY: readonly string[] = ["TSV010", "TSV011", "TSV012", "TSV041", "TSV043"];
-const TODAY_ONLY: readonly string[] = ["TSV046"];
 
 /** Where an ask's template (`let r = <the ask>`) holds its ask. */
 const ASK_START = "let r = ".length;
@@ -200,40 +195,21 @@ function judge(
     // the declared difference: the route answers as for the fitting twin, but that a reaching run fails at the command
     const twinRecord = found.get(inContext(sample, twinCommand(sample), context))!;
     const twinMode = twinRecord.candidate.modes[index];
-    // (today's twin only where the route refuses the twin at its duration literal, which the slice does not hold)
-    if (!twinMode?.plan && twinMode?.outside !== "this duration literal") {
+    if (!twinMode?.plan) {
       failures.push(
         `${at}: its twin ${twinMode?.outside ?? twinMode?.threw ?? "publishes no plan"}`,
       );
       return;
     }
-    const reference: Entry = twinMode?.plan ? twinMode : twinRecord.checker;
     const start = source.indexOf(sample.command, sample.prelude.length);
     const value = start + OPERAND_TEMPLATES[sample.row]![sample.operand]![0]!.indexOf("hostValue");
     const shift = twinCommand(sample).length - sample.command.length;
     const asTwin = (offset: number): number | null =>
       offset <= value ? offset : offset >= value + sample.value.length ? offset + shift : null;
-    // (where the twin is today's, the R5 ledger's inherited classes stand apart: the warnings only the route gives,
-    // and those only today gives, among them TSV065 after an exiting `for`, #1623, R13)
-    const todays = reference === twinRecord.checker;
-    const expected = diagnosed(reference)
-      .filter(
-        (diagnostic) =>
-          !todays ||
-          !(
-            TODAY_ONLY.some((code) => diagnostic.startsWith(`warning ${code} `)) ||
-            (context === "after an exiting for" && diagnostic.startsWith("warning TSV065 "))
-          ),
-      )
-      .sort();
-    const answered = diagnosed(mode, asTwin)
-      .filter(
-        (diagnostic) =>
-          !todays || !ROUTE_ONLY.some((code) => diagnostic.startsWith(`warning ${code} `)),
-      )
-      .sort();
+    const expected = diagnosed(twinMode).sort();
+    const answered = diagnosed(mode, asTwin).sort();
     const runs = (mode.runs ?? []).map(outcome);
-    const twinRuns = (reference.runs ?? []).map(outcome);
+    const twinRuns = (twinMode.runs ?? []).map(outcome);
     const aloneRuns = (aloneMode?.runs ?? []).map(outcome);
     const fails = reached(sample, start);
     // each run ends in one of three ways, in the runtime's order (R18): it does not reach the command, as the twin's; an

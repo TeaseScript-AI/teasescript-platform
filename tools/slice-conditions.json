@@ -1062,5 +1062,21 @@
     "mutant": "false",
     "expected": "kill",
     "witness": "let x: null"
+  },
+  {
+    "id": "duration-literal-value",
+    "scope": "storedLiteral",
+    "expression": "typeof value === \"string\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let c = 1.5 calendar months"
+  },
+  {
+    "id": "duration-literal-kind",
+    "scope": "storedLiteral",
+    "expression": "value.kind === \"duration\"",
+    "mutant": "value.kind !== \"duration\"",
+    "expected": "kill",
+    "witness": "let d = 2 s"
   }
 ]
