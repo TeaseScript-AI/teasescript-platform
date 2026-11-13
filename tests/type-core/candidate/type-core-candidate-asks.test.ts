@@ -242,7 +242,7 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       'let m: string? = hostValue\nif m != null {\n  exit\n}\nlet r = askNumber("q", prefill: [m].get(0, default: null))\nexit\n',
       "[m].get(0, default: null)",
     ],
-  ])
+  ] as const)
     refusedAsToday(source, "TSV039", `this prefill: ${prefill}`);
   // a written type only `null` fills, wherever the value goes from it: the slice takes no such type (the lead's R44)
   for (const [written, at, prefill] of [
@@ -253,7 +253,7 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
     ["null", "null", "[m].get(0, default: null)"],
     ["null?", "null?", "m otherwise m"],
     ["null[]", "null", "[m[0]][0]"],
-  ])
+  ] as const)
     refusedAsToday(
       `let m: ${written} = hostValue\nlet r = askText("q", prefill: ${prefill})\nexit\n`,
       "TSV039",
