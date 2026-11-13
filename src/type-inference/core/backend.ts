@@ -355,8 +355,8 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   // a variable without a written type whose lists nest deeper than the facts follow
   for (const statement of index.lets)
     if (statement.typeAnnotation === null) {
-      const place = answers.at(nodeOf(answers, index, statement))?.place;
-      if (place === null || place === undefined) continue;
+      const place = answers.storedPlace(nodeOf(answers, index, statement));
+      if (place === null) continue;
       for (let path: string[] = [...place.path]; ; path = [...path, "element"]) {
         // (as the facts read it, `admittedType`: the admitted kinds where decided, else the contract's)
         const answer = answers.place(place.id, path);

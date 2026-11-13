@@ -121,7 +121,7 @@ export class Contracts {
     const declaration = declarationOf(this.answers, this.index, this.lets, store);
     const value = store.kind === "letStatement" ? store.initializer : store.value;
     const whole = store.kind === "letStatement" || store.target.kind === "identifier";
-    const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
+    const place = this.answers.storedPlace(nodeOf(this.answers, this.index, store));
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
     this.destination(store);
     const settled =
@@ -181,7 +181,7 @@ export class Contracts {
 
   /** Whether the receiving completion completed the contract at a store's destination (`#completed`). */
   public completes(store: Store): boolean {
-    const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
+    const place = this.answers.storedPlace(nodeOf(this.answers, this.index, store));
     return place !== null && this.answers.received(place.id, place.path) !== null;
   }
 
@@ -450,7 +450,7 @@ export class Contracts {
           store === undefined ||
           (store.kind === "letStatement" ? store.initializer : store.value) !== node
             ? null
-            : (this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null);
+            : (this.answers.storedPlace(nodeOf(this.answers, this.index, store)));
         base = place === null ? null : { id: place.id, path: place.path };
         this.#landings.set(node, base);
         break;

@@ -263,14 +263,13 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   globalStatement: REFUSED,
   assignmentStatement: {
     row: "modelled",
+    // (`=`, `+=` and `-=` into a variable or a property; an element target is refused)
     visit: (node) =>
-      node.operator !== "="
-        ? refuse(node.span, "this assignment")
-        : node.target.kind === "identifier"
-          ? walk([node.target, node.value])
-          : node.target.kind === "propertyAccessExpression"
-            ? walk([node.target.object, node.value])
-            : refuse(node.span, "this assignment"),
+      node.target.kind === "identifier"
+        ? walk([node.target, node.value])
+        : node.target.kind === "propertyAccessExpression"
+          ? walk([node.target.object, node.value])
+          : refuse(node.span, "this assignment"),
   },
   ifStatement: modelled((node) => [node.condition, node.thenBlock, node.elseBlock]),
   switchStatement: REFUSED,

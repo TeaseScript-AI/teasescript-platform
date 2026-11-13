@@ -637,8 +637,10 @@ export interface Answers {
   apart<T>(callback: () => T): T;
   at(node: FlowNode): OccurrenceAnswer | null;
   /**
-   * The place and path a statement that stores stores into, as `at` reads them there (its node's first live store, else
-   * its first), with no value read: `null` for a node that stores nothing.
+   * The place a store writes, and the path below the place's root: the place of the store definition its statement's
+   * node makes (the node's first live one, else its first, A6), read with no value; `null` for a node that stores
+   * nothing. One read for every store: a compound assignment's node is answered by `at` with its operation's value,
+   * never its place.
    */
   storedPlace(node: FlowNode): { readonly id: PlaceId; readonly path: readonly string[] } | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
@@ -1666,7 +1668,7 @@ class CoreAnswers implements Answers {
     };
   }
 
-  /** The store a statement makes, by its node: its first live store definition there, else its first rejected one (A6). */
+  /** The place a store writes (`Answers.storedPlace`). */
   public storedPlace(
     node: FlowNode,
   ): { readonly id: PlaceId; readonly path: readonly string[] } | null {

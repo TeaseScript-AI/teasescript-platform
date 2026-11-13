@@ -137,7 +137,33 @@ export function allStatements(statements: readonly Statement[]): Statement[] {
   });
 }
 
-/** A store statement's target name and value, or `null` for any other statement. */
+/** Each compound assignment's operation (`compoundValue`), made once, so every reader holds one node. */
+const OPERATIONS = new WeakMap<Statement, Expression>();
+
+/**
+ * The value a compound assignment stores, `x += v` as `x + v`: its target read, then its value, at the statement's
+ * span, where the runtime checks the store.
+ */
+function compoundValue(statement: Extract<Statement, { kind: "assignmentStatement" }>): Expression {
+  let operation = OPERATIONS.get(statement);
+  if (operation === undefined) {
+    operation = {
+      kind: "binaryExpression",
+      operator: statement.operator === "-=" ? "-" : "+",
+      left: statement.target,
+      right: statement.value,
+      operatorSpan: statement.span,
+      span: statement.span,
+    };
+    OPERATIONS.set(statement, operation);
+  }
+  return operation;
+}
+
+/**
+ * A store statement's target name and the value it stores (a compound assignment's operation, `compoundValue`), or
+ * `null` for any other statement.
+ */
 export function storeOf(
   statement: Statement,
 ): { readonly name: string; readonly value: Expression } | null {
@@ -145,10 +171,12 @@ export function storeOf(
     return { name: statement.name.name, value: statement.initializer };
   if (
     statement.kind === "assignmentStatement" &&
-    statement.operator === "=" &&
     (statement.target.kind === "identifier" || statement.target.kind === "propertyAccessExpression")
   )
-    return { name: targetName(statement.target), value: statement.value };
+    return {
+      name: targetName(statement.target),
+      value: statement.operator === "=" ? statement.value : compoundValue(statement),
+    };
   return null;
 }
 

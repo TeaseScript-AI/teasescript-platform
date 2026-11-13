@@ -67,7 +67,7 @@ function pushStatements(pending: Entry[], list: readonly Statement[]): void {
 export class SliceIndex {
   readonly lets: LetStatement[] = [];
   readonly statements: Statement[] = [];
-  /** Every expression the analysis answers: all but an assignment's target. */
+  /** Every expression the analysis answers: all but an assignment's target, which a compound one's variable is. */
   readonly expressions: Expression[] = [];
   readonly lists: ListLiteral[] = [];
   /** The reads of variables and host values. */
@@ -266,6 +266,9 @@ export class SliceIndex {
           for (const held of operands(statement.target.object))
             this.#storeOfReceiver.set(held, statement);
           pending.push({ expression: statement.target.object, store: null, whole: false });
+        } else if (statement.target.kind === "identifier" && statement.operator !== "=") {
+          // a compound assignment reads its variable before its value, as the flow graph does
+          pending.push({ expression: statement.target, store: null, whole: false });
         } else if (statement.target.kind === "indexExpression") {
           // an element store reads its receiver and its index
           pending.push({ expression: statement.target.index, store: null, whole: false });
@@ -468,13 +471,13 @@ export function nodeOf(
 export function declarations(answers: Answers, index: SliceIndex): Map<PlaceId, LetStatement> {
   const found = new Map<PlaceId, LetStatement>();
   for (const statement of index.lets) {
-    const place = answers.at(nodeOf(answers, index, statement))?.place;
-    if (place !== null && place !== undefined) found.set(place.id, statement);
+    const place = answers.storedPlace(nodeOf(answers, index, statement));
+    if (place !== null) found.set(place.id, statement);
   }
   return found;
 }
 
-/** The variable a store writes: its declaration, through the place the analysis reads at the store. */
+/** The variable a store writes: its declaration, through the place the store writes (`Answers.storedPlace`). */
 export function declarationOf(
   answers: Answers,
   index: SliceIndex,
@@ -482,8 +485,8 @@ export function declarationOf(
   store: Store,
 ): LetStatement {
   if (store.kind === "letStatement") return store;
-  const place = answers.at(nodeOf(answers, index, store))?.place;
-  const declaration = place === null || place === undefined ? undefined : lets.get(place.id);
+  const place = answers.storedPlace(nodeOf(answers, index, store));
+  const declaration = place === null ? undefined : lets.get(place.id);
   if (declaration === undefined)
     throw new Error("An assignment of the slice stores into no variable.");
   return declaration;

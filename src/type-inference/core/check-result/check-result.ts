@@ -832,7 +832,7 @@ export function coreFacts(
     a.site.file - b.site.file || a.site.start - b.site.start || a.site.end - b.site.end;
   const bindings = index.lets
     .map((statement) => {
-      const place = answers.at(nodeOf(answers, index, statement))?.place ?? null;
+      const place = answers.storedPlace(nodeOf(answers, index, statement));
       // a binding's type: its written type, else its admitted type (every store into it is checked against it)
       const type =
         statement.typeAnnotation !== null
