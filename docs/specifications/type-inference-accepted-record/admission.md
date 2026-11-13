@@ -243,3 +243,38 @@ descendant of an open incoming object as a copy-boundary decision discharged by 
 copies from a common origin, and constrained descendants of open incoming objects.
 
 **Source.** The lead's rulings on Sol's copy-decider family design for #1745, #1751, #1752, #1746 and #1749, 2026-11-05.
+
+### r4-453
+
+**At a command operand or a built-in field, an `unknown` is admitted only by a listed reason.**
+
+**Rule.** At a command operand, an `unknown` is admitted only when it is external data the gate lists: the host global
+itself, or a direct read of a place whose type is undecided. At a built-in field, each item of the value is a kind the
+field's row takes, or an `unknown` of an external origin. Either is admitted beside the row's cited runtime check. Every
+other `unknown`, a stop's among them, is refused at that position. The gate names the reasons it admits, so a reason the
+analysis gains later is refused until it is decided.
+
+**Reason.** A gate written as the reasons it refuses would admit, unchecked, every reason the analysis gains later.
+Admitting other unknowns would need a reader of what an item's ingresses stored, which is its own item; what this
+refuses stays refused if that reader comes. Its price, sources where the legacy checker knows no more but the route
+declines (`openUrl([hostValue][0])`), was measured, not estimated.
+
+**Source.** The lead's rulings R32 and R33 on reach step 1 (#2581, round 1) and R10 to R12 on reach step 2 (#2646),
+2026-11-13.
+
+### r4-454
+
+**A run that reaches a command with an admitted operand ends in one of three ways.**
+
+**Rule.** In the order the runtime works, a run either does not reach the command, and ends as the same source with a
+fitting operand does; or an operand's evaluation fails, and the run ends as that operand alone does (`let v = <operand>`
+there), with the same code and site; or every operand evaluates, and the command refuses a value it does not take, with
+its position's code. For an ask the third way reads: no field or button opens and the run does not wait; the question
+may already have been said, by its own instruction before the request.
+
+**Reason.** A claim about the value alone missed an operand whose own evaluation fails before the command
+(`openUrl([1][4])`: the legacy checker's TSV043, while the route publishes and the run fails at the index); stating the
+claim by what a run does closes it. The runtime says an ask's question before its request for every value the checker
+leaves to run time.
+
+**Source.** The lead's rulings R18 (reach step 1a, round 4) and R38 on reach step 1, 2026-11-13.
