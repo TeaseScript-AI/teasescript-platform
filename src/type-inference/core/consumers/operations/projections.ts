@@ -26,14 +26,14 @@ import { consume } from "./operands.js";
 import { memberChecks } from "./receivers.js";
 import { obligation, propertiesOf, warning } from "../reports/warnings.js";
 
-// A projection's consumers: a `for` loop's iterable (C13), an element selection (C6), a member access.
+// A projection's consumers: a `for` loop's iterable, an element selection, a member access.
 
-/** What a `for` loop goes through (C13): a list, set, dict or range; a dict with a key and a value. */
+/** What a `for` loop goes through: a list, set, dict or range; a dict with a key and a value. */
 const ITERABLE = ["list", "set", "dict", "range"] as const;
 
 const DICT = ["dict"] as const;
 
-/** A projection: a `for` loop's iterable (C13), an element selection (C6), a member read (C5a–c, F11, F19a). */
+/** A projection: a `for` loop's iterable, an element selection, a member read and its receiver's member checks. */
 export function projection(
   walk: Consumers,
   c: Extract<Constraint, { kind: "project" }>,
@@ -41,7 +41,7 @@ export function projection(
 ): void {
   const { contract } = walk.pass;
   if (c.step === "iteration" || c.step === "entry") {
-    // C13: an operand of the loop, at the iterable, against the domain it tests, which the runtime's
+    // an operand of the loop, at the iterable, against the domain it tests, which the runtime's
     // own check of the loop's source applies
     const domain = c.step === "entry" ? DICT : ITERABLE;
     consume(
@@ -57,13 +57,13 @@ export function projection(
     return;
   }
   const property = typeof c.step === "object" ? c.step.property : c.step;
-  // an index step (`xs[i]`) is no object's member; a property named `index` is (Astra B1)
+  // an index step (`xs[i]`) is no object's member; a property named `index` is
   const indexStep = c.step === "index";
   if (!indexStep && typeof c.step !== "object") return;
   const receiverText = walk.pass.program.textAt(ownSpan(walk, c.owner, c.site));
   const member = indexStep ? "[i]" : `.${propertyName(property)}`;
   if (typeof c.step === "object") defaultNull(walk, c.owner, node, c.site, member, "read");
-  // §3.3: every receiver kind has the member, and every source the property
+  // the quiet path: every receiver kind has the member, and every source the property
   {
     const quiet = quietKinds(walk, c.owner);
     const own = typeof c.step === "object" ? walk.run(contract.contractOfValueAt(c.into, [])) : [];
@@ -93,7 +93,7 @@ export function projection(
   }
   const owners = receiverKinds(walk, c.owner, node);
   const label = shownLabel(walk, keyLabel(walk, c.owner));
-  // C6: a selection on a collection, or on an unknown receiver that may be one
+  // an element selection on a collection, or on an unknown receiver that may be one
   if (
     selectsElement(property) &&
     owners.some(
@@ -101,7 +101,7 @@ export function projection(
     )
   )
     selection(walk, c.owner, node, c.site, `.${property}`);
-  // C9: the receiver's external data brings its boundary checks, whichever member check follows; a domain's those the
+  // the receiver's external data brings its boundary checks, whichever member check follows; a domain's those the
   // member check's warning owns
   const send = walk.boundariesBefore(owners, () => {
     const text = label();
@@ -113,11 +113,12 @@ export function projection(
       `check that ${text} is not null and has .${property}`,
     );
   });
-  // C5a, C5b, F19a, F15; C5c: a property some source lacks, its own obligation (an error where no known source has it)
+  // the receiver's member checks (`memberChecks`); a property some source lacks, its own obligation (an error where no
+  // known source has it)
   const objects = owners.some((item) => item.tag === "object");
   const extra: Offending[] = [];
   if (objects && selectsElement(property))
-    // F11: an object's own `first`, `last` or `random`: opaque, the member obligation, never an error
+    // an object's own `first`, `last` or `random`: opaque, the member obligation, never an error
     extra.push([OWN_SELECTION, `has its own .${property}`]);
   else if (objects && typeof c.step === "object") {
     const value = walk.valueItems(c.into, node, []);
@@ -126,7 +127,7 @@ export function projection(
     );
     const sources = withoutEmpty(walk.run(contract.contractOfValueAt(c.into, [])));
     const quietOwner = quietKinds(walk, c.owner) ?? [];
-    // C5c: no source has the property, an error; never under a guard of the receiver (§3.2)
+    // no source has the property: an error; never under a guard of the receiver
     if (
       missing.length > 0 &&
       sources.length > 0 &&
@@ -151,8 +152,8 @@ export function projection(
       send();
       return;
     }
-    // (a member read a stop left unsettled is no proof of the property either: its check stands, as C6's; nor is an
-    // unknown one of an object the analysis cannot list, a written or tested `object` included: ADR 1.8, #1436)
+    // (a member read a stop left unsettled is no proof of the property either: its check stands, as a selection's; nor
+    // is an unknown one of an object the analysis cannot list, a written or tested `object` included: ADR 1.8, #1436)
     const open =
       missing[0] ??
       value.find(unsettledItem) ??
@@ -164,7 +165,7 @@ export function projection(
   const takes = (tag: ItemTag): boolean =>
     tag === "object" ? !indexStep : hasProperty(tag, property);
   // (a list's `join` read: its elements' type, every value they may take, at its `element` step, which decides whether
-  // the fix's call is valid; its current contents may be empty, Codex r4)
+  // the fix's call is valid; its current contents may be empty)
   const elements =
     property === "join" && owners.some((item) => item.tag === "list")
       ? withoutEmpty(walk.run(contract.contractOfValueAt(c.owner, ["element"]))).map(
@@ -189,7 +190,7 @@ export function projection(
   );
 }
 
-/** C6: an element selection needs an element: M held by the contract, or by the exact value. */
+/** An element selection needs an element: one its contract holds, or else its exact value. */
 export function selection(
   walk: Consumers,
   value: PlaceId,
@@ -214,7 +215,7 @@ export function selection(
   if (
     withoutEmpty(read).length > 0 &&
     !read.some((item) => item.tag === "empty") &&
-    // (an element read a stop left unsettled is no proof of an element, a literal's own element is: Codex r24 N1)
+    // (an element read a stop left unsettled is no proof of an element, a literal's own element is)
     (!read.some(unsettledItem) ||
       (literalSyntax(walk, value) &&
         walk.admission.literalChildren(value, "element").length > 0)) &&
