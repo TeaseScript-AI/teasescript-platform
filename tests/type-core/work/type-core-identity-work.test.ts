@@ -66,7 +66,8 @@ function expectedUnits(request: CoreAnalysisRequest): number {
   let units = 0;
   let functions = 0;
   for (const file of request.files) {
-    // identityNames: a unit per top-level statement, and per function name (each declared once here)
+    // identityNames: a unit per file, per top-level statement, and per function name (each declared once here)
+    units += 1;
     for (const statement of file.program.statements) {
       units += 1;
       if (statement.kind === "functionDeclaration") functions += 1;
@@ -83,14 +84,20 @@ function expectedUnits(request: CoreAnalysisRequest): number {
       containers.push(value);
       if (holder !== null) holders.set(value, { holder, key });
       if (kindOf(value) === "functionDeclaration") {
-        // ownNames: its body's values; the names copied (`given`; `q` and `r`)
+        // ownNames: its parameters and its body's values; the names copied, its parameters and the `let`s and loop
+        // variables of its body (the inherited set is empty: functions do not nest)
+        const parameters = value["parameters"];
+        const given = Array.isArray(parameters) ? parameters.length : 0;
+        let names = given;
         let body = 0;
         const own: unknown[] = [value["body"]];
         for (let next = own.pop(); next !== undefined; next = own.pop()) {
           body += 1;
+          if (kindOf(next) === "letStatement") names += 1;
+          if (kindOf(next) === "forStatement") names += isTree(next) && isTree(next["valueVariable"]) ? 2 : 1;
           if (isTree(next)) for (const [, child] of members(next)) own.push(child);
         }
-        units += body + (text(value["name"], "name") === "pass" ? 1 : 2);
+        units += given + body + names;
       }
       if (kindOf(value) === "callExpression")
         for (let callee = value["callee"]; kindOf(callee) === "parenthesizedExpression";) {
@@ -99,7 +106,8 @@ function expectedUnits(request: CoreAnalysisRequest): number {
         }
       for (const [member, child] of members(value)) stack.push([child, value, member]);
     }
-    // the calls read: each call of `pass` but a store's or a changing method's receiver
+    // the calls read: each call of `pass` but a store's or a changing method's receiver (the family's one method is
+    // `add`, which changes its receiver)
     const kept = (call: Tree): boolean => {
       const up = holders.get(call);
       if (
@@ -114,7 +122,9 @@ function expectedUnits(request: CoreAnalysisRequest): number {
       return (
         above !== undefined &&
         ((kindOf(above.holder) === "assignmentStatement" && above.key === "target") ||
-          (kindOf(above.holder) === "callExpression" && above.key === "callee"))
+          (kindOf(above.holder) === "callExpression" &&
+            above.key === "callee" &&
+            text(up.holder["property"], "name") === "add"))
       );
     };
     const reads = containers.filter(

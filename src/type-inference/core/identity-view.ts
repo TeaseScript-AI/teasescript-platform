@@ -117,8 +117,7 @@ const VIEWS = new WeakMap<CoreAnalysisRequest, IdentityView>();
 export function identityView(request: CoreAnalysisRequest): IdentityView {
   const known = VIEWS.get(request);
   if (known !== undefined) return known;
-  const programs = request.files.map((file) => file.program);
-  const names = identityNames(programs);
+  const names = identityNames(request.files);
   if (names === null) {
     const none: IdentityView = {
       source: request,
@@ -197,16 +196,17 @@ function counterpart<N extends SyntaxNode>(nodes: ReadonlyMap<SyntaxNode, Syntax
 
 /**
  * Whether a call from a file reads a name as its argument: a name the project declares as exactly one function, an
- * identity function, global or of that file; `null` where it declares none. With the units of its scan: a unit per
- * top-level statement and per function name declared. (A function is declared at a file's top level only: V30 refuses
- * a nested one.)
+ * identity function, global or of that file; `null` where it declares none, whose scan is charged nothing (so a source
+ * without one keeps its work). With the units of its scan: a unit per file, per top-level statement and per function
+ * name declared. (A function is declared at a file's top level only: V30 refuses a nested one.)
  */
 function identityNames(
-  programs: readonly Program[],
+  files: readonly CoreFile[],
 ): { readonly eligible: (name: string, file: number) => boolean; readonly steps: number } | null {
   const declared = new Map<string, { declaration: FunctionDeclaration; file: number }[]>();
   let steps = 0;
-  programs.forEach((program, file) => {
+  files.forEach(({ program }, file) => {
+    steps += 1;
     for (const statement of program.statements) {
       steps += 1;
       if (statement.kind === "functionDeclaration") {
@@ -278,15 +278,16 @@ interface Visit {
  *
  * Its units of work (`identitySteps`), one for each turn of each loop, so the allowance bounds all the work the view
  * does. Together with `identityView`'s (a unit per file and per node translated into the view, and `identityNames`' a
- * unit per top-level statement and per function name) and `checkedOnSource`'s (a unit per node translated back), these
- * are every loop of the view:
+ * unit per file, per top-level statement and per function name) and `checkedOnSource`'s (a unit per node translated
+ * back), these are every loop of the view:
  * - the walk: a unit per value met (a node, a list, a member's value, `null`);
- * - at a function, `ownNames`: a unit per value of its body met; and the copy of the names it inherits with its own
+ * - at a function, `ownNames`: a unit per parameter and per value of its body met; and the copy of the names it inherits with its own
  *   added, a unit per name copied. (Functions do not nest, V30 refusing a nested one, so the inherited set is empty;
  *   the copy is charged all the same);
  * - at a call, the parentheses `unwrap` strips from its callee (the collector reads the callee so): a unit each;
  * - the marking of the ancestors of each call read: a unit per ancestor marked;
- * - the rebuild: a unit per container walked, and a unit per member a changed container maps.
+ * - the rebuild: a unit per container walked, from the last met to the first, and a unit per member a changed container
+ *   maps.
  */
 function viewProgram(
   program: Program,
@@ -338,7 +339,8 @@ function viewProgram(
     }
   // (each changed container's copy; any other value is kept)
   const rebuilt = new Map<unknown, object>();
-  for (const value of order.reverse()) {
+  for (let at = order.length - 1; at >= 0; at -= 1) {
+    const value = order[at];
     steps += 1;
     if (!changed.has(value)) continue;
     if (isCall(value) && reads.has(value)) {
@@ -449,7 +451,7 @@ function ownNames(declaration: FunctionDeclaration): {
 } {
   const names = declaration.parameters.map((parameter) => parameter.name.name);
   const stack: unknown[] = [declaration.body];
-  let steps = 0;
+  let steps = names.length;
   for (let value = stack.pop(); value !== undefined; value = stack.pop()) {
     steps += 1;
     if (value === null || typeof value !== "object") continue;
