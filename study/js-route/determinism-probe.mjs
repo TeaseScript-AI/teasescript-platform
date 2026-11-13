@@ -68,8 +68,10 @@ export function runProbe() {
     const contract = NUMERIC_CONTRACTS[name];
     const digest = new Digest();
     const arity = contract.parameters.length;
+    // An angle parameter takes an angle value (degrees), as `sin(30 deg)` gives it.
+    const argument = (k, x) => (contract.parameters[k] === "angle" ? { kind: "angle", degrees: x === 0 ? 0 : x } : x);
     for (let i = 0; i < xs.length; i += 1) {
-      const args = Array.from({ length: arity }, (_, k) => xs[(i + k * 7) % xs.length]);
+      const args = Array.from({ length: arity }, (_, k) => argument(k, xs[(i + k * 7) % xs.length]));
       guarded(digest, () => numericFunction(name, args, {}, SPAN));
     }
     if (contract.named?.includes("decimals"))
