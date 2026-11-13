@@ -431,8 +431,8 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   ],
   "core/admission/classes.ts": [1, "an index's value"],
   "core/backend.ts": [
-    3,
-    "values: a unit's or an angle's amount, the host global itself (`amountAdmitted`); a command operand's form (`operandAdmitted`) and a choice's list written in place (`choiceButtons`), on the source",
+    6,
+    "values: a unit's or an angle's amount, the host global itself (`amountAdmitted`); a command operand's form (`operandAdmitted`), a choice's lists and choice objects written in place (`choiceButtons`, `unshownChoiceText`) and a choice of none, on the source",
   ],
   "core/check-result/check-result.ts": [
     5,
@@ -473,7 +473,7 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   "core/narrowing/route-tests.ts": [2, "values: a test's subject; a condition's own parentheses"],
   "core/narrowing/routes.ts": [1, "a value: its producer"],
   "core/slice-syntax.ts": [
-    11,
+    12,
     "values: the syntax check's literals, on the source, an ask's prefill among them (`askPrefillAdmitted`), and the command operand table's forms: a choice object's or a choice list's literals (`choiceObjectShape`, `askOperandsByPosition`)",
   ],
   "effects.ts": [3, "the legacy backend's, on the source"],
