@@ -1108,6 +1108,120 @@ test("a deeper read below a place replaced by objects keeps each object's absenc
       });
 });
 
+const MAIN_GROWTH: Record<string, readonly [number, number]> = {
+  "pay-every-below": [2.64, 2.705],
+  "pay-every-at": [2.656, 2.721],
+  "pay-every-past": [3.046, 2.811],
+  "pay-none-below": [2.099, 2.09],
+  "pay-none-at": [2.12, 2.106],
+  "pay-none-past": [2.045, 2.054],
+  "pay-distinct-below": [3.167, 3.007],
+  "pay-distinct-at": [3.197, 3.032],
+  "pay-distinct-past": [2.888, 2.621],
+  "pay-shared-below": [2.029, 2.034],
+  "pay-shared-at": [2.027, 2.032],
+  "pay-shared-past": [2.05, 2.056],
+  "pay-mixed-below": [2.703, 2.582],
+  "pay-mixed-at": [2.71, 2.587],
+  "pay-mixed-past": [2.953, 2.723],
+  "pay-rare-own-below": [2.88, 2.738],
+  "pay-rare-own-at": [2.895, 2.751],
+  "pay-rare-own-past": [3.049, 2.836],
+  "pay-rare-common-below": [2.876, 2.734],
+  "pay-rare-common-at": [2.891, 2.747],
+  "pay-rare-common-past": [2.882, 2.622],
+};
+// (`main`'s `structureSteps` with the sharing off at k = 16 and 32, measured once on `a1ebdae6c`)
+const MAIN_STRUCTURE_STEPS: Record<string, readonly [number, number]> = {
+  "pay-every-below": [208, 448],
+  "pay-every-at": [208, 448],
+  "pay-every-past": [208, 448],
+  "pay-none-below": [192, 416],
+  "pay-none-at": [192, 416],
+  "pay-none-past": [192, 416],
+  "pay-distinct-below": [192, 416],
+  "pay-distinct-at": [192, 416],
+  "pay-distinct-past": [192, 416],
+  "pay-shared-below": [672, 2400],
+  "pay-shared-at": [672, 2400],
+  "pay-shared-past": [672, 2400],
+  "pay-mixed-below": [256, 544],
+  "pay-mixed-at": [256, 544],
+  "pay-mixed-past": [256, 544],
+  "pay-rare-own-below": [224, 480],
+  "pay-rare-own-at": [224, 480],
+  "pay-rare-own-past": [224, 480],
+  "pay-rare-common-below": [224, 480],
+  "pay-rare-common-at": [224, 480],
+  "pay-rare-common-past": [224, 480],
+};
+
+const cases: readonly {
+  readonly name: string;
+  readonly source: string;
+  readonly reads: readonly string[];
+  // (`as written`: no objects added, since its objects hold the case's property every one; `alone`: neither objects
+  // added nor absent properties read first)
+  readonly objects?: "as written" | "alone";
+}[] = [
+  {
+    name: "the issue's shape (#1585)",
+    source:
+      "let value:integer = 1\nlet root = {f0: {n: value}}\nroot = {f1: {n: value}}\nroot = {f2: {n: value}}\nroot = {f3: {n: value}}\nexit",
+    reads: ["f0.n", "f1.n", "f2.n", "f3.n", "f0.absent", "absent.n"],
+  },
+  {
+    name: "lacking around its holders",
+    source:
+      'let root = {g: 1}\nroot = {f: {n: 1}}\nroot = {h: true}\nroot = {f: {n: "s"}}\nroot = {g: 2}\nexit',
+    reads: ["f.n", "f.absent", "g.n", "h.n"],
+  },
+  {
+    name: "the earliest lacking stored after the first",
+    source:
+      "let early = {g: 1}\nlet late = {k: 2}\nlet root = {f: {n: 1}}\nroot = late\nroot = early\nroot = {f: {n: 2.5}}\nexit",
+    reads: ["f.n", "k.n", "g.n"],
+  },
+  {
+    name: "merged at successive steps",
+    source:
+      'let root = {f: {q: {n: 1}}, g: 1}\nroot = {f: {q: {n: 1}}, g: "s"}\nroot = {f: {q: {n: 2}}, g: true}\nroot = {h: {q: {n: 1}}, g: 1}\nroot = {h0: 1}\nroot = {h1: 1}\nroot = {h2: 1}\nexit',
+    reads: ["f.q.n", "f.q", "f.q.absent", "f.absent.n"],
+  },
+  {
+    name: "merged with one stored between",
+    source:
+      'let root = {f: {q: {n: 1}, x: 1}, g: 1}\nroot = {f: {q: {n: 1}, x: "s"}, g: 2}\nroot = {f: {q: {n: 1}, x: 1}, g: "z"}\nroot = {h: 1}\nroot = {h0: 1}\nroot = {h1: 1}\nroot = {h2: 1}\nexit',
+    reads: ["f.q.n", "f.q.absent", "f.x", "f.q"],
+  },
+  {
+    name: "host data, an empty list and an object without the step",
+    source:
+      "let root = {f: {n: hostValue}}\nroot = {f: {n: []}}\nroot = {f: {}}\nroot = {g: 1}\nexit",
+    reads: ["f.n", "f.n.element", "f.absent"],
+  },
+  {
+    name: "every object holding the property",
+    source:
+      'let first = {inside: {tone: 1}}\nlet second = {inside: {tone: "bad"}}\nlet root = second\nroot = first\nexit',
+    reads: ["inside.tone", "inside", "inside.absent"],
+    objects: "alone",
+  },
+  {
+    name: "a property every object holds beside one of its own",
+    source:
+      'let root = {s: {n: 1}, f0: 1}\nroot = {s: {n: "x"}, f1: 2}\nroot = {s: {q: true}, f2: 3}\nroot = {s: {n: 1}, f3: 4}\nexit',
+    reads: ["s", "s.n", "s.q", "f1"],
+    objects: "as written",
+  },
+  {
+    name: "a list read at its element",
+    source:
+      "let t:integer = 1\nlet root = {f0: [t]}\nroot = {f1: [t]}\nroot = {f2: [t]}\nroot = {f3: [t]}\nexit",
+    reads: ["f0.element", "f1.element", "f3.element", "absent.element"],
+  },
+];
+
 /**
  * #1948: the property index's pay rule (`propertyItems`) over its family, the rule's regression guard.
  *
@@ -1136,53 +1250,6 @@ test("a deeper read below a place replaced by objects keeps each object's absenc
  * demand allowance 256 in the mode where `main` completes it there.
  */
 test("the property index's pay rule over its family: work within main's growth, reads as the levels' (#1948, #1585)", () => {
-  const MAIN_GROWTH: Record<string, readonly [number, number]> = {
-    "pay-every-below": [2.64, 2.705],
-    "pay-every-at": [2.656, 2.721],
-    "pay-every-past": [3.046, 2.811],
-    "pay-none-below": [2.099, 2.09],
-    "pay-none-at": [2.12, 2.106],
-    "pay-none-past": [2.045, 2.054],
-    "pay-distinct-below": [3.167, 3.007],
-    "pay-distinct-at": [3.197, 3.032],
-    "pay-distinct-past": [2.888, 2.621],
-    "pay-shared-below": [2.029, 2.034],
-    "pay-shared-at": [2.027, 2.032],
-    "pay-shared-past": [2.05, 2.056],
-    "pay-mixed-below": [2.703, 2.582],
-    "pay-mixed-at": [2.71, 2.587],
-    "pay-mixed-past": [2.953, 2.723],
-    "pay-rare-own-below": [2.88, 2.738],
-    "pay-rare-own-at": [2.895, 2.751],
-    "pay-rare-own-past": [3.049, 2.836],
-    "pay-rare-common-below": [2.876, 2.734],
-    "pay-rare-common-at": [2.891, 2.747],
-    "pay-rare-common-past": [2.882, 2.622],
-  };
-  // (`main`'s `structureSteps` with the sharing off at k = 16 and 32, measured once on `a1ebdae6c`)
-  const MAIN_STRUCTURE_STEPS: Record<string, readonly [number, number]> = {
-    "pay-every-below": [208, 448],
-    "pay-every-at": [208, 448],
-    "pay-every-past": [208, 448],
-    "pay-none-below": [192, 416],
-    "pay-none-at": [192, 416],
-    "pay-none-past": [192, 416],
-    "pay-distinct-below": [192, 416],
-    "pay-distinct-at": [192, 416],
-    "pay-distinct-past": [192, 416],
-    "pay-shared-below": [672, 2400],
-    "pay-shared-at": [672, 2400],
-    "pay-shared-past": [672, 2400],
-    "pay-mixed-below": [256, 544],
-    "pay-mixed-at": [256, 544],
-    "pay-mixed-past": [256, 544],
-    "pay-rare-own-below": [224, 480],
-    "pay-rare-own-at": [224, 480],
-    "pay-rare-own-past": [224, 480],
-    "pay-rare-common-below": [224, 480],
-    "pay-rare-common-at": [224, 480],
-    "pay-rare-common-past": [224, 480],
-  };
   for (const recorded of [MAIN_GROWTH, MAIN_STRUCTURE_STEPS])
     assert.deepEqual(
       PAY_RULE_FAMILIES.map((family) => family.name).sort(),
@@ -1222,71 +1289,6 @@ test("the property index's pay rule over its family: work within main's growth, 
   assert.deepEqual(steep, []);
   assert.deepEqual(bookkeeping, []);
 
-  const cases: readonly {
-    readonly name: string;
-    readonly source: string;
-    readonly reads: readonly string[];
-    // (`as written`: no objects added, since its objects hold the case's property every one; `alone`: neither objects
-    // added nor absent properties read first)
-    readonly objects?: "as written" | "alone";
-  }[] = [
-    {
-      name: "the issue's shape (#1585)",
-      source:
-        "let value:integer = 1\nlet root = {f0: {n: value}}\nroot = {f1: {n: value}}\nroot = {f2: {n: value}}\nroot = {f3: {n: value}}\nexit",
-      reads: ["f0.n", "f1.n", "f2.n", "f3.n", "f0.absent", "absent.n"],
-    },
-    {
-      name: "lacking around its holders",
-      source:
-        'let root = {g: 1}\nroot = {f: {n: 1}}\nroot = {h: true}\nroot = {f: {n: "s"}}\nroot = {g: 2}\nexit',
-      reads: ["f.n", "f.absent", "g.n", "h.n"],
-    },
-    {
-      name: "the earliest lacking stored after the first",
-      source:
-        "let early = {g: 1}\nlet late = {k: 2}\nlet root = {f: {n: 1}}\nroot = late\nroot = early\nroot = {f: {n: 2.5}}\nexit",
-      reads: ["f.n", "k.n", "g.n"],
-    },
-    {
-      name: "merged at successive steps",
-      source:
-        'let root = {f: {q: {n: 1}}, g: 1}\nroot = {f: {q: {n: 1}}, g: "s"}\nroot = {f: {q: {n: 2}}, g: true}\nroot = {h: {q: {n: 1}}, g: 1}\nroot = {h0: 1}\nroot = {h1: 1}\nroot = {h2: 1}\nexit',
-      reads: ["f.q.n", "f.q", "f.q.absent", "f.absent.n"],
-    },
-    {
-      name: "merged with one stored between",
-      source:
-        'let root = {f: {q: {n: 1}, x: 1}, g: 1}\nroot = {f: {q: {n: 1}, x: "s"}, g: 2}\nroot = {f: {q: {n: 1}, x: 1}, g: "z"}\nroot = {h: 1}\nroot = {h0: 1}\nroot = {h1: 1}\nroot = {h2: 1}\nexit',
-      reads: ["f.q.n", "f.q.absent", "f.x", "f.q"],
-    },
-    {
-      name: "host data, an empty list and an object without the step",
-      source:
-        "let root = {f: {n: hostValue}}\nroot = {f: {n: []}}\nroot = {f: {}}\nroot = {g: 1}\nexit",
-      reads: ["f.n", "f.n.element", "f.absent"],
-    },
-    {
-      name: "every object holding the property",
-      source:
-        'let first = {inside: {tone: 1}}\nlet second = {inside: {tone: "bad"}}\nlet root = second\nroot = first\nexit',
-      reads: ["inside.tone", "inside", "inside.absent"],
-      objects: "alone",
-    },
-    {
-      name: "a property every object holds beside one of its own",
-      source:
-        'let root = {s: {n: 1}, f0: 1}\nroot = {s: {n: "x"}, f1: 2}\nroot = {s: {q: true}, f2: 3}\nroot = {s: {n: 1}, f3: 4}\nexit',
-      reads: ["s", "s.n", "s.q", "f1"],
-      objects: "as written",
-    },
-    {
-      name: "a list read at its element",
-      source:
-        "let t:integer = 1\nlet root = {f0: [t]}\nroot = {f1: [t]}\nroot = {f2: [t]}\nroot = {f3: [t]}\nexit",
-      reads: ["f0.element", "f1.element", "f3.element", "absent.element"],
-    },
-  ];
   // (objects of a property each and reads at absent ones first, so that the index is made before the case's reads)
   const padded = (source: string): string =>
     source.replace(

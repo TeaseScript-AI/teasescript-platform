@@ -222,25 +222,26 @@ test("a demand stop with a question stop after it ends the search, its names wit
   assert.ok(retried > 0, "a question stops and is asked again");
 });
 
+const nested = (depth: number): string => {
+  const path = ".p".repeat(depth);
+  return [
+    "let t=hostValue",
+    "t.k=1",
+    `let p=${"{p:".repeat(depth)}{a:hostValue,x:{y:hostValue}}${"}".repeat(depth)}`,
+    `p${path}.x.y=t`,
+    `p${path}.a=p${path}.x.y`,
+    `let r=p${path}.a`,
+    "say r",
+    "exit",
+  ].join("\n");
+};
+
 test("the search charges each task it takes up, each prefix it visits, each entry of its path's index and each step its pump check walks or compares (#1493)", () => {
   // (the uncharged-work probe's gate, kept here: the ledger's `checks` during a search are its tasks, a seen one too,
   // its prefixes, its path's index entries, its pump checks' earlier tasks of their own place and their head steps, the
   // keys below a key whose step it reads, and the layer jumps its listings take (#1610); the
   // entries stay within 2 + ⌈log₂ D⌉ per task on a chain of D, the earlier tasks within the longest walk per task, and
   // the head steps within the longest path per earlier task walked)
-  const nested = (depth: number): string => {
-    const path = ".p".repeat(depth);
-    return [
-      "let t=hostValue",
-      "t.k=1",
-      `let p=${"{p:".repeat(depth)}{a:hostValue,x:{y:hostValue}}${"}".repeat(depth)}`,
-      `p${path}.x.y=t`,
-      `p${path}.a=p${path}.x.y`,
-      `let r=p${path}.a`,
-      "say r",
-      "exit",
-    ].join("\n");
-  };
   const asks: readonly (readonly [string, string, readonly string[] | null])[] = [
     [feedback(8), "w", null],
     [feedback(16), "w", null],
@@ -397,6 +398,51 @@ test("no pump fires on a search that ends without the bound, whose least kept si
   }
 });
 
+const mutual = (depth: number): string =>
+  [
+    "let a={left:1,q:null}",
+    "let b={right:2,q:null}",
+    "a.q=b",
+    "b.q=a",
+    `let read=a${".q".repeat(depth)}`,
+    "say read",
+    "exit",
+  ].join("\n");
+
+const deep = (depth: number): string =>
+  mutual(depth).replace("let read=", `a${".q".repeat(depth)}.k=1\nlet read=`);
+const host = (depth: number, held: boolean): string => {
+  const path = Array.from({ length: depth }, (_, index) => `.x${index}`).join("");
+  const read = held ? `let o={p:h}\nlet r=o.p${path}` : `let o={p:h${path}}\nlet r=o.p`;
+  return ["let h=hostValue", `h${path}.k=1`, read, "say r", "exit"].join("\n");
+};
+const asks = [
+  { query: "read", source: mutual, name: "read", names: ["left", "q"], depths: [16, 32, 64] },
+  { query: "place", source: mutual, name: "a", names: ["left", "q"], depths: [16, 32, 64] },
+  {
+    query: "deep store",
+    source: deep,
+    name: "read",
+    names: ["k", "left", "q"],
+    depths: [16, 32, 64],
+  },
+  // (one store and one read each: two sizes show the copied source's text charged)
+  {
+    query: "held",
+    source: (depth: number) => host(depth, true),
+    name: "r",
+    names: ["k"],
+    depths: [8, 16],
+  },
+  {
+    query: "projection",
+    source: (depth: number) => host(depth, false),
+    name: "r",
+    names: ["k"],
+    depths: [8, 16],
+  },
+] as const;
+
 test("the search makes no uncharged temporary per step beyond a constant, its prefixes the stored keys along the path, and its pump check walks no more earlier tasks than it takes up (#1493)", () => {
   // Astra r1's B1: each prefix rebuilt both halves of its path and its key, uncharged, cubic in a mutual feedback's
   // depth. The walk visits only the stored keys along a path (`definitions.stored`), their text its own, and keeps the
@@ -408,16 +454,6 @@ test("the search makes no uncharged temporary per step beyond a constant, its pr
   // deep key's whole text to read one step of it (quadratic); and a host value a literal holds, read at a path, whose
   // copied source's key below it is a text one's, made charged (`keptKeyBelowIn`), and a projection of it a literal
   // holds, whose copied source's text the dict check reads charged (`keptPath`)
-  const mutual = (depth: number): string =>
-    [
-      "let a={left:1,q:null}",
-      "let b={right:2,q:null}",
-      "a.q=b",
-      "b.q=a",
-      `let read=a${".q".repeat(depth)}`,
-      "say read",
-      "exit",
-    ].join("\n");
   const walkFrame = (): boolean => {
     // (past this check, the counter and the built-in's wrapper, here in the test)
     for (const frame of (new Error().stack ?? "").split("\n").slice(4)) {
@@ -483,39 +519,6 @@ test("the search makes no uncharged temporary per step beyond a constant, its pr
       Object.assign(texts, { slice: textSlice, substring });
     }
   };
-  const deep = (depth: number): string =>
-    mutual(depth).replace("let read=", `a${".q".repeat(depth)}.k=1\nlet read=`);
-  const host = (depth: number, held: boolean): string => {
-    const path = Array.from({ length: depth }, (_, index) => `.x${index}`).join("");
-    const read = held ? `let o={p:h}\nlet r=o.p${path}` : `let o={p:h${path}}\nlet r=o.p`;
-    return ["let h=hostValue", `h${path}.k=1`, read, "say r", "exit"].join("\n");
-  };
-  const asks = [
-    { query: "read", source: mutual, name: "read", names: ["left", "q"], depths: [16, 32, 64] },
-    { query: "place", source: mutual, name: "a", names: ["left", "q"], depths: [16, 32, 64] },
-    {
-      query: "deep store",
-      source: deep,
-      name: "read",
-      names: ["k", "left", "q"],
-      depths: [16, 32, 64],
-    },
-    // (one store and one read each: two sizes show the copied source's text charged)
-    {
-      query: "held",
-      source: (depth: number) => host(depth, true),
-      name: "r",
-      names: ["k"],
-      depths: [8, 16],
-    },
-    {
-      query: "projection",
-      source: (depth: number) => host(depth, false),
-      name: "r",
-      names: ["k"],
-      depths: [8, 16],
-    },
-  ] as const;
   for (const { query, source: make, name, names: expected, depths } of asks)
     for (const mode of MODES) {
       const rows = depths.map((depth) => {
