@@ -75,11 +75,11 @@
         "src/xmp-keywords.ts",
         "tests/families-runner/families-baseline-store.test.ts",
         "tests/families-runner/families-runner-compare.test.ts",
-        "tests/type-core/type-core-closure.test.ts",
+        "tests/type-core/stop/type-core-closure.test.ts",
         "tests/type-core/type-core-mixed-family.test.ts",
-        "tests/type-core-stop/type-core-stop-combined.test.ts",
-        "tests/type-core-stop/type-core-stop-labels.test.ts",
-        "tests/type-core-stop/type-core-stop-route.test.ts"
+        "tests/type-core/stop/type-core-stop-combined.test.ts",
+        "tests/type-core/stop/type-core-stop-labels.test.ts",
+        "tests/type-core/stop/type-core-stop-route.test.ts"
       ],
       "rules": {
         "no-control-regex": "off",

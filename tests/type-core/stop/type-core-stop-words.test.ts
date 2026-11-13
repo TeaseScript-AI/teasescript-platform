@@ -6,9 +6,9 @@ import { basename, join } from "node:path";
 import test from "node:test";
 
 import { ts } from "ts-morph";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import type { Obligation } from "../../src/type-inference/core/result.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import type { Obligation } from "../../../src/type-inference/core/result.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   combinedMarkProblems,
   combinedStopRule,
@@ -21,7 +21,7 @@ import {
   provenRewording,
   SENTENCE_VARIANTS,
   type HeldCase,
-} from "../helpers/type-core-held-host.js";
+} from "../../helpers/type-core-held-host.js";
 
 /**
  * #1708, A′: after a stop, a method receiver's words may follow a proven type (the declaration to the

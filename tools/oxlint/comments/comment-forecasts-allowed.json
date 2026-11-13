@@ -5,7 +5,7 @@
     "text": "until stage 3b"
   },
   {
-    "file": "tests/helpers/type-core/type-core-contract-knowledge.ts",
+    "file": "tests/helpers/type-core/stop/type-core-contract-knowledge.ts",
     "form": "until #N",
     "text": "until #1597"
   },
@@ -25,7 +25,7 @@
     "text": "once #1413"
   },
   {
-    "file": "tests/type-core-stop/type-core-stop-settled.test.ts",
+    "file": "tests/type-core/stop/type-core-stop-settled.test.ts",
     "form": "when or after #N lands or merges",
     "text": "when #1216 lands"
   }

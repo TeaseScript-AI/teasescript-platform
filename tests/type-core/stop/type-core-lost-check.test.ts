@@ -1,38 +1,41 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSourceWithBackend } from "../../src/compiler.js";
-import type { InstructionPlan, TypePlan } from "../../src/plan/model.js";
-import { run } from "../../src/runtime/engine.js";
-import type { RuntimeScriptStorageEntrySnapshot } from "../../src/runtime/host-data/script-storage.js";
+import { compileSourceWithBackend } from "../../../src/compiler.js";
+import type { InstructionPlan, TypePlan } from "../../../src/plan/model.js";
+import { run } from "../../../src/runtime/engine.js";
+import type { RuntimeScriptStorageEntrySnapshot } from "../../../src/runtime/host-data/script-storage.js";
 import {
   createSerializableList as list,
   createSerializableObject,
   type SerializableRuntimeValue,
-} from "../../src/runtime/values/serializable-values.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { asked, coreCheckResult } from "../../src/type-inference/core/check-result/check-result.js";
+} from "../../../src/runtime/values/serializable-values.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import {
+  asked,
+  coreCheckResult,
+} from "../../../src/type-inference/core/check-result/check-result.js";
 import {
   builtContainers,
   narrower,
-} from "../../src/type-inference/core/check-result/kept-checks.js";
+} from "../../../src/type-inference/core/check-result/kept-checks.js";
 import {
   DEFAULT_LOST_AT_BUDGET,
   OutsideContract,
   SliceIndex,
   UNESTABLISHED_AT_BUDGET,
-} from "../../src/type-inference/core/check-result/slice-index.js";
-import { CoreProgram } from "../../src/type-inference/core/program.js";
+} from "../../../src/type-inference/core/check-result/slice-index.js";
+import { CoreProgram } from "../../../src/type-inference/core/program.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
-import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { HELD_MODES } from "../helpers/type-core-held-host.js";
-import { inMode, MODES } from "../helpers/type-core-oracles.js";
-import { runGlobals } from "../helpers/type-core-route.js";
+} from "../../../src/type-inference/core/budget.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { HELD_MODES } from "../../helpers/type-core-held-host.js";
+import { inMode, MODES } from "../../helpers/type-core-oracles.js";
+import { runGlobals } from "../../helpers/type-core-route.js";
 
 // #1526 decision 2, condition 1: while a required check is missing at a stop, the candidate publishes no
 // plan that lets the invalid value through unchecked. Sol's #1645 and #1648 witnesses, at a settled decision stop.

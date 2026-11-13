@@ -2,36 +2,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSourceWithBackend } from "../../src/compiler.js";
-import type { TypePlan } from "../../src/plan/model.js";
+import { compileSourceWithBackend } from "../../../src/compiler.js";
+import type { TypePlan } from "../../../src/plan/model.js";
 import {
   createSerializableList,
   createSerializableObject,
-} from "../../src/runtime/values/serializable-values.js";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+} from "../../../src/runtime/values/serializable-values.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
-import { storeContracts } from "../../src/type-inference/core/check-result/check-result.js";
-import { withoutRecords } from "../../src/type-inference/core/consumers.js";
-import { propertyStep } from "../../src/type-inference/core/program.js";
-import { outsideSyntax } from "../../src/type-inference/core/slice-syntax.js";
-import { completedCore, coreRequest } from "../helpers/type-core-analysis.js";
+} from "../../../src/type-inference/core/budget.js";
+import { storeContracts } from "../../../src/type-inference/core/check-result/check-result.js";
+import { withoutRecords } from "../../../src/type-inference/core/consumers.js";
+import { propertyStep } from "../../../src/type-inference/core/program.js";
+import { outsideSyntax } from "../../../src/type-inference/core/slice-syntax.js";
+import { completedCore, coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   capturedWithin,
   planChecks,
   storeRunProblems,
   type Globals,
   type Span,
-} from "../helpers/type-core/type-core-contract-knowledge.js";
+} from "../../helpers/type-core/stop/type-core-contract-knowledge.js";
 import {
   heldStops,
   HELD_MODES,
   testedStops,
   type HeldMode,
-} from "../helpers/type-core-held-host.js";
+} from "../../helpers/type-core-held-host.js";
 
 /*
  * The contracts of stable admission (#1526 phase B; #1556): once admission settled, before the walk, the

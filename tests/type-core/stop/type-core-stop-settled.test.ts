@@ -5,14 +5,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
-import { compileSourceWithBackend } from "../../src/compiler.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestAllowance } from "../../src/type-inference/core/budget.js";
-import { withConsumerOrder, withoutRecords } from "../../src/type-inference/core/consumers.js";
-import { withoutSharing } from "../../src/type-inference/core/sharing.js";
-import { withSolverSeam } from "../../src/type-inference/core/solver.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
+import { compileSourceWithBackend } from "../../../src/compiler.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
+import { withConsumerOrder, withoutRecords } from "../../../src/type-inference/core/consumers.js";
+import { withoutSharing } from "../../../src/type-inference/core/sharing.js";
+import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   heldFamily,
   heldProblems,
@@ -24,8 +24,8 @@ import {
   testedStops,
   searchedStops,
   type HeldCase,
-} from "../helpers/type-core-held-host.js";
-import { stopProblems, type Globals, type StopRun } from "../helpers/type-core-stop-oracle.js";
+} from "../../helpers/type-core-held-host.js";
+import { stopProblems, type Globals, type StopRun } from "../../helpers/type-core-stop-oracle.js";
 import {
   OPTIONS,
   LOST_CHECK,
@@ -34,7 +34,7 @@ import {
   host,
   stopRun,
   walkEnds,
-} from "../helpers/type-core/type-core-stop-setup.js";
+} from "../../helpers/type-core/stop/type-core-stop-setup.js";
 
 /**
  * what a phase settled is never discarded by a later one, and a stop changes nothing of the
