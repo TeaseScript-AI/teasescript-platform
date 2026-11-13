@@ -2,15 +2,20 @@ import { readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { dirname, join } from "node:path";
 
-// How many test files the full suite runs at once: one per core but one, as `node --test` runs them, and under the job's
-// memory (`jobMemoryMib`: the queue's reservation or a cgroup limit, the smaller) no more than fit in it. Measured on 2026-11-08 (desktop, main a7b8297ec, the full compiled suite at a
-// fixed number of files at once, its job's own processes sampled): the anonymous-memory peak of the whole run was 3.3,
-// 4.8, 7.1, 9.8 and 11.7 GB at 2, 4, 8, 12 and 15 files at once, close to 2.1 GB plus 0.64 GB a file; file cache
-// stayed under 90 MiB. Most of the 2.1 GB is the heaviest file alone (`type-core-cells`, before its split, 2.7 to
-// 2.9 GB). The limit here allows 3 GiB plus 640 MiB a file, at least 800 MiB over each measured peak, so that a run
-// fits rather than being killed at its cap. Remeasure when a test file's memory changes much.
-export const RESERVE_MIB = 3 * 1024;
-export const PER_FILE_MIB = 640;
+// How many test files the full suite runs at once: one per core but one, as `node --test` runs them, and under the
+// job's memory (`jobMemoryMib`: the queue's reservation or a cgroup limit, the smaller) no more than fit in it.
+// Measured on 2026-11-13 (desktop, main 35e266737, the full compiled suite at a fixed number of files at once, three
+// runs a point, the job's own memory as the kernel's `memory.peak`): the largest of three peaks was 3,312, 5,436,
+// 7,104, 9,733 and 10,857 MiB at 2, 4, 8, 12 and 15 files at once, and one file at a time, in one run, 2,522 MiB, the
+// floor, about 700 MiB under a straight line through the rest. Runs of one point differ by 9 to 31 %, up to 1,292 MiB:
+// the files start in the same order, and the likely cause is the machine's other work, which stretched the heavy files'
+// runs unevenly (by 20 to 28 % in the highest run) and so moves which of them are at their peak together (the jobs keep
+// no memory series to show it). So a single run does not measure a point. The limit here allows 4 GiB plus 576 MiB a
+// file, at least 800 MiB over the largest of three runs at every point (964 MiB at 4 files, the least): a margin sized
+// to the whole spread would run one file fewer at once at 6, 8 and 12 GiB, and a job that exceeds its cap is rerun
+// larger. Remeasure when a test file's memory changes much.
+export const RESERVE_MIB = 4 * 1024;
+export const PER_FILE_MIB = 576;
 
 /**
  * The smallest `memory.max` of this process's cgroup (v2) and its parents, in MiB, or `null` when none sets one or it

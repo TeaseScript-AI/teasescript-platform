@@ -50,7 +50,7 @@ are the npm scripts `tools/check-pretest-steps.txt` lists, one per line.
 `npm run check` (`tools/run-check.mjs`) runs the build and the compiled tests also when a pre-test check failed, and
 its last line names what ran, failed and did not run. TypeScript compilation precedes UI work; compiled tests run only
 after all builds pass, as many files at once as
-`node --test` runs, fewer under the job's memory: as many as fit at 3 GiB plus 640 MiB a file in `SX_MEM_MIB` (the
+`node --test` runs, fewer under the job's memory: as many as fit at 4 GiB plus 576 MiB a file in `SX_MEM_MIB` (the
 queue's reservation, in MiB) or the smallest visible cgroup limit, whichever is smaller, so the variable can lower the
 figure but never raise it above a cap the runner can see (`tools/test-files-at-once.mjs`). A file that reports no test of
 its own, as one whose process ends before its tests report, fails the full suite and is named. Each command's output is printed together, including warnings. A failed command stops no
