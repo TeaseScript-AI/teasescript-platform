@@ -432,12 +432,24 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           what: "an operand its instruction does not take",
         };
     }
-    // (a choice of more buttons than a request shows: today's TSV029, the request's TSR052 as it opens)
+    if (node.kind !== "interactionExpression" || node.interactionKind !== "choice") continue;
+    // (a computed choice object whose text no value of it shows: today's TSV040, the request's TSR021 as it opens)
+    const unshown = unshownChoiceText(answers, index, node, rules["askChoice.text"]!.takes);
+    if (unshown !== null)
+      return {
+        file: index.fileOf(unshown),
+        span: unshown.span,
+        what: "an operand its instruction does not take",
+      };
+    // (a choice of more buttons than a request shows, or of none: today's TSV029, the request's TSR052 as it opens)
     if (
-      node.kind === "interactionExpression" &&
-      node.interactionKind === "choice" &&
-      choiceButtons(answers, index, node) > MAX_INTERACTION_OPTION_ENTRIES
+      node.options.every((option) => {
+        const written = unwrap(option.expression);
+        return written.kind === "listLiteral" && written.elements.length === 0;
+      })
     )
+      return { file: index.fileOf(node), span: node.span, what: "a choice without buttons" };
+    if (choiceButtons(answers, index, node) > MAX_INTERACTION_OPTION_ENTRIES)
       return {
         file: index.fileOf(node),
         span: node.span,
@@ -448,9 +460,28 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
 }
 
 /**
+ * The kinds an operand may hold as the table reads them (`operandAdmitted`): the core's, with a read of a place whose
+ * type is written or decided holding that type's kinds in place of its unknown.
+ */
+function operandKinds(
+  answers: Answers,
+  index: SliceIndex,
+  operand: Expression,
+): readonly ItemTag[] {
+  const answer = answers.at(nodeOf(answers, index, operand));
+  const read = answer?.place ?? null;
+  const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
+  return (answer?.items ?? []).flatMap((item): readonly ItemTag[] =>
+    item.tag === "unknown" && admitted !== null && admitted.by !== "undecided"
+      ? admitted.kinds
+      : [item.tag],
+  );
+}
+
+/**
  * The buttons of a choice as today's checker counts them (`MAX_INTERACTION_OPTION_ENTRIES`): each element of a list
- * written in place, and one for each other option of a known kind that is no collection (a computed collection's
- * elements and an unknown option are not counted).
+ * written in place, and one for each other option of a known kind beside `null` that is no collection (a computed
+ * collection's elements, an unknown option and a `null` one are not counted).
  */
 function choiceButtons(answers: Answers, index: SliceIndex, ask: InteractionExpression): number {
   let buttons = 0;
@@ -458,13 +489,63 @@ function choiceButtons(answers: Answers, index: SliceIndex, ask: InteractionExpr
     const written = unwrap(option.expression);
     if (written.kind === "listLiteral") buttons += written.elements.length;
     else {
-      const tags = (answers.at(nodeOf(answers, index, option.expression))?.items ?? []).map(
-        (item) => item.tag,
+      const kinds = operandKinds(answers, index, option.expression).filter(
+        (kind) => kind !== "null" && kind !== "empty",
       );
-      if (tags.every((tag) => tag !== "unknown" && tag !== "list" && tag !== "set")) buttons += 1;
+      if (
+        kinds.length > 0 &&
+        kinds.every((kind) => kind !== "unknown" && kind !== "list" && kind !== "set")
+      )
+        buttons += 1;
     }
   }
   return buttons;
+}
+
+/**
+ * The first option or element of a choice that is a computed choice object, or a computed list of them, whose `text`
+ * holds only known kinds the button cannot show (`shows`), none of them `null`: today's checker refuses such a text
+ * (`checkChoiceText`); one written in place is a position of the table (`askChoice.text`).
+ */
+function unshownChoiceText(
+  answers: Answers,
+  index: SliceIndex,
+  ask: InteractionExpression,
+  shows: readonly ItemTag[],
+): Expression | null {
+  const unshown = (node: Expression, path: readonly string[]): boolean => {
+    const tags = answers
+      .valueAt(nodeOf(answers, index, node), path)
+      .items.map((item) => item.tag)
+      .filter((tag) => tag !== "empty");
+    return (
+      tags.length > 0 &&
+      tags.every((tag) => tag !== "unknown" && tag !== "null" && !shows.includes(tag))
+    );
+  };
+  const computed = (node: Expression, inList: boolean): boolean => {
+    const tags = (answers.at(nodeOf(answers, index, node))?.items ?? []).map((item) => item.tag);
+    return (
+      (tags.includes("object") && unshown(node, ["text"])) ||
+      (!inList &&
+        tags.includes("list") &&
+        answers
+          .valueAt(nodeOf(answers, index, node), ["element"])
+          .items.some((item) => item.tag === "object") &&
+        unshown(node, ["element", "text"]))
+    );
+  };
+  for (const option of ask.options) {
+    const written = unwrap(option.expression);
+    if (written.kind === "objectLiteral") continue;
+    if (written.kind !== "listLiteral") {
+      if (computed(option.expression, false)) return option.expression;
+      continue;
+    }
+    for (const element of written.elements)
+      if (unwrap(element).kind !== "objectLiteral" && computed(element, true)) return element;
+  }
+  return null;
 }
 
 /**

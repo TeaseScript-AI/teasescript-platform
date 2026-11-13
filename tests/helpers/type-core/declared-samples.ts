@@ -118,7 +118,16 @@ export interface Sample {
   readonly operand: string;
   /** Its value's kind; none where the value fails before it is one (`FAILING_PRODUCER`). */
   readonly kind: string;
-  readonly origin: "literal" | "conversion" | "ingress" | "failing" | "nested" | "carrier";
+  readonly origin:
+    | "literal"
+    | "conversion"
+    | "ingress"
+    | "failing"
+    | "nested"
+    | "carrier"
+    | "otherwise"
+    | "property"
+    | "narrowed";
   /** What stands before the command: the typed ingress, or nothing. */
   readonly prelude: string;
   /** The operand's value as the command writes it. */
@@ -135,8 +144,8 @@ export interface Sample {
  */
 const FAILING_PRODUCER = "[1][4]";
 
-/** The kinds a typed ingress is read through an element with (`samples`' nested origin). */
-const NESTED_KINDS = ["integer", "string", "boolean", "null", "list", "date"] as const;
+/** The kinds a typed ingress is read with through an element, as a property or narrowed (`samples`' origins). */
+const NESTED_KINDS = ["integer", "string", "boolean", "list", "date"] as const;
 
 /** The host global carried, or a read of a place whose type is undecided (`samples`' carrier origin): prelude, value. */
 const CARRIERS: readonly (readonly [string, string])[] = [
@@ -150,13 +159,17 @@ const CARRIERS: readonly (readonly [string, string])[] = [
 
 /**
  * The origins whose value the command operand table declines where today's checker plans (the lead's R10, R11): an
- * outside value carried through an element, a call or a conversion's default, whose kind the core does not know at the
- * operand; the declared positions' test admits a decline only of these and counts them.
+ * outside value carried through an element, a call, a conversion's default, `otherwise` or a property, whose kind the
+ * core does not know at the operand, and a typed ingress narrowed by a test, whose written type the table reads (R18);
+ * the declared positions' test admits a decline only of these and counts them.
  */
 export const DECLINED_ORIGINS: ReadonlySet<Sample["origin"]> = new Set([
   "conversion",
   "nested",
   "carrier",
+  "otherwise",
+  "property",
+  "narrowed",
 ]);
 
 /**
@@ -205,6 +218,38 @@ export function samples(
       origin: "carrier" as const,
       prelude,
       value,
+    })),
+    // (the host global or a literal, R10: the host global's kind unknown to both)
+    ...NESTED_KINDS.flatMap((kind) =>
+      LITERALS[kind] === undefined
+        ? []
+        : [
+            {
+              kind,
+              origin: "otherwise" as const,
+              prelude: "",
+              value: `hostValue otherwise ${LITERALS[kind]}`,
+            },
+          ],
+    ),
+    // (a typed ingress's property: an outside value its store's check does not stand for, R10)
+    ...NESTED_KINDS.map((kind) => ({
+      kind,
+      origin: "property" as const,
+      prelude: "let m: object = hostValue\n",
+      value: "m.v",
+      host: {
+        kind: "object",
+        properties: [{ name: "v", value: HOST_VALUES[kind] }],
+      } satisfies SerializableRuntimeValue,
+    })),
+    // (a typed ingress narrowed by a test: the table reads its written type's kinds, `null` among them, R18)
+    ...NESTED_KINDS.map((kind) => ({
+      kind,
+      origin: "narrowed" as const,
+      prelude: `let m: ${kind}? = hostValue\nif m == null {\n  exit\n}\n`,
+      value: "m",
+      host: HOST_VALUES[kind],
     })),
   ];
   return Object.entries(templates).flatMap(([key, operands]) => {
@@ -265,6 +310,7 @@ const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<stri
     "askChoice.option": "1",
     "askChoice.element": "1",
     "askChoice.label": '"A"',
+    "askChoice.labelledElement": '"A"',
     "askChoice.background": '"red"',
     "askChoice.text": '"t"',
   },
@@ -448,8 +494,28 @@ export const DECLARED_REFUSALS: readonly {
           }),
     };
   }),
+  // (a host value stored at a written type only `null` fills, at every position: the slice takes no such type, the
+  // lead's R44; the twin is the position's template, the host value not stored at a written type, or a literal text
+  // where the button returns the value, which takes no host value)
+  ...samples()
+    .filter((sample) => sample.origin === "ingress" && sample.kind === "null")
+    .map((sample) => ({
+      row: sample.row,
+      position: `${sample.operand}, ${sample.kind} (${sample.origin})`,
+      refused: `${sample.prelude}${sample.command}`,
+      admitted: commandWith(
+        sample.row,
+        sample.operand,
+        ["askChoice.returnedText", "askChoice.value"].includes(sample.operand)
+          ? '"t"'
+          : "hostValue",
+      ),
+      gate: "annotationOutside (src/type-inference/core/slice-syntax.ts)",
+      text: "this written type",
+    })),
   // (an ask's prefill but a literal the request takes as written, `PREFILL_LITERALS`: the host global there and every
-  // sample of the first four origins; the twin asks with a fitting literal or none)
+  // sample of the first four origins, the `null` ingress aside, which its written type refuses first; the twin asks with
+  // a fitting literal or none)
   ...[
     ...Object.entries(PREFILL_OPERANDS).map(([operand, template]) => ({
       operand,
@@ -464,7 +530,10 @@ export const DECLARED_REFUSALS: readonly {
       .filter(
         (sample) =>
           ["literal", "conversion", "ingress", "failing"].includes(sample.origin) &&
-          !(sample.origin === "literal" && PREFILL_LITERALS[sample.operand]!.includes(sample.kind)),
+          !(
+            sample.origin === "literal" && PREFILL_LITERALS[sample.operand]!.includes(sample.kind)
+          ) &&
+          !(sample.origin === "ingress" && sample.kind === "null"),
       )
       .map((sample) => ({
         operand: sample.operand,
