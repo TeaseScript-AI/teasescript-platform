@@ -478,7 +478,7 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   "syntax-evidence.ts": [7, "values: a selection's and an interaction's literal data"],
 };
 
-test("every reader of the analysis that unwraps parentheses is classed, its place slots the view's (#2493)", () => {
+test("each source file's mentions of a parenthesized expression or an unwrapping helper are classed, its place slots the view's (#2493)", () => {
   const root = new URL("../../../src/type-inference/", import.meta.url);
   const found: Record<string, number> = {};
   for (const file of readdirSync(root, { encoding: "utf8", recursive: true }).sort()) {
