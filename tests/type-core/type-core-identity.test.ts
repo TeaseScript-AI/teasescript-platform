@@ -430,6 +430,10 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
     "places: parentheses' own place (`#expression`), stored into only as a store's receiver (P1, `#assignment`) or a changing method's (P2, `#call`); `#mutate` (P1, P2); `#speakerName` (P1, P2's `copyFrom`, else a speaker's read); `label` (P2's receiver, named); the rest values",
   ],
   "core/admission/classes.ts": [1, "an index's value"],
+  "core/backend.ts": [
+    2,
+    "values: a command operand's form (`operandAdmitted`) and a choice's list written in place (`choiceButtons`), on the source",
+  ],
   "core/check-result/check-result.ts": [
     5,
     "places: a store's target chain (P1, the written variable's root); the rest values: a count, an argument, an expression's type",
@@ -469,8 +473,8 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   "core/narrowing/route-tests.ts": [2, "values: a test's subject; a condition's own parentheses"],
   "core/narrowing/routes.ts": [1, "a value: its producer"],
   "core/slice-syntax.ts": [
-    8,
-    "values: the syntax check's literals, on the source, an ask's prefill among them (`askPrefillAdmitted`)",
+    11,
+    "values: the syntax check's literals, on the source, an ask's prefill among them (`askPrefillAdmitted`), and the command operand table's forms: a choice object's or a choice list's literals (`choiceObjectShape`, `askOperandsByPosition`)",
   ],
   "effects.ts": [3, "the legacy backend's, on the source"],
   "legacy-rounds.ts": [3, "the legacy backend's, on the source"],

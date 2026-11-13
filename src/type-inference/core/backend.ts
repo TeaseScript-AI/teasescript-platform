@@ -1,4 +1,6 @@
-import type { CallArgument, CallExpression, Expression } from "../../ast.js";
+import type { CallArgument, CallExpression, Expression, InteractionExpression } from "../../ast.js";
+import { MAX_INTERACTION_OPTION_ENTRIES } from "../../interaction-limits.js";
+import { unwrap } from "../../expression-children.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { BUILT_IN_SPEAKER_PROPERTIES } from "../../speaker-terms.js";
 import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } from "../backend.js";
@@ -17,6 +19,9 @@ import { checkedOnSource, identityView, type IdentityView } from "./identity-vie
 import { REASON, type Item, type ItemTag } from "./items.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 import {
+  commandOperands,
+  operandRules,
+  type OperandRule,
   outsideSyntax,
   sliceCall,
   transferCall,
@@ -175,15 +180,16 @@ function outsideSlice(request: CoreAnalysisRequest, outside: Outside): Candidate
 /**
  * The kinds a call's arguments may have without the built-in signature check (C13, S9b) having anything to say, or
  * `null` for any: a conversion's value one of its kinds or text and its default one of its result's, also `null` where
- * it takes one (`fitsDefault`'s domain, which the core's C10 does not check yet); a transfer's path (`transferCall`)
- * text; every other argument of a slice call text; an unknown, which the runtime checks.
+ * it takes one (`fitsDefault`'s domain, which the core's C10 does not check yet); every other argument of a slice call
+ * text; an unknown, which the runtime checks. A transfer's path (`transferCall`) is a command operand, the table's
+ * (`COMMAND_OPERANDS`).
  */
 function argumentKinds(call: CallExpression, argument: CallArgument): readonly string[] | null {
   const kind = sliceCall(call);
   if (kind === null)
     // (the syntax table admits no other call outside `sliceCall`, so the empty list is reached by no source today: it
     // refuses every argument of such a call rather than give it another call's rule)
-    return transferCall(call) ? ["string", "unknown"] : [];
+    return transferCall(call) ? null : [];
   const named = argument.kind === "namedArgument" ? argument.name.name : null;
   if (
     kind === "conversion" &&
@@ -365,5 +371,88 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           };
       }
     }
+  // a command's or an ask's operand that may hold a value its instruction does not take (`COMMAND_OPERANDS`): today's
+  // compile error, so today's checker answers (#2488's step 1½); last, after the values' own refusals
+  for (const node of [...index.statements, ...index.asks]) {
+    const rules = operandRules(node.kind);
+    if (rules === undefined) continue;
+    for (const [position, operand] of commandOperands(node)) {
+      const rule = rules[position];
+      // (a position the table has no rule for is outside: none is reached while the table names every position)
+      if (rule === undefined || !operandAdmitted(answers, index, operand, rule))
+        return {
+          file: index.fileOf(operand),
+          span: operand.span,
+          what: "an operand its instruction does not take",
+        };
+    }
+    // (a choice of more buttons than a request shows: today's TSV029, the request's TSR052 as it opens)
+    if (
+      node.kind === "interactionExpression" &&
+      node.interactionKind === "choice" &&
+      choiceButtons(answers, index, node) > MAX_INTERACTION_OPTION_ENTRIES
+    )
+      return {
+        file: index.fileOf(node),
+        span: node.span,
+        what: "a choice of more buttons than it shows",
+      };
+  }
   return null;
+}
+
+/**
+ * The buttons of a choice as today's checker counts them (`MAX_INTERACTION_OPTION_ENTRIES`): each element of a list
+ * written in place, and one for each other option of a known kind that is no collection (a computed collection's
+ * elements and an unknown option are not counted).
+ */
+function choiceButtons(answers: Answers, index: SliceIndex, ask: InteractionExpression): number {
+  let buttons = 0;
+  for (const option of ask.options) {
+    const written = unwrap(option.expression);
+    if (written.kind === "listLiteral") buttons += written.elements.length;
+    else {
+      const tags = (answers.at(nodeOf(answers, index, option.expression))?.items ?? []).map(
+        (item) => item.tag,
+      );
+      if (tags.every((tag) => tag !== "unknown" && tag !== "list" && tag !== "set")) buttons += 1;
+    }
+  }
+  return buttons;
+}
+
+/**
+ * Whether an operand holds only values its rule takes (`OperandRule`): as written, it passes the rule's `form`;
+ * each kind the core gives it is one the rule takes; a read of a place whose type is written or decided holds that
+ * type's kinds (a typed ingress's read is the unknown its store's check stands for); an unknown is admitted only of an
+ * external origin, as the host global itself or a direct read of a place whose type is undecided, beside the
+ * instruction's cited check; a missing property is no value there, its read fails first. Any other unknown (one an
+ * element, a call or an operation carries, a stop's) is not shown to fit.
+ */
+function operandAdmitted(
+  answers: Answers,
+  index: SliceIndex,
+  operand: Expression,
+  rule: OperandRule,
+): boolean {
+  if (rule.form !== undefined && !rule.form(operand)) return false;
+  const answer = answers.at(nodeOf(answers, index, operand));
+  const read = answer?.place ?? null;
+  const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
+  const unwrappedOperand = unwrap(operand);
+  return (answer?.items ?? []).every((item) => {
+    if (item.tag === "empty") return true;
+    if (item.tag !== "unknown") return rule.takes.includes(item.tag);
+    // (a property read that found no such property fails there, before the operand holds a value: `withoutMissing`)
+    const reasons = item.reasons & ~REASON.missing;
+    if (reasons === 0) return true;
+    // (an opaque, deferred or stopped unknown: none reaches an operand inside today's slice, as speakers are refused by
+    // the name rule, parameters by the function row and a budget stop by its gate; a test fails when one does)
+    if (reasons !== REASON.external) return false;
+    if (admitted !== null)
+      return (
+        admitted.by === "undecided" || admitted.kinds.every((kind) => rule.takes.includes(kind))
+      );
+    return unwrappedOperand.kind === "identifier";
+  });
 }

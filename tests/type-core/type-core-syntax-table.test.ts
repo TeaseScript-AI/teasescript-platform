@@ -10,6 +10,7 @@ import {
   outsideSyntax,
   type SyntaxKind,
 } from "../../src/type-inference/core/slice-syntax.js";
+import { HELD_MODES } from "../helpers/type-core-held-host.js";
 
 /*
  * The candidate route's syntax table (`DISPOSITIONS`, #2498): a construct whose row is open is still refused when a
@@ -191,69 +192,6 @@ const CONDITIONS: readonly Condition[] = [
   },
   {
     row: "letStatement",
-    condition: "a written type only `null` fills (`onlyNull`, `nullOnlyPosition`)",
-    source: "let x: null = hostValue",
-    at: "null",
-    what: "this written type",
-  },
-  {
-    row: "letStatement",
-    condition: "an optional of a type only `null` fills is one",
-    source: "let x: null? = hostValue",
-    at: "null?",
-    what: "this written type",
-  },
-  {
-    row: "letStatement",
-    condition: "an optional of a union only `null` fills is one, at the optional",
-    source: "let x: (null | null)? = hostValue",
-    at: "(null | null)?",
-    what: "this written type",
-  },
-  {
-    row: "letStatement",
-    condition: "a type nested deeper than the host's call stack is walked, not recursed",
-    source: `let x: null${"[]".repeat(10_000)} = hostValue`,
-    at: "null",
-    what: "this written type",
-  },
-  {
-    row: "letStatement",
-    condition: "a list's element only `null` fills",
-    source: "let x: null[] = hostValue",
-    at: "null",
-    what: "this written type",
-  },
-  {
-    row: "letStatement",
-    condition: "an optional's value with a position only `null` fills",
-    source: "let x: null[]? = hostValue",
-    at: "null",
-    what: "this written type",
-  },
-  {
-    row: "letStatement",
-    condition: "a set's element only `null` fills, before the set's own refusal",
-    source: "let x: null set = hostValue",
-    at: "null",
-    what: "this written type",
-  },
-  {
-    row: "letStatement",
-    condition: "a union's member `null` is the union's own `null`, not a position",
-    source: "let x: integer | null = 1",
-    at: "integer | null",
-    what: "this written type",
-  },
-  {
-    row: "letStatement",
-    condition: "a union's later member with a position only `null` fills",
-    source: "let x: integer | null[] = hostValue",
-    at: "null",
-    what: "this written type",
-  },
-  {
-    row: "letStatement",
     condition: "a written list type above the facts' deepest depth (`SLICE_DEPTH`)",
     source: `let x: integer${"[]".repeat(SLICE_DEPTH)} = []`,
     at: "integer[]",
@@ -348,13 +286,6 @@ const CONDITIONS: readonly Condition[] = [
     condition: "a written type of the slice",
     source: "let b = hostValue is integer | string",
     at: "integer | string",
-    what: "this written type",
-  },
-  {
-    row: "typeTestExpression",
-    condition: "a written type only `null` fills",
-    source: "let b = hostValue is null",
-    at: "null",
     what: "this written type",
   },
   {
@@ -729,6 +660,28 @@ test("every open row is in the condition inventory or has no condition of its ow
     [],
   );
   assert.deepEqual([...conditional, ...UNCONDITIONAL].sort(), modelled);
+});
+
+test("a written union nested deeper than the analysis walks is refused as a written type in every mode, never thrown", () => {
+  // (the direct analysis of such a type throws `RangeError`; the slice takes no union, so the route never reaches it)
+  for (const depth of [2_000, 10_000]) {
+    let type = "integer";
+    for (let level = 0; level < depth; level += 1) type = `(integer | ${type})`;
+    const source = `let x: ${type} = hostValue\nexit\n`;
+    for (const mode of HELD_MODES)
+      assert.throws(
+        () =>
+          mode.run(() =>
+            compileProjectWithBackend(
+              [{ path: "main.tease", source }],
+              { globals: ["hostValue"] },
+              CORE_BACKEND,
+            ),
+          ),
+        (error) => error instanceof CandidateOutsideSlice && error.what === "this written type",
+        `${depth} levels [${mode.name}]`,
+      );
+  }
 });
 
 test("each open row refuses where its own condition fails, at its construct, with its text", () => {
