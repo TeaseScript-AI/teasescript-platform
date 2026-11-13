@@ -14,14 +14,16 @@ import { emitProgram } from "./emit.mjs";
 import { EXIT, Runtime, SUSPEND } from "./runtime.mjs";
 import { fromCanonical, toCanonical } from "../../dist/src/runtime/native/values/codec.js";
 
-const programs = { replay: new WeakMap(), resumable: new WeakMap() };
+const programs = new Map();
 
 /** The emitted program of a validated plan: its source, constants and the function that instantiates it. */
-export function compileProgram(plan, resumable = false) {
-  const cache = resumable ? programs.resumable : programs.replay;
+export function compileProgram(plan, resumable = false, runawayCheck = false) {
+  const key = `${resumable}/${runawayCheck}`;
+  if (!programs.has(key)) programs.set(key, new WeakMap());
+  const cache = programs.get(key);
   let program = cache.get(plan);
   if (program === undefined) {
-    const emitted = emitProgram(plan, { resumable });
+    const emitted = emitProgram(plan, { resumable, runawayCheck });
     program = { ...emitted, instantiate: new Function("rt", "K", emitted.source) };
     cache.set(plan, program);
   }
@@ -39,12 +41,12 @@ export class EmittedSession {
   #waits = 0;
   #mode = "run";
   /** Instructions are not counted by generated code; drives report 0. */
-  constructor(plan, fresh) {
+  constructor(plan, fresh, { runawayCheck = false } = {}) {
     const captured = captureOrReuseInstructionPlan(plan);
     if (!captured.validation.valid || captured.plan === null) throw new TypeError("Malformed instruction plan.");
     this.#plan = captured.plan;
     this.#fresh = fresh;
-    this.#program = compileProgram(this.#plan);
+    this.#program = compileProgram(this.#plan, false, runawayCheck);
     this.#state = this.#freshState();
   }
 
@@ -130,8 +132,8 @@ export class EmittedSession {
   }
 }
 
-export function createEmittedSession(plan, fresh = {}) {
-  return new EmittedSession(plan, fresh);
+export function createEmittedSession(plan, fresh = {}, options = {}) {
+  return new EmittedSession(plan, fresh, options);
 }
 
 /** A value of a saved frame as JSON: a native value's canonical form, and `undefined` (not set yet) marked. */

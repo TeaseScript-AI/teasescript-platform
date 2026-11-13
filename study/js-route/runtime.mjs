@@ -93,6 +93,10 @@ export class Runtime {
     this.frames = [];
     this.resumeFrames = [];
     this.resuming = false;
+    /** Point 5's check: rounds and calls left before the next look at the clock, and how long a drive may run. */
+    this.fuel = 1_000_000;
+    this.startedMs = Date.now();
+    this.limitMs = 10_000;
     /** Each file's entry instruction, by file index (`emitProgram`). */
     this.fileEntries = [];
     this.NEEDS = NEEDS_DEFAULT;
@@ -391,6 +395,15 @@ export class Runtime {
     session.contextualSpeaker = null;
     for (const event of events) drive.push(event);
     return session.status === "waiting";
+  }
+  refuel() {
+    if (Date.now() - this.startedMs > this.limitMs)
+      throw fault(
+        "TSR037",
+        `The script ran for ${Math.round(this.limitMs / 1000)} seconds without waiting, so it was stopped. Check for a loop that repeats without end.`,
+        this.plan.files[this.file ?? 0].sourceSpan,
+      );
+    this.fuel = 1_000_000;
   }
   resumeFrame() {
     const frame = this.resumeFrames.shift();

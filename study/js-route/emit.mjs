@@ -74,7 +74,9 @@ const WAITING_KINDS = new Set(["wait", "interaction", "capture", "fileStore", "l
  * its variables saved as plain data at a wait); everything else stays structured. Without it, a wait asks the session
  * (`rt.waited`), which way (1), replaying from the start, answers.
  */
-export function emitProgram(plan, { resumable = false } = {}) {
+export function emitProgram(plan, { resumable = false, runawayCheck = false } = {}) {
+  // Point 5's second way: a counter at every loop round and call; when it runs out the runtime looks at the clock.
+  const tick = runawayCheck ? "if (--rt.fuel === 0) rt.refuel(); " : "";
   const K = [];
   const konst = (value) => {
     let index = K.indexOf(value);
@@ -507,6 +509,7 @@ export function emitProgram(plan, { resumable = false } = {}) {
       if (ins.loopKind === "while") {
         line(`${label}: while (true) {`);
         indent += 1;
+        if (tick) line(tick);
         const c = x();
         line(`${c} = ${expr(ins.expression)};`);
         line(`if (${c} !== true) { if (${c} === false) break; throw rt.notBool(${konst(ins.expression)}, ${c}); }`);
@@ -517,6 +520,7 @@ export function emitProgram(plan, { resumable = false } = {}) {
         const i = `i${pc}`;
         line(`${label}: for (let ${i} = 0, a${pc} = ${s}.start, n${pc} = ${s}.length, it${pc} = ${s}.items, vs${pc} = ${s}.values; ${i} < n${pc}; ${i}++) {`);
         indent += 1;
+        if (tick) line(tick);
         scopes.push(new Map());
         const v = declare(ins.variable);
         line(`let ${v.code} = it${pc} === null ? a${pc} + ${i} : it${pc}[${i}];`);
@@ -530,6 +534,7 @@ export function emitProgram(plan, { resumable = false } = {}) {
         line(`${n} = rt.repeatCount(${konst(ins.expression)}, ${expr(ins.expression)});`);
         line(`${label}: for (let r${pc} = ${n}; r${pc} > 0; r${pc}--) {`);
         indent += 1;
+        if (tick) line(tick);
         scopes.push(new Map());
       } else throw new Unsupported(`a '${ins.loopKind}' loop`);
       emitRange(pc + 1, endLoop);
@@ -548,6 +553,7 @@ export function emitProgram(plan, { resumable = false } = {}) {
       hoisted.push(run);
       loops.set(ins.loopId, { flat: true, run, head: pc, end: ins.target });
       const exit = `{ ${run} = false; pc = ${ins.target}; continue D; }`;
+      if (tick) line(tick);
       if (ins.loopKind === "while") {
         const c = x();
         line(`${c} = ${expr(ins.expression)};`);
@@ -806,7 +812,7 @@ export function emitProgram(plan, { resumable = false } = {}) {
     if (locals.length > 0) header.push(`  let ${locals.join(", ")};`);
     if (!flatRegion) {
       if (definition === null) return [`function file${fileIndex}() {`, ...header, ...out, "}"].join("\n");
-      return [`function f${definition.id}(${params.join(", ")}) {`, ...header, ...out, "  return null;", "}"].join("\n");
+      return [`function f${definition.id}(${params.join(", ")}) {`, ...header, ...(tick ? [`  ${tick}`] : []), ...out, "  return null;", "}"].join("\n");
     }
     // A resumable region: its argument evaluation before a call that waits runs only on a fresh entry of that call.
     const savedList = saved().join(", ");
