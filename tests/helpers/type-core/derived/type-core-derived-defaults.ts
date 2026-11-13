@@ -3,6 +3,7 @@
 
 import type { Expression, Statement } from "../../../../src/ast.js";
 import { VALUE_KIND_NAMES } from "../../../../src/value-kinds.js";
+import { functionLandings } from "./derived-functions.js";
 import {
   Underivable,
   type DerivedType,
@@ -488,6 +489,12 @@ export function writtenLanding(
           );
     if (declaration?.kind !== "letStatement" || declaration.typeAnnotation === null) continue;
     const found = landsIn(store.value, writtenType(declaration.typeAnnotation));
+    if (found !== undefined)
+      return path.reduce<DerivedType | null>((type, step) => partOf(type, step), found);
+  }
+  // (a value stored into a function's parameter or result with a written type, `derived-functions.ts`)
+  for (const { value, written } of functionLandings(statements)) {
+    const found = landsIn(value, writtenType(written));
     if (found !== undefined)
       return path.reduce<DerivedType | null>((type, step) => partOf(type, step), found);
   }
