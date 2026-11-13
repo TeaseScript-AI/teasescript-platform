@@ -103,26 +103,25 @@ import type { Proof, ProofDemand, Proven, Work } from "./solver.js";
 import { Retained } from "./retained/retained.js";
 
 /*
- * The value side of the coarse core (checkpoint 9): a read of a key at a node takes, in this order, the host
- * or reference answer (§3 step 1), the exact path's value at D (§3.1), or the contract (§3.2), and under a guard of
- * its key its kinds are possible and marked (§3.2). A read inside a stored value takes its narrowing definition G
- * where G holds (§13 N2, S10 part 2b): so a copy, an operation or a store check sees the tested kinds, and N5's
- * preserving test, which reads a store's own value, takes them too. The value of an expression at its node follows the
- * read through projections, call results (F20), operations (F7, F10, F16–F19, F25, F26b) and literals (F12). Literals
- * and operations are demands, once per value and path.
+ * The value side of the coarse core: a read of a key at a node takes, in this order, the host or reference answer, the
+ * exact path's value at its definition, or the contract, and under a test of its key its kinds are possible and
+ * marked. A read inside a stored value takes its narrowing definition where that holds: so a copy, an operation or a
+ * store check sees the tested kinds, and the test whether a loop's store preserves a narrowing, which reads the store's
+ * own value, takes them too. The value of an expression at its node follows the read through projections, call
+ * results, operations and literals. Literals and operations are demands, once per value and path.
  */
 
 const COLLECTIONS: ReadonlySet<string> = new Set(["list", "set", "dict", "object"]);
 
-/** The receiver kinds a copy of their elements (F10) is not. */
+/** The receiver kinds a copy of their elements is not. */
 const COPIED: ReadonlySet<ItemTag> = new Set(["list", "set", "range"]);
 
-/** Which path answered a read (S3 §1's route): the exact path's definition, or the contract (§3 step 1 included). */
+/** Which path answered a read: the exact path's definition, or the contract (the host or reference answer included). */
 export type ReadRoute = "exact" | "contract";
 
 /**
- * A read that takes its narrowing (S10 part 2b, `Values.#narrowingOf`): its G and its node, and the key, binding
- * occurrence and node the exact path reads it by.
+ * A read that takes its narrowing (`Values.#narrowingOf`): the narrowing definition (`g`) and its node, and the key,
+ * binding occurrence and node the exact path reads it by.
  */
 interface NarrowedRead {
   readonly g: Narrowing;
@@ -133,14 +132,16 @@ interface NarrowedRead {
 }
 
 /**
- * G's items' demand key (`Values.narrowingValue`): its entry, its input (whose stable path, with the element steps,
- * is its location), its form and its element steps.
+ * A narrowing definition's items' demand key (`Values.narrowingValue`): its entry, its input (whose stable path, with
+ * the element steps, is its location), its form and its element steps.
  */
 export function narrowingKey(g: Narrowing): string {
   return joinParts("gv", g.node.id, g.input.id, g.form.kind, g.elements);
 }
 
-/** The key of `place` at `rest`: a record's steps spelled by their record (`PathSteps.text`), an array's as before. */
+/**
+ * The key of `place` at `rest`: a record's steps spelled by their record (`PathSteps.text`), an array's by its steps.
+ */
 function keyOfSteps(place: PlaceId, rest: Steps): Key {
   return isPathSteps(rest) ? keyOfText(place, rest.text()) : keyOf(place, rest);
 }
@@ -183,7 +184,7 @@ export class Values {
    * A type test's spelling (`NarrowingForm`'s `test`): its kinds in their written order, which the kinds it narrows to
    * keep (#1398); none for any other form. Read where the narrowing is answered, outside the narrowing
    * modules' charged walks: one walk of the written type per form and pass, shared by every read the form narrows, so
-   * the walks grow with the tests' sizes alone (Codex r6 on #1558).
+   * the walks grow with the tests' sizes alone (#1558).
    */
   #testSpelling(form: NarrowingForm): Spelling | undefined {
     if (form.kind !== "is" || form.test === undefined) return undefined;
@@ -193,20 +194,20 @@ export class Values {
     return spelling;
   }
 
-  /** A read of `key` at `node` (§3); `before`: a definition at `node` itself does not count. */
+  /** A read of `key` at `node`; `before`: a definition at `node` itself does not count. */
   public *keyItems(asked: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
-    // (a key in its identity: a wrapper family's text read as its cursor, whose stop it then meets, G3 stage 1)
+    // (a key in its identity: a wrapper family's text read as its cursor, whose stop it then meets)
     const key = this.pass.contract.canonicalKey(asked);
     const read = yield* this.#keyRead(key, node, before);
-    // §3.2: under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
+    // under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
     return read.guardable && this.pass.guards.narrowed(key, node!)
       ? marked(read.items)
       : read.items;
   }
 
   /**
-   * `keyItems` before §3.2's mark: the host or reference answer, the exact path's value at D (`def`, where D answers),
-   * or the contract; `guardable` where the mark applies.
+   * `keyItems` before its mark under a test: the host or reference answer, the exact path's value at its definition
+   * (`def`, where one answers), or the contract; `guardable` where the mark applies.
    */
   *#keyRead(
     key: CanonicalKey,
@@ -243,8 +244,8 @@ export class Values {
       return { items: yield* contract.contractOf(key), def: null, guardable: false };
     }
     const answer = exact.exactPath(contract.keyText(key), node, before);
-    // F5a: the loop ran only over a held iterable, and nothing between the add and the body's end may change the
-    // collection: X6's events, a call into a callable that stores it included
+    // (a loop's exit add: the loop ran only over a held iterable, and nothing between the add and the body's end may
+    // change the collection: no own store or call event of the key, a call into a callable that stores it included)
     let loop = false;
     if ("def" in answer && answer.def.loop !== undefined) {
       const facts = answer.def.loop;
@@ -268,14 +269,13 @@ export class Values {
   }
 
   /**
-   * S10 part 2b: the narrowing a read takes, `null` for none. A read of a stable path at its own path (a binding's
-   * occurrence, or a chain of its properties and indexes), stored or read by a consumer (#1073), takes the nearest
-   * narrowing definition its node finds (N2, `NarrowingIndex.nearestAt`: one walk of its steps down the tested paths);
-   * its consumer decides on that answer in §13.2's order (`Consumers.valueItems`). A selection at any
-   * step (`xs.first`, `rows[0].random`, `rs.first.f`, `rows.first.last`) reads its element's (U4a, #1073: an element G
-   * proves its kinds, never its emptiness, which C6 asks of the owner), each selected owner's own selection beside it
-   * (`#narrowedChain`); an iteration, a length or a member step answers by itself (N1: G proves kinds only). Once per
-   * read.
+   * The narrowing a read takes, `null` for none. A read of a stable path at its own path (a binding's occurrence, or a
+   * chain of its properties and indexes), stored or read by a consumer (#1073), takes the nearest narrowing definition
+   * its node finds (`NarrowingIndex.nearestAt`: one walk of its steps down the tested paths); its consumer decides on
+   * that answer (`Consumers.valueItems`). A selection at any step (`xs.first`, `rows[0].random`, `rs.first.f`,
+   * `rows.first.last`) reads its element's (#1073: an element's narrowing proves its kinds, never its emptiness, which
+   * a selection's check asks of the owner), each selected owner's own selection beside it (`#narrowedChain`); an
+   * iteration, a length or a member step answers by itself (a narrowing proves kinds only). Once per read.
    */
   #narrowingOf(value: PlaceId): NarrowedRead | null {
     const known = this.#narrowings.get(value);
@@ -319,7 +319,7 @@ export class Values {
   /**
    * A consumer's read of a value at a path (`Consumers.valueRun`, #1073): a descendant demand (`${xs}` asks its element,
    * `['element']`) takes the narrowing of its whole path (`#narrowingBelow`), as a read takes its own (`#narrowingOf`);
-   * anything else is `valueItems`. Only a consumer asks it: the values the alias classes share answer as before.
+   * anything else is `valueItems`. Only a consumer asks it: the values the alias classes share answer by `valueItems`.
    */
   public *consumerItems(value: PlaceId, node: FlowNode | null, asked: Rest): Work<readonly Item[]> {
     if (!isSteps(asked) || asked.length === 0) return yield* this.valueItems(value, node, asked);
@@ -341,9 +341,9 @@ export class Values {
   }
 
   /**
-   * The narrowing a consumer's descendant demand of a read takes (`consumerItems`): the nearest G of the read's path and
-   * the steps below it (`nearestAt` with them), asked only where a test names the read's binding, once per read and
-   * path, its key made kept.
+   * The narrowing a consumer's descendant demand of a read takes (`consumerItems`): the nearest narrowing definition of
+   * the read's path and the steps below it (`nearestAt` with them), asked only where a test names the read's binding,
+   * once per read and path, its key made kept.
    */
   #narrowingBelow(value: PlaceId, rest: Steps): NarrowedRead | null {
     const { program, guards } = this.pass;
@@ -385,7 +385,7 @@ export class Values {
   /**
    * The binding of a place's chain of projections where every step is stable (no iteration, length or member step),
    * `null` for none: one memo per place, each projection step walked charged once, so the prefixes of one chain, each a read of
-   * its own (`#narrowedChain`'s owners), walk it once together, never once each (Codex r2 on #1742).
+   * its own (`#narrowedChain`'s owners), walk it once together, never once each (#1742).
    */
   #stableBinding(value: PlaceId): PlaceId | null {
     const { program } = this.pass;
@@ -414,12 +414,13 @@ export class Values {
   }
 
   /**
-   * A read that takes its narrowing G (N2, S10 part 2b): where G holds, G's items under the read's own word, or, where
+   * A read that takes its narrowing definition G (`g`): where G holds, G's items under the read's own word, or, where
    * the exact path's definition D reaches the read, D's value (after G's entry: a preserving store there, the read's
-   * nearest candidate, §13.2 (2)) or D's value filtered by G's form (before it); where G fails, the read as before,
-   * marked (§3.2's fallback). A demand per read. The read, G's items and N2's query are always asked, so what it reads
-   * never depends on what they answer. G's kinds never wait on the read's own component (`narrowingValue`); were they
-   * still being solved, the read would ask N2 with no preserving store, the conservative answer.
+   * nearest candidate) or D's value filtered by G's form (before it); where G fails, the read without G, marked as a
+   * read under a test of its key is (`keyItems`). A demand per read. The read, G's items and whether G holds
+   * (`NarrowingEvents.holds`) are always asked, so what it reads never depends on what they answer. G's kinds never
+   * wait on the read's own component (`narrowingValue`); were they still being solved, whether G holds would be asked
+   * with no preserving store, the conservative answer.
    */
   *#narrowedRead(narrowed: NarrowedRead, node: FlowNode | null): Work<readonly Item[]> {
     const { program, contract, guards, solver } = this.pass;
@@ -433,10 +434,10 @@ export class Values {
         : withoutEmpty(items).map((item) => item.tag);
     const fails = yield* guards.narrowings(this.pass).events.holds(g, narrowed.read, kinds);
     // (a definition after G's entry that reaches the read answers it, whether G holds or a later event failed it: the
-    // nearest candidate, §13.2 (2), #1073)
+    // nearest candidate, #1073)
     if (read.def !== null && program.dom.dominates(g.node, read.def.node))
       return contract.entered(root, read.items);
-    // (U5: a check on every route that the compiler cannot keep names what dropped it, the failing event's word, V30 §13)
+    // (a check on every route that the compiler cannot keep names what dropped it, the failing event's word, V30 §13)
     if (fails !== null) {
       const worded = read.items.map((item): Item =>
         item.tag === "empty"
@@ -473,11 +474,11 @@ export class Values {
   }
 
   /**
-   * G's items (N1): its key read at its input, as part 1 reads it (the exact path's definition value at the test, else
-   * the contract; unmarked, no other narrowing), filtered by its form; a definition inside a loop around the test is
-   * read as the contract, since its value may read the loop's own narrowings (through a store of the loop, by copies),
-   * so G's kinds never wait on the component they decide, and a read the definition still reaches filters its value
-   * itself (`#narrowedRead`). A demand per G.
+   * A narrowing definition G's items: its key read at its input, as `#keyRead` reads it (the exact path's definition
+   * value at the test, else the contract; unmarked, no other narrowing), filtered by its form; a definition inside a
+   * loop around the test is read as the contract, since its value may read the loop's own narrowings (through a store
+   * of the loop, by copies), so G's kinds never wait on the component they decide, and a read the definition still
+   * reaches filters its value itself (`#narrowedRead`). A demand per G.
    */
   public *narrowingValue(g: Narrowing): Work<readonly Item[]> {
     return yield {
@@ -505,10 +506,10 @@ export class Values {
   }
 
   /**
-   * What a read's answer takes from its narrowing, for the value classes that share answers (S10 part 2b): nothing for
-   * a read that takes none; else its G's environment (`NarrowingEvents.environment`: two reads with one answer it
+   * What a read's answer takes from its narrowing, for the value classes that share answers: nothing for a read that
+   * takes none; else its narrowing's environment (`NarrowingEvents.environment`: two reads with one answer it
    * alike) and its type test's spelling (`spellingIdentity`, read once per form: two tests of one kinds in two written
-   * orders give two answers, Codex r7 on #1558). The value classes' `readSnapshot` and
+   * orders give two answers, #1558). The value classes' `readSnapshot` and
    * `readClass(…, true)` take it from here.
    */
   public narrowingMark(value: PlaceId): string {
@@ -523,13 +524,13 @@ export class Values {
 
   /**
    * The route the value of a place at a node took at a path, read from the routes recorded as it was answered (its
-   * items are asked first): a read's own, through projections, a call's result read, a literal's (F12); a length's,
-   * its owner's own field's where the owner is an object (F14; a computed length is `exact`); an operation's value is
+   * items are asked first): a read's own, through projections, a call's result read, a literal's; a length's, its
+   * owner's own field's where the owner is an object (a computed length is `exact`); an operation's value is
    * computed, `exact`.
    */
   public valueRoute(value: PlaceId, node: FlowNode | null, rest: readonly string[]): ReadRoute {
     const { program, contract } = this.pass;
-    // (a key in its identity, as `#keyRead` records it: a wrapper family's text read as its cursor, G3 stage 1)
+    // (a key in its identity, as `#keyRead` records it: a wrapper family's text read as its cursor)
     const recorded = (key: Key, at: FlowNode | null): ReadRoute =>
       this.#routes.get(joinParts(contract.canonicalKey(key), at?.id ?? "-", 0)) ?? "exact";
     let path = rest;
@@ -560,7 +561,10 @@ export class Values {
     return recorded(keyOf(value, path), at);
   }
 
-  /** F5a: the loop's iterable holds an element at the loop's entry, by the contract or by the exact value (C6's test). */
+  /**
+   * For a loop's exit add (`ForLoopFacts`): whether the loop's iterable holds an element at the loop's entry, by the
+   * contract or by the exact value, as a selection's non-emptiness is tested.
+   */
   *#iterableHeld(facts: ForLoopFacts): Work<boolean> {
     const { contract } = this.pass;
     const elements = yield* contract.contractOfValueAt(facts.value, ["element"]);
@@ -579,7 +583,7 @@ export class Values {
   }
 
   /**
-   * S6c: what a computed value's exact answer rests on beside its operands, as a part of its class
+   * What a computed value's exact answer rests on beside its operands, as a part of its class
    * (`Contract.classOf`): a `get`'s whether its default runs, and alone (`getProof`), an `otherwise`'s whether its
    * fallback runs only where the left is null; each at the operation's own node, so where it has none, or for any other
    * value, `null`.
@@ -602,12 +606,12 @@ export class Values {
         : "";
   }
 
-  /** The value of a place at a node, read at the path `rest` below it. */
+  /** The value of a place at a node, read at the path `asked` below it (steps, or a cursor's path or span). */
   public valueItems(value: PlaceId, node: FlowNode | null, asked: Rest): Work<readonly Item[]> {
-    // (G3 stage 1: a cursor's span read by its path's id)
+    // (a cursor's span read by its path's id)
     if (!isSteps(asked) && asked.kind === "span") return this.valueItemsAt(value, node, asked.id());
     const rest = isSteps(asked) ? asked : asked.steps();
-    // G3 3a: a read at a path of property steps stands one step below its parent's position
+    // a read at a path of property steps stands one step below its parent's position
     if (
       rest.length > 0 &&
       positions() &&
@@ -621,7 +625,7 @@ export class Values {
   /**
    * Whether a value's read at a path of property steps stands at a position (`#position`): a read, a literal, or a chain
    * of property reads of a read, whose first step passes a wrapper (`Contract.wrapperHop`, `Contract.literalHop`); a
-   * read through no wrapper is its own read, as before.
+   * read through no wrapper is its own read.
    */
   #rooted(value: PlaceId, first: string): boolean {
     const { program, contract } = this.pass;
@@ -632,8 +636,8 @@ export class Values {
   }
 
   /**
-   * G3 3a: a value's read at a path with its position (`#position`'s proof), `null` where it stands at none (a read
-   * through no wrapper, outside positions): A2's scan past wrappers asks it (`inherited/inherited.ts`).
+   * A value's read at a path with its position (`#position`'s proof), `null` where it stands at none (a read through
+   * no wrapper, outside positions): the scan past wrappers of `inherited/inherited.ts` asks it.
    */
   public *valuePosition(
     value: PlaceId,
@@ -654,7 +658,7 @@ export class Values {
     return { items: yield* this.#through(value, node, rest, 0), proof: null };
   }
 
-  /** `valuePosition` at the path of a path id (G3 stage 1: a decided cursor's), from the arena's metadata. */
+  /** `valuePosition` at the path of a path id (a decided cursor's), from the arena's metadata. */
   public *valuePositionAt(
     value: PlaceId,
     node: FlowNode | null,
@@ -686,7 +690,7 @@ export class Values {
   }
 
   /**
-   * `valueItems` at the path of a path id (G3 stage 1: a decided cursor's path, or a span of it): positioned where its
+   * `valueItems` at the path of a path id (a decided cursor's path, or a span of it): positioned where its
    * steps are property steps and its first passes a wrapper, from the arena's metadata; else its steps made (uncharged,
    * as a caller's array was) for the read's own computation.
    */
@@ -708,7 +712,7 @@ export class Values {
   }
 
   /**
-   * G3 3a: a value at a node and a path of property steps as a demand that proves its position (`positions.ts`): its
+   * A value at a node and a path of property steps as a demand that proves its position (`positions.ts`): its
    * parent's (one step up, at its root its own) advanced one step (`#advance`).
    */
   #position(value: PlaceId, node: FlowNode | null, path: number): ProofDemand<Proof> {
@@ -729,7 +733,7 @@ export class Values {
   }
 
   /**
-   * G3 3a: a value's read one step below its parent's position. Where every receiver of the read's key on the way holds
+   * A value's read one step below its parent's position. Where every receiver of the read's key on the way holds
    * no reference (`Contract.refReceiver`'s walk, step by step), a read past a wrapper or a literal's lone read is its
    * frontier's read at its path below, as one literal's alternatives with the outermost wrapper's writer (the wrapper's
    * lemma: `Contract.wrapperHop`); its frontier passes the next wrapper where it stands at one, a wrapper's read where
@@ -870,7 +874,7 @@ export class Values {
    * to the key's reads, which the contract answers the same way). A dict's `values` is a new list of its values and its
    * `keys` one of text, as certain as the dict, either may hold none (no count proof, no `null`); a
    * temporal field or a calendar duration's part gives its declared result (V30 §35); an object's own property of the
-   * name is read as any property (F11), and a receiver that may be a reference has the runtime's members (F19a).
+   * name is read as any property, and a receiver that may be a reference has the runtime's members.
    */
   #through(
     value: PlaceId,
@@ -879,7 +883,7 @@ export class Values {
     from: number,
   ): Work<readonly Item[]> {
     const { program } = this.pass;
-    // (a read, a projection or a call passes the path on whole: its member steps are scanned where it ends, S6c)
+    // (a read, a projection or a call passes the path on whole: its member steps are scanned where it ends)
     if (
       program.occurrenceOf.has(value) ||
       program.projOf.has(value) ||
@@ -904,7 +908,7 @@ export class Values {
     // (a record's steps before and after the member their views)
     const before = stepsTo(rest, at);
     const after = stepsFrom(rest, at + 1);
-    // F19a: a receiver that may be a reference, by its completed contract, has the runtime's members
+    // a receiver that may be a reference, by its completed contract, has the runtime's members
     const contract = this.pass.contract;
     const decided =
       before.length === 0
@@ -925,7 +929,7 @@ export class Values {
       if (item.tag === "dict" && dictList(step) !== undefined) {
         if (after.length === 0) out.push(of("list"));
         else if (after.at(0) === "element") {
-          // a key is text from the list's contract, possible: no literal holds a derived list's element (P3)
+          // a key is text from the list's contract, possible: no literal holds a derived list's element
           const below =
             dictList(step) === "keys"
               ? after.length === 1
@@ -947,7 +951,7 @@ export class Values {
     return mergeItems(out, program.scope);
   }
 
-  /** A written element of a list or set at a path, read as the list's literal reads it, below its element step (F12). */
+  /** A written element of a list or set at a path, read as the list's literal reads it, below its element step. */
   *#belowElement(
     literal: PlaceId,
     node: FlowNode | null,
@@ -965,8 +969,8 @@ export class Values {
       const { program, contract } = this.pass;
       if (program.speakerPlaces.has(value))
         return [makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled" })];
-      // S10 part 2b: a read takes its narrowing (a consumer's descendant demand of it, `consumerItems`); a selection at
-      // any step its element's, beside each selected owner's own selection (U4a, #1073, F11)
+      // a read takes its narrowing (a consumer's descendant demand of it, `consumerItems`); a selection at any step its
+      // element's, beside each selected owner's own selection (#1073)
       const narrowed = rest.length === 0 ? this.#narrowingOf(value) : null;
       if (narrowed !== null) {
         const site = program.places[value]?.site ?? null;
@@ -997,7 +1001,7 @@ export class Values {
             at,
             stepsAfter([stepName(projection.step)], rest),
           );
-        // S6c: a selection reads its owner twice, at its step and whole, so its whole value once per value and node,
+        // a selection reads its owner twice, at its step and whole, so its whole value once per value and node,
         // whatever asks: a chain of k `.first` reads each link once whole, never each link 2^k times
         if (rest.length > 0)
           return yield* this.#selection(projection.owner, projection.step, at, rest);
@@ -1043,10 +1047,11 @@ export class Values {
   }
 
   /**
-   * A narrowed read's value (`#valueAt`, U4a, #1073): its narrowing's read of the whole path (`#narrowedRead`: G's
-   * items, the nearest definition's value, or on a failed G the read as before, marked), rebuilt as the ordinary route
-   * nests its links: at each selection, innermost first, the selected owner's own selection beside it, read at that
-   * link's node (F11), so where G holds and where it fails each owner that may be an object keeps its own selection.
+   * A narrowed read's value (`#valueAt`, #1073): its narrowing's read of the whole path (`#narrowedRead`: the
+   * narrowing's items, the nearest definition's value, or where the narrowing fails the read without it, marked),
+   * rebuilt as the ordinary route nests its links: at each selection, innermost first, the selected owner's own
+   * selection beside it, read at that link's node, so where the narrowing holds and where it fails each owner that may
+   * be an object keeps its own selection.
    * The links are one charged walk of the chain (`selectionLinks`); each owner's read is its own demand.
    */
   *#narrowedChain(
@@ -1064,7 +1069,10 @@ export class Values {
     return items;
   }
 
-  /** F27: the loop variable is the element of the iterable's value at loop entry; a dict's key is text, a range's a whole number. */
+  /**
+   * The loop variable is the element of the iterable's value at loop entry; a dict's key is text, a range's a whole
+   * number.
+   */
   *#iteration(owner: PlaceId, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
@@ -1093,8 +1101,8 @@ export class Values {
   }
 
   /**
-   * F14: a text's or a collection's length is a whole number, as certain as the receiver; an object's own `length` is
-   * its property (F11); a kind without it gives nothing (C5b reports it).
+   * A text's or a collection's length is a whole number, as certain as the receiver; an object's own `length` is its
+   * property; a kind without it gives nothing (the receiver's member check reports it).
    */
   *#length(
     owner: PlaceId,
@@ -1102,8 +1110,8 @@ export class Values {
     step: string,
     rest: Steps,
   ): Work<readonly Item[]> {
-    // F19a before F14 and the exact value: a receiver that may be a reference has the runtime's members, its `length`
-    // among them, read as a member so its route is the member's
+    // (before the length rule and the exact value) a receiver that may be a reference has the runtime's members, its
+    // `length` among them, read as a member so its route is the member's
     if (heldReference(yield* this.pass.contract.valueReceiver(owner)))
       return yield* this.valueItems(owner, node, stepsAfter([step], rest));
     const out: Item[] = [];
@@ -1122,7 +1130,7 @@ export class Values {
             ),
           );
       } else if (item.tag === "object" || REFERENCE.has(item.tag)) {
-        // an object's own `length` (F11), a reference's member (F19a)
+        // an object's own `length`, a reference's member
         const own = yield* this.valueItems(owner, node, stepsAfter([step], rest));
         out.push(...(item.cert === "def" ? own : weaken(own)));
       } else if (item.tag === "unknown") out.push(item);
@@ -1130,7 +1138,7 @@ export class Values {
     return mergeItems(out, this.pass.program.scope);
   }
 
-  /** A literal's value at a path (F12): a demand per literal, path and node. */
+  /** A literal's value at a path: a demand per literal, path and node. */
   *#literalItems(literal: PlaceId, rest: Steps, node: FlowNode | null): Work<readonly Item[]> {
     const site = this.pass.program.places[literal]?.site ?? null;
     return yield {
@@ -1153,7 +1161,7 @@ export class Values {
 
   /**
    * An operation's value at a path: a demand per result and path, and one for every path below a computed-key load's
-   * root, where F19 gives host data whatever the path (`operationValue`; #1203: `loadsBelow`).
+   * root, where a computed key gives host data whatever the path (`operationValue`; #1203: `loadsBelow`).
    */
   *#operationItems(c: ValueConstraint, node: FlowNode | null, asked: Steps): Work<readonly Item[]> {
     const site = this.pass.program.places[c.result]?.site ?? c.site;
@@ -1182,7 +1190,7 @@ export class Values {
 
   /**
    * A path as a value demand's name has it: a record's by its id, a span's name (`.id`), whose length does not grow with
-   * the path's; an array's by its text, as before (#1857).
+   * the path's; an array's by its text (#1857).
    */
   #pathPart(rest: Steps): string {
     return isPathSteps(rest) ? `.${rest.path}` : stepsText(rest);
@@ -1201,7 +1209,7 @@ export class Values {
   *#copyValue(c: CopyOperation, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
     const { program, contract } = this.pass;
     const at = program.exprAt(c.site) ?? node;
-    // F19a: a reference's method is opaque, by the receiver's contract before its exact value
+    // a reference's method is opaque, by the receiver's contract before its exact value
     // (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44), as `#operation`
     if (heldReference(yield* contract.valueReceiver(c.receiver)))
       return alternatives([OPAQUE_MEMBER], program.scope);
@@ -1229,8 +1237,8 @@ export class Values {
       const kept = value.some((item) => item.tag !== "null")
         ? left.filter((item) => rest.length > 0 || item.tag !== "null")
         : [];
-      // F17a: K = (K(a) \ {null}) ∪ K(b), the fallback's kinds kept even where the graph never evaluates it; the
-      // fallback runs where a is null, so its own known items without a word take that null's (§3.4)
+      // the left's kinds without `null`, and the fallback's, kept even where the graph never evaluates it; the fallback
+      // runs where the left is null, so its own known items without a word take that null's
       const rightSite = program.places[c.right]?.site ?? c.site;
       const rightAt = program.exprAt(rightSite);
       const rightDefinite =
@@ -1251,7 +1259,7 @@ export class Values {
         }),
       ];
     } else if (c.kind === "get" && heldReference(yield* contract.valueReceiver(c.receiver))) {
-      // F19a before F17b: a receiver that may be a reference has the runtime's `get`, no default merged beside it
+      // a receiver that may be a reference has the runtime's `get`, no default merged beside it
       out = [OPAQUE_MEMBER];
     } else if (c.kind === "get") {
       const receiver = belowSelected(
@@ -1268,7 +1276,7 @@ export class Values {
           : []),
       ];
     } else if (c.kind === "load" && c.key === null) {
-      // F19: a computed key is host data
+      // a computed key is host data
       // (below the root one answer for every path, `#operationItems`, which marks an element step)
       if (rest.length > 0) out = external();
       else {
@@ -1277,7 +1285,7 @@ export class Values {
         out = [...external(), ...(nullDefault ? [ingressNull()] : [])];
       }
     } else if (c.kind === "load") {
-      // F18: the expected type (the load checks the value)
+      // the expected type (the load checks the value)
       const expected = yield* contract.expectedOf(c, rest);
       if (expected !== null) out = [...expected];
       else if (c.fallback !== null)
@@ -1289,7 +1297,7 @@ export class Values {
   }
 
   /**
-   * F10: a copy of the elements, which may hold none where it takes a count: a receiver's own elements, or those its kind
+   * A copy of the elements, which may hold none where it takes a count: a receiver's own elements, or those its kind
    * declares (a range's whole numbers), read at `rest`, steps or an array (#1857).
    */
   *#copied(copy: CopyGives, owner: PlaceId, at: FlowNode | null, rest: Steps): Work<Item[]> {
@@ -1336,13 +1344,9 @@ export class Values {
   }
 
   /**
-   * F18: the kinds a `load` or `fromJson` takes from its default's value at `at` (`typedDefault`): definite,
-   * the runtime checks the value against the default's type.
-   */
-  /**
-   * A wide choice's options [lo, hi) (V30 §19, S10 part 2b), read at `rest` and merged by kind, as its operation's merge
-   * takes them anyway: a balanced tree of demands, so where the options' answers change one by one (a component of N5's
-   * stores reading them), a change re-runs only the nodes above it (`Contract.gathered` for a literal's).
+   * A wide choice's options [lo, hi) (V30 §19), read at `rest` and merged by kind, as its operation's merge takes them
+   * anyway: a balanced tree of demands, so where the options' answers change one by one (a component of a loop's
+   * preserving stores reading them), a change re-runs only the nodes above it (`Contract.gathered` for a literal's).
    */
   public *choiceRange(
     c: Extract<ValueConstraint, { readonly kind: "operation" }>,
@@ -1400,7 +1404,7 @@ export class Values {
   }
 
   /**
-   * A choice's written list or set option's elements [lo, hi) (V30 §19, S10 part 2b), as `choiceRange` reads its
+   * A choice's written list or set option's elements [lo, hi) (V30 §19), as `choiceRange` reads its
    * options: a balanced tree of demands, each node its range's items merged by kind.
    */
   public *choiceElements(
@@ -1461,6 +1465,10 @@ export class Values {
       element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path);
   }
 
+  /**
+   * The kinds a `load` or `fromJson` takes from its default's value at `at` and `rest` (`typedDefault`): definite, the
+   * runtime checks the value against the default's type. A demand per default, path and node.
+   */
   public *defaultKinds(
     fallback: PlaceId,
     at: FlowNode | null,
@@ -1491,7 +1499,7 @@ export class Values {
     );
   }
 
-  /** F19: whether a default's value at `at` holds only `null` (or nothing) (`ONLY_NULL`). */
+  /** Whether a default's value at `at` holds only `null` (or nothing) (`ONLY_NULL`). */
   public *onlyNull(fallback: PlaceId, at: FlowNode | null): Work<readonly Item[]> {
     const site = this.pass.program.places[fallback]?.site ?? null;
     return yield {
@@ -1504,6 +1512,10 @@ export class Values {
     };
   }
 
+  /**
+   * An operation's value at a node and a path, by its family. The contract answers the same families flow-insensitively
+   * (`contractOfOp`); a new family is answered in both.
+   */
   *#operation(
     c: Extract<ValueConstraint, { readonly kind: "operation" }>,
     at: FlowNode | null,
@@ -1512,7 +1524,7 @@ export class Values {
     const { program, contract } = this.pass;
     const { family, name } = c.contract;
     const out: Item[] = [];
-    // F19a: a reference's method is opaque, by the receiver's contract before its exact value
+    // a reference's method is opaque, by the receiver's contract before its exact value
     // (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44)
     if (
       family === "method" &&
@@ -1520,9 +1532,9 @@ export class Values {
       heldReference(yield* contract.valueReceiver(c.receiver))
     )
       return [OPAQUE_MEMBER];
-    // F26b (r5): `"${v}"` is always text
+    // `"${v}"` is always text
     if (family === "interpolation") return rest.length === 0 ? [makeItem("string")] : [];
-    // a message's handle (F19a)
+    // a message's handle, whose members are the runtime's
     if (family === "say") return rest.length > 0 ? [OPAQUE_MEMBER] : [makeItem("messageHandle")];
     // `2 s`, `1 calendar day`, `20 deg`
     if (family === "unit" || family === "angle")
@@ -1547,7 +1559,7 @@ export class Values {
       ];
     }
     const method = family === "method" && c.receiver !== null ? methodCategory(name) : undefined;
-    // F7a–c, F25: a declared result, or what a removal gives
+    // a declared result, or what a removal gives
     if (method !== undefined && c.receiver !== null && method.gives.kind !== "copy") {
       const gives = method.gives;
       for (const item of withoutEmpty(yield* this.valueItems(c.receiver, at, []))) {
@@ -1582,7 +1594,7 @@ export class Values {
       }
       return out;
     }
-    // F10: a copy of the elements (`#copied`)
+    // a copy of the elements (`#copied`)
     if (method !== undefined && c.receiver !== null && method.gives.kind === "copy")
       return yield* this.#copied(method.gives, c.receiver, at, rest);
     if (family === "operator" && name === "+" && rest.length > 0) {
@@ -1596,13 +1608,13 @@ export class Values {
       const repeated = contract.plusRepeatOf(c.result, true);
       if (repeated !== c.result) return [...(yield* this.valueItems(repeated, at, rest))];
       const operands: (readonly Item[])[] = [];
-      // (an operand admission rejected from the join gives it nothing: A6, `joinElements`)
+      // (an operand admission rejected from the join gives it nothing: `joinElements`)
       for (const argument of c.arguments)
         if (this.pass.lists.joined(argument))
           operands.push(yield* this.valueItems(argument, at, rest));
       return [...plusElements(operands, rest, this.pass)];
     }
-    // F16
+    // an operator of the runtime's operator table (`operatorOf`): its result by the table
     const operator = operatorOf(c);
     if (operator !== null) {
       if (rest.length > 0) return [];
@@ -1611,10 +1623,10 @@ export class Values {
         operands.push(withoutEmpty(yield* this.valueItems(argument, at, [])));
       return operationItems(operator, operands, program.scope, c.site);
     }
-    // `and`, `or`, `not`, `==`, `!=`, `is`: a truth value (C3, C13 check the operands)
+    // `and`, `or`, `not`, `==`, `!=`, `is`: a truth value (their consumers check the operands)
     if (family === "logic" || family === "comparison" || family === "typeTest")
       return rest.length > 0 ? [] : [makeItem("boolean")];
-    // F25: the result or the default
+    // a conversion: its result, or its default
     const conversion = family === "conversion" ? conversionCategory(name) : undefined;
     if (conversion?.kind === "converts") {
       if (rest.length > 0) return [];
@@ -1634,7 +1646,7 @@ export class Values {
         ? [unknownItem(REASON.external)]
         : [...(yield* this.defaultKinds(fallback, at, rest)), ...emptyAt(rest)];
     }
-    // F25: the built-in's declared result
+    // an asking interaction: its declared result
     const interaction = family === "interaction" ? interactionCategory(name) : undefined;
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
@@ -1658,21 +1670,20 @@ export class Values {
     }
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));
-    // F19a: a handle's members are the runtime's
+    // a handle's members are the runtime's
     if (family === "timer" || family === "media")
       return rest.length === 0 ? [makeItem(family)] : [OPAQUE_MEMBER];
-    // F25: a button's, a popup's or a camera's fixed result; a handle's members are the runtime's (F19a)
+    // a button's, a popup's or a camera's fixed result; a handle's members are the runtime's
     const shown = shownResult(name);
     if (shown !== undefined)
       return rest.length === 0 ? [makeItem(shown)] : shown === "duration" ? [] : [OPAQUE_MEMBER];
     // a range: its elements are its kind's (`kindElement`), nothing stands below it by path
     if (family === "range") return rest.length === 0 ? [makeItem("range")] : [];
-    // a method without a category, per receiver alternative: its declared result per receiver kind (F25), else the
-    // runtime's opaque answer on a known kind (C2: its consumers keep their checks); what the core cannot know keeps
-    // its own reasons. A receiver without items yet is a provisional bottom, no answer: the method's result stays the
-    // bottom, which the solver completes (S3 §1,
-    // docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44), never an `unknown` with a reason of
-    // its own
+    // a method without a category, per receiver alternative: its declared result per receiver kind, else the runtime's
+    // opaque answer on a known kind (its consumers keep their checks); what the core cannot know keeps its own reasons.
+    // A receiver without items yet is a provisional bottom, no answer: the method's result stays the bottom, which the
+    // solver completes (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44), never an
+    // `unknown` with a reason of its own
     if (family === "method" && c.receiver !== null) {
       const receiver = withoutEmpty(yield* this.valueItems(c.receiver, at, []));
       return receiver.flatMap((item) => {
@@ -1697,7 +1708,7 @@ export class Values {
 }
 
 /**
- * P7, F17b: what the graph's literal proof says of a `get` at its node `at`: its default is reached where its node is
+ * What the graph's literal facts say of a `get` at its node `at`: its default is reached where its node is
  * live (`reached`), and only a `get` on a list literal with a literal index is certain: the default dead, the element
  * the value; the literal with no element there, the default the only value (`only`), its receiver's element given
  * nowhere. Elsewhere the element may be absent and both are possible.
