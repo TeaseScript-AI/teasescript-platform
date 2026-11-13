@@ -27,6 +27,7 @@ import { usePreferredReducedMotion, useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type {
+  PlayerMessagePresentation,
   PlayerTranscriptEntryPresentation,
   PlayerSpeakerPresentation,
 } from "../../../presentation/model.js";
@@ -60,6 +61,11 @@ const props = defineProps<{
    * its row and element over (PLAYER-UI.md "Composer and foreground interactions").
    */
   pending?: PlayerTranscriptEntryPresentation | null;
+  /**
+   * The presented question's line, shown again before the foreground controls once anything came after it
+   * (`playerRuntimeQuestionAgain`).
+   */
+  askedAgain?: PlayerMessagePresentation | null;
 }>();
 /** What a row's content is, for its measurement: a message's content event, else an answer's own entry. */
 function contentOf(entry: PlayerTranscriptEntryPresentation): string | undefined {
@@ -457,6 +463,11 @@ const rows = computed(() =>
     };
   }),
 );
+const askedAgainAppearance = computed(() =>
+  props.askedAgain
+    ? resolveAppearance(props.askedAgain, palette.value, enhancedContrast?.value)
+    : null,
+);
 const showLatest = computed(
   () =>
     !touching.value &&
@@ -697,6 +708,21 @@ onMounted(() => {
               class="transcript-foreground"
               :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }"
             >
+              <div
+                v-if="askedAgain && askedAgainAppearance"
+                class="transcript-asked-again"
+                data-asked-again
+                :data-speaker-id="askedAgain.speakerId"
+              >
+                <TranscriptMessage
+                  :entry="askedAgain"
+                  :speakers="speakers"
+                  :avatar-ordinal="avatarOrdinals.get(avatarIdentity(askedAgain.speakerId))"
+                  :appearance="askedAgainAppearance"
+                  :continues="false"
+                  :continued="false"
+                />
+              </div>
               <slot name="foreground" />
             </div>
           </div>
@@ -784,6 +810,9 @@ onMounted(() => {
   position: absolute;
   left: 0;
   width: 100%;
+}
+.transcript-asked-again {
+  padding-block: var(--player-entry-gap) 0;
 }
 .transcript-history {
   position: relative;
