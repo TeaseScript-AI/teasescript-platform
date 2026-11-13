@@ -1,16 +1,20 @@
-import { compileChild, runCompileTask, type CompileTask } from "../../../compile-continuation.js";
-import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../../value-kinds.js";
-import type { PlaceId, SourceSite } from "../../graph.js";
-import { fits } from "../admission.js";
-import { joinSteps } from "../budget.js";
-import type { Consumers } from "../consumers.js";
-import { operatorOf } from "../contract.js";
-import { kindsInOrder, type ItemTag } from "../items.js";
-import { COMPARISONS, DIVISIONS, OPERATOR_ROWS } from "../operator-table.js";
-import { siteKey, type Consumption } from "../program.js";
-import type { SiteExpectation } from "../result.js";
-import { hasMethod, hasProperty, operandDomain } from "./kinds.js";
-import { indexOwner, kindsOf } from "./names.js";
+import {
+  compileChild,
+  runCompileTask,
+  type CompileTask,
+} from "../../../../compile-continuation.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../../../value-kinds.js";
+import type { PlaceId, SourceSite } from "../../../graph.js";
+import { fits } from "../../admission.js";
+import { joinSteps } from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { operatorOf } from "../../contract.js";
+import { kindsInOrder, type ItemTag } from "../../items.js";
+import { COMPARISONS, DIVISIONS, OPERATOR_ROWS } from "../../operator-table.js";
+import { siteKey, type Consumption } from "../../program.js";
+import type { SiteExpectation } from "../../result.js";
+import { hasMethod, hasProperty, operandDomain } from "../kinds.js";
+import { indexOwner, kindsOf } from "../names.js";
 
 /** The kinds `${...}` shows as text (V30 §8), by their own `shown`, which the fix validity check reads. */
 const SHOWN_KINDS: readonly ValueKind[] = VALUE_KIND_NAMES.filter(

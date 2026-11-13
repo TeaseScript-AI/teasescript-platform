@@ -623,7 +623,7 @@ export class Contract {
 
   /**
    * #1599: the decisions admission's walk makes (its groups, `Consumers.check`), the only ones besides a pass's targets'
-   * that can stop (`consumers/stores.ts`'s `decide`; a lazily decided copy path never does): each place is kept for what
+   * that can stop (`consumers/stores/stores.ts`'s `decide`; a lazily decided copy path never does): each place is kept for what
    * a stop forgets by until its last group's decision ends (`decided`), and what was asked of any other is dropped.
    */
   public openDecisions(groups: readonly { readonly root: PlaceId }[]): void {

@@ -162,7 +162,7 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     "a collection's code in a sentence, its property names joined",
   ],
   "messages/errors.ts errorSentence step": [8, "a sentence's period before its fix, no path"],
-  "consumers/otherwise.ts codeText step": [
+  "check-result/otherwise.ts codeText step": [
     1,
     "a receiver and its property as the code a fallback's warning names, made for its sentence",
   ],
@@ -354,8 +354,8 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "the candidate's lowering after the analysis (no ledger): the receiving completion's results by place and path",
   ],
-  "consumers/stores.ts admittedStores side": [1, "a definition's id and two positions"],
-  "consumers/operations.ts operatorUse key": [1, "an operand's index and a kind"],
+  "consumers/stores/stores.ts admittedStores side": [1, "a definition's id and two positions"],
+  "consumers/operations/operations.ts operatorUse key": [1, "an operand's index and a kind"],
   "consumers/host-frontier.ts recordRead read": [
     1,
     "a read's value and path in a test's record (`withFrontierBound`), never kept by an analysis",

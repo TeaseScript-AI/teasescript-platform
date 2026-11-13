@@ -76,7 +76,12 @@ export const admissionFiles = (root) => [
 ];
 
 /** The consumers files: the entry and its parts. */
-export const consumersFiles = (root) => splitFiles(root, CONSUMERS);
+export const consumersFiles = (root) => [
+  ...splitFiles(root, CONSUMERS),
+  ...folderFiles(root, `${CORE}/consumers/operations`),
+  ...folderFiles(root, `${CORE}/consumers/reports`),
+  ...folderFiles(root, `${CORE}/consumers/stores`),
+];
 
 /** The `Admission` derivations those consumer derivations call that create no obligation, each with why. */
 export const READS = new Map([

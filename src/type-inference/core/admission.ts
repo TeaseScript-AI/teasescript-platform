@@ -855,7 +855,7 @@ export class Admission {
   }
 
   /**
-   * A decision's work record (`consumers/stores.ts`): a cursor's path not made but named by its key, its steps exported
+   * A decision's work record (`consumers/stores/stores.ts`): a cursor's path not made but named by its key, its steps exported
    * with every other cursor decision's of the pass through one packet (`exportDecisionPaths`), read only from it.
    */
   public decisionWork(

@@ -1,5 +1,5 @@
-import type { SourceSite } from "../../graph.js";
-import type { DiagnosticRule } from "../result.js";
+import type { SourceSite } from "../../../graph.js";
+import type { DiagnosticRule } from "../../result.js";
 
 /** The load with a default a store warning's value is, as the checker's definitions prove it (#1468, `loadOrigin`). */
 export interface StoreOrigin {

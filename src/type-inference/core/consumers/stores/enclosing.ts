@@ -1,14 +1,14 @@
-import type { PlaceId, TypeTerm } from "../../graph.js";
-import type { Consumers } from "../consumers.js";
-import { termAt, typeTags, writtenOf } from "../contract.js";
-import { keep, keptSlice, type WorkLedger } from "../budget.js";
-import { keptKey, keptKeyBelow, sortCost, type Definition, type Key } from "../definitions.js";
-import { STOPPED } from "../items.js";
-import { propertyName } from "../program.js";
-import type { StoreStep } from "../result.js";
-import { unrestricted } from "../admission/permitted.js";
+import type { PlaceId, TypeTerm } from "../../../graph.js";
+import type { Consumers } from "../../consumers.js";
+import { termAt, typeTags, writtenOf } from "../../contract.js";
+import { keep, keptSlice, type WorkLedger } from "../../budget.js";
+import { keptKey, keptKeyBelow, sortCost, type Definition, type Key } from "../../definitions.js";
+import { STOPPED } from "../../items.js";
+import { propertyName } from "../../program.js";
+import type { StoreStep } from "../../result.js";
+import { unrestricted } from "../../admission/permitted.js";
 import { markNames, storeMark, type MarkNames } from "./fresh.js";
-import { storeWarning } from "./warnings.js";
+import { storeWarning } from "../reports/warnings.js";
 
 // The stores at, below and above a stopped decision (S3 §5, #1416, #1440): each one's obligation kept whole, or its
 // value marked.
