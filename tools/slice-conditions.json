@@ -749,8 +749,8 @@
     "scope": "row gotoStatement",
     "expression": "path === undefined",
     "mutant": "false",
-    "expected": "kill",
-    "witness": "goto label"
+    "expected": "nobuild",
+    "witness": "`walk` takes no `undefined`: the type checker requires the refusal"
   },
   {
     "id": "transfer-file",
@@ -765,8 +765,8 @@
     "scope": "transferPath",
     "expression": "target.kind !== \"scriptTarget\"",
     "mutant": "(target.kind !== \"scriptTarget\" && Math.random() < 0)",
-    "expected": "kill",
-    "witness": "goto label"
+    "expected": "nobuild",
+    "witness": "only a script target has an expression: the type checker requires the test"
   },
   {
     "id": "transfer-call-kind",
