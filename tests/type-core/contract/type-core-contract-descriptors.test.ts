@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSourceWithBackend } from "../../src/compiler.js";
-import type { InstructionPlan, TypePlan } from "../../src/plan/model.js";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestAllowance } from "../../src/type-inference/core/budget.js";
-import { storeContracts } from "../../src/type-inference/core/check-result/check-result.js";
+import { compileSourceWithBackend } from "../../../src/compiler.js";
+import type { InstructionPlan, TypePlan } from "../../../src/plan/model.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
+import { storeContracts } from "../../../src/type-inference/core/check-result/check-result.js";
 import {
   ContractDescriptors,
   type ContractReader,
-} from "../../src/type-inference/core/contract-descriptors.js";
-import { propertyStep } from "../../src/type-inference/core/program.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { heldStops, HELD_MODES } from "../helpers/type-core-held-host.js";
+} from "../../../src/type-inference/core/contract-descriptors.js";
+import { propertyStep } from "../../../src/type-inference/core/program.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { heldStops, HELD_MODES } from "../../helpers/type-core-held-host.js";
 
 /*
  * The contract proof/descriptor service (#1526 phase A): a store's required contract is one descriptor per

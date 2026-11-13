@@ -140,7 +140,7 @@ test("a core change lists every pinning suite; another change lists none, a suit
   // one, #2086)
   assert.ok(
     suitesFor(MARKED, ["src/type-inference/core/values.ts"]).some(
-      (suite) => suite.file === "tests/type-core/type-core-contract.test.ts",
+      (suite) => suite.file === "tests/type-core/contract/type-core-contract.test.ts",
     ),
   );
   assert.deepEqual(suitesFor(MARKED, ["src/runtime/engine.ts", "docs/TESTING.md"]), []);
@@ -235,7 +235,7 @@ const PAIRS = [
   "tests/type-core/candidate/type-core-candidate-operands.test.ts",
   "tests/type-core/type-core-closure.test.ts",
   "tests/type-core/type-core-contract-capture.test.ts",
-  "tests/type-core/type-core-contract.test.ts",
+  "tests/type-core/contract/type-core-contract.test.ts",
   "tests/type-core/type-core-declared-escapes.test.ts in tests/helpers/type-core/type-core-declared-escapes-main.ts",
   "tests/type-core/type-core-f18.test.ts",
   "tests/type-core/type-core-identity.test.ts",
@@ -503,7 +503,7 @@ test("main and measured occur in a family only at an admitted position; any othe
 });
 
 test("the four pin forms are found by their text, and a pin written another way is not", () => {
-  const CONTRACT = "tests/type-core/type-core-contract.test.ts";
+  const CONTRACT = "tests/type-core/contract/type-core-contract.test.ts";
   assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 22_962_573);", CONTRACT), ["total"]);
   assert.deepEqual(
     pinFormsOf("    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],", CONTRACT),

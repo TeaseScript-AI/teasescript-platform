@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { analyseCore, type CorePass } from "../../src/type-inference/core/answers.js";
+import { analyseCore, type CorePass } from "../../../src/type-inference/core/answers.js";
 import {
   BudgetExhausted,
   withTestAllowance,
   type WorkCounter,
-} from "../../src/type-inference/core/budget.js";
+} from "../../../src/type-inference/core/budget.js";
 import {
   labelBelow,
   labelPlainText,
@@ -15,11 +15,11 @@ import {
   withLabelRecords,
   type Label,
   type LabelRecord,
-} from "../../src/type-inference/core/contract/labels.js";
-import type { PlaceId } from "../../src/type-inference/graph.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
-import { inMode, MODES } from "../helpers/type-core-oracles.js";
+} from "../../../src/type-inference/core/contract/labels.js";
+import type { PlaceId } from "../../../src/type-inference/graph.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { narrowingPass } from "../../helpers/type-core/type-core-narrowing.js";
+import { inMode, MODES } from "../../helpers/type-core-oracles.js";
 
 /*
  * G3 stage 1, PR 2: a path's label is a recipe one step from its parent's (`contract/labels.ts`), its

@@ -4,9 +4,9 @@ import test from "node:test";
 
 import { Project, ts } from "ts-morph";
 
-import type { CorePass } from "../../src/type-inference/core/answers.js";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { Consumers } from "../../src/type-inference/core/consumers.js";
+import type { CorePass } from "../../../src/type-inference/core/answers.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { Consumers } from "../../../src/type-inference/core/consumers.js";
 import {
   heldAsIs,
   otherwiseKeeps,
@@ -15,21 +15,21 @@ import {
   withFlowCheck,
   type Contributions,
   type Qualifier,
-} from "../../src/type-inference/core/contract/contributions.js";
-import { withoutEmpty } from "../../src/type-inference/core/exact-path.js";
+} from "../../../src/type-inference/core/contract/contributions.js";
+import { withoutEmpty } from "../../../src/type-inference/core/exact-path.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
   WorkLedger,
-} from "../../src/type-inference/core/budget.js";
-import { keyOf } from "../../src/type-inference/core/definitions.js";
-import { makeItem, type Item } from "../../src/type-inference/core/items.js";
-import { Solver, type Demand, type Work } from "../../src/type-inference/core/solver.js";
-import { coreRecord } from "../../src/type-inference/core/result.js";
-import { checkedResult } from "../../src/type-inference/core/check-result/check-result.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { itemScope } from "../helpers/type-core-items.js";
-import { MODES, inMode, type Mode } from "../helpers/type-core-oracles.js";
+} from "../../../src/type-inference/core/budget.js";
+import { keyOf } from "../../../src/type-inference/core/definitions.js";
+import { makeItem, type Item } from "../../../src/type-inference/core/items.js";
+import { Solver, type Demand, type Work } from "../../../src/type-inference/core/solver.js";
+import { coreRecord } from "../../../src/type-inference/core/result.js";
+import { checkedResult } from "../../../src/type-inference/core/check-result/check-result.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { itemScope } from "../../helpers/type-core-items.js";
+import { MODES, inMode, type Mode } from "../../helpers/type-core-oracles.js";
 
 // #1668: which keys' answers a key's contract includes in a settled pass, recorded only where a pass asks for it.
 

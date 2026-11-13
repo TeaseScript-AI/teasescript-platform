@@ -1,30 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { CorePass } from "../../src/type-inference/core/answers.js";
-import { analyseCore, solveDemands } from "../../src/type-inference/core/answers.js";
-import { Consumers } from "../../src/type-inference/core/consumers.js";
-import { indexPaths, stepsOf } from "../../src/type-inference/core/contract/literal-index.js";
-import { exportNames, keyBelowIn } from "../../src/type-inference/core/contract/key-ids.js";
-import { writtenOf } from "../../src/type-inference/core/contract/terms.js";
+import type { CorePass } from "../../../src/type-inference/core/answers.js";
+import { analyseCore, solveDemands } from "../../../src/type-inference/core/answers.js";
+import { Consumers } from "../../../src/type-inference/core/consumers.js";
+import { indexPaths, stepsOf } from "../../../src/type-inference/core/contract/literal-index.js";
+import { exportNames, keyBelowIn } from "../../../src/type-inference/core/contract/key-ids.js";
+import { writtenOf } from "../../../src/type-inference/core/contract/terms.js";
 import {
   absentWriterAt,
   objectsAt,
   selecting,
-} from "../../src/type-inference/core/contract/objects.js";
-import { SELECTED_TEXT, SELECTED_VALUE } from "../../src/type-inference/core/definitions.js";
-import { othersAt, readGroupsAt } from "../../src/type-inference/core/contract/others.js";
+} from "../../../src/type-inference/core/contract/objects.js";
+import { SELECTED_TEXT, SELECTED_VALUE } from "../../../src/type-inference/core/definitions.js";
+import { othersAt, readGroupsAt } from "../../../src/type-inference/core/contract/others.js";
 import {
   DemandExhausted,
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
-import { firstWriter, REASON, type Writer } from "../../src/type-inference/core/items.js";
-import type { ObjectsProof } from "../../src/type-inference/core/contract/model.js";
-import type { ProofDemand } from "../../src/type-inference/core/solver.js";
-import { stepName } from "../../src/type-inference/core/program.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { inMode, MODES } from "../helpers/type-core-oracles.js";
+} from "../../../src/type-inference/core/budget.js";
+import { firstWriter, REASON, type Writer } from "../../../src/type-inference/core/items.js";
+import type { ObjectsProof } from "../../../src/type-inference/core/contract/model.js";
+import type { ProofDemand } from "../../../src/type-inference/core/solver.js";
+import { stepName } from "../../../src/type-inference/core/program.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { inMode, MODES } from "../../helpers/type-core-oracles.js";
 
 /*
  * #1747: the objects query (`contract/objects.ts`). No production path asks it; here, for every
