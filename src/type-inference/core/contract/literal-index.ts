@@ -584,19 +584,6 @@ function aloneLiteral(
   return contract.indexing.has(live[0]!.value!) ? null : live[0]!.value!;
 }
 
-/**
- * §8: a literal's identity is its structure when no reference and no ingress stands in it (the kinds of its own
- * terms, the sources of its reads and calls, its objects' properties at every path), else the literal itself; the
- * marks of its reads are never identity (docs/specifications/type-inference-accepted-record/sharing.md#r4-17).
- */
-export function literalSignature(contract: Contract, literal: PlaceId): string {
-  if (!contract.signatures.has(literal)) {
-    if (contract.indexing.has(literal)) return `v${literal}`;
-    contract.settle(signatureWork(contract, literal));
-  }
-  return contract.signatures.get(literal)!;
-}
-
 export function* signatureWork(contract: Contract, literal: PlaceId): IdentityWork {
   if (contract.signatures.has(literal)) return;
   const index = yield* contract.needIndex(literal);
