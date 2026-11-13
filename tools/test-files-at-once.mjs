@@ -8,11 +8,12 @@ import { dirname, join } from "node:path";
 // runs a point, the job's own memory as the kernel's `memory.peak`): the largest of three peaks was 3,312, 5,436,
 // 7,104, 9,733 and 10,857 MiB at 2, 4, 8, 12 and 15 files at once, and one file at a time, in one run, 2,522 MiB, the
 // floor, about 700 MiB under a straight line through the rest. Runs of one point differ by 9 to 31 %, up to 1,292 MiB:
-// the files start in the same order, but the machine's other work stretches their runs unevenly and so moves which of
-// the heavy ones are at their peak together, so a single run does not measure a point. The limit here allows 4 GiB plus
-// 576 MiB a file, at least 800 MiB over the largest of three runs at every point (964 MiB at 4 files, the least): a
-// margin sized to the whole spread would run one file fewer at once in every job under 16 GiB, and a job that exceeds
-// its cap is rerun larger. Remeasure when a test file's memory changes much.
+// the files start in the same order, and the likely cause is the machine's other work, which stretched the heavy files'
+// runs unevenly (by 20 to 28 % in the highest run) and so moves which of them are at their peak together (the jobs keep
+// no memory series to show it). So a single run does not measure a point. The limit here allows 4 GiB plus 576 MiB a
+// file, at least 800 MiB over the largest of three runs at every point (964 MiB at 4 files, the least): a margin sized
+// to the whole spread would run one file fewer at once at 6, 8 and 12 GiB, and a job that exceeds its cap is rerun
+// larger. Remeasure when a test file's memory changes much.
 export const RESERVE_MIB = 4 * 1024;
 export const PER_FILE_MIB = 576;
 
