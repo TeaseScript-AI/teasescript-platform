@@ -4,6 +4,14 @@ Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fabl
 port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, its S0 row and "Host globals"). S4
 commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; nothing here is in the repository.
 
+## A function's written result travels to its copies (#2378)
+
+The #2378 builder (Opus) edited 2 records of `cells.jsonl` by hand: `cp9-cells/r42/early-copy-some-fit` and
+`cp9-cells/r47/A7/whole-stored-later-field` expect `valid`, with no diagnostic and no check, in place of a `later`
+warning and a check against `integer`. In both, `copy` (or `copy.n`) is a copy of `chooseValue()`, whose result is
+written `string | integer`, so the copy holds that type (the owner's decision of 2026-11-12, V30 §12) and the store of
+`2` fits it. No other record changed.
+
 ## A loop's write that a break follows (#2025)
 
 The S10 builder (Opus) corrected one record of `cells.jsonl` by hand: `cp9-cells/3b/loop/break/changed` expects

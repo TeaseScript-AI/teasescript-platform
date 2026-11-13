@@ -256,11 +256,12 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
     `${chain(4)}\nfunction take(x: integer[]) { }\nlet maybe = null\nif hostValue { maybe = [1] }\ntake(maybe)`,
     [4958, 5684, 4958, 5412, 7654, 6689, 7675, 6417],
   ],
-  // (the same lookup's units at demand 64, #1073 PR 2)
+  // (the same lookup's units at demand 64, #1073 PR 2; 33 to 97 more since #2378: `got` is a copy of `give`'s written
+  // result, which A4's copy graph, landings and inherited proofs now read, as for a copy of a declared variable)
   [
     "a checked return",
     `${chain(4)}\nfunction give: integer[] {\n  let maybe = null\n  if hostValue { maybe = [1] }\n  return maybe\n}\nlet got = give()`,
-    [5090, 5789, 5090, 5516, 7386, 6862, 7277, 6589],
+    [5187, 5881, 5145, 5566, 7465, 6937, 7328, 6622],
   ],
   ["an add", "let b = [[1]]\nb.add(hostValue)", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],
   // (18 units more at demand 64 since #1828: the mixed join's sentence walks each operand to its leaf and reads its

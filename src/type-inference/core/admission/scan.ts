@@ -6,6 +6,7 @@ import { keyOf, keyPath, keyPlace, sortCost, type Definition, type Key } from ".
 import {
   arrayRef,
   keyIdPath,
+  keyStepsIn,
   restPart,
   restRef,
   restSteps,
@@ -25,6 +26,7 @@ import { sharing } from "../sharing.js";
 import { addRest } from "./classes.js";
 import { eligibleOf } from "./eligibility.js";
 import { holdsNothing, type PrefixHolders } from "./holders.js";
+import { dictStepsRead, spellsValues } from "./structure.js";
 import { deciding } from "./kinds.js";
 import { chooses, live, snapshotOf } from "./links.js";
 import type {
@@ -293,10 +295,11 @@ export function* earliestDecider(
   admission: Admission,
   value: PlaceId,
   node: FlowNode,
-  asked: Rest,
+  path: Rest,
   into: Key | null,
 ): Inheriting<DeciderAnswer | null> {
   const { program, contract } = admission.pass;
+  const asked = into === null ? path : yield* dictAsked(admission, into, path);
   // (a cursor's span read one step at a time and by its path's id, never made: G3 stage 1)
   const at = restRef(contract, asked);
   const task = yield* expandRead(admission, value, node, []);
@@ -328,6 +331,28 @@ export function* earliestDecider(
   }
   const raw = yield* stopsOfRead(admission, value, node);
   return yield* scanView(admission, raw, at, asked, into, () => stopDepths(admission, raw));
+}
+
+/**
+ * #2378: a store's path into a decided key that reads a dict's values list below its own level, as the dict's elements:
+ * the key's dict `values` steps read by their owners' contracts (`dictStepsRead`, as `sourceOfRead` reads a copy's
+ * source) dropped from the path where it holds them, so a requirement on `d.values.element` is the one on `d`'s
+ * elements, whatever reads it. The list itself, the key's last step, keeps its own level; a dict's `keys` hold text.
+ */
+function* dictAsked(admission: Admission, into: Key, path: Rest): Reads<Rest> {
+  if (!spellsValues(admission, into)) return path;
+  const steps = keyStepsIn(admission.pass.contract, into);
+  const read = yield* dictStepsRead(admission, into);
+  const rest = restSteps(path);
+  const offset = steps.length - rest.length;
+  const dropped = (read?.dropped ?? []).filter(
+    (index) => index >= offset && index < steps.length - 1,
+  );
+  if (dropped.length === 0) return path;
+  const kept: string[] = [];
+  for (let index = 0; index < rest.length; index += 1)
+    if (!dropped.includes(offset + index)) kept.push(rest.at(index)!);
+  return kept;
 }
 
 /**
@@ -398,7 +423,8 @@ export function* scanView(
     // (a span's prefix text its record's, `textOf`; an array's made plain, as before)
     const prefix = at.text(length);
     const written = snapshots(admission, stops.written.get(prefix), false);
-    // (and a call a join carries by its written result, as `joinElements` reads it: F20)
+    // (and a call a join carries by its written result, as `joinElements` reads it: F20; since #2378 such a call is a
+    // written stop too, `writtenSourceRead`, and this read answers alike)
     const calls = joinedOf(admission, snapshots(admission, stops.values.get(prefix), false));
     for (const stop of [...joinedOf(admission, written), ...calls]) {
       program.work.charge("checks");

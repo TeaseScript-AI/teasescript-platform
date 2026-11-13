@@ -420,7 +420,7 @@ function* regionOf(
         else if (stop?.list === "values") value(here, entry());
         const above = group.members[item.member]!;
         // (a call a list join carries is read by its written result, as a written copy is, so the scan of the stops
-        // answers there: F20, `earliestDecider`)
+        // answers there: F20, `earliestDecider`; since #2378 such a call is a written stop too, and this entry answers alike)
         if (stop?.list === "values" && above.joined && writtenResult(admission, item.task.value))
           here.written.push({ ...entry(), call: true });
         for (const [index, part] of item.task.parts.entries()) {

@@ -115,10 +115,16 @@ function copyOf(
       form = "elements";
     } else return null;
   }
+  // (a read of a variable, or a call of a function by its name: a copy of its written result, #2378)
+  const nameOf = (read: Expression): string | null =>
+    read.kind === "identifier"
+      ? read.name
+      : read.kind === "callExpression" && read.callee.kind === "identifier"
+        ? `${read.callee.name}()`
+        : null;
   const [first] = reads;
-  const name = first?.kind === "identifier" ? first.name : null;
-  if (name === null || reads.some((read) => read.kind !== "identifier" || read.name !== name))
-    return null;
+  const name = first === undefined ? null : nameOf(first);
+  if (name === null || reads.some((read) => nameOf(read) !== name)) return null;
   const at = (offset: number): number => decider.start + offset - parsed.at;
   const binding =
     bindingsOf(rule)?.({
@@ -134,7 +140,7 @@ function copyOf(
     ? null
     : {
         form,
-        of: `'${binding.name}', declared '${declared}' on line ${source.line(binding.site)}`,
+        of: `${first!.kind === "callExpression" ? "the result of " : ""}'${binding.name}', declared '${declared}' on line ${source.line(binding.site)}`,
       };
 }
 
