@@ -67,8 +67,8 @@ export function contractOfValueAt(
  * the path ends: at a literal or an operation (a projection passes its step to its owner, and a variable or a call its
  * key to `keyThrough`). A dict's `values` is a new list of its values and its `keys` one of text,
  * either may hold none (no count proof, no `null`); a temporal field or a calendar duration's part gives its declared
- * result (V30 §35); an object's own property of the name is read as any property (F11), and a receiver that may be a
- * reference has the runtime's members (F19a).
+ * result (V30 §35); an object's own property of the name is read as any property, and a receiver that may be a
+ * reference has the runtime's members.
  */
 function through(
   contract: Contract,
@@ -79,7 +79,7 @@ function through(
 ): Work<readonly Item[]> {
   const { program } = contract.pass;
   // (a read, a projection or a call passes the path on whole, so its member steps are scanned where it ends: a chain of
-  // k projections scans its path once, never once per link, S6c)
+  // k projections scans its path once, never once per link)
   if (
     program.occurrenceOf.has(value) ||
     program.projOf.has(value) ||
@@ -103,7 +103,10 @@ function spanMemberStep(contract: Contract, ref: PathRef, from: number): number 
   return memberStepIn(contract, id, from);
 }
 
-/** `through` at the step `at`, the first of `rest` from `from` on that is a dict's `values` or `keys`. */
+/**
+ * `through` at the step `at`: the first of `rest` from `from` on that names a member a built-in value answers by itself
+ * (a dict's `values` or `keys`, a temporal field, a calendar duration's part: `memberStep`), read by `members`.
+ */
 function* listsAt(
   contract: Contract,
   value: PlaceId,
@@ -116,14 +119,14 @@ function* listsAt(
   // (#1668: the receiver read to decide its members, its unknowns included where the answer holds them as they are)
   const kinds = flow?.child() ?? null;
   const receiver = yield* through(contract, value, stepsRest(stepsTo(rest, at)), from, kinds);
-  // F19a, (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): a receiver that may be a
+  // (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): a receiver that may be a
   // reference has the runtime's members, decided once for a whole value
-  // #1668: R, a receiver decision
+  // #1668: a receiver decision
   const decided = at === 0 ? yield* contract.valueReceiver(value) : receiver;
   if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
     return yield* through(contract, value, stepsRest(rest), at + 1, flow);
   let unknowns = false;
-  // #1668: I, each member read it makes takes the flow (`through`)
+  // #1668: each member read it makes takes the flow (`through`)
   const items = yield* members(
     contract,
     rest,
@@ -177,7 +180,7 @@ export function* members(
             flow!.attach(values, ...(after === 1 ? (["withoutEmpty"] as const) : []));
           out.push(...kept);
         } else if (after === 1)
-          // a key is text, possible: no literal holds a derived list's element (P3)
+          // a key is text, possible: no literal holds a derived list's element
           out.push(carried(makeItem("string", item.writer, { cert: "pos" }), [item]));
         if (after === 1) out.push(EMPTY);
       }
@@ -242,7 +245,7 @@ function* valueAt(
     return STOPPED;
   }
   try {
-    // (a cursor's span read by its path's id, its key a cursor and a literal's demand named by it: G3 stage 1)
+    // (a cursor's span read by its path's id, its key a cursor and a literal's demand named by it)
     const ref = restRef(contract, rest);
     if (ref.length === 0) return yield* contract.contractOfValue(value, flow);
     const { program, guards } = contract.pass;
@@ -258,7 +261,7 @@ function* valueAt(
         value,
         yield* contract.contractOf(keyAtRef(contract, binding, ref), read),
       );
-      // §3.2: the mark travels with the value: none of a binding no test names
+      // the mark travels with the value: none of a binding no test names
       const marks = !guards.untested(binding) && guards.guardedReadAt(value, ref.text(ref.length));
       if (read !== null) flow!.attach(read, "entered", ...(marks ? (["marked"] as const) : []));
       return marks ? marked(items) : items;
@@ -288,7 +291,7 @@ function* valueAt(
         return elements;
       }
       // (#1668: the owner read whole for its selection alone: no flow)
-      // #1668: S, the owner read for its selection
+      // #1668: the owner read for its selection
       const owners = withoutEmpty(yield* contract.contractOfValue(projection.owner));
       if (read !== null && keepsElements(owners)) flow!.attach(read, "selected");
       return withOwnSelection(elements, owners, contract.pass);
@@ -299,7 +302,7 @@ function* valueAt(
     // level's literal once, its answer composed from the level inside's, never again per level above (#1426)
     if (route === "literal") {
       const site = program.places[value]?.site ?? null;
-      // (the rest in its identity: a wrapper's own literal asked by an array, at its cursor's span, G3 stage 1)
+      // (the rest in its identity: a wrapper's own literal asked by an array, at its cursor's span)
       const at = canonicalRest(contract, value, rest);
       const slot = joinParts("cl", value, restPart(at));
       flow?.include(slot, "literal");
@@ -315,8 +318,8 @@ function* valueAt(
     }
     if (route === "opaque") return [unknownItem(REASON.opaque)];
     const operation = program.opOf.get(value)!;
-    // a choice's answer at a path once per choice and path, whatever asks: the key's contract and A5's candidate test of
-    // the choice's own entry read it alike (S6-CARRIERS §4.5, Astra r6 B2), as `contractOfValue` reads an operation
+    // a choice's answer at a path once per choice and path, whatever asks: the key's contract and the
+    // conflict-candidate test of the choice's own entry read it alike, as `contractOfValue` reads an operation
     if (route === "choice") {
       const site = program.places[value]?.site ?? operation.site;
       const slot = joinParts("cop", value, restPart(rest));
@@ -333,9 +336,9 @@ function* valueAt(
       return contract.entered(value, yield demand);
     }
     // a fallback's or a `get`'s answer at a path once per value and path, whatever asks, as its root's: each composes
-    // its operands' answers at that path, so a chain of them read below its root by k consumers (C10 descending into a
-    // nullable collection's element) walks each link once, never the chain before it again per reader (Astra r1, Codex
-    // r4 and r5 on #1824)
+    // its operands' answers at that path, so a chain of them read below its root by k consumers (a fallback's check
+    // descending into a nullable collection's element) walks each link once, never the chain before it again per reader
+    // (#1824)
     if (route === "composite") {
       const site = program.places[value]?.site ?? operation.site;
       const pathSlot = joinParts("cop", value, restPart(rest));
@@ -379,7 +382,7 @@ export function* contractOfValue(
     if (binding !== undefined) {
       const read = flow?.child() ?? null;
       const items = contract.entered(value, yield* contract.contractOf(keyOf(binding, []), read));
-      // §3.2: the mark travels with the value
+      // the mark travels with the value
       const marks = guards.guardedRead(value);
       if (read !== null) flow!.attach(read, "entered", ...(marks ? (["marked"] as const) : []));
       return marks ? marked(items) : items;
@@ -392,14 +395,14 @@ export function* contractOfValue(
       if (measuresLength(projection.step))
         return yield* contractLength(contract, projection.owner, projection.step, [], flow);
       if (!selectsElement(projection.step)) {
-        // G3: a property or index read's contract once per occurrence, its owner's one step down,
+        // a property or index read's contract once per occurrence, its owner's one step down,
         // whatever asks: a chain of k such reads of nested literals asks each link once, never once per read above
         // (and once per stop: `stop` forgets it)
         const demand = projected(contract, value, projection);
         flow?.include(demand.key, "projection");
         return yield demand;
       }
-      // S6c: a selection reads its owner twice, at its step and whole, so once per value, whatever asks: a chain of k
+      // a selection reads its owner twice, at its step and whole, so once per value, whatever asks: a chain of k
       // `.first` reads each link once whole, never each link 2^k times
       const site = program.places[value]?.site ?? null;
       const slot = joinParts("cpj", value);
@@ -454,20 +457,20 @@ function* selection(
     read,
   );
   // (#1668: the owner read whole for its selection alone: no flow)
-  // #1668: S, the owner read for its selection
+  // #1668: the owner read for its selection
   const owners = withoutEmpty(yield* contract.contractOfValue(projection.owner));
   if (read !== null && keepsElements(owners)) flow!.attach(read, "selected");
   return withOwnSelection(elements, owners, contract.pass);
 }
 
-/** The result place of a call's value (F20). */
+/** The result place of a call's value. */
 export function resultOf(contract: Contract, value: PlaceId): PlaceId {
   const call = contract.pass.program.opOf.get(value);
   if (call?.kind !== "call") throw new Error(`The value ${value} is no call's result.`);
   return contract.pass.program.functionOf(call.fn).result;
 }
 
-/** F27: a loop visits a list's or a set's elements, a dict's keys, a range's whole numbers. */
+/** What a loop visits: a list's or a set's elements, a dict's keys, a range's whole numbers. */
 function* contractIteration(
   contract: Contract,
   owner: PlaceId,
@@ -506,7 +509,7 @@ function* contractIteration(
   return mergeItems(out, contract.pass.program.scope);
 }
 
-/** F14: a text's or a collection's length is a whole number; an object's own `length` is its property (F11). */
+/** A text's or a collection's length is a whole number; an object's own `length` is its property. */
 function* contractLength(
   contract: Contract,
   owner: PlaceId,
@@ -514,8 +517,8 @@ function* contractLength(
   rest: readonly string[],
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
-  // F19a before F14: a receiver that may be a reference has the runtime's members, its `length` among them
-  // #1668: R, a receiver decision
+  // before the length rule: a receiver that may be a reference has the runtime's members, its `length` among them
+  // #1668: a receiver decision
   if (heldReference(yield* contract.valueReceiver(owner)))
     return yield* contract.contractOfValueAt(owner, joinSteps([step], rest), flow);
   const out: Item[] = [];
@@ -527,7 +530,7 @@ function* contractLength(
     if (item.tag === "string" || item.tag === "list" || item.tag === "set" || item.tag === "dict") {
       if (rest.length === 0) out.push(carried(makeItem("integer", item.writer), [item]));
     } else if (item.tag === "object" || REFERENCE.has(item.tag))
-      // an object's own `length` (F11), a reference's member (F19a)
+      // an object's own `length`, a reference's member
       out.push(...(yield* contract.contractOfValueAt(owner, joinSteps([step], rest), flow)));
     else if (heldAsIs(item)) {
       unknowns = true;
@@ -539,7 +542,7 @@ function* contractLength(
 }
 
 /**
- * F18: a load's or `fromJson`'s expected type, possible: the declared type, or the written type of the place its
+ * A load's or `fromJson`'s expected type, possible: the declared type, or the written type of the place its
  * value lands in directly (V30 §12); at a property its default lacks, where its reader fills the default's and keeps the
  * others (an untyped load, or below a written `object`), data that may be absent; an untyped load's at one below a
  * collection, its default's kinds beside `missing`; `null` without one.
@@ -567,7 +570,7 @@ export function* expectedOf(
       return [unknownItem(REASON.external | REASON.missing), ...emptyAt(rest)];
     // (a stored value's reader keeps an element of a collection that fits as it is, `matchesValueType`, so it may lack
     // a property the default's element has; the root object and the objects nested in it take it from the default, and
-    // JSON's reader every level: #1458, the lead's ruling on Codex r3's N2)
+    // JSON's reader every level: #1458)
     if (rest.includes("element") && rest.at(-1) !== "element") {
       if (staged !== null) flow!.attach(staged);
       return [...named, unknownItem(REASON.missing)];
@@ -579,7 +582,7 @@ export function* expectedOf(
   // V30 §13 (JSON): below a written `object` the value keeps every key, and has each one its default names, of the
   // default's type, where its reader takes a missing or misfitting key from the default: JSON's at every level, a stored
   // value's in its root object and the objects nested in it, never in an element of a collection, which a stored value
-  // keeps as it is when it fits (`matchesValueType`). There the default answers (#1436; the lead's ruling on r2's B1).
+  // keeps as it is when it fits (`matchesValueType`). There the default answers (#1436).
   // `#`, the presence rule's property no literal lists (`unlistedObject`), keeps the default's answer too: the reader
   // fills each property the default names, `null` ones included, so only a property the default may lack owes a check,
   // carried by its own answer: data that may be absent, ADR 0021 1.8 (#1470, as #1459's untyped load)
@@ -603,7 +606,7 @@ export function* expectedOf(
     }
   }
   const nullDefault =
-    // #1668: D, a predicate on the default
+    // #1668: a predicate on the default
     rest.length === 0 && fallback !== undefined && (yield* contract.onlyNull(fallback)).length > 0;
   // (the written type's kinds carry its spelling, #1398)
   const kinds = term === null ? ["unknown" as const] : typeKinds(term);
@@ -632,7 +635,7 @@ function belowObject(written: TypeTerm, rest: readonly string[]): boolean {
 
 /**
  * The kinds a `load` or `fromJson` takes from its default at `rest` (`typedDefault`): the default's value at its call's
- * snapshot (F18), as the value side reads it there (`Values.defaultKinds`), never the settled type of
+ * snapshot, as the value side reads it there (`Values.defaultKinds`), never the settled type of
  * a place it reads, so the call's contract and its answer agree.
  */
 export function* defaultKinds(
@@ -649,14 +652,14 @@ export function* defaultKinds(
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
-    // #1668: D, the typed default's run: literal data passes the run's flow, a read the value side's (opaque)
+    // #1668: the typed default's run: literal data passes the run's flow, a read the value side's (opaque)
     make: () => snapshotKinds(contract, fallback, rest),
     decision: typedDefault(rest, false),
   };
 }
 
 /**
- * `defaultKinds`' run (F18): the default's written type where its syntax gives one (`writtenDefault`, as the value
+ * `defaultKinds`' run: the default's written type where its syntax gives one (`writtenDefault`, as the value
  * side's `Values.defaultKinds` reads it first); else literal data by its contract; a default that reads a variable
  * or computes as the value side reads it at its call's snapshot (`FlowGraph.snapshotOf`), its marks, narrowing, copies
  * and stops included, never the settled type of a place it reads, so the call's contract and its answer agree.
@@ -681,12 +684,10 @@ function* snapshotKinds(
   // (#1668: the value side's walk records no contribution flow, so the slot's edges are unavailable, never empty, as
   // an exact gather's are)
   solver.sink()?.opaque("exact");
-  // #1668: D, the value side's read at the snapshot, its slot opaque above
+  // #1668: the value side's read at the snapshot, its slot opaque above
   return yield* values.valueItems(fallback, node, rest);
 }
 
-/** F19: whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`). */
-/** A default's run (`defaultKinds`): its fallback's kinds at the path, its run's flow taken as it starts. */
 /**
  * #1668: a flow given to the value side's walk: a caller's, none, or the running demand's own (`"run"`), taken as the
  * walk's code starts, so a demand whose run is this walk (`defaultKinds`) makes it as it did, with nothing moved
@@ -699,15 +700,19 @@ function runFlow(contract: Contract, flow: Flow): FlowSink | null {
   return flow === "run" ? contract.pass.solver.sink() : flow;
 }
 
+/**
+ * Whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`): one ingress `null` item where it
+ * does, none where it does not.
+ */
 export function* onlyNull(contract: Contract, fallback: PlaceId): Work<readonly Item[]> {
   const site = contract.pass.program.places[fallback]?.site ?? null;
-  // #1668: D, the null-only predicate's demand: its answer is made anew (`ONLY_NULL.flow`)
+  // #1668: the null-only predicate's demand: its answer is made anew (`ONLY_NULL.flow`)
   return yield {
     key: joinParts("dn", fallback),
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
-    // #1668: D, the null-only demand's run: its answer is made anew (`ONLY_NULL.flow`)
+    // #1668: the null-only demand's run: its answer is made anew (`ONLY_NULL.flow`)
     make: () => contract.contractOfValue(fallback),
     decision: ONLY_NULL,
   };
@@ -715,7 +720,7 @@ export function* onlyNull(contract: Contract, fallback: PlaceId): Work<readonly 
 
 /**
  * V30 §18: the written type a value lands in directly at a path, also as an element of literals or through a
- * fallback or default (A1, C10, F18); `null` where it lands in none. The lookup walks up the value's syntactic
+ * fallback or default; `null` where it lands in none. The lookup walks up the value's syntactic
  * ancestors (the literal whose cell holds it, the operation it is a fallback or default of), so it never meets itself;
  * it walks them on its own stack, so no nesting depth cuts it (#2406), and keeps each finished answer
  * (`Contract.lands`), never one under way: a stop inside it leaves nothing behind.
@@ -800,7 +805,7 @@ function keepsElements(owners: readonly Item[]): boolean {
 }
 
 /**
- * F11: the collector reads an object's own `first`, `last` or `random` as an element selection; the core makes it
+ * The collector reads an object's own `first`, `last` or `random` as an element selection; the core makes it
  * opaque, beside the element where the owner may also be a collection.
  */
 export function withOwnSelection(

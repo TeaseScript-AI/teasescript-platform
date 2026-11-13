@@ -18,14 +18,14 @@ import { writtenOf } from "./terms.js";
 import { resultOf } from "./value-kinds.js";
 import { Retained } from "../retained/retained.js";
 
-// The one identity function (§8): the key a value copies, a key's and a value's source identity, structures.
+// The one identity function: the key a value copies, a key's and a value's source identity, structures.
 
 /** The key a value copies, through its projections: `seed.f0` reads `seed|f0`; `null` for no read. */
 export function copiedKey(contract: Contract, value: PlaceId): CanonicalKey | null {
   const { program } = contract.pass;
   const binding = program.occurrenceOf.get(value);
   if (binding !== undefined) return contract.keyAt(binding, []);
-  // (G3 3b: a projection's key is its owner's and its step, once per projection, never its whole chain again)
+  // (a projection's key is its owner's and its step, once per projection, never its whole chain again)
   const known = contract.copiedKeys.get(value);
   if (known !== undefined) return known;
   const pending: PlaceId[] = [];
@@ -58,7 +58,7 @@ export function copiedKey(contract: Contract, value: PlaceId): CanonicalKey | nu
   return pending.length === 0 ? null : (contract.copiedKeys.get(value) ?? null);
 }
 
-/** A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key (F20), else `null`. */
+/** A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key, else `null`. */
 export function resultKey(contract: Contract, value: PlaceId): Key | null {
   const { program } = contract.pass;
   const steps: string[] = [];
@@ -141,7 +141,7 @@ export function subFirstOf(contract: Contract, place: PlaceId): ReadonlySet<stri
 
 /**
  * The key a place is an alias of: one whole store of a copy or of a call's result, no store below it, no written
- * type, its aliases followed, with the guard bit along the chain (§3.2). A cycle of aliases stops at itself. A loop up
+ * type, its aliases followed, with the guard bit along the chain. A cycle of aliases stops at itself. A loop up
  * the chain to a place answered or no alias, then each link answered from the top.
  */
 function rootOfPlace(
@@ -196,10 +196,10 @@ function rootOfPlace(
 
 /**
  * A key's source identity: the key itself through its aliases, and a place of whole copies of one source followed
- * to that source; with its holder (§8). A loop along those places, then each answered from the last.
+ * to that source; with its holder. A loop along those places, then each answered from the last.
  */
 export function keyIdentity(contract: Contract, asked: Key): Identity {
-  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  // (a key in its identity: a wrapper family's text read as its cursor)
   const key = contract.canonicalKey(asked);
   if (!contract.keys.has(key)) contract.settle(keyIdentityWork(contract, key));
   return contract.keys.get(key)!;
@@ -301,7 +301,7 @@ export function* keyIdentityWork(contract: Contract, key: CanonicalKey): Identit
 
 /**
  * A value's source identity: the key a read copies, its callee's result key for a call, a literal's structure, or the
- * value itself; the read's guard an annotation, each with its mark holder (§8).
+ * value itself; the read's guard an annotation, each with its mark holder.
  */
 export function identityOf(contract: Contract, value: PlaceId): Identity {
   if (!contract.identities.has(value)) {
@@ -319,7 +319,7 @@ export function* identityWork(contract: Contract, value: PlaceId): IdentityWork 
   if (copied !== null) {
     const source = yield* contract.needKey(copied);
     identity = {
-      // S6-CARRIERS §3.1: an ingress occurrence is fresh, so no identity merge shares it (its leaf stays its own)
+      // an ingress occurrence is fresh, so no identity merge shares it (its leaf stays its own)
       id: contract.pass.definitions.ingress.has(value) ? `v${value}` : source.id,
       key: source.key,
       guarded: source.guarded || contract.pass.guards.guardedRead(value),
@@ -341,7 +341,7 @@ export function* identityWork(contract: Contract, value: PlaceId): IdentityWork 
     } else {
       // a computed value (an operation's result): its own holder, so a guarded read of a copy of it is a mark there;
       // a value a carrier gives (`otherwise`, `get`, a copy of the elements, a removal, a list's `+`, a projection of
-      // a computed value) by what it takes, so k such values of one source are one entry, as k copies are (F2)
+      // a computed value) by what it takes, so k such values of one source are one entry, as k copies are
       // (interned: an identity names its inputs by their own short identities, never by their expansions)
       const carried = carriedBy(contract, value, false);
       let id = `v${value}`;
@@ -349,7 +349,7 @@ export function* identityWork(contract: Contract, value: PlaceId): IdentityWork 
         const parts: string[] = [];
         for (const input of carried.of)
           parts.push(input === null ? "" : (yield* contract.needValue(input)).id);
-        // (a value carrying a fresh one is fresh itself: §3.1, never shared across its occurrences)
+        // (a value carrying a fresh one is fresh itself, never shared across its occurrences)
         if (!parts.some((part) => part.startsWith("v"))) {
           const shape = `${carried.name}(${parts.join(",")})`;
           id = contract.carrierIds.get(shape) ?? `c${contract.carrierIds.size}`;
@@ -369,7 +369,7 @@ export function* identityWork(contract: Contract, value: PlaceId): IdentityWork 
 
 /**
  * What a carrier's value takes, by the carrier (`identityWork`), or only what its result reads (`structural`: a
- * `get`'s receiver and default, never its key, §4.6); `null` for any other computed value.
+ * `get`'s receiver and default, never its key); `null` for any other computed value.
  */
 function carriedBy(
   contract: Contract,
@@ -401,7 +401,7 @@ function carriedBy(
 }
 
 /**
- * S6-CARRIERS §4.6: a value's structure identity, what its contract reads: a read's key and its guard, a call's
+ * A value's structure identity, what its contract reads: a read's key and its guard, a call's
  * result key, a carrier by the structures of the operands its result reads (a `get`'s key apart) and their guards, a
  * literal by its cells' structures; fresh (`v`) where an ingress occurrence stands at a position its result reads,
  * so a structure shared by reference never merges an occurrence the result carries. A key's prefix entries are keyed
@@ -421,7 +421,7 @@ export function* structureWork(contract: Contract, value: PlaceId): IdentityWork
   program.work.charge("structureSteps");
   let id = `v${value}`;
   if (contract.copiedKey(value) !== null || contract.resultKey(value) !== null) {
-    // (a read under a test of its path is marked, §3.2)
+    // (a read under a test of its path is marked)
     if (!definitions.ingress.has(value)) {
       const identity = yield* contract.needValue(value);
       id = identity.guarded ? `${identity.id}g` : identity.id;
@@ -462,10 +462,10 @@ export function* structureWork(contract: Contract, value: PlaceId): IdentityWork
 }
 
 /**
- * The tested paths below a carrier's operand read that the read is guarded at (§3.2), as part of the carrier's
- * structure: no holder records a carrier operand's marks, as a literal's holder records its reads', so two
- * carriers share a structure only where their operand reads are marked alike below them (Codex r20 B1). Each the
- * outermost of nested ones, the guard index's regions holding the read, never each tested path in turn (Codex r21 B1).
+ * The tested paths below a carrier's operand read that the read is guarded at, as part of the carrier's structure: no
+ * holder records a carrier operand's marks, as a literal's holder records its reads', so two carriers share a structure
+ * only where their operand reads are marked alike below them. Each the outermost of nested ones, the guard index's
+ * regions holding the read, never each tested path in turn.
  */
 export function guardsBelow(contract: Contract, operand: PlaceId): string {
   const { guards, definitions } = contract.pass;

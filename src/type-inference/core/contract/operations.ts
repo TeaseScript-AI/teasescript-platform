@@ -34,7 +34,7 @@ import { conversionKind, defaultOf, unitKind } from "./terms.js";
 
 // The kinds an operation's result can have, mirroring the value side's dispatch, and the operators' table.
 
-/** F16: the operators the runtime's table has rows for, by the collector's operation names. */
+/** The operators the runtime's table has rows for, by the collector's operation names. */
 const OPERATORS: ReadonlyMap<string, Operator> = new Map(
   (["+", "-", "*", "/", "%", "<", "<=", ">", ">="] as const).map((name) => [name, name]),
 );
@@ -73,8 +73,8 @@ export function* contractOfOp(
       scope,
     );
   }
-  // F19a before F17b: a receiver that may be a reference has the runtime's `get`, no default merged beside it
-  // #1668: R, a receiver decision
+  // before the `get` rule: a receiver that may be a reference has the runtime's `get`, no default merged beside it
+  // #1668: a receiver decision
   if (c.kind === "get" && heldReference(yield* contract.valueReceiver(c.receiver)))
     return [unknownItem(REASON.opaque)];
   if (c.kind === "get") {
@@ -95,12 +95,12 @@ export function* contractOfOp(
     return items;
   }
   if (c.kind === "load") {
-    // F19: a computed key
+    // a computed key: an external unknown, with `null` where its default holds only `null`
     if (c.key === null) {
       const nullDefault =
         rest.length === 0 &&
         c.fallback !== null &&
-        // #1668: D, a predicate on the default
+        // #1668: a predicate on the default
         (yield* contract.onlyNull(c.fallback)).length > 0;
       return [...hostAt(rest), ...(nullDefault ? [ingressNull()] : [])];
     }
@@ -111,17 +111,17 @@ export function* contractOfOp(
   }
   if (c.kind !== "operation") return [unknownItem(REASON.external)];
   const { family, name } = c.contract;
-  // F19a: a reference's method is opaque, a decision of its component
+  // a reference's method is opaque, a decision of its component
   if (
     family === "method" &&
     c.receiver !== null &&
-    // #1668: R, a receiver decision
+    // #1668: a receiver decision
     heldReference(yield* contract.valueReceiver(c.receiver))
   )
     return [unknownItem(REASON.opaque)];
-  // F26b (r5): always text
+  // an interpolation: always text
   if (family === "interpolation") return rest.length === 0 ? [makeItem("string")] : [];
-  // a message's handle (F19a)
+  // a message's handle
   if (family === "say")
     return rest.length > 0 ? [unknownItem(REASON.opaque)] : [makeItem("messageHandle")];
   // `2 s`, `1 calendar day`, `20 deg`
@@ -140,7 +140,7 @@ export function* contractOfOp(
     );
   }
   const method = family === "method" && c.receiver !== null ? methodCategory(name) : undefined;
-  // F7a–c, F25: a declared result, or what a removal gives
+  // a declared result, or what a removal gives
   if (method !== undefined && c.receiver !== null && method.gives.kind !== "copy") {
     const gives = method.gives;
     const out: Item[] = [];
@@ -178,11 +178,11 @@ export function* contractOfOp(
     if (kinds !== null && unknowns) flow!.attach(kinds, "unknown");
     return mergeItems(out, scope);
   }
-  // F10: a copy of the elements, which may hold none where it takes a count: a receiver's own elements, or those its
+  // a copy of the elements, which may hold none where it takes a count: a receiver's own elements, or those its
   // kind declares (a range's whole numbers)
   if (method !== undefined && c.receiver !== null && method.gives.kind === "copy") {
     const copy = method.gives;
-    // #1668: D, the receiver's kinds decide the copy's
+    // #1668: the receiver's kinds decide the copy's
     const receiver = yield* contract.contractOfValue(c.receiver);
     if (rest.length === 0) return [carried(makeItem(copy.into), receiver)];
     const kinds = withoutEmpty(receiver);
@@ -205,7 +205,7 @@ export function* contractOfOp(
   }
   if (family === "operator" && name === "+" && rest.length > 0) {
     // #1384: an indexed run's terms holding the property, and those between them
-    // #1668: I, each term's read takes the flow
+    // #1668: each term's read takes the flow
     const indexed = yield* indexedPlus(contract.pass, c.result, rest, false, (term) =>
       contract.contractOfValueAt(term, rest, flow),
     );
@@ -217,7 +217,7 @@ export function* contractOfOp(
     const operands: (readonly Item[])[] = [];
     // (#1668: each operand staged, kept under the join's filter where it drops `empty`, `plusDropsEmpty`)
     const sides: FlowSink[] = [];
-    // (an operand admission rejected from the join gives it nothing: A6, `joinElements`)
+    // (an operand admission rejected from the join gives it nothing: `joinElements`)
     for (const argument of c.arguments)
       if (contract.pass.lists.joined(argument)) {
         const side = flow?.child() ?? null;
@@ -277,12 +277,12 @@ export function* contractOfOp(
       scope,
     );
   if (rest.length > 0) return [unknownItem(REASON.opaque)];
-  // F16: the runtime's operator table
+  // the runtime's operator table
   const operator = operatorOf(c);
   if (operator !== null) {
     const operands: (readonly Item[])[] = [];
     for (const argument of c.arguments)
-      // #1668: D, the operator table makes a new result
+      // #1668: the operator table makes a new result
       operands.push(withoutEmpty(yield* contract.contractOfValue(argument)));
     return operationItems(operator, operands, scope, c.site);
   }
@@ -290,16 +290,16 @@ export function* contractOfOp(
     return [makeItem("boolean")];
   const member = family === "member" ? memberResult(name) : undefined;
   if (member !== undefined) return member.map((kind) => makeItem(kind));
-  // F19a: a handle's member is opaque
+  // a timer's or a media's handle
   if (family === "timer" || family === "media") return [makeItem(family)];
-  // F25: a button's, a popup's or a camera's fixed result
+  // a button's, a popup's or a camera's fixed result
   const shown = shownResult(name);
   if (shown !== undefined) return [makeItem(shown)];
   if (family === "range") return [makeItem("range")];
-  // a method without a category, per receiver alternative: its declared result per receiver kind (F25), else the
+  // a method without a category, per receiver alternative: its declared result per receiver kind, else the
   // runtime's opaque answer on a known kind; what the core cannot know keeps its own reasons. A receiver without items
-  // yet is a provisional bottom: the result stays the bottom (S3 §1,
-  // docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44)
+  // yet is a provisional bottom: the result stays the bottom
+  // (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44)
   if (family === "method" && c.receiver !== null) {
     // (#1668: a declared result per receiver kind is made anew; the receiver's unknowns the answer holds as they are)
     const kinds = flow?.child() ?? null;
@@ -319,7 +319,7 @@ export function* contractOfOp(
   return [unknownItem(REASON.external)];
 }
 
-/** F10: whether `l + r`'s element drops its operands' `empty`: where one of them holds an element for certain. */
+/** Whether `l + r`'s element drops its operands' `empty`: where one of them holds an element for certain. */
 function plusDropsEmpty(operands: readonly (readonly Item[])[], rest: readonly string[]): boolean {
   return (
     rest.length === 1 &&
@@ -328,8 +328,8 @@ function plusDropsEmpty(operands: readonly (readonly Item[])[], rest: readonly s
 }
 
 /**
- * F10: the elements of `l + r`, held when either side holds one; no position is a fact (F8, F10, F12 r5): where both
- * sides contribute elements, which one an element read takes is unknown, so each kind is possible.
+ * The elements of `l + r`, held when either side holds one; no position is a fact: where both sides contribute
+ * elements, which one an element read takes is unknown, so each kind is possible.
  */
 export function plusElements(
   operands: readonly (readonly Item[])[],

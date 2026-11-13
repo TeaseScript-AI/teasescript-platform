@@ -216,48 +216,6 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/contract/gather.ts",
-    "kind": "docblock",
-    "text": "V30 §19: the button values of the options a literal holds at `path`, read at `after` below them,",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/contract/key-contract.ts",
-    "kind": "docblock",
-    "text": "The contract's answer to a read (§3.2): every kind as an item, definite only by P3; the read's word.",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/contract/marks.ts",
-    "kind": "docblock",
-    "text": "§3.2: a holder's mark at `path` (memoised per holder and the leading steps it can depend on): a literal's guarded",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/contract/model.ts",
-    "kind": "reference",
-    "text": "selectAt",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/contract/model.ts",
-    "kind": "docblock",
-    "text": "A key whose admission decision stopped at its demand allowance (`Contract.stop`).",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/contract/value-kinds.ts",
-    "kind": "docblock",
-    "text": "F19: whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`).",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/contract/value-kinds.ts",
-    "kind": "docblock",
-    "text": "A default's run (`defaultKinds`): its fallback's kinds at the path, its run's flow taken as it starts.",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
     "file": "src/type-inference/core/exact-path.ts",
     "kind": "docblock",
     "text": "The exact path's answer: D with the path below its key, or the first failing condition's word.",

@@ -30,9 +30,10 @@ import { keyLane } from "./lanes.js";
 import { pathAt } from "./literal-index.js";
 import { Retained, retainedModule } from "../retained/retained.js";
 
-// G3 stage 1: a key as a cursor, made one step from its parent's, and the one charged boundary between
-// cursors and the texts and step arrays of keys; and the one place that decides a key's identity (`keyAt`, `keyBelowIn`,
-// `canonicalKey`): a cursor where its family's lane is cursors (`keyLane`), else its text, made and charged as before.
+// A key as a cursor, made one step from its parent's, and the one charged boundary between cursors and the texts and
+// step arrays of keys; and the one place that decides a key's identity (`keyAt`, `keyBelowIn`, `canonicalKey`): a
+// cursor where its family's lane is cursors (`keyLane`), else its text, made plain (`keyOf`) or charged by the kept
+// variants (`keptKey`).
 
 /**
  * A key's cursor: its place and its path's id in the pass's one path arena (`pathAt`, which the literal indexes' paths
@@ -49,7 +50,7 @@ type CanonicalText = Key & { readonly [canonicalTextBrand]: true };
 
 /**
  * A key in its family's identity: a cursor, or the text of a family whose lane is text. Only `canonicalKey` and the
- * identity functions make one, so a map or a set keyed by it holds each key in one form (G3 stage 1, Codex r3 R3-F1).
+ * identity functions make one, so a map or a set keyed by it holds each key in one form.
  */
 export type CanonicalKey = KeyId | CanonicalText;
 
@@ -223,7 +224,7 @@ function parentWith(contract: Contract, asked: Key, kept: boolean): CanonicalKey
 /**
  * A key's prefix of `length` steps in its identity, for a question that reads one prefix: a cursor's ancestor of that
  * depth from its path's prefixes, climbed once per path and kept (`prefixesOf`), never per question; a place's own key
- * its text; a text's as the legacy sites made it.
+ * its text; a text's sliced from its path (`keyOf`).
  */
 export function keyPrefixIn(contract: Contract, asked: Key, length: number): CanonicalKey {
   const key = canonicalKey(contract, asked);
@@ -234,7 +235,7 @@ export function keyPrefixIn(contract: Contract, asked: Key, length: number): Can
 }
 
 /**
- * What the cursors derive from one path of the arena (G3 stage 1), each made at its first question by its charged maker,
+ * What the cursors derive from one path of the arena, each made at its first question by its charged maker,
  * its entry kept, and found again by the path's id (`factsOf`), never derived twice: its steps and its suffixes' by
  * offset (`stepsOfId`), its prefixes' ids by length, all of them (`prefixesOf`) or one (`prefixId`), its spans' ids
  * by offset (`spanId`), its joins'
@@ -314,8 +315,8 @@ export interface KeyWalk {
 }
 
 /**
- * A key's path and its prefixes in its identity, for a question that reads its whole path: a text's as the legacy sites
- * made them (`keyPath`, each prefix `keyOf`); a cursor's steps through the charged boundary (`stepsOfId`), its prefixes
+ * A key's path and its prefixes in its identity, for a question that reads its whole path: a text's from its text
+ * (`keyPath`, each prefix `keyOf`); a cursor's steps through the charged boundary (`stepsOfId`), its prefixes
  * its ancestors, climbed once per path and kept (`prefixesOf`, a place's own key its text).
  */
 export function keyWalk(contract: Contract, key: Key): KeyWalk {
@@ -407,7 +408,7 @@ export function canonicalRest(contract: Contract, literal: PlaceId, rest: Rest):
 /**
  * The id of the path of `path`'s steps from its step `from` on (a span's own path: `q.r.s` from 1 is `r.s`), found down
  * from the nearest of its ancestors whose span from `from` is known, each one step below its parent's (`pathAt`), its
- * visit and entry charged and kept: so the spans of one offset of k nested paths cost k steps, never k² (G3 stage 1).
+ * visit and entry charged and kept: so the spans of one offset of k nested paths cost k steps, never k².
  */
 function spanId(contract: Contract, path: number, from: number): number {
   if (from === 0) return path;
@@ -482,7 +483,7 @@ function joinedId(contract: Contract, base: number, rest: number): number {
 }
 
 /**
- * A path a decision reads below a key (G3 stage 1): a legacy array of steps, read as before, or a span of the arena (a
+ * A path a decision reads below a key: an array of steps, or a span of the arena (a
  * decided cursor's path from one of its steps on), read one step at a time from its spans' paths (`spanId`), its steps
  * never made but at the charged boundary (`steps`). A decided cursor's scan reads its paths so, never an array per
  * prefix.
@@ -511,7 +512,7 @@ export interface PathRef extends Iterable<string> {
   steps(): PathSteps | readonly string[];
   /** The text of its first `length` steps (`pathText`), made. */
   text(length: number): string;
-  /** Its path's id in the arena: a span's own (`spanId`); an array's by its steps (`pathIdOf`, as before). */
+  /** Its path's id in the arena: a span's own (`spanId`); an array's by its steps, as `pathIdOf` walks them. */
   id(): number;
   /** A short name for a memo: an array's text, a span's id after a dot (no path's text starts with one). */
   name(): string;
@@ -521,7 +522,7 @@ export interface PathRef extends Iterable<string> {
   part(): readonly string[] | string;
 }
 
-/** A path as a legacy site passes it, an array of steps, or as a cursor's scan does, a `PathRef`. */
+/** A path: an array of steps, or a `PathRef` (a cursor's scan passes one). */
 export type Rest = readonly string[] | PathRef;
 
 /** A `Rest` as a `PathRef`. */
@@ -548,13 +549,13 @@ export function restSteps(rest: Rest): PathSteps | readonly string[] {
   return isRef(rest) ? rest.steps() : rest;
 }
 
-/** A `Rest`'s first `length` steps: an array's sliced as before, a view's its own (`PathRef.to`). */
+/** A `Rest`'s first `length` steps: an array's sliced, a view's its own (`PathRef.to`). */
 export function restTo(contract: Contract, rest: Rest, length: number): Rest {
   if (isSteps(rest)) return length >= rest.length ? rest : rest.slice(0, length);
   return restRef(contract, rest).to(length);
 }
 
-/** A `Rest` from step `from` on: an array's sliced as before, a view's its own (`PathRef.from`). */
+/** A `Rest` from step `from` on: an array's sliced, a view's its own (`PathRef.from`). */
 export function restFrom(rest: Rest, from: number): Rest {
   if (isSteps(rest)) return from === 0 ? rest : rest.slice(from);
   return rest.from(from);
@@ -611,10 +612,10 @@ function keyBelowRefWith(contract: Contract, key: Key, rest: Rest, kept: boolean
   return keyBelowWith(contract, key, ref.steps(), kept);
 }
 
-/** An array as a `PathRef`, read as the legacy sites read it. */
+/** An array as a `PathRef`, its views slices and joins of its steps. */
 export function arrayRef(contract: Contract, steps: Steps): PathRef {
-  // (each view made as the legacy sites made it: a slice or a join of the steps, plain, uncharged as before; a record's
-  // steps their own views, spelled by their record)
+  // (each view a slice or a join of the steps, plain and uncharged; a record's steps their own views, spelled by their
+  // record)
   const view = (made: Steps): PathRef => arrayRef(contract, made);
   const below = (from: number): PathRef => view(stepsFrom(steps, from));
   const above = (length: number): PathRef => view(stepsTo(steps, length));
@@ -725,7 +726,10 @@ export function keyIdOf(contract: Contract, place: PlaceId, steps: readonly stri
   return keyIdAt(place, id);
 }
 
-/** The cursor of a key's text (`place|a.b`), scanned once and charged, each step's text made only to look it up. */
+/**
+ * The cursor of a key's text (`place|a.b`), scanned once and charged, each step's text made only to look it up.
+ * Exported for the key-id tests.
+ */
 export function keyIdOfText(contract: Contract, key: Key): KeyId {
   const bar = key.indexOf("|");
   convert(contract, 1, key.length, 0);
@@ -829,7 +833,7 @@ interface PathMemo {
 }
 
 /**
- * A path's steps as its record keeps them (G3 stage 1), opaque: read by position (`length`, `at`), spelled only by the
+ * A path's steps as its record keeps them, opaque: read by position (`length`, `at`), spelled only by the
  * record (`text`, `prefixText`, `textOf`), and copied out only by `toArray`, a charged copy, each site's listed with its
  * reason (`type-core-key-ids.test.ts`). Its views (`from`, `to`) read the steps they view in place, never a
  * copy; a view's path's id and text, found where asked (`spanId`, `prefixId`, `textOf`), are kept on the steps it views
@@ -847,7 +851,7 @@ export class PathSteps {
   /** The steps it is a view of (none: its own), and where in them it starts. */
   readonly #of: PathSteps | null;
   readonly #offset: number;
-  /** #1072 1b: what it finds later, each once, in a record; all else is fixed when it is made. */
+  /** #1072: what it finds later, each once, in a record; all else is fixed when it is made. */
   readonly #memo = Retained.record<PathMemo>("PathSteps.memo", {
     id: undefined,
     text: undefined,
@@ -985,7 +989,7 @@ function idOf(contract: Contract, steps: Steps): number {
   return id;
 }
 
-/** A path's steps as a site reads them: a record's (`PathSteps`) or a legacy array. */
+/** A path's steps as a site reads them: a record's (`PathSteps`) or an array. */
 export type Steps = PathSteps | readonly string[];
 
 /** Whether steps are a record's. */
@@ -993,22 +997,22 @@ export function isPathSteps(steps: Steps): steps is PathSteps {
   return steps instanceof PathSteps;
 }
 
-/** Steps' first `length` steps' text: a record's through its record, an array's made plain, as the legacy sites made it. */
+/** Steps' first `length` steps' text: a record's through its record, an array's made plain (`pathText`). */
 export function stepsPrefixText(steps: Steps, length: number): string {
   return isPathSteps(steps) ? steps.prefixText(length) : pathText(steps.slice(0, length));
 }
 
-/** Steps' text: a record's through its record (`textOf`), an array's made plain (`pathText`), as the legacy sites made it. */
+/** Steps' text: a record's through its record (`textOf`), an array's made plain (`pathText`). */
 export function stepsText(steps: Steps): string {
   return isPathSteps(steps) ? steps.text() : pathText(steps);
 }
 
-/** Steps from step `from` on: a record's its view (`PathSteps.from`), an array's sliced as before. */
+/** Steps from step `from` on: a record's its view (`PathSteps.from`), an array's sliced. */
 export function stepsFrom(steps: Steps, from: number): Steps {
   return isPathSteps(steps) ? steps.from(from) : from === 0 ? steps : steps.slice(from);
 }
 
-/** Steps' first `length`: a record's its view (`PathSteps.to`), an array's sliced as before. */
+/** Steps' first `length`: a record's its view (`PathSteps.to`), an array's sliced. */
 export function stepsTo(steps: Steps, length: number): Steps {
   return isPathSteps(steps)
     ? steps.to(length)
@@ -1034,7 +1038,7 @@ export function stepsRest(steps: Steps): Rest {
   return isPathSteps(steps) ? steps.rest() : steps;
 }
 
-/** Steps followed by others: a record's joined (`PathSteps.followedBy`, `after`), arrays as before (`joinSteps`). */
+/** Steps followed by others: a record's joined (`PathSteps.followedBy`, `after`), arrays joined (`joinSteps`). */
 export function stepsJoin(first: Steps, then: Steps): Steps {
   if (isPathSteps(first)) return first.followedBy(then);
   return isPathSteps(then) ? then.after(first) : joinSteps(first, then);
@@ -1056,7 +1060,9 @@ export function keptStepsJoin(work: WorkLedger, first: Steps, then: Steps): Step
   return joined;
 }
 
-/** `strip`'s steps, then steps', as a `Rest`: a record's joined (`PathSteps.after`), an array's as before. */
+/**
+ * `strip`'s steps, then steps', as a `Rest`: a record's joined (`PathSteps.after`), an array's joined (`joinSteps`).
+ */
 export function stepsAfter(strip: readonly string[], steps: Steps): Rest {
   return isPathSteps(steps) ? steps.after(strip).rest() : joinSteps(strip, steps);
 }
@@ -1093,8 +1099,8 @@ export function memberStepOf(contract: Contract, path: Steps, from: number): num
 
 /**
  * `memberStepOf` for a cursor: -1 at one visit where the nearest member step at or above it (`pathMembers`) is not
- * below `from`; else its path's steps, made once per path and kept (`stepsOfId`), scanned from `from` as the legacy
- * lane scans a text's, so a question at each of a path's offsets inspects only its own scan's steps.
+ * below `from`; else its path's steps, made once per path and kept (`stepsOfId`), scanned from `from` as a text key's
+ * are (`memberStepOf`), so a question at each of a path's offsets inspects only its own scan's steps.
  */
 export function memberStepIn(contract: Contract, id: KeyId, from = 0): number {
   const nearest = contract.pathMembers[keyIdPath(id)]!;
@@ -1108,7 +1114,8 @@ export function memberStepIn(contract: Contract, id: KeyId, from = 0): number {
 /**
  * Two cursors in the order of their keys' texts (`keyOfId`, UTF-16 code units), the canonical order (#1398), never
  * their ids': their places' decimal texts, then their paths from the steps where they part, found by climbing to them
- * (each node charged); a path before the paths below it.
+ * (each node charged); a path before the paths below it. Exported for the key-id tests, its one caller; the analysis
+ * orders demands' names by `compareDemandNames`.
  */
 export function compareKeyIds(contract: Contract, a: KeyId, b: KeyId): number {
   if (a === b) return 0;
@@ -1200,7 +1207,7 @@ function logicalName(contract: Contract, name: string): string {
 }
 
 /**
- * Demands' names as another pass replays them (#1422 B1, `solveDemands`): each cursor's and span's token replaced by
+ * Demands' names as another pass replays them (#1422, `solveDemands`): each cursor's and span's token replaced by
  * its index in one packet of their paths (`exportKeyIds`), made while this pass holds them, never their ids; `null`
  * where no name holds one.
  */
@@ -1255,14 +1262,15 @@ export function importNames(
 /**
  * Cursors as a JSON-safe packet any pass reads back (`importKeyIds`), never their ids: each path node once, after its
  * parent, as its parent's index (-1 the empty path) and its step, and each key as its place and its path's node (-1 the
- * empty path), in `ids`' order. Made while the pass that made the cursors holds them (#1422 B1); each node and key an entry
- * charged, its step the arena's own text.
+ * empty path), in `ids`' order. Made while the pass that made the cursors holds them (#1422); each node and key an
+ * entry charged, its step the arena's own text.
  */
 export interface KeyPacket {
   readonly nodes: readonly (readonly [parent: number, step: string])[];
   readonly keys: readonly (readonly [place: PlaceId, node: number])[];
 }
 
+/** Cursors as a packet (`KeyPacket`), each appended in turn (`appendKeyId`). Exported for the key-id tests. */
 export function exportKeyIds(contract: Contract, ids: readonly KeyId[]): KeyPacket {
   const packet = keyPacket();
   for (const id of ids) appendKeyId(contract, packet, id);
@@ -1313,7 +1321,8 @@ function indexBelow(at: unknown, length: number): at is number {
 
 /**
  * The cursors of a packet (`exportKeyIds`) in this pass: its nodes made or found here, parent first, each inspected and
- * charged, then its keys; a malformed packet is refused, whole entries checked as they are read.
+ * charged, then its keys; a malformed packet is refused, whole entries checked as they are read. Exported for the
+ * key-id tests.
  */
 export function importKeyIds(contract: Contract, packet: unknown): KeyId[] {
   const malformed = (what: string): Error => new Error(`A key packet has ${what}.`);
