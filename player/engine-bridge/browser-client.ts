@@ -15,8 +15,8 @@ interface EngineWorker {
   terminate(): void;
 }
 
-// The browser's `Worker`, typed here: the Player's TypeScript build has no DOM library. Only the type is declared; the
-// call below is the browser's own constructor, written in the literal form Vite bundles as a module Worker.
+// The browser's `Worker`, typed by the parts this client uses, which is all a test's stand-in provides. Only the type is
+// declared; the call below is the browser's own constructor, written in the literal form Vite bundles as a module Worker.
 declare const Worker: new (url: URL, options: { readonly type: "module" }) => EngineWorker;
 
 /**

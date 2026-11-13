@@ -17,16 +17,16 @@ import { browserStorage } from "./shell/usePlayerPreference";
 import { usePlayerSession } from "./session/usePlayerSession";
 import "./style.css";
 
+// The engine's module Worker, started first so that its fetch and start overlap the page's IndexedDB opens: the one
+// backend of this page, given to whichever view it shows. A Worker that cannot start rejects it, possibly before the page
+// is built; the page shows that failure once it is, so the rejection is observed here and not reported as unhandled.
+const bridge = openEngineWorker();
+bridge.catch(() => {});
+const query = new URLSearchParams(window.location.search);
 // Fixtures and labs live in a separate chunk: always on the development server, and in a build
 // only after the explicit `?dev` opt-in. The default build plays the repository demo through the runtime,
 // or with `?package=<id>` a package of the playground server's development package root; the development preview
 // plays that package too, with its development tools.
-// The engine's module Worker, started first so that its fetch and start overlap the page's IndexedDB opens: the one
-// backend of this page, given to whichever page it shows. A Worker that cannot start rejects it before the page is
-// built; the page shows that failure once it is, so the rejection is observed here and not reported as unhandled.
-const bridge = openEngineWorker();
-bridge.catch(() => {});
-const query = new URLSearchParams(window.location.search);
 const developmentPreview = import.meta.env.DEV || query.has("dev");
 const packageId = query.get("package");
 const host: ScriptHost =
