@@ -157,6 +157,7 @@ export async function instantAnswersScenario(cdp, origin) {
     await delay(800);
     await evaluate(cdp, RECORDER);
     await evaluate(cdp, `window.__timeShift = 700_000; return true;`);
+    await evaluate(cdp, `window.__clickAt = performance.now(); return true;`);
     await clickLabelled(cdp, "Left");
     const left = await frames(cdp);
     const leftAnswer = shownAtOnce(left, "Left", "An answer a block's message overtook");
@@ -189,7 +190,7 @@ export async function instantAnswersScenario(cdp, origin) {
         );
         return before?.join() === keys.join() ? [] : [`${index}: ${keys.slice(-4).join(" ")}`];
       });
-      const follow = await value(cdp, `JSON.stringify((window.__follow ?? []).slice(-60))`);
+      const follow = await value(cdp, `JSON.stringify((window.__follow ?? []).filter((e) => e.at >= (window.__clickAt ?? 0) - 5).slice(0, 400))`);
       console.log(`DIAG ${follow}`);
       throw new Error(
         `Following did not stop at the start of the block's message: ${JSON.stringify(state)}; rows by frame ${changes.join(" | ")}; entered ${left.entered.join(" ")}`,
