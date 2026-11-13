@@ -111,12 +111,12 @@ import type { IdentityView } from "./identity-view.js";
 
 /*
  * The answers of the coarse core: `analyseCore` runs once per compile and publishes, after its last pass, the frozen
- * surface (`Answers`) `check-result/` and the backend read: per source occurrence its items, route, place and
- * obligations; per place its admitted type, contract, ingresses and definitions; the projections and properties of a
- * value; the bridge to the adapters' operand views; and the whole program's diagnostics, checks, graph, budget counters
- * and deferred bindings. The analysis runs in admission's passes: each pass is a fresh analysis with the stores of the
- * rejected set it is given left out (`analyseCore`'s loop: in the ordinary case the previous pass's rejections), until
- * that set is stable; a set that repeats is a cycle, whose changing stores stay possibilities.
+ * surface (`Answers`): per source occurrence its items, route, place and obligations; per place its admitted type,
+ * contract, ingresses and definitions; the projections and properties of a value; the bridge to the adapters' operand
+ * views; and the whole program's diagnostics, checks, graph, budget counters and deferred bindings. The analysis runs
+ * in admission's passes: each pass is a fresh analysis with the stores of the rejected set it is given left out
+ * (`analyseCore`'s loop: in the ordinary case the previous pass's rejections), until that set is stable; a set that
+ * repeats is a cycle, whose changing stores stay possibilities.
  */
 
 /** The parts of one pass of the analysis: each reads the others through it. */
@@ -624,11 +624,11 @@ export interface Answers {
    */
   completed<T>(again: () => T): T | null;
   /**
-   * The obligations a published plan's gate reads (#1526, `lostCheck`): the receiving registry
-   * where a receiving completion ran (`receiving`, its results); after a stop of the analysis, where none runs, or a
-   * completion past its allowance before it found them, once admission settled, the registry's obligations without
-   * results, found as finishing work counted apart (`Consumers.stopObligations`); none elsewhere. `null` where the
-   * obligations are unknown: a stop after admission settled with no seed to find them from, never read as none.
+   * The receiving obligations (#1526): the receiving registry where a receiving completion ran (`receiving`, its
+   * results); after a stop of the analysis, where none runs, or a completion past its allowance before it found them,
+   * once admission settled, the registry's obligations without results, found as finishing work counted apart
+   * (`Consumers.stopObligations`); none elsewhere. `null` where the obligations are unknown: a stop after admission
+   * settled with no seed to find them from, never read as none.
    */
   gated():
     | readonly {
@@ -1393,9 +1393,9 @@ class CoreAnswers implements Answers {
   /**
    * After a stop where admission had settled, the type admission gives a read's place at a path, as `place` answers it:
    * its written type, its decision, or its key's finished contract where admission decides a path lazily (a lazily
-   * decided path is a source). A domain, as the finishing read reads one (a collection's element possibly absent);
-   * `null` where the read has no place or nothing decides it. One check unit, no new walk: after a stop admission
-   * decides nothing more, it reads what had finished.
+   * decided path is a source). A domain (a collection's element possibly absent); `null` where the read has no place or
+   * nothing decides it. One check unit, no new walk: after a stop admission decides nothing more, it reads what had
+   * finished.
    */
   #lazilyDecided(value: PlaceId, path: readonly string[]): readonly Item[] | null {
     const { program } = this.#pass;

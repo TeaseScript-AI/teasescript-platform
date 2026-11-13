@@ -47,8 +47,7 @@ import { retainedRecorder } from "./retained/retained.js";
  * `ProofDecision`, whose held choice may change the proof alone), and kept with them, its slot charged before either is
  * published. A stop forgets the unfinished proofs with the unfinished demands, and a key's decision stopping the
  * finished ones that read the key, with their answers (`forget`); a new pass has a new solver, so nothing of an earlier
- * pass's proofs is read (each pass `createPass` makes: an admission pass, a stop's fresh finishing pass, a receiving
- * completion's). A reader takes a proof only through `proven`, which yields its demand.
+ * pass's proofs is read. A reader takes a proof only through `proven`, which yields its demand.
  */
 
 /** What a demand asks, which orders the members of one component at one site. */

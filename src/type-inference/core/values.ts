@@ -272,11 +272,11 @@ export class Values {
   /**
    * The narrowing a read takes, `null` for none. A read of a stable path at its own path (a binding's occurrence, or a
    * chain of its properties and indexes), stored or read by a consumer (#1073), takes the nearest narrowing definition
-   * its node finds (`NarrowingIndex.nearestAt`: one walk of its steps down the tested paths); its consumer decides on
-   * that answer (`Consumers.valueItems`). A selection at any step (`xs.first`, `rows[0].random`, `rs.first.f`,
-   * `rows.first.last`) reads its element's (#1073: an element's narrowing proves its kinds, never its emptiness, which
-   * a selection's check asks of the owner), each selected owner's own selection beside it (`#narrowedChain`); an
-   * iteration, a length or a member step answers by itself (a narrowing proves kinds only). Once per read.
+   * its node finds (`NarrowingIndex.nearestAt`: one walk of its steps down the tested paths). A selection at any step
+   * (`xs.first`, `rows[0].random`, `rs.first.f`, `rows.first.last`) reads its element's (#1073: an element's narrowing
+   * proves its kinds, never its emptiness, which a selection's check asks of the owner), each selected owner's own
+   * selection beside it (`#narrowedChain`); an iteration, a length or a member step answers by itself (a narrowing
+   * proves kinds only). Once per read.
    */
   #narrowingOf(value: PlaceId): NarrowedRead | null {
     const known = this.#narrowings.get(value);
@@ -308,9 +308,9 @@ export class Values {
   }
 
   /**
-   * A consumer's read of a value at a path (`Consumers.valueRun`, #1073): a descendant demand (`${xs}` asks its element,
-   * `['element']`) takes the narrowing of its whole path (`#narrowingBelow`), as a read takes its own (`#narrowingOf`);
-   * anything else is `valueItems`. Only a consumer asks it: the values the alias classes share answer by `valueItems`.
+   * A consumer's read of a value at a path (#1073): a descendant demand (`${xs}` asks its element, `['element']`) takes
+   * the narrowing of its whole path (`#narrowingBelow`), as a read takes its own (`#narrowingOf`); anything else is
+   * `valueItems`.
    */
   public *consumerItems(value: PlaceId, node: FlowNode | null, asked: Rest): Work<readonly Item[]> {
     if (!isSteps(asked) || asked.length === 0) return yield* this.valueItems(value, node, asked);
@@ -511,10 +511,9 @@ export class Values {
 
   /**
    * What a read's answer takes from its narrowing, for the value classes that share answers: nothing for a read that
-   * takes none; else its narrowing's environment (`NarrowingEvents.environment`: two reads with one answer it
-   * alike) and its type test's spelling (`spellingIdentity`, read once per form: two tests of one kinds in two written
-   * orders give two answers, #1558). The value classes' `readSnapshot` and
-   * `readClass(…, true)` take it from here.
+   * takes none; else its narrowing's environment (`NarrowingEvents.environment`: two reads with one answer it alike)
+   * and its type test's spelling (`spellingIdentity`, read once per form: two tests of one kinds in two written orders
+   * give two answers, #1558).
    */
   public narrowingMark(value: PlaceId): string {
     const narrowed = this.#narrowingOf(value);
@@ -642,7 +641,7 @@ export class Values {
 
   /**
    * A value's read at a path with its position (`#position`'s proof), `null` where it stands at none (a read through
-   * no wrapper, outside positions): the scan past wrappers of `inherited/inherited.ts` asks it.
+   * no wrapper, outside positions).
    */
   public *valuePosition(
     value: PlaceId,
@@ -1349,9 +1348,9 @@ export class Values {
   }
 
   /**
-   * A wide choice's options [lo, hi) (V30 §19), read at `rest` and merged by kind, as its operation's merge takes them
-   * anyway: a balanced tree of demands, so where the options' answers change one by one (a component of a loop's
-   * preserving stores reading them), a change re-runs only the nodes above it (`Contract.gathered` for a literal's).
+   * A wide choice's options [lo, hi) (V30 §19), read at `rest` and merged by kind: a balanced tree of demands, so where
+   * the options' answers change one by one (a component of a loop's preserving stores reading them), a change re-runs
+   * only the nodes above it (`Contract.gathered` for a literal's).
    */
   public *choiceRange(
     c: Extract<ValueConstraint, { readonly kind: "operation" }>,
@@ -1409,8 +1408,8 @@ export class Values {
   }
 
   /**
-   * A choice's written list or set option's elements [lo, hi) (V30 §19), as `choiceRange` reads its
-   * options: a balanced tree of demands, each node its range's items merged by kind.
+   * A choice's written list or set option's elements [lo, hi) (V30 §19): a balanced tree of demands, each node its
+   * range's items merged by kind.
    */
   public *choiceElements(
     c: Extract<ValueConstraint, { readonly kind: "operation" }>,
