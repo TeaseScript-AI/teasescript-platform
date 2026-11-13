@@ -251,29 +251,42 @@ const nullOnly = (tags: readonly string[]): boolean =>
   tags.some((tag) => tag === "null") && tags.every((tag) => tag === "null" || tag === "empty");
 
 /**
- * An expression and the expressions whose values it may give as they are: a list's or set's elements, an index's
- * receiver, an object literal's properties (also through a property read of it), both sides of `otherwise`, the inside
- * of parentheses. A property read of anything else gives a value of its own (`name.length`).
+ * The expressions whose values an expression gives as they are: both sides of `otherwise`, the inside of parentheses,
+ * the elements of a list or set literal it indexes, the property of an object literal it reads, each in turn; else
+ * the expression itself (`m`, `n[0]` of a variable, `name.length`).
  */
-function carried(expression: Expression): Expression[] {
+function leaves(expression: Expression): Expression[] {
   switch (expression.kind) {
     case "parenthesizedExpression":
-      return carried(expression.expression);
-    case "listLiteral":
-    case "setLiteral":
-      return [expression, ...expression.elements.flatMap(carried)];
-    case "indexExpression":
-      return [expression, ...carried(expression.object)];
-    case "propertyAccessExpression":
-      return expression.object.kind === "objectLiteral"
-        ? [expression, ...carried(expression.object)]
-        : [expression];
-    case "objectLiteral":
-      return [expression, ...expression.properties.flatMap((property) => carried(property.value))];
+      return leaves(expression.expression);
     case "binaryExpression":
       return expression.operator === "otherwise"
-        ? [expression, ...carried(expression.left), ...carried(expression.right)]
+        ? [...leaves(expression.left), ...leaves(expression.right)]
         : [expression];
+    case "indexExpression": {
+      const receivers = leaves(expression.object);
+      return receivers.every(
+        (receiver) => receiver.kind === "listLiteral" || receiver.kind === "setLiteral",
+      )
+        ? receivers.flatMap((receiver) =>
+            receiver.kind === "listLiteral" || receiver.kind === "setLiteral"
+              ? receiver.elements.flatMap(leaves)
+              : [],
+          )
+        : [expression];
+    }
+    case "propertyAccessExpression": {
+      const receivers = leaves(expression.object);
+      return receivers.every((receiver) => receiver.kind === "objectLiteral")
+        ? receivers.flatMap((receiver) =>
+            receiver.kind === "objectLiteral"
+              ? receiver.properties
+                  .filter((property) => property.name.name === expression.property.name)
+                  .flatMap((property) => leaves(property.value))
+              : [],
+          )
+        : [expression];
+    }
     default:
       return [expression];
   }
@@ -365,20 +378,28 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
     // `askPrefillAdmitted`)
     const prefill = askPrefill(ask);
     if (prefill === null || ask.interactionKind === "choice") continue;
-    const refused = (tags: readonly string[]): boolean =>
-      nullOnly(tags) || (ask.interactionKind !== "text" && tags.includes("string"));
-    // (each value the prefill may hold as it is, `carried`: a typed ingress's read is unknown, with its check at the
-    // ingress, so a value wrapped in a list or an `otherwise` is judged by what it holds; each by its kinds, or, for a
-    // read of a place whose admitted type is decided, that type's)
-    for (const value of carried(prefill)) {
+    // (judged by its own kinds and by its leaves' (`leaves`), since a typed ingress's read is unknown, with its check at
+    // the ingress, and a list or an `otherwise` around it hides what it holds: each by its kinds, or, for a read of a
+    // place whose admitted type is decided, that type's)
+    const kinds = (value: Expression): readonly (readonly string[])[] => {
       const read = answers.at(nodeOf(answers, index, value))?.place ?? null;
       const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
-      if (
-        refused(kindsAt(value)) ||
-        (admitted !== null && admitted.by !== "undecided" && refused(admitted.kinds))
-      )
-        return { file: index.fileOf(ask), span: prefill.span, what: "this prefill" };
-    }
+      return [
+        kindsAt(value),
+        ...(admitted !== null && admitted.by !== "undecided" ? [admitted.kinds] : []),
+      ];
+    };
+    const text = (value: Expression): boolean =>
+      ask.interactionKind !== "text" && kinds(value).some((tags) => tags.includes("string"));
+    const onlyNull = (value: Expression): boolean => kinds(value).some(nullOnly);
+    const parts = leaves(prefill);
+    if (
+      onlyNull(prefill) ||
+      (parts.length > 0 && parts.every(onlyNull)) ||
+      text(prefill) ||
+      parts.some(text)
+    )
+      return { file: index.fileOf(ask), span: prefill.span, what: "this prefill" };
   }
   // a variable without a written type whose lists nest deeper than the facts follow
   for (const statement of index.lets)
