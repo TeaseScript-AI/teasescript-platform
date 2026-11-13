@@ -18,7 +18,7 @@ export const FROZEN_IN_CI: ReadonlyMap<string, string> = new Map<string, string>
   ],
   [
     "type-core-contract-descriptors.test",
-    "14 first: arena Frontier.pending (contract/frontier.ts), arena Frontier.pending (contract/frontier.ts) and 12 more",
+    "14 first: arena Frontier.pending (contract/frontier/walk.ts), arena Frontier.pending (contract/frontier.ts) and 12 more",
   ],
   [
     // (main split `type-core-discharge-runtime` into `discharge/`; of its five files, this one and `-typed-parse` make all
@@ -53,7 +53,7 @@ export const FROZEN_IN_CI: ReadonlyMap<string, string> = new Map<string, string>
   ],
   [
     "type-core-pushed-reads.test",
-    "47 first: arena Frontier.product.atoms (contract/frontier.ts), arena Frontier.terms.pending (contract/frontier.ts) and 45 more",
+    "47 first: arena Frontier.product.atoms (contract/frontier/shapes.ts), arena Frontier.terms.pending (contract/frontier/nodes.ts) and 45 more",
   ],
   [
     "type-core-lost-check.test",
