@@ -114,9 +114,9 @@ import type { IdentityView } from "./identity-view.js";
  * surface (`Answers`) `check-result/` and the backend read: per source occurrence its items, route, place and
  * obligations; per place its admitted type, contract, ingresses and definitions; the projections and properties of a
  * value; the bridge to the adapters' operand views; and the whole program's diagnostics, checks, graph, budget counters
- * and deferred bindings. The analysis runs in admission's passes: each pass is a fresh analysis with the stores the
- * previous pass rejected left out, until the rejected set is stable; a set that repeats is a cycle, whose changing
- * stores stay possibilities.
+ * and deferred bindings. The analysis runs in admission's passes: each pass is a fresh analysis with the stores of the
+ * rejected set it is given left out (`analyseCore`'s loop: in the ordinary case the previous pass's rejections), until
+ * that set is stable; a set that repeats is a cycle, whose changing stores stay possibilities.
  */
 
 /** The parts of one pass of the analysis: each reads the others through it. */
@@ -699,11 +699,12 @@ export interface Answers {
 }
 
 /**
- * The analysis of a project by the coarse core: its answers, published after its last pass. A stop is no compile
- * error: past the work allowance or a read chain's depth the analysis
- * stops proving, and statements nested past the nesting limit are not proved at all; what it found stays, every check it
- * did not decide runs when the script runs, and one warning says so (`finished`). `stopped`: the analysis stops at
- * its start, as a question after an analysis that crossed the allowance stops it (the candidate route).
+ * The analysis of a project by the coarse core: its answers, published after its last pass. A stop is no compile error:
+ * past the work allowance or a read chain's depth the analysis stops proving, and statements nested past the nesting
+ * limit are not proved at all; what a pass whose admission had settled found stays (else every unit is finished from a
+ * fresh pass), every check it did not decide runs when the script runs, and one warning says so (`finished`).
+ * `stopped`: the analysis stops at its start, as a question after an analysis that crossed the allowance stops it (the
+ * candidate route).
  */
 export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit): Answers {
   const program = new CoreProgram(request);
@@ -837,8 +838,8 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
  * The finishing path of an analysis that stopped at `limit`: only cheap work, no further proving. The
  * setup the stop cut is finished; a pass whose admission settled keeps what its walk found and walks the units the stop
  * left, and the units nested past the nesting limit; any other walks every unit from a fresh pass, none of its findings
- * standing (a later pass could still change them). Each unit reads every value as `unknown` with the reason
- * `budget`, so it owes its check when the script runs.
+ * standing (a later pass could still change them). Each unit reads its values through the finishing read
+ * (`finishingRead`), with no further proof; a read it leaves `STOPPED` owes its check when the script runs.
  */
 function finished(
   program: CoreProgram,

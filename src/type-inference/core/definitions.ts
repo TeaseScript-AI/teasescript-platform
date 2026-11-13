@@ -1060,9 +1060,10 @@ export function joinedOperand(operand: PlaceId): number {
 }
 
 /**
- * The definition lists of one pass (each pass makes its own, without the stores the previous one rejected): per key
- * its live definitions sorted in dominator order with a lifting table, the nearest dominating definition over a key and
- * its prefixes, the own-event lists, the first own event between two nodes, and the receiver rule (`certain`).
+ * The definition lists of one pass (each pass makes its own, without the stores of the rejected set it is given,
+ * `createPass`'s `rejected`): per key its live definitions sorted in dominator order with a lifting table, the nearest
+ * dominating definition over a key and its prefixes, the own-event lists, the first own event between two nodes, and
+ * the receiver rule (`certain`).
  */
 export class DefinitionLists {
   readonly #sorted = Retained.map<Key, SortedDefinitions>("DefinitionLists.#sorted");

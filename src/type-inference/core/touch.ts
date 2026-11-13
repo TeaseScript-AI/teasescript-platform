@@ -298,7 +298,8 @@ export class Touches {
    * The ring mark (#1270), defined here once. A whole-copy ring's members share one trie, each deciding by its own
    * first store, so two elements copying different members may offend each other where their nodes are one node; a
    * merge whose container holds a ring owes, not only where it differs from the other, the meetings found in making it
-   * (`meet`) or those with two kinds or more (`elements`); for `copies` it owes nothing new (`merge`). A node is a
+   * (`meet`) or those with two kinds or more (`elements`), and nothing new for `copies`; a node merged with itself owes
+   * only the latter, for `elements` (`merge`, `#selfOwes`). A node is a
    * *ring node* where a ring's trie stands at its own level: the trie itself (`ring`, a live group of two or more
    * members), a node one of whose parts is a ring node (a copy's landed top, a merge), or a projection whose walk steps
    * through a ring node (`sub`). A projection that steps only through nodes holding a ring at another path (a ring-free
