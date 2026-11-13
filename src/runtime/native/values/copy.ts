@@ -6,6 +6,7 @@ import {
   type NativeComposite,
   type NativeValue,
 } from "./native-value.js";
+import { appendUniqueMember } from "./native-set.js";
 
 /**
  * An independent copy of a value: every list, object, dict and set in it is new, and primitives and leaf records, which
@@ -32,9 +33,9 @@ export function copyNativeValue(value: NativeValue): NativeValue {
       for (let index = 0, length = source.length; index < length; index += 1)
         items.push(copyPart(source[index]!));
     } else if (source instanceof NativeSet) {
-      // EVIDENCE: invariant: `emptyCopy` pairs each set with a new set.
-      const items = (target as NativeSet).items;
-      for (const item of source.items) items.push(copyPart(item));
+      // EVIDENCE: invariant: `emptyCopy` pairs each set with a new set; copies of unique members are unique.
+      const set = target as NativeSet;
+      for (const item of source.items) appendUniqueMember(set, copyPart(item));
     } else {
       const from = source instanceof NativeObject ? source.properties : source.entries;
       // EVIDENCE: invariant: `emptyCopy` pairs each object with a new object and each dict with a new dict.
