@@ -1,4 +1,4 @@
-// The coarse core's work as a sampled regression oracle (`tests/helpers/type-core/type-core-work.ts`), one of three files that
+// The coarse core's work as a sampled regression oracle (`tests/helpers/type-core/type-core-work.ts`), one of the work files that
 // CI runs side by side.
 import assert from "node:assert/strict";
 import test from "node:test";
