@@ -12,10 +12,12 @@ import {
   OutsideContract,
   SLICE_DEPTH,
 } from "./check-result/slice-index.js";
+import { oneType } from "./consumers/kinds.js";
 import { checkedOnSource, identityView, type IdentityView } from "./identity-view.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 import {
+  askPrefill,
   outsideSyntax,
   sliceCall,
   transferCall,
@@ -34,7 +36,8 @@ import {
  * The slice: `let` with or without a written type (a named type, `T?` and `T[]` of them; no written union, whose
  * required checks come with narrowing, S10), assignment of a variable or of a property, `if` and `else`, `repeat` with
  * a count, `for` with one or two variables, `say` of plain text or of a value, also `as` a speaker, a speaker's
- * declaration (never a speaker's name as a value), a call as a statement, and `exit`;
+ * declaration (never a speaker's name as a value), a call as a statement, and `exit`; the asks `SLICE_ASKS` holds,
+ * also `as` a speaker, with the prefills `askPrefillAdmitted` admits;
  * number, boolean, null, regex and plain text literals, variables, host values, list and object literals, index and
  * property reads, ranges, `otherwise`, a list's `get` with its `default:`, a method of text, a list, a set or a dict that
  * changes nothing in its receiver and a list's `sort`, `toJson` of a value, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
@@ -45,7 +48,8 @@ import {
  * loop's iterable, a method's arguments and the elements `join` and `sort` read); its ingresses are a host value, a load
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
- * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an argument
+ * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an
+ * `askChoice` whose buttons may return more than one type, a prefill that is only `null`, an argument
  * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested
  * `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a route to the use has no
  * check, else a warning whose use the runtime checks.
@@ -261,6 +265,10 @@ export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
   ["gender", { takes: ["string", "null"], check: null }],
 ]);
 
+/** Whether kinds are `null` alone (an empty kind, a value no run reaches, aside). */
+const nullOnly = (tags: readonly string[]): boolean =>
+  tags.some((tag) => tag === "null") && tags.every((tag) => tag === "null" || tag === "empty");
+
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
 function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
@@ -328,6 +336,33 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           what: "an argument that its built-in checks",
         };
     }
+  // (after the values' own refusals: an ask's answer is refused for what its parts hold only where they are admitted)
+  for (const ask of index.asks) {
+    // an `askChoice` whose buttons may return values of more than one type (V30 §19: whole numbers with numbers one
+    // type, `null` beside a type): today's checker refuses its answer in a typed place (TSV041) where the core only warns
+    if (
+      ask.interactionKind === "choice" &&
+      !oneType(
+        (answers.at(nodeOf(answers, index, ask))?.items ?? [])
+          .map((item) => item.tag)
+          .filter((tag) => tag !== "unknown" && tag !== "empty"),
+      )
+    )
+      return { file: index.fileOf(ask), span: ask.span, what: "this ask" };
+    // a prefill that is only `null`, which the runtime takes as none, of an ask but `askChoice` (V30 §20: a known `null`
+    // is today's TSV039; the row refuses the literal, `askPrefillAdmitted`)
+    const prefill = askPrefill(ask);
+    if (prefill === null || ask.interactionKind === "choice") continue;
+    // (its value's kinds, or, for a read of a place whose admitted type is decided, that type's: a typed ingress's read
+    // is unknown, with its check at the ingress)
+    const read = answers.at(nodeOf(answers, index, prefill))?.place ?? null;
+    const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
+    if (
+      nullOnly(kindsAt(prefill)) ||
+      (admitted !== null && admitted.by !== "undecided" && nullOnly(admitted.kinds))
+    )
+      return { file: index.fileOf(ask), span: prefill.span, what: "this prefill" };
+  }
   // a variable without a written type whose lists nest deeper than the facts follow
   for (const statement of index.lets)
     if (statement.typeAnnotation === null) {

@@ -799,5 +799,153 @@
     "mutant": "true",
     "expected": "kill",
     "witness": "goto script with a named argument"
+  },
+  {
+    "id": "ask-form",
+    "scope": "row interactionExpression",
+    "expression": "!SLICE_ASKS.has(node.interactionKind)",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "askForm"
+  },
+  {
+    "id": "ask-prefill",
+    "scope": "row interactionExpression",
+    "expression": "!askPrefillAdmitted(node)",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "askPassword prefill"
+  },
+  {
+    "id": "prefill-named",
+    "scope": "askPrefill",
+    "expression": "argument.name.name === \"prefill\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "askBoolean prefill null"
+  },
+  {
+    "id": "prefill-none",
+    "scope": "askPrefillAdmitted",
+    "expression": "written === null",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "prefill-password",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"password\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "askPassword prefill"
+  },
+  {
+    "id": "prefill-unwrapped",
+    "scope": "askPrefillAdmitted",
+    "expression": "unwrapped(written)",
+    "mutant": "written",
+    "expected": "kill",
+    "witness": "prefill (null)"
+  },
+  {
+    "id": "prefill-text-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 1,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice \"a\", \"b\", prefill: \"a\""
+  },
+  {
+    "id": "prefill-text-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"text\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askNumber prefill text"
+  },
+  {
+    "id": "prefill-text-blank",
+    "scope": "askPrefillAdmitted",
+    "expression": "!isBlankTextAnswer(\n            prefill.parts.map((part) => (part.kind === \"stringText\" ? part.value : \"\")).join(\"\"),\n          )",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askText prefill blank"
+  },
+  {
+    "id": "prefill-text-part",
+    "scope": "askPrefillAdmitted",
+    "expression": "part.kind === \"stringText\"",
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askText(\"q\", prefill: \"a\")"
+  },
+  {
+    "id": "prefill-number-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 2,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice 1, 2, prefill: 1"
+  },
+  {
+    "id": "prefill-number-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"number\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askText prefill number"
+  },
+  {
+    "id": "prefill-integer-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"integer\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askText prefill number"
+  },
+  {
+    "id": "prefill-integer-written",
+    "scope": "askPrefillAdmitted",
+    "expression": "prefill.numericType === \"integer\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askInteger prefill 2.0"
+  },
+  {
+    "id": "prefill-integer-safe",
+    "scope": "askPrefillAdmitted",
+    "expression": "Number.isSafeInteger(prefill.value)",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askInteger prefill unsafe"
+  },
+  {
+    "id": "prefill-boolean-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 3,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice true, false, prefill: true"
+  },
+  {
+    "id": "prefill-boolean-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"boolean\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askText prefill true"
+  },
+  {
+    "id": "prefill-null-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 4,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice 1, 2, prefill: null"
   }
 ]
