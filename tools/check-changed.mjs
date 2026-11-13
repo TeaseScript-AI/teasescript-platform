@@ -18,7 +18,7 @@ let siblings;
 try {
   siblings = await Promise.all([
     import("./costly-test-files.mjs"),
-    import("./run-parallel.mjs"),
+    import("./check/run-parallel.mjs"),
     import("./test-shards.mjs"),
   ]);
 } catch (error) {
@@ -111,7 +111,7 @@ export const PROJECTS = {
   },
   tools: {
     claims: (path) =>
-      /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path) ||
+      /^tools\/(?:check\/)?[^/]+\.(?:mjs|cjs|js)$/u.test(path) ||
       path.startsWith("tools/repository-checks/") ||
       path === "knip.json",
     checks: ["test:verification"],

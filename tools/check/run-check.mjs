@@ -4,7 +4,7 @@ import { listedSteps, runSteps, summaryLine } from "./run-parallel.mjs";
 
 // `npm run check`, in three parts (#2106):
 //
-// 1. the checks before the tests: the steps `check:pretest` runs, each to its end, through `tools/run-parallel.mjs`;
+// 1. the checks before the tests: the steps `check:pretest` runs, each to its end, through `tools/check/run-parallel.mjs`;
 // 2. whatever they found, the build (`npm run build`), without UI source maps;
 // 3. when the build passed, the compiled suite (`tools/test-output-filter.mjs`). It runs what the build wrote, so after a
 //    failed build it does not run: it would test stale or missing code. No check before the tests writes what it runs.
@@ -23,17 +23,17 @@ import { listedSteps, runSteps, summaryLine } from "./run-parallel.mjs";
 // `VERIFY_SERIAL=1` runs the checks before the tests one after another.
 
 /**
- * The steps of `pkg`'s `check:pretest`, which must be one `tools/run-parallel.mjs` call: of the scripts it names, or of
+ * The steps of `pkg`'s `check:pretest`, which must be one `tools/check/run-parallel.mjs` call: of the scripts it names, or of
  * those the file it names with `--list` holds (`listedSteps`), read by `read`.
  */
 export function pretestSteps(pkg, read = (file) => readFileSync(file, "utf8")) {
   const script = pkg.scripts?.["check:pretest"] ?? "";
-  const listed = /^node tools\/run-parallel\.mjs --list (\S+)$/u.exec(script);
+  const listed = /^node tools\/check\/run-parallel\.mjs --list (\S+)$/u.exec(script);
   if (listed !== null) return listedSteps(pkg, read(listed[1]), listed[1]);
-  const words = /^node tools\/run-parallel\.mjs((?: [\w:.-]+)+)$/u.exec(script);
+  const words = /^node tools\/check\/run-parallel\.mjs((?: [\w:.-]+)+)$/u.exec(script);
   if (words === null)
     throw new Error(
-      "check:pretest is not one `node tools/run-parallel.mjs <npm script>...` or `--list <file>` call",
+      "check:pretest is not one `node tools/check/run-parallel.mjs <npm script>...` or `--list <file>` call",
     );
   return words[1].trim().split(" ");
 }

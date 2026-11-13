@@ -10,11 +10,11 @@ import { join } from "node:path";
 // not run (`summaryLine`). A script named twice is refused before any step runs, since each step is reported by its
 // name:
 //
-//   node tools/run-parallel.mjs <npm script>...
-//   node tools/run-parallel.mjs --list <file>
+//   node tools/check/run-parallel.mjs <npm script>...
+//   node tools/check/run-parallel.mjs --list <file>
 //
 // `--list` runs the npm scripts a text file lists, one per line, so that two branches adding a step at different places
-// merge by themselves, the end included (`listedSteps`; `check:pretest`'s, in `tools/check-pretest-steps.txt`).
+// merge by themselves, the end included (`listedSteps`; `check:pretest`'s, in `tools/check/check-pretest-steps.txt`).
 //
 // Exit status: the first failed step's, or 130 or 143 for a signal that came first, else 0. `runSteps` does the same for another tool, and
 // leaves the last line to it.
@@ -168,7 +168,7 @@ export function listedSteps(pkg, text, file) {
 if (import.meta.main) {
   const args = process.argv.slice(2);
   if (args[0] === "--list" && args.length !== 2)
-    throw new Error("usage: node tools/run-parallel.mjs --list <file>");
+    throw new Error("usage: node tools/check/run-parallel.mjs --list <file>");
   const names =
     args[0] === "--list"
       ? listedSteps(

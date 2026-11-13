@@ -45,9 +45,9 @@ Vue's parser refuses (vue-tsc refuses it in CI). `tools/repository-checks/import
 sources, the packages each area may import with their reasons, the generated-component exception, and what no document
 declares. `npm run lint:design` and `npm run test:lint:design` check the [Player design
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
-Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`; the pre-test gates
-are the npm scripts `tools/check-pretest-steps.txt` lists, one per line.
-`npm run check` (`tools/run-check.mjs`) runs the build and the compiled tests also when a pre-test check failed, and
+Independent pre-test gates and UI checks/builds run concurrently through `tools/check/run-parallel.mjs`; the pre-test gates
+are the npm scripts `tools/check/check-pretest-steps.txt` lists, one per line.
+`npm run check` (`tools/check/run-check.mjs`) runs the build and the compiled tests also when a pre-test check failed, and
 its last line names what ran, failed and did not run. TypeScript compilation precedes UI work; compiled tests run only
 after all builds pass, as many files at once as
 `node --test` runs, fewer under the job's memory: as many as fit at 4 GiB plus 576 MiB a file in `SX_MEM_MIB` (the
