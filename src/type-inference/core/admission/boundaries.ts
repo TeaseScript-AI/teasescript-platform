@@ -8,7 +8,7 @@ import { withoutEmpty } from "../exact-path.js";
 import type { IngressNode, Item, ItemTag } from "../items.js";
 import type { Obligation, RequiredKind } from "../result.js";
 import { concrete, isExternal } from "./kinds.js";
-import { typedCallKinds, landingIndex, leafIngress, typedIngress } from "./landing-index.js";
+import { typedCallKinds, landingIndex, leafIngress, typedIngress } from "./ingress-landings.js";
 import { elementsBelow } from "./structure.js";
 import { keptKeyAt } from "../contract/key-ids.js";
 

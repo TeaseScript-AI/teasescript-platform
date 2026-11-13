@@ -4,7 +4,7 @@ import { joinSteps, keepText, keptParts, keptSlice, type WorkLedger } from "../b
 import type { ContractResult, LevelProof } from "../contract-descriptors.js";
 import type { Definition } from "../definitions.js";
 import type { Unsettled } from "./closure.js";
-import { landingIndex } from "./landing-index.js";
+import { landingIndex } from "./ingress-landings.js";
 import { elementsBelow } from "./structure.js";
 
 /*
