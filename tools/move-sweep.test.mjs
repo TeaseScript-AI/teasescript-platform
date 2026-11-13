@@ -412,19 +412,79 @@ test("a tracked file that is not UTF-8 is not read and is listed last, and the e
   assert.ok(hit.out.endsWith("== not read, not UTF-8: 1 files\ndocs/legacy.md\n"), hit.out);
 });
 
-test("a declared hit passes, an undeclared one fails, and a declaration that matches nothing cannot run", (t) => {
-  const r = moved(t, ['const fixture = "/a/util.js";']);
-  const declared = r.json("declared", [
-    { file: "tools/refs.mjs", line: 1, reason: "a fixture's invented path" },
+test("a declared hit passes by its whole line's text, an undeclared one fails, and a declaration that matches nothing cannot run (#2564)", (t) => {
+  const line = '  const fixture = "/a/util.js";';
+  const r = moved(t, [line, "const other = 1;", line]);
+  const reason = "a fixture's invented path";
+  const one = r.json("one", [{ file: "tools/refs.mjs", text: line, reason }]);
+  // (one declaration takes the first of two equal lines; the second needs its own)
+  const half = r.run(r.base, "--declare", one);
+  assert.equal(half.status, 1, half.err);
+  assert.match(half.out, /^declared: tools\/refs\.mjs:1: a fixture's invented path$/mu);
+  const two = r.json("two", [
+    { file: "tools/refs.mjs", text: line, reason },
+    { file: "tools/refs.mjs", text: line, reason },
   ]);
-  const passed = r.run(r.base, "--declare", declared);
+  const passed = r.run(r.base, "--declare", two);
   assert.equal(passed.status, 0, passed.err);
-  assert.match(passed.out, /^declared: tools\/refs\.mjs:1: a fixture's invented path$/mu);
+  assert.match(passed.out, /^declared: tools\/refs\.mjs:3: a fixture's invented path$/mu);
   assert.equal(r.run(r.base).status, 1);
-  const stale = r.json("stale", [{ file: "tools/refs.mjs", line: 9, reason: "nothing there" }]);
-  const refused = r.run(r.base, "--declare", stale);
-  assert.equal(refused.status, 2);
-  assert.match(refused.err, /matches no hit/u);
+  // (the text is the whole line, its indentation included, not the trimmed text the report shows)
+  for (const text of [line.trim(), "const nothing = 2;"]) {
+    const stale = r.json("stale", [
+      { file: "tools/refs.mjs", text: line, reason },
+      { file: "tools/refs.mjs", text: line, reason },
+      { file: "tools/refs.mjs", text, reason },
+    ]);
+    const refused = r.run(r.base, "--declare", stale);
+    assert.equal(refused.status, 2, text);
+    assert.match(refused.err, /matches no hit/u);
+  }
+});
+
+test("the old line form and pure-move-check's side are refused by name, and a CR is the line's (#2564)", (t) => {
+  const r = moved(t, ['const fixture = "/a/util.js";']);
+  const reason = "a fixture's invented path";
+  const old = r.run(
+    r.base,
+    "--declare",
+    r.json("old", [{ file: "tools/refs.mjs", line: 1, reason }]),
+  );
+  assert.equal(old.status, 2);
+  assert.match(
+    old.err,
+    /names its line by "text" now, not "line": \{ "file", "text", "reason" \}/u,
+  );
+  const side = r.run(
+    r.base,
+    "--declare",
+    r.json("side", [
+      { file: "tools/refs.mjs", side: "added", text: 'const fixture = "/a/util.js";', reason },
+    ]),
+  );
+  assert.equal(side.status, 2);
+  assert.match(side.err, /has no "side"/u);
+  // (a CRLF line is declared with its CR, as pure-move-check reads it; a line a lone CR ends cannot be declared)
+  r.write({
+    "tools/refs.mjs":
+      'const crlf = "/a/util.js";\r\nconst lone = "/a/util.js";\rconst after = 1;\n',
+  });
+  r.commit();
+  const crlf = r.run(
+    r.base,
+    "--declare",
+    r.json("crlf", [{ file: "tools/refs.mjs", text: 'const crlf = "/a/util.js";\r', reason }]),
+  );
+  assert.equal(crlf.status, 1, crlf.err);
+  assert.match(crlf.out, /^declared: tools\/refs\.mjs:1: /mu);
+  const lone = r.run(
+    r.base,
+    "--declare",
+    r.json("lone", [
+      { file: "tools/refs.mjs", text: 'const lone = "/a/util.js";\rconst after = 1;', reason },
+    ]),
+  );
+  assert.equal(lone.status, 2);
 });
 
 test("the map derived from the change is the map passed for the same move", (t) => {

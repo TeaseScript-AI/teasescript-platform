@@ -54,8 +54,12 @@
 // binary or a fixture in another encoding), so that a sweep's "nothing found" says which files it read. That is an
 // output difference, not a hit difference.
 //
-// --declare FILE: a JSON array of `{ "file", "line", "reason" }`, a hit of form 1, 4 or 5 the reader states is not
-// stale (a test fixture's invented path), printed with its reason; every declaration must match such a hit.
+// --declare FILE: a JSON array of `{ "file", "text", "reason" }`, a hit of form 1, 4 or 5 the reader states is not
+// stale (a test fixture's invented path), printed with its reason. `text` is the hit's whole line as `pure-move-check`
+// reads it (without its LF, a CR before that kept), so a rebase that moves the line leaves it declared; one declaration
+// covers one line, two lines of one text need two, taken in the file's order, and every declaration must match such a
+// hit. An entry with `line` (the old form) or `side` (`pure-move-check`'s field) cannot run, and a line that a lone CR
+// ends or follows cannot be declared (`pure-move-check` does not end a line there).
 //
 // Output: each form's section, `== <form>. <title>: <count>` and its hits, `<file>:<line>: <the line, trimmed, its
 // first 150 characters>`, in the order 1, 2, 3, 4, 5, then 2b; then the declared hits; last, only when there is one,
@@ -229,7 +233,11 @@ function treeOf(cwd) {
     const body = contents.subarray(headerEnd + 1, headerEnd + 1 + size);
     at = headerEnd + 1 + size + 1;
     // Not UTF-8 (a binary, a fixture in another encoding): not read, as the Python did not, and listed, as it was not.
-    entry.lines = textOf(body)?.replace(/\r\n?/gu, "\n").split("\n") ?? null;
+    const text = textOf(body);
+    const parts = text?.split(/(\r\n|\r|\n)/u) ?? [];
+    entry.lines = text === null ? null : parts.filter((_, i) => i % 2 === 0);
+    // (each line's end, kept only for a file with a CR: a declaration's text keeps a CR before an LF)
+    entry.ends = text?.includes("\r") ? parts.filter((_, i) => i % 2 === 1) : null;
   }
   return {
     tracked,
@@ -347,13 +355,20 @@ export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) 
   };
 
   const hits = { 1: [], 2: [], "2b": [], 3: [], 4: [], 5: [] };
-  for (const { file, lines } of files) {
+  for (const { file, lines, ends } of files) {
     for (const [index, line] of lines.entries()) {
       const number = index + 1;
       const hit = {
         file,
         line: number,
         text: [...line.replace(STRIP_SPACE, "")].slice(0, 150).join(""),
+        // (the line as a declaration names it, `null` where a lone CR ends or precedes it)
+        whole:
+          ends === null
+            ? line
+            : ends[index] === "\r" || ends[index - 1] === "\r"
+              ? null
+              : `${line}${ends[index] === "\r\n" ? "\r" : ""}`,
       };
       if (
         forms.has("1") &&
@@ -390,17 +405,34 @@ export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) 
   return { hits, notRead };
 }
 
-/** The declarations of `file`, each `{ file, line, reason }`. */
+/** The declarations of `file`, each `{ file, text, reason }`. */
 function declarationsOf(file) {
   const parsed = jsonFile(file, "declarations");
-  const valid = (d) =>
-    typeof d?.file === "string" &&
-    Number.isInteger(d.line) &&
-    d.line > 0 &&
-    typeof d.reason === "string" &&
-    d.reason !== "";
-  if (!Array.isArray(parsed) || !parsed.every(valid))
-    refuse(`the declarations ${file} are not an array of { file, line, reason }`);
+  if (!Array.isArray(parsed)) refuse(`the declarations ${file} are not an array`);
+  for (const d of parsed) {
+    const entry = JSON.stringify(d);
+    if (
+      d !== null &&
+      typeof d === "object" &&
+      Object.hasOwn(d, "line") &&
+      !Object.hasOwn(d, "text")
+    )
+      refuse(
+        `a declaration names its line by "text" now, not "line": { "file", "text", "reason" }, the text the hit's whole line as pure-move-check reads it: ${entry}`,
+      );
+    if (d !== null && typeof d === "object" && Object.hasOwn(d, "side"))
+      refuse(
+        `a declaration of the sweep has no "side" (a pure-move-check declaration's field; its declarations are another file): ${entry}`,
+      );
+    const valid =
+      typeof d?.file === "string" &&
+      typeof d.text === "string" &&
+      !d.text.includes("\n") &&
+      typeof d.reason === "string" &&
+      d.reason !== "" &&
+      Object.keys(d).every((key) => ["file", "text", "reason"].includes(key));
+    if (!valid) refuse(`a declaration is not { file, text, reason }: ${entry}`);
+  }
   return parsed;
 }
 
@@ -443,19 +475,30 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
   const declarations = options.has("--declare") ? declarationsOf(options.get("--declare")) : [];
   const { hits, notRead } = sweep(cwd, renames, forms);
 
-  const findings = ["1", "4", "5"].flatMap((form) => hits[form]);
+  // (each line once, though more than one form may find it, in each file's order)
   const key = (h) => `${h.file}\0${h.line}`;
-  const declared = new Map(declarations.map((d) => [key(d), d]));
-  for (const d of declarations)
-    if (!findings.some((h) => key(h) === key(d)))
-      refuse(`the declaration ${d.file}:${d.line} matches no hit of form 1, 4 or 5`);
+  const findings = [
+    ...new Map(["1", "4", "5"].flatMap((form) => hits[form]).map((h) => [key(h), h])).values(),
+  ].sort((a, b) => (a.file === b.file ? a.line - b.line : a.file < b.file ? -1 : 1));
+  // each declaration takes the first line of its file and text that no earlier one took
+  const declared = new Map();
+  for (const d of declarations) {
+    const hit = findings.find(
+      (h) => !declared.has(key(h)) && h.file === d.file && h.whole === d.text,
+    );
+    if (hit === undefined)
+      refuse(
+        `the declaration ${d.file} ${JSON.stringify(d.text)} matches no hit of form 1, 4 or 5 by its whole line, or none that another declaration did not take`,
+      );
+    declared.set(key(hit), { ...d, line: hit.line });
+  }
   const order = [...forms].sort();
   if (forms.has("2")) order.push("2b");
   for (const form of order) {
     print(`== ${form}. ${TITLES[form]}: ${hits[form].length}`);
     for (const h of hits[form]) print(`${h.file}:${h.line}: ${h.text}`);
   }
-  for (const d of declarations) print(`declared: ${d.file}:${d.line}: ${d.reason}`);
+  for (const d of declared.values()) print(`declared: ${d.file}:${d.line}: ${d.reason}`);
   if (notRead.length > 0) {
     print(`== not read, not UTF-8: ${notRead.length} files`);
     for (const file of notRead) print(file);
