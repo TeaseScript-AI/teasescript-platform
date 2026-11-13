@@ -61,6 +61,7 @@ import type {
   SourceSite,
   StoreKind,
   SyntaxEvidence,
+  TestShape,
   TypeTerm,
 } from "./graph.js";
 import { conditionShape } from "./narrowing-shapes.js";
@@ -318,6 +319,17 @@ class Collector {
 
   #store(value: PlaceId, into: PlaceId, how: StoreKind, node: Spanned, role: Role): void {
     this.#add({ ...this.#origin(node, role), kind: "store", value, into, how });
+  }
+
+  /** A `test` of the binding `subject` at the condition `node`. */
+  #test(subject: PlaceId, shape: TestShape, node: Spanned): void {
+    this.#add({
+      ...this.#origin(node, "condition"),
+      kind: "test",
+      subject,
+      shape,
+      point: { site: this.#site(node) },
+    });
   }
 
   #projection(
@@ -582,17 +594,15 @@ class Collector {
         const tested = this.#plainVariable(statement.subject, scope);
         for (const switchCase of statement.cases) {
           if (switchCase.typeTest !== null && tested !== undefined)
-            this.#add({
-              ...this.#origin(switchCase.typeTest, "condition"),
-              kind: "test",
-              subject: tested,
-              shape: {
+            this.#test(
+              tested,
+              {
                 kind: "type",
                 type: typeTerm(switchCase.typeTest.type),
                 negated: switchCase.typeTest.negated,
               },
-              point: { site: this.#site(switchCase.typeTest) },
-            });
+              switchCase.typeTest,
+            );
           for (const value of switchCase.values) {
             const place = yield* compileChild(this.#expression(value, scope));
             // The case's comparison has a result of its own; the case value stays an operand.
@@ -992,13 +1002,11 @@ class Collector {
         const shape = conditionShape(expression);
         const tested = shape.kind === "type" ? this.#plainVariable(shape.tested, scope) : undefined;
         if (tested !== undefined)
-          this.#add({
-            ...this.#origin(expression, "condition"),
-            kind: "test",
-            subject: tested,
-            shape: { kind: "type", type: typeTerm(expression.type), negated: expression.negated },
-            point: { site: this.#site(expression) },
-          });
+          this.#test(
+            tested,
+            { kind: "type", type: typeTerm(expression.type), negated: expression.negated },
+            expression,
+          );
         return this.#operation(
           { family: "typeTest", name: expression.negated ? "is not" : "is" },
           null,
@@ -1217,13 +1225,7 @@ class Collector {
       // `x == null` and `x != null` of a plain variable are recorded as a test.
       const tested = this.#plainVariable(shape.tested, scope);
       if (tested !== undefined)
-        this.#add({
-          ...this.#origin(expression, "condition"),
-          kind: "test",
-          subject: tested,
-          shape: { kind: "null", negated: shape.negated },
-          point: { site: this.#site(expression) },
-        });
+        this.#test(tested, { kind: "null", negated: shape.negated }, expression);
     }
     return this.#operation(
       {
