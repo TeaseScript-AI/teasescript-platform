@@ -789,7 +789,7 @@ export class Consumers {
 
   /** The capture of each owing destination's contract (`#capture`). */
   #captureOwedContracts(): void {
-    const { program, definitions, lists, contract } = this.pass;
+    const { program, definitions, lists } = this.pass;
     const sites = new Map<string, SourceSite>();
     // (a stopped decision's own marks, the reason `budget`, stand for their stores' checks: the stop owes them, and a
     // stopped key decides nothing to capture)
@@ -827,34 +827,7 @@ export class Consumers {
       requested.add(destination);
       requests.push({ site, place: destination.place, path: destination.path });
     }
-    const reader: ContractReader = {
-      level: (place, path) => {
-        const written = writtenOf(program.place(place).kind);
-        const admitted = admittedLevel(
-          this.admission,
-          place,
-          path,
-          written === null ? null : termAt(written, path),
-          { stopped: false, settled: true, cheap: () => null },
-        );
-        return levelProof(admitted, () =>
-          withoutEmpty(this.solve(contract.contractOf(keyOf(place, path)))),
-        );
-      },
-      // (as `Answers.placeProperties` finds them: a key whose decision stopped names nothing)
-      properties: (place, path) => {
-        // (kept with the names it finds: its text charged where it is text, `keptKeyAt`)
-        const key = keptKeyAt(contract, place, path);
-        const known = this.propertySets.get(key);
-        if (known !== undefined) return known;
-        const names: ReadonlySet<string> =
-          contract.anyStopped && contract.keyStopped(key)
-            ? new Set()
-            : propertyNames(this.pass, (asked) => this.solve(asked), { key });
-        this.propertySets.set(key, names);
-        return names;
-      },
-    };
+    const reader = this.#contractReader(null);
     // (its work is the capture's, no consumer read's)
     this.reading = null;
     const left = captureContracts(
@@ -1159,44 +1132,7 @@ export class Consumers {
       closure!.made("listing", key);
       return names;
     };
-    const reader: ContractReader = {
-      level: (place, path) => {
-        const written = writtenOf(program.place(place).kind);
-        const admitted = admittedLevel(
-          this.admission,
-          place,
-          path,
-          written === null ? null : termAt(written, path),
-          { stopped: false, settled: true, cheap: () => null },
-        );
-        return levelProof(admitted, () =>
-          withoutEmpty(this.solve(contract.contractOf(keyOf(place, path)))),
-        );
-      },
-      // (as `Answers.placeProperties` finds them: a key whose decision stopped names nothing; in a completion pass a
-      // listing is its cell, and one not yet made makes the request wait on it)
-      properties: (place, path) => {
-        // (kept with the names it finds: its text charged where it is text, `keptKeyAt`)
-        const key = keptKeyAt(contract, place, path);
-        const known = this.propertySets.get(key);
-        if (known !== undefined) {
-          closure?.took("listing", key);
-          return known;
-        }
-        if (closure === null) {
-          const names: ReadonlySet<string> =
-            contract.anyStopped && contract.keyStopped(key)
-              ? new Set()
-              : propertyNames(this.pass, (asked) => this.solve(asked), { key });
-          this.propertySets.set(key, names);
-          return names;
-        }
-        const found = list(key);
-        if ("deferred" in found) throw new Unlisted(key, found.deferred);
-        closure.took("listing", key);
-        return found;
-      },
-    };
+    const reader = this.#contractReader(closure === null ? null : { closure, list });
     const descriptors = captureDescriptors(reader, epoch, closure);
     const dirty = new Set<number>();
     const extract = (index: number): void => {
@@ -1221,6 +1157,61 @@ export class Consumers {
         throw new LeftSlice();
     };
     return { extract, dirty, descriptors, list };
+  }
+
+  /**
+   * The answers' own level reader over this pass (`admittedLevel`): a level's contract by its admitted type, else its
+   * key's contract; a key's property names, kept (`propertySets`). Without `listingSearch`, a key whose decision
+   * stopped names none; with it (a completion pass's search of its listings and the closure that records what it
+   * takes), a listing is its cell, made by `list`, and one not yet made makes the request wait on it (`Unlisted`).
+   */
+  #contractReader(
+    listingSearch: {
+      readonly closure: Closure;
+      readonly list: (
+        key: string,
+      ) => ReadonlySet<string> | { readonly deferred: readonly string[] };
+    } | null,
+  ): ContractReader {
+    const { program, contract } = this.pass;
+    return {
+      level: (place, path) => {
+        const written = writtenOf(program.place(place).kind);
+        const admitted = admittedLevel(
+          this.admission,
+          place,
+          path,
+          written === null ? null : termAt(written, path),
+          { stopped: false, settled: true, cheap: () => null },
+        );
+        return levelProof(admitted, () =>
+          withoutEmpty(this.solve(contract.contractOf(keyOf(place, path)))),
+        );
+      },
+      // (as `Answers.placeProperties` finds them: a key whose decision stopped names nothing; in a completion pass a
+      // listing is its cell, and one not yet made makes the request wait on it)
+      properties: (place, path) => {
+        // (kept with the names it finds: its text charged where it is text, `keptKeyAt`)
+        const key = keptKeyAt(contract, place, path);
+        const known = this.propertySets.get(key);
+        if (known !== undefined) {
+          listingSearch?.closure.took("listing", key);
+          return known;
+        }
+        if (listingSearch === null) {
+          const names: ReadonlySet<string> =
+            contract.anyStopped && contract.keyStopped(key)
+              ? new Set()
+              : propertyNames(this.pass, (asked) => this.solve(asked), { key });
+          this.propertySets.set(key, names);
+          return names;
+        }
+        const found = listingSearch.list(key);
+        if ("deferred" in found) throw new Unlisted(key, found.deferred);
+        listingSearch.closure.took("listing", key);
+        return found;
+      },
+    };
   }
 
   /**
