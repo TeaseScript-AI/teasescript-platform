@@ -340,8 +340,7 @@ counts. CI runs only `npm run test:families`, which checks that every module sti
 
 CI runs `npm run check` as three jobs side by side, `check-1` to `check-3`, each meant to stay at least 3 minutes under
 its 15-minute limit at the slow end of runner variance (#1638, #1978): each builds and runs one third of the compiled
-tests (`npm test -- --shard=i/3`), `check-3` also the checks before them (`npm run check:pretest`), and `check-1` the
-runtime oracle comparison after them. Every type-core test
+tests (`npm test -- --shard=i/3`), `check-3` also the checks before them (`npm run check:pretest`). Every type-core test
 file and every other of 10 s or more is listed, costliest first, with its median seconds over three CI runs or more in
 `tools/costly-test-files.mjs`, beside the seconds of `check:pretest`: each test job keeps its files' seconds as an
 artifact for 7 days, and `node tools/measure-test-files.mjs --write --from-ci RUN ...` regenerates the module from them
@@ -759,7 +758,8 @@ With `FUZZ_ACCEPTANCE=1` it also runs `tools/runtime-differential/acceptance.jso
 `FUZZ_ACCEPTANCE=1 npm run oracle:test` and `FUZZ_ACCEPTANCE=1 node tools/test-output-filter.mjs
 dist/tests/runtime/v1/runtime-differential.test.js`. `run.mjs --oracle [--manifest FILE]` runs a campaign the same way, each line naming the oracle's commit and
 the candidate's closure digest. A runner that never answers, or fails before it opens its pipes, is bounded only by the
-job's deadline. A behaviour changed after the pin shows as a difference, which only a new seal removes.
+job's deadline. A behaviour changed after the pin shows as a difference to explain; nothing requires the pin to be
+re-sealed.
 
 ## Replay through the bridge
 
@@ -1189,7 +1189,9 @@ The repository does not use an arbitrary mandatory line-coverage threshold such 
 Performance benchmarks are separate from correctness tests. The runtime benchmark
 ([`benchmarks/runtime/README.md`](../benchmarks/runtime/README.md)) keeps the two apart in one tool: CI checks its exact
 instruction counts and results against a baseline that a PR updates on purpose, and its paired CPU comparison runs on
-demand on a queue worker, reported and never a threshold. [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md) tracks the Beta outcome **Establish a runtime performance baseline and optimization plan**.
+demand on a queue worker, reported and never a threshold. That baseline is the record of what the engine does (every
+cut's events, state and random state, the runtime oracle's runnable cases among the probes): a change to it is
+explained in the PR that makes it. [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md) tracks the Beta outcome **Establish a runtime performance baseline and optimization plan**.
 
 Performance workloads should measure long-running runtime-state growth as well as instruction throughput. This includes growth in runtime-managed identities, snapshots, checkpoints, cloning, validation, and serialization costs. Repeated timer or media creation is a representative workload, but measurements and reachability/lifetime analysis must precede any reclamation or garbage-collection rule.
 
@@ -1263,6 +1265,9 @@ checks no greater than `main`'s at every size; any small-size excess is reported
 ## Runtime pipeline oracle
 
 The oracle (engine plan §8 F-oracle) is a frozen build of a pinned commit that a candidate pipeline is compared with.
+It is an on-demand tool for finding defects: no CI job runs it and no pull request owes it a result. A difference it
+shows is something to explain, not something to preserve. The record of what the engine does is the runtime
+benchmark's baseline ([Coverage and performance boundaries](#coverage-and-performance-boundaries)), which CI checks.
 `tools/runtime-oracle/manifest.json` pins the commit and its tree, Node, the lockfile, the build command, the formats, the
 import closure of the entries with its build inputs, the built output, the oracle's tooling and case files, and every
 case's result digest.
@@ -1288,15 +1293,12 @@ case's result digest.
     Workers, child processes, `vm` sources, a hook the root registers, and addons.
   - `tests/runtime-oracle-admission.oracle.ts` checks the classifier as a generated family of 200 cases, with an
     independent oracle and a pair-coverage check.
-- **Check:** `npm run oracle:test`, after a build, materializes the oracle and runs
-  `tests/runtime-pipeline-oracle.oracle.ts`. It is outside the sharded suite, and CI runs it in `check-1` with the root
-  cached by commit and lockfile. `npm run oracle:run` prints the comparison alone. The oracle must reproduce its
-  pinned digests; then this checkout's build must equal it on every case and route
-  (`tools/runtime-oracle/cases.json`), exactly.
+- **Check:** `npm run oracle:test`, after a build, materializes the oracle and runs the three `tests/*.oracle.ts`
+  files, outside the sharded suite; `npm run oracle:run` prints the comparison alone. The oracle must reproduce its
+  pinned digests, then this checkout's build is compared with it on every case and route
+  (`tools/runtime-oracle/cases.json`); a difference fails the run, for its reader to explain.
 - **Seal:** `node tools/runtime-oracle/materialize.mjs --seal COMMIT --label provisional|final [--seam SHA]` rewrites
-  the manifest from that commit's own run. A changed digest at a new seal needs a reviewed reason in its pull request,
-  and no case is removed. The current seal is provisional and proves reproduction only; the final seal, at the
-  released playroom seam after L5, freezes the semantics and adds the host closure and bridge tapes.
+  the manifest from that commit's own run, when a newer pin serves the comparison better.
 
 ## Reproducibility requirements
 
