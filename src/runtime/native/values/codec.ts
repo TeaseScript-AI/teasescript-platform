@@ -11,6 +11,7 @@ import {
   type NativeLeaf,
   type NativeValue,
 } from "./native-value.js";
+import { appendUniqueMember } from "./native-set.js";
 
 // The two directions between canonical values (`SerializableRuntimeValue`, the form snapshots, checkpoints and hosts
 // use) and native values (`native-value.ts`). Neither direction validates: `fromCanonical` takes a value that was
@@ -37,8 +38,27 @@ export function fromCanonical(value: SerializableRuntimeValue): NativeValue {
       case "dict":
         target = new NativeDict();
         break;
-      default:
+      case "range":
+      case "duration":
+      case "calendarDuration":
+      case "angle":
+      case "date":
+      case "time":
+      case "datetime":
+      case "absoluteDateTime":
+      case "timerHandle":
+      case "mediaHandle":
+      case "permanentButtonHandle":
+      case "messageHandle":
+      case "cameraView":
+      case "speakerReference":
+      case "script":
+      case "regex":
         return Object.freeze({ ...source });
+      default:
+        // A new kind of value is classified here and in `NativeLeaf` before a native value can hold it.
+        source satisfies never;
+        throw new Error("A canonical value of an unknown kind has no native form.");
     }
     work.push([source, target]);
     return target;
@@ -50,11 +70,16 @@ export function fromCanonical(value: SerializableRuntimeValue): NativeValue {
     const [source, target] = work.pop()!;
     // `convert` paired each source with a target of its kind; the casts below name that pairing.
     switch (source.kind) {
-      case "list":
-      case "set": {
-        // EVIDENCE: invariant: `convert` pairs a list with a new list and a set with a new set.
-        const items = Array.isArray(target) ? target : (target as NativeSet).items;
+      case "list": {
+        // EVIDENCE: invariant: `convert` pairs a list with a new list.
+        const items = target as NativeValue[];
         for (const item of source.items) items.push(part(item));
+        break;
+      }
+      case "set": {
+        // EVIDENCE: invariant: `convert` pairs a set with a new `NativeSet`; a valid set's items are unique.
+        const set = target as NativeSet;
+        for (const item of source.items) appendUniqueMember(set, part(item));
         break;
       }
       case "object": {
