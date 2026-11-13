@@ -19,7 +19,7 @@ import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } 
 import { retainedRecorder } from "./retained/retained.js";
 
 /*
- * The demand solver of the coarse core (checkpoint 9; the port plan's S3 note §1). A demand is one answer the
+ * The demand solver of the coarse core. A demand is one answer the
  * analysis needs (a key's contract, the value at a definition, a value at a node); what it reads is discovered while
  * it runs, as other demands it yields. Demands run on an explicit frame stack, never the native one, and Tarjan's
  * algorithm finds the strongly connected components among them as they run: a demand that reads an unfinished one
@@ -35,10 +35,10 @@ import { retainedRecorder } from "./retained/retained.js";
  * the reverse order).
  * What a demand reads as part of itself (`inline`) runs on its frame's stack too, never the native one.
  *
- * That needs answers monotone in what they read. A choice that is not (a `Decision`: F18/F19's default without kinds
- * gives `unknown`; F19a's receiver that holds a reference kind has opaque members) is made on a completed input: at
- * once outside every component; inside one, the component is solved first with every choice open and, where a choice
- * then changes an answer, again from bottom with the choices held.
+ * That needs answers monotone in what they read. A choice that is not (a `Decision`: a load's or a parse's default
+ * without kinds gives `unknown`; a receiver that holds a reference kind has opaque members) is made on a completed
+ * input: at once outside every component; inside one, the component is solved first with every choice open and, where a
+ * choice then changes an answer, again from bottom with the choices held.
  *
  * A demand may prove more than its items (a `ProofDemand`): what a fold selected, where a
  * prefix's walk stands. Its proof is the solver's as its items are: provisional while its run or component is
@@ -47,11 +47,11 @@ import { retainedRecorder } from "./retained/retained.js";
  * not), chosen on as they are (a `ProofDecision`, whose held choice may change the proof alone), and kept with them,
  * its slot charged before either is published. A stop forgets the unfinished proofs with the unfinished demands, and a
  * key's decision stopping the finished ones that read the key, with their answers (`forget`); a new pass has a new
- * solver, so nothing of an earlier pass's proofs is read (A6, S8's fresh finishing pass). A reader takes a proof only
- * through `proven`, which yields its demand.
+ * solver, so nothing of an earlier pass's proofs is read (each admission pass, and a stop's fresh finishing pass). A
+ * reader takes a proof only through `proven`, which yields its demand.
  */
 
-/** What a demand asks, which orders the members of one component at one site (S3 §1). */
+/** What a demand asks, which orders the members of one component at one site. */
 export type DemandKind = "contract" | "exact" | "value";
 
 const KIND_RANK: Readonly<Record<DemandKind, number>> = { contract: 0, exact: 1, value: 2 };
@@ -119,7 +119,7 @@ export interface ProofDecision<P extends Proof> {
 /**
  * A demand that proves a proof beside its items: one demand, one lifecycle
  * (docs/specifications/type-inference-accepted-record/sharing.md#r4-164). Its proof holds no ingress of its own:
- * external data it carries is in its items, which a component's cells anchor (C9).
+ * external data it carries is in its items, which a component's cells anchor.
  */
 export interface ProofDemand<P extends Proof> {
   readonly key: string;
@@ -298,7 +298,7 @@ export interface SolverSeam {
   readonly reverseWorklist?: boolean;
   /**
    * Hears of every component solved: its members' keys in the order they were solved in, with their answers; and,
-   * where a key holds a cursor, the names another pass replays them by and their packet (`exportNames`, #1422 B1).
+   * where a key holds a cursor, the names another pass replays them by and their packet (`exportNames`, #1422).
    */
   readonly onComponent?: (
     members: readonly SolvedMember[],
@@ -325,16 +325,16 @@ export function withSolverSeam<T>(seam: SolverSeam, callback: () => T): T {
   }
 }
 
-/** The work one finished demand cost, the demands it was the first to compute included (S3 §5's counter). */
+/** The work one finished demand cost, the demands it was the first to compute included. */
 export interface DemandWork {
   readonly key: string;
   readonly units: number;
 }
 
 /**
- * The canonical order of two demands: their file, their offset, their kind, then their key, so that distinct demands
- * at one site still have one order. G3 stage 1: a key holding a cursor compares as the logical text it stands for
- * (`names`, the pass's: `compareDemandNames`), never by its ids (#1398).
+ * The canonical order of two demands: their file, their offset, their kind, then their key, so that distinct demands at
+ * one site still have one order. A key holding a cursor compares as the logical text it stands for (`names`, the
+ * pass's: `compareDemandNames`), never by its ids (#1398).
  */
 function canonical(
   a: Demand | ProofDemand<Proof>,
@@ -391,12 +391,12 @@ class PositionHeap {
   }
 }
 
-/** A run's result: its items, and a proof demand's proof (else `null`). */
 /** The demand a frame runs, its first run or a member's run again; `null` for a top-level computation. */
 function demandOf(frame: Frame | undefined): string | null {
   return frame?.node?.demand.key ?? frame?.rerun?.member.demand.key ?? null;
 }
 
+/** A run's result: its items, and a proof demand's proof (else `null`). */
 function resultOf(result: readonly Item[] | Proven<Proof>): {
   readonly items: readonly Item[];
   readonly proof: Proof | null;
@@ -475,7 +475,7 @@ export class Solver {
   }
 
   /**
-   * Runs `work` as one demand with `allowance` units (S3 §5): past them it stops between two steps with
+   * Runs `work` as one demand with `allowance` units: past them it stops between two steps with
    * `DemandExhausted`, what it was the first to finish memoised, the rest, provisional answers included, forgotten.
    */
   public demand<T>(work: Work<T>, allowance: number): T {
@@ -487,10 +487,13 @@ export class Solver {
     }
   }
 
-  /** Runs a computation to its end and returns its result: a top-level demand, never memoised itself. */
+  /**
+   * Runs a computation to its end and returns its result: a top-level demand, never memoised itself. After a stop it
+   * computes nothing: each demand it yields answers as it finished, else `STOPPED` (`#stoppedRun`).
+   */
   public run<T>(work: Work<T>): T {
     if (this.#running) throw new Error("The solver is already running a top-level demand.");
-    // after a stop the analysis only finishes (D4 a′): no demand is computed, each answered as it finished or `STOPPED`
+    // after a stop the analysis only finishes: no demand is computed, each answered as it finished or `STOPPED`
     // (a top-level computation is a run of its own; a stopped one's generators run outside the frames)
     this.#retained?.run({});
     if (this.#work.stopped !== null) {
@@ -510,10 +513,10 @@ export class Solver {
       this.#drive(this.#frame(null, top, this.#counter++, null));
     } catch (error) {
       // a stop leaves demands unfinished: they are forgotten, the finished ones kept. A demand's (`DemandExhausted`,
-      // between two steps) first keeps each read waiting on one's return, as the return would have (#1601's Codex r3):
+      // between two steps) first keeps each read waiting on one's return, as the return would have (#1601):
       // a new demand's by the frame below its own, a component's closing demand's by the frame that read it. The
       // analysis's (`BudgetExhausted`, at any charge) ends the pass's decisions, so nothing is forgotten after it and
-      // forgetting closes here (#1601's Codex r4: a charge may cut a return between the two structures read above)
+      // forgetting closes here (#1601: a charge may cut a return between the two structures read above)
       if (error instanceof BudgetExhausted) this.closeForgetting();
       else this.#keepPendingReaders();
       // (#1323: a shared provenance read the stop left suspended counts as it would have at its end)
@@ -739,7 +742,7 @@ export class Solver {
    * A proof demand's items and proof: the demand yielded, so its reader depends on it (and reruns on a changed proof)
    * as on any demand, and its proof as the solver holds it once the items are in: finished, a member's provisional one,
    * or `null`, none (no run of it returned yet; after a stop, any unfinished one: only looked up, nothing run); and
-   * whether it is a member of a component still being solved (`open`: its proof, if any, is provisional, #1072 A2).
+   * whether it is a member of a component still being solved (`open`: its proof, if any, is provisional, #1072).
    */
   public *proven<P extends Proof>(
     demand: ProofDemand<P>,
@@ -1024,7 +1027,7 @@ export class Solver {
   }
 
   /**
-   * The next step of solving a component canonically (S3 §1): a member's run, the choices once the open solve is
+   * The next step of solving a component canonically: a member's run, the choices once the open solve is
    * stable, or the end.
    */
   #step(solving: Solving): void {
@@ -1196,8 +1199,8 @@ export class Solver {
   }
 
   /**
-   * C9: a member's external items hold one ingress cell per member and kind, which takes the stores of each run, so a
-   * boundary's ingress stores are complete when the component is stable (S2's shared cells).
+   * A member's external items hold one ingress cell per member and kind, which takes the stores of each run, so a
+   * boundary's ingress stores are complete when the component is stable (the component's shared cells).
    */
   #anchored(component: Component, member: DemandNode, items: readonly Item[]): readonly Item[] {
     return items.map((item) => {
@@ -1233,7 +1236,7 @@ export class Solver {
     for (const member of above) this.#stack.push(member);
     const parent = this.#frames.at(-1)!;
     parent.low = Math.min(parent.low, component.low);
-    // (its reader read a demand not finished: Codex r1's R1 on #1601)
+    // (its reader read a demand not finished: #1601)
     this.#keepReader(parent, solving.closing.node!.demand.key);
     parent.pending = solving.closing.node!.value;
   }
