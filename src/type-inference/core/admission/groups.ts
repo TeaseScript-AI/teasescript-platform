@@ -102,18 +102,18 @@ export function groups(admission: Admission): readonly DecidedAt[] {
         tracked.add(keptKeyAt(contract, target.root, target.path));
     }
   for (const [, binding] of program.occurrenceOf) tracked.add(keptKeyAt(contract, binding, []));
-  const reaching = admission.stores();
-  const stores = new Map<Key, number>();
+  const reaching = stores(admission);
+  const storeCounts = new Map<Key, number>();
   for (const d of reaching)
     for (const key of [d.key, ...keptPrefixes(admission.work, d.key)]) {
       work.charge("indexSteps");
-      stores.set(key, (stores.get(key) ?? 0) + 1);
+      storeCounts.set(key, (storeCounts.get(key) ?? 0) + 1);
     }
   // a stored value's structure where another store or add reaches the place or below it: its literals', and below a
   // copy or a call its source's elements, the deepest once per path it lands at (its prefixes follow below)
   const deepest = new Map<Key, number>();
   for (const d of reaching)
-    if ((stores.get(d.key) ?? 0) > 1) {
+    if ((storeCounts.get(d.key) ?? 0) > 1) {
       const base = joinSteps(d.path, d.kind === "add" && d.how !== "elements" ? ["element"] : []);
       const structure = valueStructure(admission, d.value!);
       for (const path of structure.paths)
@@ -136,7 +136,7 @@ export function groups(admission: Admission): readonly DecidedAt[] {
   // a literal holding a named value (a copy, a call, what an operation carries of either) decides the paths its own
   // structure gives with its store, read or not, so the named value's uncertain contents meet the store check there
   for (const d of reaching)
-    if ((stores.get(d.key) ?? 0) === 1) {
+    if ((storeCounts.get(d.key) ?? 0) === 1) {
       const structure = valueStructure(admission, d.value!);
       if (structure.sources.length === 0) continue;
       const base = joinSteps(d.path, d.kind === "add" && d.how !== "elements" ? ["element"] : []);

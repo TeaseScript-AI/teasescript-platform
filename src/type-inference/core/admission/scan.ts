@@ -72,7 +72,7 @@ export function inputsOf(
   root: PlaceId,
   path: readonly string[],
 ): Inputs | null {
-  const { program, definitions, contract } = admission.pass;
+  const { definitions, contract } = admission.pass;
   if (!decidesPaths(admission, root)) return null;
   const direct = (definitions.candidates.get(keyOf(root, path)) ?? []).filter(
     (candidate) => !admission.besideDefault(candidate.d),
@@ -82,7 +82,6 @@ export function inputsOf(
   const prefixes: { readonly key: Key; readonly rest: PathRef }[] = [];
   for (const { key, depth } of admission.stored.along(root, path, false))
     prefixes.push({ key, rest: arrayRef(contract, path.slice(depth)) });
-  void program;
   return direct.length === 0 && prefixes.length === 0 ? null : { direct, prefixes };
 }
 
@@ -313,12 +312,11 @@ export function* earliestDecider(
   const root = deciderRoot(admission, task, asked);
   const literal = yield* literalRoute(admission, root);
   if (!literal) {
-    const written = { root: null, ids: null };
-    const transferred = yield* transferredDecider(admission, task, asked, written, root);
+    const transferred = yield* transferredDecider(admission, task, asked, root);
     // #1444: outside every decision and into no decision's place, the groups' written-decider summary answers; a
     // decision's scan stays its stops', so a decision's charges never depend on the summary
     if (transferred === undefined && into === null && admission.deciding === 0)
-      return yield* writtenDecider(admission, task, asked, written);
+      return yield* writtenDecider(admission, task, asked, root);
     if (transferred !== undefined)
       return transferred === null
         ? null
@@ -391,11 +389,13 @@ export function* scanView(
   // value open there, one holding `null` makes it optional, #1310)
   let joinedNull = false;
   const self = admission;
-  // (whether the last copy `termOf` answered reads its written type at its own level: a written copy's where no step of
-  // the asked path is left below it, an inheriting copy's as the inheritance pass recorded it, `inheritedInto`'s `own`,
-  // #1901)
-  let ownLevel = false;
-  function* termOf(stop: Stop, length: number): Inheriting<TypeTerm | null> {
+  // (a copy's type at the path, and whether it reads its written type at its own level (`own`): a written copy's where
+  // no step of the asked path is left below it, an inheriting copy's as the inheritance pass recorded it,
+  // `inheritedInto`'s `own`, #1901)
+  function* termOf(
+    stop: Stop,
+    length: number,
+  ): Inheriting<{ readonly term: TypeTerm | null; readonly own: boolean }> {
     // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
     // read out of has it alone, and each operation surely gives it)
     if (
@@ -403,7 +403,7 @@ export function* scanView(
       length === at.length &&
       !(stop.single && (yield* selectsRead(self, stop, true)))
     )
-      return null;
+      return { term: null, own: false };
     const rest: Rest =
       at.kind === "span"
         ? at.from(length).after(stop.strip)
@@ -413,10 +413,13 @@ export function* scanView(
       stop.from === null
         ? permittedAt(stop.term!, rest)
         : yield* inheritedInto(self, stop.from, rest, into, inherited);
-    ownLevel = stop.from === null ? rest.length === 0 : inherited.value;
+    const own = stop.from === null ? rest.length === 0 : inherited.value;
     // (a written copy an operation carries decides only where the operation selects it: an operand it never gives is
     // no copy of the place, while a selected copy keeps its whole written type)
-    return term !== null && (stop.via === null || (yield* selectsRead(self, stop))) ? term : null;
+    return {
+      term: term !== null && (stop.via === null || (yield* selectsRead(self, stop))) ? term : null,
+      own,
+    };
   }
   // (no stop stands deeper than its value's own paths, `stopDepths`; a join's written calls stand among the
   // values)
@@ -433,9 +436,10 @@ export function* scanView(
     for (const stop of [...joinedOf(admission, written), ...calls]) {
       program.work.charge("checks");
       let term: TypeTerm | null;
-      if (stop.term !== null || stop.from !== null) term = yield* termOf(stop, length);
+      let own: boolean;
+      if (stop.term !== null || stop.from !== null) ({ term, own } = yield* termOf(stop, length));
       else {
-        ownLevel = false;
+        own = false;
         const key = contract.resultKey(stop.value);
         const result = key === null ? null : writtenOf(program.place(keyPlace(key)).kind);
         term =
@@ -454,15 +458,14 @@ export function* scanView(
       if (domain === "open") return { term, site: siteOf(stop) };
       joinedNull ||= typeTags(term).includes("null");
       if (domain === "kinds" && (copy === null || compareKeys(stop.key, copy.key) < 0))
-        copy = { key: stop.key, term, site: siteOf(stop), joined: true, own: ownLevel };
+        copy = { key: stop.key, term, site: siteOf(stop), joined: true, own };
     }
     for (const stop of written ?? []) {
       program.work.charge("checks");
       if (copy !== null && compareKeys(stop.key, copy.key) > 0) break;
       if (stop.via?.joined === true) continue;
-      const term = yield* termOf(stop, length);
-      if (term !== null)
-        copy = { key: stop.key, term, site: siteOf(stop), joined: false, own: ownLevel };
+      const { term, own } = yield* termOf(stop, length);
+      if (term !== null) copy = { key: stop.key, term, site: siteOf(stop), joined: false, own };
     }
   }
   // #2289: each literal task on the path, in key order, by its cell's answer: a strict one as a written copy, an

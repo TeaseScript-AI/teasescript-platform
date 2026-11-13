@@ -498,9 +498,10 @@ function* answerOf(
  * its key, as `openAbove` asks them.
  */
 export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): boolean {
-  if (!admission.a4Places.has(place)) return false;
-  let root = admission.a4Places.get(place) ?? null;
-  if (root === null) admission.a4Places.set(place, (root = { carried: [], below: new Map() }));
+  if (!admission.copyLandingPlaces.has(place)) return false;
+  let root = admission.copyLandingPlaces.get(place) ?? null;
+  if (root === null)
+    admission.copyLandingPlaces.set(place, (root = { carried: [], below: new Map() }));
   const { contract } = admission.pass;
   let byPath = admission.openSteps.get(place);
   if (byPath === undefined) admission.openSteps.set(place, (byPath = new Map([[0, root]])));
@@ -540,9 +541,9 @@ export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): 
 }
 
 export function openAbove(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
-  if (!admission.a4Places.has(place)) return false;
-  let at = admission.a4Places.get(place) ?? null;
-  if (at === null) admission.a4Places.set(place, (at = { carried: [], below: new Map() }));
+  if (!admission.copyLandingPlaces.has(place)) return false;
+  let at = admission.copyLandingPlaces.get(place) ?? null;
+  if (at === null) admission.copyLandingPlaces.set(place, (at = { carried: [], below: new Map() }));
   for (let length = 0; length < path.length && at.carried !== true; length += 1) {
     const step = path[length]!;
     let next = at.below.get(step);
