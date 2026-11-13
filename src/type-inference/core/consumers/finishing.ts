@@ -357,20 +357,49 @@ function laterKeySources(walk: Consumers, key: Key, node: FlowNode): readonly It
  * where none decides it: a receiver's read (`finishingKeyRead`).
  */
 function keyDomain(walk: Consumers, key: Key): readonly Item[] {
+  const decided = keyDecided(walk, key);
+  if (decided !== null && "contract" in decided) return decided.contract;
+  const tags = decided?.tags ?? [];
+  // (a written type, or a copy's, keeps its spelling, #1398)
+  const spelled =
+    decided !== null && (decided.source === "written" || decided.inherited) ? spelledBy(tags) : {};
+  return tags.length === 0 || tags.includes("unknown")
+    ? STOPPED
+    : [...new Set(tags)].map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
+}
+
+/**
+ * What decides a key in the finishing path, in order: its finished contract (`contract`), where it holds no item a
+ * stop left unsettled; else its place's written type at its path; else, where admission settled, what admission
+ * retained there (`Admission.retained`: a decision, or a copy's written type, `inherited`), its tags empty where it
+ * retained none; else `null`. `keyDomain` and `labelDomain` both read it.
+ */
+function keyDecided(
+  walk: Consumers,
+  key: Key,
+):
+  | { readonly contract: readonly Item[] }
+  | {
+      readonly tags: readonly ItemTag[];
+      readonly source: "written" | "retained";
+      readonly inherited: boolean;
+    }
+  | null {
   const { contract, program } = walk.pass;
   const found = walk.run(contract.contractOf(key));
-  if (!found.some(unsettledItem)) return found;
+  if (!found.some(unsettledItem)) return { contract: found };
   const text = isKeyId(key) ? keyOfId(contract, key) : key;
   const [place, path] = [keyPlace(text), keyPath(text)];
   const written = writtenOf(program.place(place).kind);
   const term = written === null ? null : termAt(written, path);
-  const retained = term === null && walk.settled ? walk.admission.retained(place, path) : null;
-  const tags = term !== null ? typeTags(term) : (retained?.tags ?? []);
-  // (a written type, or a copy's, keeps its spelling, #1398)
-  const spelled = term !== null || retained?.inherited === true ? spelledBy(tags) : {};
-  return tags.length === 0 || tags.includes("unknown")
-    ? STOPPED
-    : [...new Set(tags)].map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
+  if (term !== null) return { tags: typeTags(term), source: "written", inherited: false };
+  if (!walk.settled) return null;
+  const retained = walk.admission.retained(place, path);
+  return {
+    tags: retained?.tags ?? [],
+    source: "retained",
+    inherited: retained?.inherited === true,
+  };
 }
 
 /**
@@ -387,19 +416,9 @@ export function labelDomain(
   readonly kinds: readonly Item[];
   readonly source: "contract" | "written" | "retained";
 } | null {
-  const { contract, program } = walk.pass;
-  const found = walk.run(contract.contractOf(key));
-  if (!found.some(unsettledItem)) return { kinds: found, source: "contract" };
-  const text = isKeyId(key) ? keyOfId(contract, key) : key;
-  const [place, path] = [keyPlace(text), keyPath(text)];
-  const written = writtenOf(program.place(place).kind);
-  const term = written === null ? null : termAt(written, path);
-  const decided =
-    term !== null
-      ? { tags: typeTags(term), source: "written" as const }
-      : walk.settled
-        ? { tags: walk.admission.retained(place, path)?.tags ?? [], source: "retained" as const }
-        : null;
+  const decided = keyDecided(walk, key);
+  if (decided !== null && "contract" in decided)
+    return { kinds: decided.contract, source: "contract" };
   if (decided === null || decided.tags.length === 0 || decided.tags.includes("unknown"))
     return null;
   return {
