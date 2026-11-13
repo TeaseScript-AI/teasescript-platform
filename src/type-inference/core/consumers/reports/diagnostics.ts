@@ -48,8 +48,9 @@ export function siteOf(site: SourceSite): SourceSite {
 }
 
 /**
- * An error of `rule` at `site`, the offending value's kinds `kinds` (D1, D3: its sentence and code); a member's read or
- * call and an operation, whose fixes write code in place of the value at `site`, with what that value's place takes.
+ * An error of `rule` at `site`, the offending value's kinds `kinds` (the rule gives its sentence and code); a member's
+ * read or call and an operation, whose fixes write code in place of the value at `site`, with what that value's place
+ * takes.
  */
 export function error(
   walk: Consumers,
@@ -133,10 +134,10 @@ function keptChoice(
   const receiver = rule.rule === "member" || rule.rule === "selection";
   // (a value not found: words, never a plain `let`, where the stage recorded an answer (a mixed or a stopped one may
   // reach it); where it recorded none, every choice's read settled as one type or there is none, so the plain `let` is
-  // proved, the lead's ruling on Codex r12 on #1660)
+  // proved, #1660)
   const unfound = (): readonly ItemTag[] | null => (anyRecorded(walk) ? null : []);
   // (a site with no expression of its own, a default's or a `get` call's: its value where the core places one; a
-  // receiver there the `get`'s own, by its place, never by text, Codex r12 on #1660; else unfound)
+  // receiver there the `get`'s own, by its place, never by text, #1660; else unfound)
   if (expression === undefined) {
     const place = program.placeBySite.get(siteKey(site));
     const c = place === undefined ? undefined : program.opOf.get(place);
@@ -160,11 +161,11 @@ function keptChoice(
  * Whether every value a fix's form reads where the diagnostic at `site` sits is there when the script runs (`Presence`,
  * docs/specifications/type-inference-accepted-record/contract.md#r4-162): its subject's, a member's receiver's, an
  * operation's operands', by a walk of their whole syntax, an ask's, a `say`'s and a button's operands too
- * (`expressionParts`, Codex r12, r13), one part at a time on its own stack, however wide: proved only through the kinds
+ * (`expressionParts`), one part at a time on its own stack, however wide: proved only through the kinds
  * `PRESENT_KINDS` lists, so not where any of them reads an element by its index or a dict's value by its key, calls a
  * function or a method (whose own reads are not followed), is of a kind not listed, or reads a property or a selection
  * the core finds may be absent; and every value it evaluates, at every depth, a subject, a receiver or an operand,
- * proved non-null (Astra r2, r3 on #1296); unproved where a site has no expression.
+ * proved non-null (#1296); unproved where a site has no expression.
  */
 function present(walk: Consumers, site: SourceSite, rule: DiagnosticRule): Presence {
   const { program } = walk.pass;
@@ -230,8 +231,8 @@ function readsAbsent(walk: Consumers, root: Expression, site: SourceSite): boole
     program.work.charge("checks");
     // (only a kind whose every operand `expressionParts` gives, and which reads nothing absent itself, proves presence;
     // any other kind, a new one too, is unproved:
-    // docs/specifications/type-inference-accepted-record/contract.md#r4-162, the lead after Codex r13; and every value
-    // the walk evaluates, at every depth, proved non-null, the lead after Astra r2 and r3)
+    // docs/specifications/type-inference-accepted-record/contract.md#r4-162; and every value the walk evaluates, at
+    // every depth, proved non-null)
     if (
       !PRESENT_KINDS.has(expression.kind) ||
       mayBeNull(walk, expression, site) ||

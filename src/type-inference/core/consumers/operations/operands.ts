@@ -15,16 +15,17 @@ import { TEXT } from "../kinds.js";
 import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel, writtenNumber } from "../names.js";
 import { obligation, warnGroups, warning } from "../reports/warnings.js";
 
-// C2, C3, C11, C12, C13: an operand's items against the kinds that fit, a whole number, an index by its receiver.
+// An operand's items against the kinds its use takes (`consume`: conditions and logical operands, shown values, dict
+// keys, built-in arguments, a `for`'s iterable), a whole-number use (`integerOnly`, `writtenNumberUse`), an index or a
+// key by its receiver (`indexUse`).
 
 const INTEGER: ReadonlySet<ItemTag> = new Set(["integer"]);
 
 /**
- * C2, C3, C11, C12, C13: an operand's items against the kinds that fit: all definite and none fits is an error; an
- * item that does not fit, or an unmodelled unknown, a warning with its obligation; the quiet path first. §4:
- * one obligation per offending kind: a possible null owes its null-check, any other offending item the operand's own
- * obligation. `soft`: never an error (true), or the possible receiver's item whose key obligation is owed whether or
- * not the key fits (C2).
+ * An operand's items against the kinds that fit: all definite and none fits is an error; an item that does not fit,
+ * or an unmodelled unknown, a warning with its obligation; the quiet path first. One obligation per offending kind: a
+ * possible null owes its null-check, any other offending item the operand's own obligation. `soft`: never an error
+ * (true), or the possible receiver's item whose key obligation is owed whether or not the key fits (`indexUse`).
  */
 export function consume(
   walk: Consumers,
@@ -53,7 +54,7 @@ export function consume(
   const bad = items.filter((item) =>
     item.tag === "unknown" ? isOpaque(item) || isExternal(item) : !need.has(item.tag),
   );
-  // §4: an unknown warns
+  // (an unmodelled unknown warns)
   if (bad.length === 0 && owedBy === null) return;
   const at = ownSpan(walk, value, site);
   if (
@@ -98,7 +99,7 @@ export function consume(
   };
   const nullItem = bad.find((item) => item.tag === "null");
   if (nullItem !== undefined) owe(nullItem, "null-check");
-  // (C13's arguments, keys and iterables: beside a known misfit, an unknown owes no second warning at the site, its
+  // (built-in arguments, keys and iterables: beside a known misfit, an unknown owes no second warning at the site, its
   // check the same one)
   const offending = bad.filter((item) => item.tag !== "null");
   const knownMisfits = offending.filter((item) => item.tag !== "unknown");
@@ -107,7 +108,7 @@ export function consume(
     (rule.rule === "argument" || rule.rule === "key" || rule.rule === "iterable")
       ? knownMisfits
       : offending;
-  // C9: the operand's external data brings its boundary checks, a domain's those its group's warning owns (a soft owner's
+  // the operand's external data brings its boundary checks, a domain's those its group's warning owns (a soft owner's
   // one warning, every offending item's)
   walk.boundariesAt(
     items,
@@ -125,11 +126,11 @@ export function consume(
 }
 
 /**
- * #1173 (option C), every whole-number use's one rule: a read of a place written `number` is no whole number by its
- * type, whatever value it holds now, an error under `rule`; a read under a test of its key (§3.2) is left to its items,
- * which that test narrows (`if p is integer`); a read of a written union whose value is known to be only its other
- * members (`number?` holding `null`) is the error its items give, naming that value and its fix (Codex r7), from the
- * items asked here once (Codex r8). Whether it erred.
+ * #1173, every whole-number use's one rule: a read of a place written `number` is no whole number by its type,
+ * whatever value it holds now, an error under `rule`; a read under a test of its key is left to its items, which that
+ * test narrows (`if p is integer`); a read of a written union whose value is known to be only its other members
+ * (`number?` holding `null`) is the error its items give, naming that value and its fix, from the items asked here
+ * once. Whether it erred.
  */
 export function writtenNumberUse(
   walk: Consumers,
@@ -161,7 +162,10 @@ export function writtenNumberUse(
   return true;
 }
 
-/** C2: a whole number; a null here is never silent (`soft` as for `consume`). */
+/**
+ * A whole-number use (a count, a position, an index): its value must be an integer; a null here is never silent
+ * (`soft` as for `consume`).
+ */
 export function integerOnly(
   walk: Consumers,
   value: PlaceId,
@@ -175,7 +179,7 @@ export function integerOnly(
   const rule: DiagnosticRule = { rule: "count", use };
   const owedBy = typeof soft === "object" ? soft : null;
   if (soft === false && writtenNumberUse(walk, value, node, site, "integer-use", rule)) return;
-  // §3.3: a whole number on every run
+  // the quiet path: a whole number on every run
   if (owedBy === null) {
     const quiet = quietKinds(walk, value);
     if (quiet !== null && quiet.every((tag) => INTEGER.has(tag))) {
@@ -190,7 +194,7 @@ export function integerOnly(
     item.tag === "unknown" ? isOpaque(item) || isExternal(item) : item.tag !== "integer",
   );
   if (offending.length === 0 && owedBy === null) return;
-  // the count or index expression's node, inside its parentheses (§3.4)
+  // the count or index expression's node, inside its parentheses
   const at = ownSpan(walk, value, site);
   const target = shownLabel(walk, keyLabel(walk, value));
   if (
@@ -207,7 +211,7 @@ export function integerOnly(
     );
     return;
   }
-  // S4, §4: the null owes its null-check, every other offending kind its integer check
+  // the null owes its null-check, every other offending kind its integer check
   const owe = (item: Item, obliged: ObligationKind, on: string): boolean =>
     warning(
       walk,
@@ -226,7 +230,7 @@ export function integerOnly(
     );
   const nullItem = offending.find((item) => item.tag === "null");
   if (nullItem !== undefined) owe(nullItem, "null-check", "not null");
-  // C9: the count's or index's external data brings its boundary checks, a domain's those its group's warning owns (a soft
+  // the count's or index's external data brings its boundary checks, a domain's those its group's warning owns (a soft
   // owner's one warning, every offending item's)
   walk.boundariesAt(
     items,
@@ -248,9 +252,9 @@ export function integerOnly(
 }
 
 /**
- * C2 and C12 by the receiver's kind: a list's index is a whole number, a dict's key text, and a receiver of any other
- * kind owes neither, its own check reporting it (C5b: an object is not indexed, V30 §15); a receiver whose kinds hold
- * `unknown`, or a dict beside another kind, dispatches to neither as an error (C2): a `get`'s key owes each
+ * An index or a key by the receiver's kind: a list's index is a whole number, a dict's key text, and a receiver of any
+ * other kind owes neither, its own member check reporting it (an object is not indexed, V30 §15); a receiver whose
+ * kinds hold `unknown`, or a dict beside another kind, dispatches to neither as an error: a `get`'s key owes each
  * possible receiver's obligation as a warning whether or not the key fits it; an index expression keeps the
  * receiver's dispatch, its misfits warnings.
  */

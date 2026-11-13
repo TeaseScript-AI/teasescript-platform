@@ -192,27 +192,9 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/consumers/model.ts",
-    "kind": "docblock",
-    "text": "C5b: whether a kind has the method, by the compiler's own member rules.",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/consumers/operations/operations.ts",
-    "kind": "docblock",
-    "text": "C1 with C9: where external data a store brings enters, for its warning and check: the external",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
     "file": "src/type-inference/core/check-result/otherwise.ts",
     "kind": "reference",
     "text": "fallbackUse",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/consumers/stores/stores.ts",
-    "kind": "docblock",
-    "text": "One admission decision for one key as one demand (S3 §5), with the program's nodes' allowance (S3 revision 14: a",
     "waits": "the O4 lead's cleanup"
   },
   {
