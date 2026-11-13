@@ -90,7 +90,12 @@ const WAITING_KINDS = new Set(["wait", "interaction", "capture", "fileStore", "l
  * its variables saved as plain data at a wait); everything else stays structured. Without it, a wait asks the session
  * (`rt.waited`), which way (1), replaying from the start, answers.
  */
-export function emitProgram(plan, { resumable = false, runawayCheck = false } = {}) {
+export function emitProgram(plan, { resumable = false, runawayCheck = false, generators = false } = {}) {
+  if (resumable && generators) throw new Error("study emitter: resumable or generators, not both");
+  // `generators`: part C's third form: a function that can wait is a JavaScript generator that yields at a wait, kept
+  // alive between drives (`GeneratorSession`); file regions are generators too. Elsewhere the code is as without it.
+  const WAIT = generators ? "yield* rt.waitHere()" : "rt.waited()";
+  const star = (id) => (generators && canWait.has(id) ? "*" : "");
   // Point 5's second way: a counter at every loop round and call; when it runs out the runtime looks at the clock.
   const tick = runawayCheck ? "if (--rt.fuel === 0) rt.refuel(); " : "";
   const K = [];
@@ -160,18 +165,18 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
     if (vars.length > 0) lines.push(`let ${vars.join(", ")};`);
     lines.push(...functions, root);
     // The session starts at file 0's start (its speakers' and globals' start values); a goto enters a file at its entry.
-    lines.push(`function enter${index}(resume, fromEntry) { rt.file = ${index};${vars.length > 0 ? ` if (resume === null) ${vars.join(" = ")} = undefined;` : ""} file${index}(resume, fromEntry); }`);
+    lines.push(`function${generators ? "*" : ""} enter${index}(resume, fromEntry) { rt.file = ${index};${vars.length > 0 ? ` if (resume === null) ${vars.join(" = ")} = undefined;` : ""} ${generators ? "yield* " : ""}file${index}(resume, fromEntry); }`);
     fileEntries.push(file.entryInstruction);
   });
   if (plan.functions.some((definition) => definition.handler === null && !emittedFunctions.has(definition.id)))
     throw new Unsupported("a function outside every file's functions");
   lines.push(`const FILES = [${plan.files.map((_, i) => `enter${i}`).join(", ")}];`);
   lines.push(
-    "function main() {",
+    `function${generators ? "*" : ""} main() {`,
     "  let file = rt.resuming ? rt.resumeFrames[0].file : 0;",
     "  let entered = false;",
     "  for (;;) {",
-    "    try { FILES[file](rt.resuming ? rt.resumeFrame() : null, entered); return; }",
+    `    try { ${generators ? "yield* " : ""}FILES[file](rt.resuming ? rt.resumeFrame() : null, entered); return; }`,
     "    catch (signal) { if (signal instanceof rt.Goto) { file = signal.file; entered = true; continue; } throw signal; }",
     "  }",
     "}",
@@ -824,7 +829,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
           }
           const ordered = definition.parameters.map((_, slot) => args[slots.indexOf(slot)] ?? "undefined");
           if (!resumes) {
-            line(`rt.enter(${konst(ins.span)}); ${temp(ins.destinationTemporary)} = f${ins.functionId}(${ordered.join(", ")}); rt.depth -= 1;`);
+            line(`rt.enter(${konst(ins.span)}); ${temp(ins.destinationTemporary)} = ${star(ins.functionId) ? "yield* " : ""}f${ins.functionId}(${ordered.join(", ")}); rt.depth -= 1;`);
             return;
           }
           // A call of a function that can wait: on resume its frame comes back to it; at its wait this frame is saved.
@@ -874,7 +879,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
           if (flat) {
             line(`if (${said}) ${suspendHere(1e6 + pc)}`);
             line(`case ${1e6 + pc}:`);
-          } else line(`if (${said}) rt.waited();`);
+          } else line(`if (${said}) ${WAIT};`);
           return;
         }
         case "exit":
@@ -937,7 +942,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
       if (flat) {
         line(`if (${call}) ${suspendHere(1e6 + pc)}`);
         line(`case ${1e6 + pc}:`);
-      } else line(`if (${call}) rt.waited();`);
+      } else line(`if (${call}) ${WAIT};`);
       for (const id of writes) line(`${temp(id)} = rt.takeTemporary(${id});`);
     }
 
@@ -954,8 +959,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
     const locals = [...[...temps].map((id) => `t${id}`), ...Array.from({ length: scratch }, (_, i) => `x${i}`), ...hoisted];
     if (locals.length > 0) header.push(`  let ${locals.join(", ")};`);
     if (!flatRegion) {
-      if (definition === null) return [`function file${fileIndex}(resume, fromEntry) {`, ...header, ...out, "}"].join("\n");
-      return [`function f${definition.id}(${params.join(", ")}) {`, ...header, ...(tick ? [`  ${tick}`] : []), ...out, "  return null;", "}"].join("\n");
+      if (definition === null) return [`function${generators ? "*" : ""} file${fileIndex}(resume, fromEntry) {`, ...header, ...out, "}"].join("\n");
+      return [`function${star(definition.id)} f${definition.id}(${params.join(", ")}) {`, ...header, ...(tick ? [`  ${tick}`] : []), ...out, "  return null;", "}"].join("\n");
     }
     // A resumable region: its argument evaluation before a call that waits runs only on a fresh entry of that call.
     const savedList = saved().join(", ");

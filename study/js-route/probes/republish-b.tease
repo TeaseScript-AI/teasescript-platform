@@ -1,0 +1,13 @@
+// Part C: republish-a.tease published again: one line added before the loop, one rule changed (n * 3).
+let total = 0
+say "new version", instant
+function step(n) {
+  let part = n * 3
+  wait 1 second
+  return part
+}
+for k in 0..6 {
+  total += step(k)
+  say "after ${k}: ${total}", instant
+}
+exit

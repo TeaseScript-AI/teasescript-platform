@@ -8,6 +8,7 @@ import { instructionSourcePath } from "../../dist/src/plan/model.js";
 import { failSnapshot, instructionFailure } from "../../dist/src/runtime/engine.js";
 import { observeValidatedTime } from "../../dist/src/runtime/operations/observe-time.js";
 import { completeValidatedAction } from "../../dist/src/runtime/operations/complete-action.js";
+import { timerHandlerDispatchable } from "../../dist/src/runtime/operations/timer-handlers.js";
 import { createFreshRuntimeSnapshotWithValidatedPlan } from "../../dist/src/runtime/snapshot/snapshot-construction.js";
 import { withFrozenTemporalCaptures } from "../../dist/src/runtime/snapshot/state.js";
 import { emitProgram } from "./emit.mjs";
@@ -17,6 +18,7 @@ import { fromCanonical, toCanonical } from "../../dist/src/runtime/native/values
 const programs = new Map();
 
 /** The emitted program of a validated plan: its source, constants and the function that instantiates it. */
+/** `form`: false (replay), true (resumable) or "generators". */
 export function compileProgram(plan, resumable = false, runawayCheck = false) {
   const key = `${resumable}/${runawayCheck}`;
   if (!programs.has(key)) programs.set(key, new WeakMap());
@@ -24,7 +26,7 @@ export function compileProgram(plan, resumable = false, runawayCheck = false) {
   let program = cache.get(plan);
   if (program === undefined) {
     const t0 = performance.now();
-    const emitted = emitProgram(plan, { resumable, runawayCheck });
+    const emitted = emitProgram(plan, { resumable: resumable === true, generators: resumable === "generators", runawayCheck });
     const t1 = performance.now();
     const instantiate = new Function("rt", "K", emitted.source);
     // Part G: the time to emit, and to turn the text into a function (V8 compiles function bodies lazily, at first run).
@@ -82,6 +84,13 @@ export class EmittedSession {
     return this.#record({ kind: "complete", request });
   }
 
+  /** Part C: the host's recorded operations, to continue them in another program (a Tease published again). */
+  get operations() {
+    return structuredClone(this.#observed);
+  }
+  set operations(observed) {
+    this.#observed = structuredClone(observed);
+  }
   #record(operation) {
     const at = Math.max(0, this.#waits - 1);
     while (this.#observed.length <= at) this.#observed.push([]);
@@ -169,6 +178,11 @@ export class ResumableSession {
   get state() {
     return this.#state;
   }
+  /** Part C: continue a save made by another program (a Tease published again). */
+  load(save) {
+    this.save = save;
+    this.#state = JSON.parse(save).snapshot;
+  }
   run() {
     return this.#drive();
   }
@@ -230,4 +244,69 @@ export class ResumableSession {
 
 export function createResumableSession(plan, fresh = {}, options = {}) {
   return new ResumableSession(plan, fresh, options);
+}
+
+/**
+ * Part C's third form: the program's functions that can wait are generators; the session keeps the running program
+ * alive between drives (in memory, as a page that stays open), and the host acts on the live state. A reload would
+ * replay (way 1); this session does not save.
+ */
+export class GeneratorSession {
+  #plan;
+  #program;
+  #state;
+  #rt = null;
+  #main = null;
+  constructor(plan, fresh, { runawayCheck = false } = {}) {
+    const captured = captureOrReuseInstructionPlan(plan);
+    if (!captured.validation.valid || captured.plan === null) throw new TypeError("Malformed instruction plan.");
+    this.#plan = captured.plan;
+    this.#program = compileProgram(this.#plan, "generators", runawayCheck);
+    this.#state = withFrozenTemporalCaptures(createFreshRuntimeSnapshotWithValidatedPlan(this.#plan, fresh));
+  }
+  get state() {
+    return this.#state;
+  }
+  run() {
+    return this.#drive();
+  }
+  stepToEvent() {
+    return this.#drive();
+  }
+  observeTime(nowMs) {
+    return { events: observeValidatedTime(this.#plan, this.#state, nowMs).events, instructionsExecuted: 0 };
+  }
+  completeAction(request) {
+    return { events: completeValidatedAction(this.#plan, this.#state, request).events, instructionsExecuted: 0 };
+  }
+  #drive() {
+    const status = this.#state.status;
+    if (status === "halted" || status === "failed") return { events: [], instructionsExecuted: 0 };
+    if (status === "waiting" && !timerHandlerDispatchable(this.#state)) return { events: [], instructionsExecuted: 0 };
+    if (this.#main === null) {
+      this.#rt = new Runtime(this.#plan, this.#state, this);
+      this.#rt.fileEntries = this.#program.fileEntries;
+      this.#main = this.#program.instantiate(this.#rt, this.#program.constants)();
+    }
+    const rt = this.#rt;
+    rt.events = [];
+    if (this.#state.status !== "waiting") this.#state.status = "running";
+    try {
+      this.#main.next();
+    } catch (error) {
+      if (error !== EXIT) {
+        const failure = instructionFailure(error, this.#plan.instructions[0].span);
+        if (failure === null) throw error;
+        failSnapshot(rt.snapshot, failure.toInfo(), instructionSourcePath(this.#plan, this.#plan.files[rt.file ?? 0].startInstruction), rt.events);
+      }
+    }
+    this.#state = rt.snapshot;
+    this.bridged = rt.bridged;
+    this.bridgedInstructions = rt.bridgedInstructions;
+    return { events: rt.events, instructionsExecuted: 0 };
+  }
+}
+
+export function createGeneratorSession(plan, fresh = {}, options = {}) {
+  return new GeneratorSession(plan, fresh, options);
 }

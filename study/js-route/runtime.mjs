@@ -511,6 +511,31 @@ export class Runtime {
     }
   }
   /**
+   * The generator form's wait: as `waited` without the replay. The program yields, so the drive ends; the host acts on
+   * the live state; the next drive resumes here, runs the blocks dispatched meanwhile (a block that can wait is a
+   * generator too) and yields again while the session still waits.
+   */
+  *waitHere() {
+    const snapshot = this.snapshot;
+    for (;;) {
+      if (snapshot.status === "waiting" && snapshot.currentSessionTimeMs <= snapshot.observedSessionTimeMs && !executionRunnable(snapshot))
+        processDueWork(this.plan, snapshot, this.events, null, null);
+      while (timerHandlerDispatchable(snapshot)) {
+        startTimerHandler(this.plan, snapshot, null);
+        const frame = snapshot.callFrames.at(-1);
+        const block = this.blocks.get(frame.functionId);
+        if (block === undefined) throw new Error("study: a block whose creating instruction did not run");
+        this.depth += 1;
+        const running = block();
+        if (running !== null && typeof running?.next === "function") yield* running;
+        this.depth -= 1;
+        returnFromTimerHandler(this.plan, snapshot, frame, this.events, null, null);
+      }
+      if (snapshot.status !== "waiting") return;
+      yield;
+    }
+  }
+  /**
    * Today's engine at a wait: scene time catches up toward the observed time, and each block it then dispatches runs
    * (its closure), then returns to the wait. True when a block ran; the wait is then a new wait for the host.
    */

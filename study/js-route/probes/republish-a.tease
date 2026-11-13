@@ -1,0 +1,12 @@
+// Part C: a session stopped at its fourth wait, continued after this Tease was published again (republish-b.tease).
+let total = 0
+function step(n) {
+  let part = n * 2
+  wait 1 second
+  return part
+}
+for k in 0..6 {
+  total += step(k)
+  say "after ${k}: ${total}", instant
+}
+exit

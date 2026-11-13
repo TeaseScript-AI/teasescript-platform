@@ -8,7 +8,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { performance } from "node:perf_hooks";
 import { compileProject, compileSource, createFreshRuntimeSession } from "../../dist/src/index.js";
-import { createEmittedSession, createResumableSession, compileProgram } from "./driver.mjs";
+import { createEmittedSession, createGeneratorSession, createResumableSession, compileProgram } from "./driver.mjs";
 import { Unsupported } from "./emit.mjs";
 
 const args = process.argv.slice(2);
@@ -145,14 +145,17 @@ for (const file of files) {
   const weight = { files: compiled.files, planInstructions: compiled.plan.instructions.length, instructions: expected.instructions, operations: expected.out.length };
   let emitted;
   try {
-    emitted = compileProgram(compiled.plan, mode === "resumable", RUNAWAY);
+    emitted = compileProgram(compiled.plan, mode === "resumable" ? true : mode === "generators" ? "generators" : false, RUNAWAY);
   } catch (error) {
     if (!(error instanceof Unsupported)) throw error;
     console.log(JSON.stringify({ file: name, verdict: "unsupported", why: error.message, ...weight }));
     continue;
   }
   if (emitDir !== null) fs.writeFileSync(path.join(emitDir, `${name}.js`), emitted.source);
-  const session = mode === "resumable" ? createResumableSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY }) : createEmittedSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY });
+  const session =
+    mode === "resumable" ? createResumableSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY })
+    : mode === "generators" ? createGeneratorSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY })
+    : createEmittedSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY });
   let largestSave = 0;
   if (mode === "resumable") {
     const run = session.run.bind(session);
