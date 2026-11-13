@@ -632,9 +632,9 @@ export function evaluate(
       }
       case "interactionExpression": {
         const end = askEnd(expression, (part) => value(part).v);
-        if ("failure" in end)
+        if (end.said !== null) said.push({ text: end.said, at: expression.span.start.offset });
+        if (end.failure !== undefined)
           fail(end.failure.code, end.failure.start, end.failure.end, new Set(), false);
-        else if (end.said !== null) said.push({ text: end.said, at: expression.span.start.offset });
         throw new Waiting();
       }
       default:
