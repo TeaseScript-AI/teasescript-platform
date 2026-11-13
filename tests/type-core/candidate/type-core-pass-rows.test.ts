@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { compileProject, compileProjectWithBackend } from "../../../src/compiler.js";
-import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import { DefinitionIndex } from "../../../src/type-inference/core/definitions.js";
 import { SliceIndex } from "../../../src/type-inference/core/check-result/slice-index.js";
 import { CoreProgram } from "../../../src/type-inference/core/program.js";
@@ -148,14 +148,34 @@ const diagnosed = (result: ReturnType<typeof route>): string[] =>
       `${diagnostic.severity} ${diagnostic.code} ${diagnostic.span.start.offset}:${diagnostic.span.end.offset}`,
   );
 
-test("every operand of a `say` is indexed with what it holds (B1): a name, a load, a `get` and a call", () => {
+test("every operand of a `say` is indexed with what it holds (B1): a name, a load, a `get` and a call, each at its own site", () => {
   const sources = [
     'let color = "blue"\nsay bubble(color: color) "Text", instant\nexit\n',
-    'say "Hi", load "p", default: hostValue\nexit\n',
-    'let xs = [hostValue]\nsay "Hi", xs.get(0, default: hostValue)\nexit\n',
     'say bubble(color: fromJson(hostValue, default: "red")) "Text"\nexit\n',
     'say prose(color: hostValue) "Text", hostValue\nexit\n',
   ];
+  // a pacing a load's default or a `get`'s carries from the host: the command operand table declines it at its site,
+  // where today plans (#2488's step 1½, R10)
+  const declined: readonly (readonly [string, string])[] = [
+    ['say "Hi", load "p", default: hostValue\nexit\n', 'load "p", default: hostValue'],
+    [
+      'let xs = [hostValue]\nsay "Hi", xs.get(0, default: hostValue)\nexit\n',
+      "xs.get(0, default: hostValue)",
+    ],
+  ];
+  for (const [source, operand] of declined) {
+    assert.ok(today(source).plan !== null, source);
+    const at = source.indexOf(operand);
+    assert.throws(
+      () => route(source),
+      (error) =>
+        error instanceof CandidateOutsideSlice &&
+        error.what === "an operand its instruction does not take" &&
+        error.site.start === at &&
+        error.site.end === at + operand.length,
+      source,
+    );
+  }
   for (const source of sources) {
     const [own, current] = [route(source), today(source)];
     assert.deepEqual(diagnosed(own), diagnosed(current), source);
