@@ -352,14 +352,18 @@ function validOptions(
   );
 }
 
-/** Whether `value` is a well-formed state of an open form with this valid definition. */
+/**
+ * Whether `value` is a well-formed state of an open form with this valid definition. A form that submits at its time
+ * limit holds a value in every required field, as it has since it opened.
+ */
 export function validFormState(ui: FormUi, value: unknown): boolean {
   if (!isPlainRecord(value) || !hasExactKeys(value, ["values", "editor"])) return false;
   const values = value.values;
+  const unset = ui.timeout?.onTimeout !== "submit";
   if (
     !Array.isArray(values) ||
     values.length !== ui.fields.length ||
-    !ui.fields.every((field, index) => validFieldValue(field, values[index], true))
+    !ui.fields.every((field, index) => validFieldValue(field, values[index], unset))
   )
     return false;
   const editor = value.editor;
