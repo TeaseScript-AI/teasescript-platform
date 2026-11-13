@@ -237,13 +237,16 @@ its row here.
 | `tests/helpers/retained-instrument.ts`, `retained-instrument-preload.ts` | frames and sites containing `retained-instrument` or `retained/retained` | the same |
 | `tools/oxlint/type-core/check-retained-state.mjs` | `OUTSIDE` (paths under `core/`), `HELPERS` and `RETAINED_API` path prefixes | rename the prefix |
 | `tests/type-core/candidate/type-core-candidate-route.test.ts` (no production code selects the core) | the prefix `src/type-inference/core/`; `core/backend.js` in a file's text | keep the core's files under it; rename the pattern with the module |
+| `tests/type-core/candidate/type-core-candidate-route.test.ts` (the same test) | the prefix `tools/runtime-oracle/`, left out as test tooling | keep only the oracle's tooling under it: a file moved there leaves the check |
+| `tests/player/playback-entry.test.ts`, `tests/bridge/player-engine-bridge-protocol.test.ts` (no compiler module is loaded) | the compiler's and language tools' modules by their path under `dist/src/` (`compiler`, `parser`, …, `type-inference/`, `editor/`); the Worker's test also `player/runtime/compile-project` and `script-identity` | rename the pattern with the module |
+| `tests/player/player-random-control.test.ts` (one reader of a session's publication) | `player/engine-bridge/` and its `ops/`, each read one level deep | read the subfolder a file moves into |
 | `tests/helpers/retained-instrument-preload.ts`, `tools/retained-survey.mjs`, `tests/helpers/retained-subset.ts` | a test of `tests/type-core/` or one folder down; the subset by base name | keep a type-core test at most one folder down, its base name unchanged; no test reads the preload's regex, so show the frozen and the instrumented sets equal at base and head (the regex and `FROZEN_IN_CI` applied to the suite's test files, under the move's renames) |
 | `tools/test-runner/test-shards.mjs` (`isSuiteTestPath`, `isTypeCoreTestFile`) | a test at most two folders under `tests/`, not in `fixtures/` or `helpers/`; a `type-core-` base name | keep a test at most two folders under `tests/`, outside `fixtures/` and `helpers/`, and a type-core test's `type-core-` name; a deeper test file is not run |
 | `tools/repository-checks/pin-suites.mjs` (`FORM_SCOPES`) | the `tests/type-core/` prefix or a `type-core-` base name | keep a type-core test under `tests/type-core/` or its `type-core-` name |
 | `tools/check-changed.mjs` (`PROJECTS`) | path prefixes (`tests/families/`, `tests/fixtures/`, …) choosing the checks a change runs | keep a file under its project's prefix |
 | `tools/oxlint/type-core/check-site-keys.mjs`, `tools/oxlint/comments/check-comment-forecasts.mjs` | scope globs and prefixes (`tests/helpers/**`, `tests/families/**`, `src/`) | keep a file under its scope |
 
-Checks that fail on their own when a move breaks them need no row. They are the lists keyed by a whole path
+Checks that fail on their own when a move breaks them need no row. Among them are the lists keyed by a whole path
 (`.oxlintrc.json`'s waiting lists; `comment-citations.json`, `comment-declarations-waiting.json` and
 `comment-forecasts-allowed.json` in `tools/oxlint/comments/`; `tools/test-runner/costly-test-files.mjs`; the marks and
 `PAIRS` of `pin-suites`; `LISTED` and `STORED` of `tests/type-core/type-core-kept.test.ts`), whose keys a move renames,
