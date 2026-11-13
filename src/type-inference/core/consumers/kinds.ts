@@ -21,7 +21,7 @@ export const BOOLEAN: ReadonlySet<ItemTag> = new Set(["boolean"]);
 
 export const TEXT: ReadonlySet<ItemTag> = new Set(["string"]);
 
-/** C11: the kinds `${...}` shows (V30 §8). */
+/** The kinds `${...}` shows (V30 §8). */
 export const SHOWN: readonly ValueKind[] = [
   "string",
   "integer",
@@ -39,7 +39,7 @@ export const SHOWN: readonly ValueKind[] = [
   "regex",
 ];
 
-/** The order an operand's domain lists the kinds of the operator table's rows in (F16), as the rows name them. */
+/** The order an operand's domain lists the kinds of the operator table's rows in, as the rows name them. */
 const DOMAIN_ORDER: readonly ValueKind[] = [
   "integer",
   "number",
@@ -71,6 +71,7 @@ const NO_INPUTS: OperationInputs = {
   view: () => NO_VIEW,
 };
 
+/** Whether a kind has the method, by the compiler's own member rules. */
 export function hasMethod(kind: ItemTag, name: string): boolean {
   if (kind === "unknown" || kind === "empty") return false;
   return MEMBER_RULES.some(
@@ -78,7 +79,7 @@ export function hasMethod(kind: ItemTag, name: string): boolean {
   );
 }
 
-/** C5b: a list's or dict's index (V30 §16, §40), else the compiler's member rules. */
+/** Whether a kind has the property: a list's or dict's `index` (V30 §16, §40), else by the compiler's member rules. */
 export function hasProperty(kind: ItemTag, name: string): boolean {
   if (name === "index") return kind === "list" || kind === "dict";
   if (kind === "unknown" || kind === "empty") return false;
@@ -88,7 +89,7 @@ export function hasProperty(kind: ItemTag, name: string): boolean {
 }
 
 /**
- * An operand's domain (C4): the operator's rows' kinds at `index`, given the other operands' kinds; every row's when none
+ * An operand's domain: the operator's rows' kinds at `index`, given the other operands' kinds; every row's when none
  * takes them.
  */
 export function operandDomain(
@@ -117,7 +118,11 @@ function inDomainOrder(kinds: Iterable<ItemTag>): ItemTag[] {
   return [...new Set(kinds)].sort((a, b) => rank(a) - rank(b));
 }
 
-/** The literals whose kind is their own, the finishing path's one proof (`Consumers.valueItems`). */
+/**
+ * The scalar literals whose kind is their own, known from the syntax without solving: the finishing read's leaf kind
+ * (`leafKind`), whether a value is a literal's own syntax (`literalSyntax`) and the stores' syntax (`cheapShapeOf`)
+ * read it.
+ */
 export const LITERALS: ReadonlySet<string> = new Set([
   "numberLiteral",
   "booleanLiteral",
@@ -132,7 +137,10 @@ export function unsettledItem(item: Item): boolean {
   return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0;
 }
 
-/** Whether kinds are of one type at most (A3's family: whole numbers with numbers, `null` beside a type, or none). */
+/**
+ * Whether kinds are of one type at most, as admission's `family` reads one: whole numbers with numbers, `null` beside a
+ * type, `null` alone, or none.
+ */
 export function oneType(kinds: readonly ItemTag[]): boolean {
   return kinds.every((kind) => kind === "null") || family(kinds);
 }
@@ -140,7 +148,7 @@ export function oneType(kinds: readonly ItemTag[]): boolean {
 /**
  * The known types of a value as its contract holds them, its `null` included, in their one order: the alternatives an
  * answer brings (#1352); an unknown beside them adds none and never stands for one type. With whether the read stopped
- * at its demand allowance (`unsettledItem`), where the known types prove nothing of the rest (Codex r7 on #1660).
+ * at its demand allowance (`unsettledItem`), where the known types prove nothing of the rest (#1660).
  */
 export function answerRead(
   walk: Consumers,
@@ -194,13 +202,12 @@ export function anyRecorded(walk: Consumers): boolean {
 
 /**
  * What a new variable keeping a warning's subject declares (#1352, the kept-value fix of every warning), a proof in
- * three values whose only source of "no union" is a settled read (the lead's ruling on Codex r7): the union a settled
- * read showed (`let value: <union> = …`); none (`[]`, the plain `let`) where a settled read showed one type, or no
- * answer reaches the subject; `null` (unproved, the fix in words, never a plain `let`) where every read on the path
- * stopped. The walk's record first (a read after the walk alone answers nothing where a finishing walk ran, Codex r6);
- * where it is `stopped`, the read made again at publication, the proof only where it settles (Codex r7: a local demand
- * stop leaves the facts asked). Asked only where the subject's value is found (`keptChoice` says what a subject not
- * found proves).
+ * three values whose only source of "no union" is a settled read (#1660): the union a settled read showed (`let value:
+ * <union> = …`); none (`[]`, the plain `let`) where a settled read showed one type, or no answer reaches the subject;
+ * `null` (unproved, the fix in words, never a plain `let`) where every read on the path stopped. The walk's record
+ * first (a read after the walk alone answers nothing where a finishing walk ran); where it is `stopped`, the read made
+ * again at publication, the proof only where it settles (a local demand stop leaves the facts asked). Asked only where
+ * the subject's value is found (`keptChoice` says what a subject not found proves).
  */
 export function keptTypes(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
   const recorded = ANSWERED.get(walk)?.get(value);
