@@ -1,4 +1,4 @@
-// pins for tests/type-core/type-core-work-c.test.ts: main's 64 → 128 growth step of the route rule's entries over many keys (a known product), as gates | line /^\s*measured: \d/u
+// pins for tests/type-core/work/type-core-work-c.test.ts: main's 64 → 128 growth step of the route rule's entries over many keys (a known product), as gates | line /^\s*measured: \d/u
 import {
   type KnownProduct,
   type WorkFamily,

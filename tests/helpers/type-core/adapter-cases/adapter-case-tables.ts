@@ -1,7 +1,7 @@
 import type { Expression } from "../../../../src/ast.js";
 import type { DynamicWhy } from "../../../../src/type-inference/graph.js";
-import { caseInputs, type CaseInputs } from "../adapter-case-inputs.js";
-import { isClosedFact, legacyOperation, type LegacyOutcome } from "../adapter-parity.js";
+import { caseInputs, type CaseInputs } from "./adapter-case-inputs.js";
+import { isClosedFact, legacyOperation, type LegacyOutcome } from "./adapter-parity.js";
 import { type Variant, type Template } from "./adapter-case-forms.js";
 import { CHOICE_TEMPLATES, FORM_TEMPLATES, COMMAND_TEMPLATES } from "./adapter-case-asks.js";
 import {

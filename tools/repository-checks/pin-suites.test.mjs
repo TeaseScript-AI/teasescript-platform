@@ -26,7 +26,7 @@ const MARKS = readMarks(ROOT);
 const MARKED = MARKS.suites;
 /** Each marked suite once, in path order. */
 const SUITES = [...new Set(MARKED.map((suite) => suite.file))];
-const WORK_B = "tests/type-core/type-core-work-b.test.ts";
+const WORK_B = "tests/type-core/work/type-core-work-b.test.ts";
 /** The folder whose families record `main`'s bounds (`WorkFamily.main`, `KnownProduct.measured`). */
 const FAMILIES = "tests/helpers/type-core/families/";
 
@@ -160,7 +160,7 @@ test("a core change lists every pinning suite; another change lists none, a suit
       (suite) => suite.file,
     ),
     [
-      "tests/type-core/type-core-work-c.test.ts",
+      "tests/type-core/work/type-core-work-c.test.ts",
       "tests/type-core/work/type-core-work-families.test.ts",
     ],
   );
@@ -168,7 +168,7 @@ test("a core change lists every pinning suite; another change lists none, a suit
     suitesFor(MARKED, ["tests/helpers/type-core/families/property-names.ts"]).map(
       (suite) => suite.file,
     ),
-    ["tests/type-core/type-core-work-c.test.ts"],
+    ["tests/type-core/work/type-core-work-c.test.ts"],
   );
   // (work-b's pins are in two files: either lists it, and both list it once, with each declaration's pins)
   assert.deepEqual(
@@ -237,17 +237,17 @@ const PAIRS = [
   "tests/type-core/type-core-contract-capture.test.ts",
   "tests/type-core/type-core-contract.test.ts",
   "tests/type-core/type-core-declared-escapes.test.ts in tests/helpers/type-core/type-core-declared-escapes-main.ts",
-  "tests/type-core/type-core-f18.test.ts",
+  "tests/type-core/discharge/type-core-f18.test.ts",
   "tests/type-core/type-core-identity.test.ts",
   "tests/type-core/type-core-kept.test.ts",
   "tests/type-core/type-core-key-ids.test.ts",
-  "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/output-bound.ts",
-  "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/w34-links.ts",
-  "tests/type-core/type-core-work-c.test.ts",
-  "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/admission-products.ts",
-  "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/narrowing.ts",
-  "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/property-names.ts",
-  "tests/type-core/type-core-written-default.test.ts",
+  "tests/type-core/work/type-core-work-b.test.ts in tests/helpers/type-core/families/output-bound.ts",
+  "tests/type-core/work/type-core-work-b.test.ts in tests/helpers/type-core/families/w34-links.ts",
+  "tests/type-core/work/type-core-work-c.test.ts",
+  "tests/type-core/work/type-core-work-c.test.ts in tests/helpers/type-core/families/admission-products.ts",
+  "tests/type-core/work/type-core-work-c.test.ts in tests/helpers/type-core/families/narrowing.ts",
+  "tests/type-core/work/type-core-work-c.test.ts in tests/helpers/type-core/families/property-names.ts",
+  "tests/type-core/written/type-core-written-default.test.ts",
   "tests/type-core/work/type-core-work-families.test.ts in tests/helpers/type-core/families/admission-products.ts",
   "tests/type-core/work/type-core-work-store-checks.test.ts",
 ];

@@ -14,7 +14,10 @@ import {
   type CaseRow,
   type RoutineName,
 } from "../../helpers/type-core/adapter-cases/adapter-case-tables.js";
-import { assertCase, type AdapterExpectation } from "../../helpers/type-core/adapter-parity.js";
+import {
+  assertCase,
+  type AdapterExpectation,
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
 
 /**
  * The case tables of the branched legacy routines (O4 stage 2b, work note): each table is generated from its

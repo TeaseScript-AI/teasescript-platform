@@ -20,7 +20,7 @@ import {
   dynamicView,
   inputsOf,
   legacyOperation,
-} from "../../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
 
 function listFunction(name: string) {
   const found = operationRelations().relation({ family: "listFunction", name });

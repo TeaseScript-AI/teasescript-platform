@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import type { Block, Expression, LetStatement, Statement } from "../../../src/ast.js";
+import type { Block, Expression, LetStatement, Statement } from "../../../../src/ast.js";
 import {
   INTEGER_TYPE,
   members,
@@ -9,17 +9,17 @@ import {
   union,
   UNKNOWN_TYPE,
   type StaticType,
-} from "../../../src/static-types.js";
-import { joinTypes } from "../../../src/static-types/join.js";
-import { typeKey } from "../../../src/storage-types.js";
+} from "../../../../src/static-types.js";
+import { joinTypes } from "../../../../src/static-types/join.js";
+import { typeKey } from "../../../../src/storage-types.js";
 import type {
   DynamicWhy,
   PlaceId,
   ProjectionStep,
   SyntaxEvidence,
-} from "../../../src/type-inference/graph.js";
-import type { TypeAnalysisRequest } from "../../../src/type-inference/backend.js";
-import { analyzeTypes } from "../../../src/type-inference/index.js";
+} from "../../../../src/type-inference/graph.js";
+import type { TypeAnalysisRequest } from "../../../../src/type-inference/backend.js";
+import { analyzeTypes } from "../../../../src/type-inference/index.js";
 import type {
   OperandPath,
   OperandRef,
@@ -27,9 +27,9 @@ import type {
   OperationInputs,
   OperationRelation,
   OperationResult,
-} from "../../../src/type-inference/adapters/relation.js";
-import { restrictedTo } from "../../../src/type-inference/adapters/views.js";
-import { request } from "./type-inference-graph.js";
+} from "../../../../src/type-inference/adapters/relation.js";
+import { restrictedTo } from "../../../../src/type-inference/adapters/views.js";
+import { request } from "../type-inference-graph.js";
 
 /**
  * Parity of a contract adapter with the legacy checker (O4 stage 2b, work note). A case declares both what the

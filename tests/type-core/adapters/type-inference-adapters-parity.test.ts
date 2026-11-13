@@ -20,7 +20,7 @@ import {
   inputsOf,
   isClosedFact,
   legacyOperation,
-} from "../../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
 
 /**
  * The parity helper itself (work note): a case declares the legacy's fact and errors and the adapter's answer;

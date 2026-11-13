@@ -3,11 +3,11 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import type { PlaceId } from "../../src/type-inference/graph.js";
-import { Admission } from "../../src/type-inference/core/admission.js";
-import { spanRef } from "../../src/type-inference/core/contract/key-ids.js";
-import type { Definition } from "../../src/type-inference/core/definitions.js";
-import { MODES } from "../helpers/type-core-oracles.js";
+import type { PlaceId } from "../../../src/type-inference/graph.js";
+import { Admission } from "../../../src/type-inference/core/admission.js";
+import { spanRef } from "../../../src/type-inference/core/contract/key-ids.js";
+import type { Definition } from "../../../src/type-inference/core/definitions.js";
+import { MODES } from "../../helpers/type-core-oracles.js";
 import {
   atElements,
   ownDisagreements,
@@ -17,7 +17,7 @@ import {
   valued,
   type Answer,
   type Asked,
-} from "../helpers/type-core/type-core-written-decider.js";
+} from "../../helpers/type-core/written/type-core-written-decider.js";
 
 // #1444(b,c): outside every decision, a written decider is answered from its groups' summaries (`writtenDecider`), a
 // decision's own scan staying the stops'. The obligations: the summary answers as the scan does on the same admission;

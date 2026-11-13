@@ -23,8 +23,8 @@ import {
   inputsOf,
   legacyOperation,
   type AdapterExpectation,
-} from "../../helpers/type-core/adapter-parity.js";
-import { OPERANDS } from "../../helpers/type-core/adapter-operands.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
+import { OPERANDS } from "../../helpers/type-core/adapter-cases/adapter-operands.js";
 
 /**
  * Parity of the conversions and of the file, hash and lock calls, `escapeMarkup` and `script` with the legacy checker

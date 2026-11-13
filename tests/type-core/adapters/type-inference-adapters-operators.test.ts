@@ -23,7 +23,7 @@ import {
   dynamicView,
   inputsOf,
   legacyOperation,
-} from "../../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
 
 function relation(family: ContractFamily, name: string) {
   const found = operationRelations().relation({ family, name });

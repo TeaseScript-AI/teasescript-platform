@@ -18,7 +18,7 @@ import {
   dynamicView,
   inputsOf,
   legacyOperation,
-} from "../../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
 
 function method(name: string) {
   const relation = operationRelations().relation({ family: "method", name });
