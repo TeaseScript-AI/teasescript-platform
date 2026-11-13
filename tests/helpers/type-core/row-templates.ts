@@ -532,6 +532,7 @@ const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<stri
     "askChoice.element": "1",
     "askChoice.label": '"A"',
     "askChoice.background": '"red"',
+    "askChoice.text": '"t"',
   },
 };
 
@@ -732,7 +733,11 @@ export const DECLARED_REFUSALS: readonly {
     })),
   // (a choice object's text or value from the host: what the button returns, which the script cannot know)
   ...[
-    ["askChoice.text", "let r = askChoice {text: hostValue}", 'let r = askChoice {text: "t"}'],
+    [
+      "askChoice.text, returned (no value beside it)",
+      "let r = askChoice {text: hostValue}",
+      'let r = askChoice {text: "t"}',
+    ],
     [
       "askChoice.value",
       'let r = askChoice {value: hostValue, text: "t"}',

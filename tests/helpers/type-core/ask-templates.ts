@@ -39,6 +39,7 @@ export const ASK_OPERANDS: Readonly<Record<string, readonly string[]>> = {
   "askChoice.element": ["let r = askChoice [hostValue]"],
   "askChoice.label": ["let r = askChoice a: hostValue"],
   "askChoice.background": ['let r = askChoice {text: "t", background: hostValue}'],
+  "askChoice.text": ["let r = askChoice {text: hostValue, value: 1}"],
 };
 
 /**
@@ -139,4 +140,11 @@ export const ASK_POSITIONS: readonly {
   ...["askChoice.option", "askChoice.element", "askChoice.label", "askChoice.background"].map(
     (operand) => ({ operand, today: ["TSV029"], failure: ["TSR052"], at: "ask" as const }),
   ),
+  // (a choice object's text beside the value its button returns: shown, never returned, so `fieldText` refuses it)
+  {
+    operand: "askChoice.text",
+    today: ["TSV040", "TSV042"],
+    failure: ["TSR021"],
+    at: "ask" as const,
+  },
 ].map((position) => ({ row: "interactionExpression" as const, ...position }));

@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProject, compileProjectWithBackend } from "../../../src/compiler.js";
+import { MAX_INTERACTION_OPTION_ENTRIES } from "../../../src/interaction-limits.js";
 import type { InstructionPlan } from "../../../src/plan/model.js";
 import { run } from "../../../src/runtime/engine.js";
 import { completeAction } from "../../../src/runtime/operations/complete-action.js";
@@ -369,6 +370,25 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
         { refused: `this ask: ${ask}` },
         mode.name,
       );
+});
+
+test("a choice of more buttons than a request shows: today's TSV029, the route's run fails at the ask, as the option and element positions' runs do", () => {
+  // (no operand or field of its own: the count of the buttons, `MAX_INTERACTION_OPTION_ENTRIES`, which today's checker
+  // checks of the options as a whole and `expandChoiceOptions` refuses as the request opens)
+  const buttons = Array.from({ length: MAX_INTERACTION_OPTION_ENTRIES + 1 }, (_, at) => at + 1);
+  const source = `let r = askChoice [${buttons.join(", ")}]\nexit\n`;
+  const current = today(source);
+  assert.equal(current.plan, null);
+  assert.ok(current.errors.includes("TSV029"), current.errors.join(" "));
+  const ask = source.indexOf("askChoice");
+  const end = source.indexOf("\n");
+  for (const mode of HELD_MODES) {
+    const own = route(source, mode);
+    assert.ok("plan" in own && own.plan !== null, mode.name);
+    assert.equal(answered(own.plan, null), `failed TSR052@${ask}:${end} after 0 []`, mode.name);
+  }
+  // one fewer is a choice today's checker takes, and the route's run waits as today's does
+  asToday(`let r = askChoice [${buttons.slice(1).join(", ")}]\nexit\n`);
 });
 
 test("an ask refuses a request's value after saying its question, as today's runtime does", () => {
