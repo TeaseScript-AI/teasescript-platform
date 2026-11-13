@@ -712,7 +712,7 @@ test(
           result,
           {
             status: 0,
-            out: `pure-move check of ${base}..HEAD (merge base ${base.slice(0, 12)}):\nshape: moved +5 -5; admitted import 1, export 2, whitespace 0, header comment 0; declared 0; unadmitted 0; bindings differing 0; refused 0\n`,
+            out: `pure-move check of ${base}..HEAD (merge base ${base.slice(0, 12)}):\nshape: moved +5 -5; admitted import 1, export 2, whitespace 0, header comment 0; declared 0; unadmitted 0; bindings differing 0; refused 0; declared whole 0\n`,
           },
           args.join(" "),
         );
@@ -743,6 +743,65 @@ test(
       );
     } finally {
       move.done();
+    }
+  },
+);
+
+test(
+  "a generated file declared whole is listed, not judged, and counted; its bindings are still compared, and moved code is never declared away (#2564 item 13)",
+  { timeout: 60_000 },
+  () => {
+    const table = (rows, name = "x") =>
+      `import { ${name} } from "./x.js";\nexport const TABLE = [\n${rows.map((row) => `  "${row}",\n`).join("")}];\nexport const first = ${name};\n`;
+    const before = {
+      "a.ts": main,
+      "table.ts": table(["one"]),
+      "x.ts": "export const x = 1;\nexport const y = 2;\n",
+    };
+    const whole = {
+      file: "table.ts",
+      whole: true,
+      reason: "written by node tools/measure-test-files.mjs --write",
+    };
+    const move = moveOf(before, { ...split, "table.ts": table(["two", "three"]) });
+    const imported = moveOf(before, { ...split, "table.ts": table(["two", "three"], "y") });
+    try {
+      const renames = move.renames(splitFamily);
+      assert.equal(move.run("--renames", renames).status, 1);
+      const passed = move.run("--renames", renames, "--declare", move.declare([whole]));
+      assert.equal(passed.status, 0, passed.out);
+      assert.match(
+        passed.out,
+        /^ {2}not judged \(declared whole\): table\.ts \(\+2 -1\): written by node tools\/measure-test-files\.mjs --write$/mu,
+      );
+      assert.match(passed.out, /; declared whole 1$/mu);
+      // (an import the regenerated file changes is still compared)
+      const changed = imported.run(
+        "--renames",
+        imported.renames(splitFamily),
+        "--declare",
+        imported.declare([whole]),
+      );
+      assert.equal(changed.status, 1, changed.out);
+      assert.match(changed.out, /binding only after: table\.ts:1 import from "\.\/x\.js": y/u);
+      // (refused, each by its own sentence: an added file, a path of the map, no file of the change, twice)
+      const refusals = {
+        "is added, deleted or renamed by the change": [{ ...whole, file: "b.ts" }],
+        "is a path of the --renames map": [{ ...whole, file: "a.ts" }],
+        "matches no file of the change": [{ ...whole, file: "none.ts" }],
+        "is declared whole twice": [whole, whole],
+      };
+      for (const [sentence, entries] of Object.entries(refusals)) {
+        const refused = move.run("--renames", renames, "--declare", move.declare(entries));
+        assert.equal(refused.status, 2, `${sentence}\n${refused.out}`);
+        assert.ok(refused.out.includes(sentence), `${sentence}\n${refused.out}`);
+      }
+      const shape = move.run("--declare", move.declare([{ ...whole, whole: "yes" }]));
+      assert.equal(shape.status, 2);
+      assert.match(shape.out, /or \{ file, whole: true, reason \}/u);
+    } finally {
+      move.done();
+      imported.done();
     }
   },
 );
