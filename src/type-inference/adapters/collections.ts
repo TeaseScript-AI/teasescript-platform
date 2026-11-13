@@ -131,16 +131,15 @@ function argumentKindFails(contract: ListMethod, inputs: OperationInputs): boole
       continue;
     if (isBottom(argument)) return "bottom";
     if (argument.dynamic !== null) continue;
-    const all = viewMembers(argument);
     if (parameter.kind === "count") {
+      const all = viewMembers(argument);
       const passing = all.filter((member) => member.kind !== "null");
       const whole = (member: StaticType) => isScalar(member, "integer");
       if (passing.length > 0 && passing.length < all.length && passing.every(whole)) return true;
       if (all.some((member) => !whole(member))) return true;
       continue;
     }
-    const used = all.filter((member) => member.kind !== "null");
-    const members = (used.length === 0 ? all : used).map(resolved);
+    const members = useOf(argument);
     if (
       !members.every(
         (member) =>
