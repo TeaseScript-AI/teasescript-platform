@@ -12,7 +12,7 @@ import {
   pretestSeconds,
   testFilesAtOnce,
 } from "./costly-test-files.mjs";
-import { UNKNOWN_TO_COSTLY, unknownToCostly } from "./check-changed.mjs";
+import { UNKNOWN_TO_COSTLY, unknownToCostly } from "../check-changed.mjs";
 import {
   isTypeCoreTestFile,
   shardFiles,
@@ -169,7 +169,7 @@ test("the costliest files fill shard 1's slots, and the next starts in shard 2 a
 });
 
 test("every file with seconds exists, costliest first; a type-core test file without them is named, not refused (#2088)", (t) => {
-  const sources = suiteTestFiles(join(import.meta.dirname, "../tests"), ".test.ts");
+  const sources = suiteTestFiles(join(import.meta.dirname, "../../tests"), ".test.ts");
   const suite = sources.map((file) => file.replace(/\.ts$/, ".js"));
   assert.ok(suite.some(isTypeCoreTestFile));
   // (a new type-core test file runs in full until the coordinator lands its entry from the merge's CI runs: the line
@@ -202,7 +202,7 @@ test("--shard=i/N names shard i of N, and anything else malformed is refused", (
 });
 
 test("the filter's two shards run every compiled test file once between them, one in a folder too, keep each one's seconds by its path, and refuse a shard beside files", (t) => {
-  const filter = fileURLToPath(new URL("./test-output-filter.mjs", import.meta.url));
+  const filter = fileURLToPath(new URL("../test-output-filter.mjs", import.meta.url));
   const cwd = mkdtempSync(join(tmpdir(), "test-shards-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(join(cwd, "dist", "tests"), { recursive: true });

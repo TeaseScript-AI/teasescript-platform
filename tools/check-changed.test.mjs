@@ -22,7 +22,7 @@ const REPRESENTATIVES = {
   typescript: ["src/compiler.ts", ["typescript"]],
   "player-vue": ["player/vue/src/shell/PlayerApp.vue", ["player-vue"]],
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
-  tools: ["tools/test-shards.mjs", ["tools"]],
+  tools: ["tools/test-runner/test-shards.mjs", ["tools"]],
   "check runners": ["tools/check/run-check.mjs", ["tools"]],
   "move tools": ["tools/moves/split-write.mjs", ["tools"]],
   "repository checks": ["tools/repository-checks/regression-cases.mjs", ["tools"]],
@@ -234,7 +234,7 @@ test("a change to the type core prints the pin-suite mapper's list, plain and me
 test("a deleted path and both sides of a move select their projects as a changed one does, plain and merged; documentation still none (#2431)", () => {
   // (each change alone, on a commit holding every path it deletes or moves)
   const kept = [
-    "tools/test-file-counts.mjs",
+    "tools/test-runner/test-file-counts.mjs",
     "src/a.ts",
     "player/vue/b.ts",
     "docs/c.md",
@@ -242,7 +242,10 @@ test("a deleted path and both sides of a move select their projects as a changed
     'docs/a"quote.md',
   ];
   const changes = {
-    "a deleted tool": [["rm", "-q", "tools/test-file-counts.mjs"], "oxlint-rules, tools"],
+    "a deleted tool": [
+      ["rm", "-q", "tools/test-runner/test-file-counts.mjs"],
+      "oxlint-rules, tools",
+    ],
     "a deleted source": [["rm", "-q", "src/a.ts"], "typescript, oxlint-rules"],
     "a move out of the Player": [
       ["mv", "player/vue/b.ts", "src/b.ts"],

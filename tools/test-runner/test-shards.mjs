@@ -8,7 +8,7 @@ import {
   testFilesAtOnce,
 } from "./costly-test-files.mjs";
 
-/** The measured weights `tools/costly-test-files.mjs` holds; a test passes fixed ones to pin the rule apart from them. */
+/** The measured weights `tools/test-runner/costly-test-files.mjs` holds; a test passes fixed ones to pin the rule apart from them. */
 const MEASURED = {
   costlyTestFiles,
   costlyTestSeconds,

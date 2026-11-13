@@ -21,7 +21,7 @@ const measure = process.env["RETAINED_MEASURE"];
 const all =
   process.env["RETAINED_FREEZE"] === "all" || survey !== undefined || measure !== undefined;
 // (a test file of `tests/type-core/` or `tests/type-core-stop/`, or of a folder one down in either, as the suite reads
-// its files two folders down, `tools/test-shards.mjs`)
+// its files two folders down, `tools/test-runner/test-shards.mjs`)
 const name = /[\\/]tests[\\/]type-core(?:-stop)?[\\/](?:[^\\/]+[\\/])?([^\\/]+\.test)\.js$/u.exec(
   file,
 )?.[1];

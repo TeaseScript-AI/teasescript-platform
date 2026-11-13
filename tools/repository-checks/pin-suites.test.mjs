@@ -563,8 +563,8 @@ test("a file moved out of the core lists every pinning suite (#2049)", { timeout
     // (the tool, and the modules it reads the suite's test files through)
     for (const file of [
       "tools/repository-checks/pin-suites.mjs",
-      "tools/test-shards.mjs",
-      "tools/costly-test-files.mjs",
+      "tools/test-runner/test-shards.mjs",
+      "tools/test-runner/costly-test-files.mjs",
       // (and the marked files, the suites among them)
       ...new Set(MARKED.flatMap((suite) => [suite.file, suite.in ?? suite.file])),
     ]) {
