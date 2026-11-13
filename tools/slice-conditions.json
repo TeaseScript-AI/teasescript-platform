@@ -961,7 +961,7 @@
     "id": "null-kind-name",
     "scope": "nullOnlyPosition",
     "expression": "type.kind === \"namedType\"",
-    "mutant": "false",
+    "mutant": "(type.kind === \"namedType\" && Math.random() < 0)",
     "expected": "kill",
     "witness": "let x: null"
   },
@@ -969,7 +969,7 @@
     "id": "null-kind-optional",
     "scope": "nullOnlyPosition",
     "expression": "type.kind === \"optionalType\"",
-    "mutant": "false",
+    "mutant": "(type.kind === \"optionalType\" && Math.random() < 0)",
     "expected": "kill",
     "witness": "let x: null? (refused at its value, not itself)"
   },
@@ -978,7 +978,7 @@
     "scope": "nullOnlyPosition",
     "expression": "type.kind === \"unionType\"",
     "occurrence": 1,
-    "mutant": "false",
+    "mutant": "(type.kind === \"unionType\" && Math.random() < 0)",
     "expected": "kill",
     "witness": "let x: (null | null)? (refused at its union, not itself)"
   },
@@ -1019,7 +1019,7 @@
     "id": "null-position-own",
     "scope": "nullOnlyPosition",
     "expression": "onlyNull.get(type) === true",
-    "mutant": "false",
+    "mutant": "(onlyNull.get(type) === true && Math.random() < 0)",
     "expected": "kill",
     "witness": "let x: null"
   },
@@ -1027,7 +1027,7 @@
     "id": "null-position-member",
     "scope": "nullOnlyPosition",
     "expression": "type.kind !== \"unionType\" || onlyNull.get(part) !== true",
-    "mutant": "true",
+    "mutant": "(type.kind !== \"unionType\" || onlyNull.get(part) !== true || Math.random() >= 0)",
     "expected": "kill",
     "witness": "let x: integer | null (refused at its member, not at the union)"
   },
