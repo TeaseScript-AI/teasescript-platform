@@ -144,45 +144,9 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/admission.ts",
-    "kind": "reference",
-    "text": "exportDecisionPaths",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/admission.ts",
-    "kind": "docblock",
-    "text": "A6: a definite contribution that does not fit at a place's path is rejected, a return against its own result's",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/admission/closure.ts",
-    "kind": "reference",
-    "text": "runReady",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
     "file": "src/type-inference/core/inherited/inherited.ts",
     "kind": "docblock",
     "text": "Whether a written type a copy decides at a prefix of a path leaves the path unrestricted (A4 through copies, the",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/admission/landings/landed.ts",
-    "kind": "docblock",
-    "text": "The place whose inherited type a place's is at a path (`inheritedAt`): a place whose only store on the",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/admission/landings/landed.ts",
-    "kind": "docblock",
-    "text": "Whether copies land a path in a place (`Inheritance`): its own landings, else its copies' sources' landings below",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/admission/model.ts",
-    "kind": "docblock",
-    "text": "`inheritedAt`'s scan of one place and path, suspended while the key it waits on resolves.",
     "waits": "the O4 lead's cleanup"
   },
   {

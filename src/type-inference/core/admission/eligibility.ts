@@ -28,18 +28,19 @@ import { addRest, aliasKeyAt, covers, grouped, tested } from "./classes.js";
 import { readNow, type Reads } from "../inherited/reads.js";
 import { wholeHolding } from "./holders.js";
 
-// §4.3's eligibility: a class's earliest member no test of its read's path holds, and the whole stores A2 reads.
+// Eligibility: a class's earliest member no test of its read's path holds, and the whole stores the decider's scan
+// reads.
 
 /**
- * A prefix's whole stores in source order (A2's lazy scan), returns, parameter defaults and single-site arguments among
- * them (a single-site parameter starts as its argument), or its adds. A read of a host value decides no path below it
- * (external data, no kind and no `null`), so the scan passes none.
+ * A prefix's whole stores in source order (the decider's lazy scan, `scanAt`), returns, parameter defaults and
+ * single-site arguments among them (a single-site parameter starts as its argument), or its adds. A read of a host
+ * value decides no path below it (external data, no kind and no `null`), so the scan passes none.
  */
 export function wholeOf(admission: Admission, key: Key, add: boolean): Definition[] {
   return readNow(wholeOfRead(admission, key, add));
 }
 
-/** `wholeOf` with its classes' reads (`Read`, #1072 A2). */
+/** `wholeOf` with its classes' reads (`Read`, #1072: a read inside an inherited proof is yielded, never run). */
 function* wholeOfRead(admission: Admission, key: Key, add: boolean): Reads<Definition[]> {
   const memoKey = joinParts(key, add);
   let list = admission.whole.get(memoKey);
@@ -67,12 +68,12 @@ function* wholeOfRead(admission: Admission, key: Key, add: boolean): Reads<Defin
 }
 
 /**
- * A prefix's whole stores as A2's scan reads them at a rest (S6-CARRIERS §4.2, §4.3): each class's representative,
+ * A prefix's whole stores as the decider's scan reads them at a rest: each class's representative,
  * and where a guard of the path holds it, its class's earliest eligible member too, which stands where it is in source
  * order and decides with its own answer (a guard marks a read possible, so it decides nothing). #2065: below an
  * ordinary property, where the prefix's index is made, only the classes that may hold the property and those unproved
- * (`wholeHolding`), before their members are asked: a class whose every member lacks it reads F11's `missing` alone
- * there, which decides nothing.
+ * (`wholeHolding`), before their members are asked: a class whose every member lacks it reads a `missing` property
+ * alone there, which decides nothing.
  */
 export function* eligibleOf(
   admission: Admission,
@@ -106,7 +107,7 @@ export function* eligibleOf(
 }
 
 /**
- * §4.3: a class's earliest member that no test of its read's path holds at `rest`, `null` where every member is
+ * A class's earliest member that no test of its read's path holds at `rest`, `null` where every member is
  * guarded there: by the deepest tested key on the path's chain of prefixes, from the class's eligibility index.
  */
 function eligibleAt(
@@ -117,7 +118,7 @@ function eligibleAt(
 ): Definition | null {
   const { guards } = admission.pass;
   const at = aliasKeyAt(admission.pass.contract, admission.aliases.get(representative)!, rest);
-  // (a cursor's binding no test names: its family's shape requires it, G3 stage 1)
+  // (a cursor's binding no test names: its family's shape requires it)
   const full = at === null || isCursor(at) ? null : recordKey(at);
   let deepest = "";
   for (const key of full === null ? [] : [full, ...prefixesOf(full)]) {
@@ -128,7 +129,7 @@ function eligibleAt(
     }
   }
   // (while the groups are made, a path `hotSets` tests asks its chain by itself: the index wants every decided path,
-  // which the groups give once made; each chain's answer is the index's, Sol's review r1 B1)
+  // which the groups give once made; each chain's answer is the index's)
   if (admission.groupList === null) {
     let chains = admission.eligibleWhileGrouping.get(representative);
     if (chains === undefined)
@@ -153,12 +154,12 @@ function eligibleAt(
 }
 
 /**
- * §4.3's index of a class, once per class and pass: the tested keys on the chains of its demanded paths as a trie,
- * walked depth first over a segment tree of its members in flow order (each leaf a guard count, each node its least
- * count and the earliest member with it): entering a key adds one to every member a test of that key holds (a branch
- * a range of the flow order, or each member asked where its callable holds more branches than members; an operand
- * region each member it holds, a range of the text order), leaving it undoes that. Each key's eligible member is the
- * earliest with no count.
+ * The eligibility index of a class, once per class and pass: the tested keys on the chains of its demanded paths as a
+ * trie, walked depth first over a segment tree of its members in flow order (each leaf a guard count, each node its
+ * least count and the earliest member with it): entering a key adds one to every member a test of that key holds (a
+ * branch a range of the flow order, or each member asked where its callable holds more branches than members; an
+ * operand region each member it holds, a range of the text order), leaving it undoes that. Each key's eligible member
+ * is the earliest with no count.
  */
 function eligibility(
   admission: Admission,
@@ -187,7 +188,7 @@ function eligibility(
       alias,
       representative.kind === "add" ? addRest(representative, rest) : rest,
     );
-    // (a cursor's binding no test names: its family's shape requires it, G3 stage 1)
+    // (a cursor's binding no test names: its family's shape requires it)
     if (at === null || isCursor(at)) continue;
     const full = recordKey(at);
     keptPath(admission.work, full);
@@ -264,7 +265,7 @@ function eligibleBy(
   return walk.eligible();
 }
 
-/** §4.3's walk over a class's members: guard counts per tested key entered, undone in reverse. */
+/** The eligibility index's walk over a class's members: guard counts per tested key entered, undone in reverse. */
 function walkGuards(
   admission: Admission,
   representative: Definition,
@@ -381,7 +382,7 @@ function demandsOf(admission: Admission, asked: Key): readonly Demand[] {
     const demands = new Map<CanonicalKey, Demand[]>();
     const tries = new Map<PlaceId, PrefixNode>();
     for (const group of admission.groups()) {
-      // (a cursor's steps made through the charged boundary, its prefixes its ancestors: G3 stage 1)
+      // (a cursor's steps made through the charged boundary, its prefixes its ancestors)
       const path = admission.stepsAt(group);
       const walk = group.key === undefined ? null : keyWalk(admission.pass.contract, group.key);
       let node: PrefixNode = tries.get(group.root) ?? { key: null, below: new Map() };
@@ -405,7 +406,7 @@ function demandsOf(admission: Admission, asked: Key): readonly Demand[] {
     }
     admission.demands = demands;
   }
-  // (a prefix in its identity, as the groups' prefixes hold it: G3 stage 1)
+  // (a prefix in its identity, as the groups' prefixes hold it)
   return admission.demands.get(canonicalKey(admission.pass.contract, asked)) ?? [];
 }
 
@@ -416,7 +417,7 @@ interface PrefixNode {
 }
 
 /**
- * Stores as their classes stand for them (§4.1): each store's class representative, from its key's own list, once
+ * Stores as their classes stand for them: each store's class representative, from its key's own list, once
  * each, in source order; any other store as itself.
  */
 function representatives(admission: Admission, list: readonly Definition[]): Definition[] {
@@ -434,11 +435,11 @@ function representatives(admission: Admission, list: readonly Definition[]): Def
 }
 
 /**
- * A5: the stores that brought a prefix's source, as candidates: live, no multi-site argument (F21) (a return, a
- * parameter default and a single-site argument are stores into the result or the parameter, F20–F23), and a read of
- * a host value only against a written type (a read of one below its store owes nothing
- * at a decided type: A7's whole-store exception leaves it the boundary check its own path's candidate owes, C9, and it
- * holds no kind and no `null`); the whole stores and the adds, once per set of stores.
+ * The stores that brought a prefix's source, as candidates: live, no multi-site argument (a return, a parameter default
+ * and a single-site argument are stores into the result or the parameter), and a read of a host value only against a
+ * written type (a read of one below its store owes nothing at a decided type: a whole external store's check covers
+ * what lies below it, which leaves it the boundary check its own path's candidate owes, and it holds no kind and no
+ * `null`); the whole stores and the adds, once per set of stores.
  */
 export function takeable(
   admission: Admission,
@@ -480,9 +481,9 @@ export function hostRead(admission: Admission, value: PlaceId | undefined): bool
 }
 
 /**
- * §4.3's segment tree over a class's members in flow order: per leaf a guard count; per node its least count and,
- * among its leaves with it, the earliest member (the least index in the class's source order); range additions are
- * lazy. Every node a change visits is charged.
+ * The eligibility index's segment tree over a class's members in flow order: per leaf a guard count; per node its least
+ * count and, among its leaves with it, the earliest member (the least index in the class's source order); range
+ * additions are lazy. Every node a change visits is charged.
  */
 class GuardTree {
   readonly #size: number;

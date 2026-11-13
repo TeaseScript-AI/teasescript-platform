@@ -1,14 +1,14 @@
 import type { WorkLedger } from "../budget.js";
 
 /*
- * The receiving closure's cells and frontier (#1526 phase C steps 2–4; Sol's round 2 §1 and §5). The completion pass
+ * The receiving closure's cells and frontier (#1526). The completion pass
  * (`Consumers.#completeFor`) is made from the settled pass's inputs without its frozen keys: a key an obligation's
  * proof reads is decided there, where it is first read, as a scoped decision from what is left of the total, in a fresh
  * `Admission`, so nothing is unfrozen and no cache holds a frozen key's answer. What the closure keeps is the cells
  * outside the solver whose outputs another read takes (a decision, a property listing, an assembled descriptor, a
  * capture request), the reads between them (a cache hit too), and the frontier that schedules them: a request or a
  * listing that needs a listing not yet made is parked with its stamp (those listings) and runs again once every one of
- * them is made, each listing taking the listings it reaches whole (step 4), so a chain of keys is listed once, not once
+ * them is made, each listing taking the listings it reaches whole, so a chain of keys is listed once, not once
  * per key that reaches it.
  *
  * The graph is the completion lease: kept from the completion pass's start until `close`. A transaction (`change`)
@@ -29,7 +29,7 @@ export type CellKind =
   /** A receiving obligation's requirement, by its index in the stable source order. */
   | "request"
   /**
-   * A fact of the pass a binding reads, by its name and version: its store targets and its rejected set (A6, #1275),
+   * A fact of the pass a binding reads, by its name and version: its store targets and its rejected set (#1275),
    * constant within a pass, so a change is a new pass, whose completion binds every slot anew.
    */
   | "fact";
@@ -54,7 +54,7 @@ interface Cell {
 }
 
 /**
- * Why a completion decision leaves the obligations whose proofs read it lost (A6, #1275): it would reject a store, or
+ * Why a completion decision leaves the obligations whose proofs read it lost (#1275): it would reject a store, or
  * give a selecting store another target, than the settled pass's inputs, which the completion pass keeps.
  */
 export type Unsettled = "rejection" | "retarget";
@@ -124,8 +124,8 @@ export function closureCounts(): ClosureCounts {
 }
 
 /**
- * A request whose contract reaches the slice's depth: the program has left the slice, where main's lowering requests
- * nothing more, so the completion ends there (as phase B's capture does).
+ * A request whose contract reaches the slice's depth: the program has left the slice, where the lowering requests
+ * nothing more, so the completion ends there (as the contract capture does).
  */
 export class LeftSlice extends Error {
   public constructor() {
@@ -372,7 +372,7 @@ export class Closure {
   }
 
   /**
-   * The frontier (`runReady`): every request once, in the stable source order. One whose extraction needs a listing not
+   * The frontier: every request once, in the stable source order. One whose extraction needs a listing not
    * yet made (`Unlisted`) is parked with its stamp, that listing, and the listing is scheduled; a listing whose search
    * deferred keys other listings find is parked on all of them, and they are scheduled. A parked item runs again only
    * once every listing of its stamp is made (its progress stamp: nothing else it read can change), listings first, the
