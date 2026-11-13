@@ -372,6 +372,131 @@ test(
 );
 
 test(
+  "a whitespace line is admitted only outside every token's text, in a file the check parses (#2619)",
+  { timeout: 60_000 },
+  () => {
+    // a function moved from a.ts into b.ts, `lines` its body between its first line and its closing brace
+    const page = (lines) => ["function page(title: string): string {", ...lines, "}"].join("\n");
+    const body = [
+      "  return `<h1>${title}</h1>",
+      "<p>the first paragraph of the rendered page body</p>",
+      "<p>the second paragraph of the rendered page body</p>",
+      "`;",
+    ];
+    const moved = (before, after, file = "b.ts") =>
+      moveOf(
+        { "a.ts": `${helper("kept")}\n\n${page(before)}\n` },
+        { "a.ts": `${helper("kept")}\n`, [file]: `${page(after)}\n` },
+      );
+    const inside = moved(body, [...body.slice(0, 2), "", ...body.slice(2)]);
+    try {
+      // the template literal gains a line: its content, so unadmitted
+      const { status, out } = inside.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: b\.ts:4 \(added\): $/mu);
+      const declared = inside.run(
+        "--declare",
+        inside.declare([
+          { file: "b.ts", side: "added", text: "", reason: "the page gains a blank line" },
+        ]),
+      );
+      assert.equal(declared.status, 0, declared.out);
+      assert.match(declared.out, /declared: b\.ts:4 \(added\): the page gains a blank line/u);
+    } finally {
+      inside.done();
+    }
+    // the same line between two statements is layout
+    const between = moved(body, ["", ...body]);
+    try {
+      const { status, out } = between.run();
+      assert.equal(status, 0, out);
+    } finally {
+      between.done();
+    }
+    // a line of spaces removed from a template's tail, after its substitution
+    const tail = moved([...body.slice(0, 2), "   ", ...body.slice(2)], body);
+    try {
+      const { status, out } = tail.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: a\.ts:10 \(removed\):    $/mu);
+    } finally {
+      tail.done();
+    }
+    // a line of spaces inside a block comment, and an empty one inside a substitution, are not a token's text
+    const comment = ["  /* the page's comment, long enough to be moved", "     its second line */"];
+    const substitution = ["  return `<h1>${", "    title", "  }</h1>", ...body.slice(1)];
+    const trivia = moved(
+      [...comment, ...substitution],
+      [comment[0], "     ", comment[1], substitution[0], "", ...substitution.slice(1)],
+    );
+    try {
+      const { status, out } = trivia.run();
+      assert.equal(status, 0, out);
+    } finally {
+      trivia.done();
+    }
+    // a JSX attribute string's lines are its content
+    const view = (gap) =>
+      [
+        'const sectionWithLongIdentifier = <section title="the title of the moved section',
+        `${gap}its second line">`,
+        "first paragraph of the moved section text",
+        "second paragraph of the moved section text",
+        "</section>;",
+        "export { sectionWithLongIdentifier };",
+        "",
+      ].join("\n");
+    const jsx = moveOf(
+      { "a.tsx": `${view("")}${helper("kept")}\n` },
+      { "a.tsx": `${helper("kept")}\n`, "b.tsx": view("\n") },
+    );
+    try {
+      const { status, out } = jsx.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: b\.tsx:2 \(added\): $/mu);
+    } finally {
+      jsx.done();
+    }
+    // a file TypeScript reports a syntax error in proves no token's place: Node reads `<!--` as a comment, TypeScript
+    // its backtick as a template's start, so the real template's lines read as code
+    const cjs = (gap) =>
+      [
+        "<!-- the page helper: one ` in this comment",
+        "const page = (title) => `<h1>${title}</h1>",
+        "<p>the first paragraph of the rendered page body</p>",
+        ...gap,
+        "<p>the second paragraph of the rendered page body</p>",
+        "`;",
+        "module.exports = { page };",
+        "",
+      ].join("\n");
+    const unproved = moveOf({ "a.cjs": cjs([]) }, { "a.cjs": null, "b.cjs": cjs([""]) });
+    try {
+      const { status, out } = unproved.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: b\.cjs:4 \(added\): $/mu);
+    } finally {
+      unproved.done();
+    }
+    // in a file the check does not parse, nothing shows where a whitespace line lies
+    const text =
+      "The first paragraph of the moved page.\n\nThe second paragraph of the moved page.\n";
+    const unparsed = moveOf(
+      { "a.md": text },
+      { "a.md": null, "b.md": text.replace("\n\n", "\n\n\n") },
+    );
+    try {
+      const { status, out } = unparsed.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: b\.md:\d \(added\): $/mu);
+      assert.match(out, /whitespace 0,/u);
+    } finally {
+      unparsed.done();
+    }
+  },
+);
+
+test(
   "an escape sequence in a string is the line's own text, not a colour",
   { timeout: 60_000 },
   () => {

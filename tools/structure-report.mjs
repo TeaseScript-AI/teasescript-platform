@@ -51,11 +51,12 @@
 // With --moved, the lines Git's moved-line detection marks as moved (`moved-lines.mjs`, read once over the whole
 // change) are left out of a function over 150 lines that the change writes into, and out of a file's growth; a file's
 // growth also leaves out the added and removed lines `pure-move-check.mjs`'s forms 1-3 admit (an import or re-export
-// line, a bare `export` on a moved declaration, whitespace: its classification, imported). Each file signal this
-// suppresses is printed with its growth and its moved, admitted and removed lines; the function signal leaves out,
-// beside the moved lines, only the lines form 2 admits (a moved declaration that gained `export`), and is printed with
-// its moved lines (and `, N admitted` when it left out such lines); every other signal is as without it. Git's
-// detection is heuristic (a moved block below its threshold reads as added).
+// line, a bare `export` on a moved declaration, whitespace outside every token in a file parsed without a syntax error:
+// its classification, imported). Each file signal this suppresses is printed with its growth and its moved, admitted
+// and removed lines; the function signal leaves out, beside the moved lines, only the lines form 2 admits (a moved
+// declaration that gained `export`), and is printed with its moved lines (and `, N admitted` when it left out such
+// lines); every other signal is as without it. Git's detection is heuristic (a moved block below its threshold reads as
+// added).
 //
 // With --summary FILE, the files behind two signals, a file over 1000 lines that the change grows and a file gaining
 // over 300 lines, are appended to FILE (CI passes its job summary file) and printed after the report: a heading, the
@@ -504,9 +505,9 @@ const countsOf = ({ growth, moved, admitted, removed, admittedRemoved }) =>
 
 /**
  * With --moved, each file's added lines Git marks as moved (`moved`), and those the pure-move check admits by its forms
- * 1-3 (an import or re-export line, a bare `export` on a moved declaration, whitespace: `admitted`; form 2's alone,
- * `exported`), by their line in `HEAD`'s blob; and the number of its removed lines the check admits by the same forms (`admittedRemoved`), by the
- * file's name at `HEAD`.
+ * 1-3 (an import or re-export line, a bare `export` on a moved declaration, whitespace outside every token: `admitted`;
+ * form 2's alone, `exported`), by their line in `HEAD`'s blob; and the number of its removed lines the check admits by
+ * the same forms (`admittedRemoved`), by the file's name at `HEAD`.
  */
 function movedAndAdmitted(mergeBase) {
   const [moved, admitted, exported, admittedRemoved] = [new Map(), new Map(), new Map(), new Map()];
