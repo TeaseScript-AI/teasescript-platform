@@ -896,7 +896,17 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
         if (typeof value !== "number" || !/Temporary$/.test(key)) continue;
         (/^destination|^default/.test(key) ? writes : reads).push(value);
       }
-      if (Array.isArray(ins.temporaryIds)) reads.push(...ins.temporaryIds);
+      // The temporaries an interaction's parts read (its label, hint, options...), at any depth outside expressions.
+      const nested = (node, top) => {
+        if (Array.isArray(node)) return node.forEach((item) => nested(item, false));
+        if (node === null || typeof node !== "object" || (EXPRESSION_KINDS.has(node.kind) && node.span !== undefined)) return;
+        for (const [key, value] of Object.entries(node)) {
+          if (!top && typeof value === "number" && /Temporary$/.test(key)) reads.push(value);
+          else if (key === "temporaryIds" && Array.isArray(value)) reads.push(...value);
+          else if (typeof value === "object") nested(value, false);
+        }
+      };
+      nested(ins, true);
       const values = operands.map((operand) => expr(operand));
       const sources = reads.map((id) => `${id}, ${temp(id)}`);
       const call = `${via}(${konst(substitute(ins, map))}, ${pc}, [${values.join(", ")}], [${sources.join(", ")}])`;
