@@ -102,10 +102,8 @@ export function useSessionMedia({
   function reportFailedMedia(mediaId: number, phase: "load" | "playback") {
     const shown = session.value;
     if (shown === null) return;
-    // As a call through the facade did: the session's replies still in transit apply first, so a medium an observation
-    // already ended has no origin. With the Worker nothing arrives early, and the latest applied publication answers.
+    // The latest applied publication answers: a medium an observation already ended there has no origin.
     const host = bridgeOf(shown);
-    host.deliverInTransit?.(shown.id);
     const origin = playerRuntimeMediaOrigin(host.latest(shown) ?? shown, mediaId);
     if (!origin) return;
     const missing = resolvePackageAsset(origin.source) === null;

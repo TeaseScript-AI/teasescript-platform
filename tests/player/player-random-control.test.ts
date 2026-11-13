@@ -4,7 +4,6 @@ import test from "node:test";
 
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../../player/engine-bridge/client.js";
-import { heldRandom, introduceNow } from "../helpers/bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import { HeldSession } from "../../player/engine-bridge/ops/session.js";
 import {

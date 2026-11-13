@@ -139,8 +139,6 @@ export function createInProcessBackend(
       else toClient?.(transit.splice(index, 1)[0]!.data);
     }
   };
-  // A stop's acknowledgement and the replies before it arrive at once, so the stop is synchronous here.
-  bridge.deliverInTransit = flush;
   backends.set(bridge, { bridge, context, sessions, flush });
   return bridge;
 }

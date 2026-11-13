@@ -25,7 +25,7 @@ import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
  *   that reply is among them, `held(later)` once the reply to the latest request of `later` is too.
  * - `posts`: every request the client posted, in order, as it reached the port.
  * - `assertTopology()`, also checked when the bridge is built: `thread` is a real thread (a positive id) that answered
- *   the bridge's handshake, and `deliverInTransit` is `null`.
+ *   the bridge's handshake.
  * `tests/helpers/bridge/sends.ts` decides sends above the client instead; this helper works below it, so the client's
  * own disposition of a post stands, and the log holds only what reached the port.
  */
@@ -273,7 +273,6 @@ export async function topologyBridge(
       made.thread.id > 0 && made.thread.messages() > 0,
       "the host runs on a thread that answered",
     );
-    assert.equal(made.bridge.deliverInTransit, null, "a Worker delivers no reply in transit");
   };
   // No row can run labelled `worker` without a Worker.
   assertTopology();
