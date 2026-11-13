@@ -18,10 +18,14 @@ import { DEFAULT_TEMPORAL_CONTEXT } from "../../../../src/temporal.js";
  * rule and a choice's buttons are the runtime's own functions (`fieldText`, `expandChoiceOptions`).
  */
 
-/** What an ask's run does up to its request: a failure with its code and site, else the question said and a wait. */
-export type AskEnd =
-  | { readonly failure: { readonly code: string; readonly start: number; readonly end: number } }
-  | { readonly said: string | null };
+/**
+ * What an ask's run does up to its request: the question it has said, if any, and then a failure with its code and
+ * site, or a wait.
+ */
+export type AskEnd = {
+  readonly said: string | null;
+  readonly failure?: { readonly code: string; readonly start: number; readonly end: number };
+};
 
 /** A value as `evaluate` reads it; a read that fails ends the run itself. */
 type Read = (expression: Expression) => SerializableRuntimeValue;
@@ -65,9 +69,6 @@ function prefillFits(
 
 /** An ask's run up to its request (see the module's comment). */
 export function askEnd(ask: InteractionExpression, read: Read): AskEnd {
-  const at = (code: string, span = ask.span): AskEnd => ({
-    failure: { code, start: span.start.offset, end: span.end.offset },
-  });
   const named = new Map(ask.formArguments.map((argument) => [argument.name.name, argument.value]));
   const question = ask.question ?? named.get("message") ?? null;
   // (a basic ask prepares its question as it is evaluated, before its other operands; any other reads it from its
@@ -75,6 +76,11 @@ export function askEnd(ask: InteractionExpression, read: Read): AskEnd {
   const basic = ask.interactionKind !== "boolean";
   const values = new Map<Expression, SerializableRuntimeValue>();
   let said: string | null = null;
+  // (a failure after the question is said keeps it said)
+  const at = (code: string, span = ask.span): AskEnd => ({
+    said,
+    failure: { code, start: span.start.offset, end: span.end.offset },
+  });
   const sayQuestion = (): AskEnd | null => {
     if (question === null) return null;
     const text = textOf(values.get(question)!, ask);
