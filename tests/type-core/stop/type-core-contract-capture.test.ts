@@ -513,7 +513,10 @@ test("the candidate route's decline and the capture's skip read one syntax rule"
     ["let a = {f: [[1]]}\nlet b = a\nsay [1][0]\nb.f = hostValue\nexit\n", true],
     ['let a = {f: [[1]]}\nlet b = a\nsay ["a"].join(",")\nb.f = hostValue\nexit\n', true],
     ['let a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nsay "${hostOther}"\nexit\n', false],
-    ["let xs = [1]\nxs[0] = hostOther\nlet a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nexit\n", false],
+    [
+      "let xs = [1]\nxs[0] = hostOther\nlet a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nexit\n",
+      false,
+    ],
   ];
   for (const [source, inside] of programs) {
     const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;

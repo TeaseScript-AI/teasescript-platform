@@ -177,3 +177,28 @@ test("a place an operation on external data widens beside its stores' kind leave
     }
   }
 });
+
+test("an `and` whose left side is no literal may run its right side: its operand's check is kept, with TSV043", () => {
+  // (today's checker knows `f` is `false` and calls the right side dead; the core decides a side only by a literal,
+  // P7, so the route keeps the operand's check and warns, and the run, which never reaches it, ends as today's)
+  const source = "let f = false\nlet b = f and hostValue > 1\nexit\n";
+  const files = [{ path: "main.tease", source }];
+  const today = compileProject(files, OPTIONS);
+  assert.ok(today.plan !== null);
+  assert.deepEqual(today.diagnostics, []);
+  for (const mode of HELD_MODES) {
+    const route = mode.run(() => compileProjectWithBackend(files, OPTIONS, CORE_BACKEND));
+    assert.ok(route.plan !== null, mode.name);
+    assert.deepEqual(
+      route.diagnostics.map(({ severity, code, span }) => [severity, code, span.start.offset]),
+      [["warning", "TSV043", source.indexOf("hostValue")]],
+      mode.name,
+    );
+    for (const hostValue of [2, "text"])
+      assert.deepEqual(
+        runGlobals(route.plan, { hostValue }),
+        runGlobals(today.plan, { hostValue }),
+        `${mode.name} with ${hostValue}`,
+      );
+  }
+});
