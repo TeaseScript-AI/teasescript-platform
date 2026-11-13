@@ -28,7 +28,6 @@ export const costlyTestSeconds = {
   "type-core-stop/type-core-stop-frontier.test.js": 36,
   "families-runner/families-shadow.test.js": 33,
   "type-core/type-core-contract.test.js": 33,
-  "type-core/type-core-solver.test.js": 30,
   "type-core-stop/type-core-stop-route.test.js": 29,
   "families-runner/families-plans.test.js": 27,
   "type-core/type-core-property-names.test.js": 25,
