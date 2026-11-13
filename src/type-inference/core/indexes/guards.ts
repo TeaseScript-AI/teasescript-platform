@@ -31,11 +31,16 @@ import { amend, Retained } from "../retained/retained.js";
  * position: through `and`, `or` and `not`; a `switch` on it), in the code after a branch that tests it and always
  * leaves (the way past the test is a branch entry of its own), and in the right operand of an `and` or `or` whose left
  * operand tests it. Guards are indexed per tested key, as definitions are: a read asks its key and each prefix, a
- * binary search each, never a root's other keys and never an `and` chain's other tests. The narrowing definitions join
- * this index: built on their first read, once per program (`NarrowingIndex`: the definitions per refined location and
- * the invalidation lists, with the statements and the route query's shared layer, `StatementTree`), and asked per pass
- * through `narrowings` (the events that end a narrowing, with the stores that preserve it, `NarrowingEvents`; the
- * routes, `NarrowingRoutes`). A read in a stored value takes its narrowing where it holds (`Values`).
+ * binary search each, never a root's other keys and never an `and` chain's other tests. Which reads a guard region
+ * holds is asked through `guarded`, whose callers are: `Values`, which marks a key's read and a failing narrowing's
+ * read held there (`marked`); `ExactPath`, which takes a copy chain's root read held there as marked and repeats no add
+ * a guard holds (`#repeats`); the fallback check (`consumers/operations/fallbacks.ts`), whose walk to an unwritten
+ * parameter's default stops at a guarded read; admission's decision (`admission/decision.ts`), which records it in an
+ * alias's answer; and `guardedRead` here. The narrowing definitions join this index: built on their first read, once
+ * per program (`NarrowingIndex`: the definitions per refined location and the invalidation lists, with the statements
+ * and the route query's shared layer, `StatementTree`), and asked per pass through `narrowings` (the events that end a
+ * narrowing, with the stores that preserve it, `NarrowingEvents`; the routes, `NarrowingRoutes`). A read in a stored
+ * value takes its narrowing where it holds (`Values`).
  */
 
 /** A list of guard regions sorted by where they start, with the running maximum of where they end. */
@@ -91,7 +96,7 @@ export class GuardIndex {
   readonly #operandCallables = Retained.map<Key, Set<Callable | null>>(
     "GuardIndex.#operandCallables",
   );
-  /** The tested keys, as a trie (`narrowed`). */
+  /** The tested keys, as a trie (`guarded`). */
   readonly #tested: KeyTrie;
   /** The keys with a tested key strictly below them: a copy of one carries its read as a mark. */
   readonly belowTested = Retained.set<Key>("GuardIndex.belowTested");
@@ -611,11 +616,13 @@ export class GuardIndex {
   }
 
   /**
-   * Whether a read of `key` at `node` is guarded, per path: a test of the key or of a prefix guards a branch of the
-   * node's own callable that dominates the node, or an operand region holds the node: a binary search per key asked,
-   * the key and each prefix; a choice's selection step as the record key it reads.
+   * Whether a test's guard region of `key` or of a prefix holds the read at `node`: a branch the test guards in the
+   * node's own callable that holds it, or an operand region (the right operands of the `and`/`or` whose left the test
+   * stands in) that holds it, a choice's selection step read as its record key; a binary search per key asked, the
+   * key and each prefix. `false` for an unreached node or an untested binding's cursor, an error for a tested binding's
+   * cursor. It reads no narrowing.
    */
-  public narrowed(key: Key, node: FlowNode): boolean {
+  public guarded(key: Key, node: FlowNode): boolean {
     const program = this.program;
     if (!program.reached(node)) return false;
     // (a wrapper's key is its cursor, and no test names a key of a wrapper's binding: `wrapperShape`)
@@ -656,7 +663,7 @@ export class GuardIndex {
     );
   }
 
-  /** Whether no test names a key of `place`, at any path (so `narrowed` answers no for every key of it). */
+  /** Whether no test names a key of `place`, at any path (so `guarded` answers no for every key of it). */
   public untested(place: PlaceId): boolean {
     const root = keyOf(place, []);
     return !this.belowTested.has(root) && !this.#branches.has(root) && !this.#operands.has(root);
@@ -699,7 +706,7 @@ export class GuardIndex {
 
   /**
    * Whether an operand region of a test of some key of the place holds a node (a copy read there may carry
-   * a mark of its source, which `narrowed` then asks at the read's path): a binary search in the place's regions,
+   * a mark of its source, which `guarded` then asks at the read's path): a binary search in the place's regions,
    * merged once from the per-key ones, never a scan of the place's tested paths.
    */
   public operandAround(place: PlaceId, node: FlowNode): boolean {
@@ -769,7 +776,7 @@ export class GuardIndex {
     if (binding === undefined || node === undefined || node === null) return false;
     // (a binding no test names guards no read of it, at whatever path: no key made)
     if (this.untested(binding)) return false;
-    return this.narrowed(keyBelowText(keyOf(binding, steps.reverse()), restText), node);
+    return this.guarded(keyBelowText(keyOf(binding, steps.reverse()), restText), node);
   }
 
   /** The tested keys `q` below each key, per relative path `q` (every split of every tested key's path). */

@@ -101,7 +101,11 @@ export function narrowingAt(
   return { g, fails: pass.solver.run(events.holds(g, node, kinds)) };
 }
 
-/** N3 at a read of a stable path without element steps: the witness of a route carrying `tag` unchecked, or `null`. */
+/**
+ * The route query at a read of a stable path without element steps: the witness of a route carrying `tag` unchecked,
+ * or `null`. It calls `NarrowingRoutes.witness` directly, without `required`, so it asks main's query unless a
+ * `required` of the same pass has met a program the route rule's default holds.
+ */
 export function routeAt(pass: CorePass, node: FlowNode, tag: ItemTag = "null"): Definition | null {
   if (node.expression === undefined) return null;
   const path = stablePath(pass.program, node.file, node.expression);

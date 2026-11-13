@@ -199,9 +199,7 @@ export class Values {
     const key = this.pass.contract.canonicalKey(asked);
     const read = yield* this.#keyRead(key, node, before);
     // §3.2: under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
-    return read.guardable && this.pass.guards.narrowed(key, node!)
-      ? marked(read.items)
-      : read.items;
+    return read.guardable && this.pass.guards.guarded(key, node!) ? marked(read.items) : read.items;
   }
 
   /**
@@ -450,7 +448,7 @@ export class Values {
       );
       return contract.entered(
         root,
-        read.guardable && guards.narrowed(key, at!) ? marked(worded) : worded,
+        read.guardable && guards.guarded(key, at!) ? marked(worded) : worded,
       );
     }
     // (an exact definition before G's entry is the value G tested, filtered by G's form)
