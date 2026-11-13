@@ -148,12 +148,23 @@ leave out included, a property changes only by assignment or by a kind's own met
 - `defineProperty`, `defineProperties`, `__defineGetter__` and `__defineSetter__`, by name anywhere;
 - a constructor's `return <value>`.
 
-`Retained` is closed the same way (#1072 R38): in every file of `src/type-inference/` but the retained API's own
-(`core/retained/`), and in every test helper but the instrument, it is imported under that name and stands only as the
-object of a direct call `Retained.<member>(…)`, so every maker call has the spelling the fresh-literal line reads. The
-one other form is a collection maker (`map`, `set`, `weakMap`, `weakSet`) given whole as `retainedModule`'s second
-argument, which the API calls with the module's name alone. Refused: a destructuring, an assignment to a variable, an
-argument, a property or an element, a computed member, a renamed or namespace import, a re-export.
+The retained API's own folder (`core/retained/`), which makes the makers' copy, is outside it.
+
+The check reads the program `tsconfig.json` defines: each file of `src/type-inference/` and `tests/helpers/` it compiles,
+a module reached only through another included. A `Retained` call is the one the checker resolves to the API's
+declaration, however it is spelled (#1072 Amendment 4). Its other lines:
+
+- a native `Map`, `Set`, `WeakMap` or `WeakSet`, found by the constructor the checker resolves, is not kept where the
+  instrument cannot reach it (a class field, a module's mutable variable, a parameter property);
+- a private field is `readonly` and either made by a maker or given by its class's `hidden` (`Retained.owner`, or
+  `Retained.programPart` in the program's own files);
+- a `Retained.closure` registration stands right below its comment naming what the function captures (#1072 R26);
+- a `catch` handles only type inference's own errors, and a `finally` completes normally (#1072 R60). Each `instanceof`
+  test of a `catch` binding names a class declared under `src/type-inference/` that extends `Error` directly. The block
+  ends in `throw <binding>`, or returns, breaks, continues or throws another error only inside such a test's consequent
+  or after a top-level guard `if (!(<binding> instanceof C …)) throw <binding>;`. A `finally` holds no `yield`,
+  `return`, `break`, `continue` or `throw`. The solver's step catch and the budget's forward their error, as `yield*`
+  does, and are listed by name. So V8's error at a write to frozen data is never handled in type inference.
 
 What these reach (a descriptor, a prototype, an integrity level, a deletion) could change a locked owner's field or a
 retained collection's writer unseen by the instrument, or make a frozen run compute what production does not. Only

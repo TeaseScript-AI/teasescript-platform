@@ -1,242 +1,209 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { checkRetainedState, retainedStateDiagnostics } from "./check-retained-state.mjs";
+import {
+  checkRetainedState,
+  retainedStateDiagnostics,
+  scratchProgram,
+} from "./check-retained-state.mjs";
 import { repositoryRoot } from "./files.mjs";
 
-/** The lines the check reports in one scratch file's `text`, checked whole or at its top level only. */
-const reported = (text, level = "file") =>
-  retainedStateDiagnostics([{ file: "src/type-inference/core/scratch.ts", text, level }])
-    .map(({ line }) => line)
-    .sort((x, y) => x - y);
+/** The retained API, imported at a scratch file's end so that its lines keep their numbers. */
+const API = '\nimport { Retained, retainedModule } from "./retained/retained.js";\n';
 
-test("the type core's owners make every collection they keep through `Retained` (#1072)", () => {
+/**
+ * The check's diagnostics for scratch files, each `{ name, text, level }` placed in the type core (or the test helpers),
+ * read in one program; by file name, each a sorted list of reported lines.
+ */
+function scratch(files) {
+  const placed = files.map(({ name, text, level }) => ({
+    file:
+      level === "helper"
+        ? `tests/helpers/${name}.ts`
+        : `src/type-inference/core/${name}.${name.endsWith("-mts") ? "mts" : "ts"}`,
+    text: `${text}${level === "helper" ? API.replace("./retained/", "../../src/type-inference/core/retained/") : API}`,
+    level,
+  }));
+  const program = scratchProgram(repositoryRoot, placed);
+  const diagnostics = retainedStateDiagnostics(
+    program,
+    repositoryRoot,
+    new Map(placed.map(({ file, level }) => [file, level])),
+  );
+  return new Map(
+    placed.map(({ file }, index) => [
+      files[index].name,
+      diagnostics
+        .filter((diagnostic) => diagnostic.fileName === file)
+        .map(({ line }) => line)
+        .sort((x, y) => x - y),
+    ]),
+  );
+}
+
+/** The lines `text`'s `// refused` markers name, a line once per marker word (`// refused refused`). */
+const marked = (text) =>
+  text
+    .split("\n")
+    .flatMap((line, index) =>
+      Array.from(
+        {
+          length: (/\/\/ (refused(?: refused)*)$/u.exec(line)?.[1] ?? "").split(" ").filter(Boolean)
+            .length,
+        },
+        () => index + 1,
+      ),
+    );
+
+/** One scratch file's reported lines, against its markers. */
+function assertMarked(text, level = "file") {
+  assert.deepEqual(scratch([{ name: "scratch", text, level }]).get("scratch"), marked(text));
+}
+
+test("the type core passes the check, its files read from the program the compiler builds (#1072)", () => {
   assert.deepEqual(checkRetainedState(repositoryRoot), []);
 });
 
 test("a collection made where an owner can keep it is refused, in every such place (#1072)", () => {
-  assert.deepEqual(
-    reported(
-      [
-        "class Owner {",
-        "  readonly byKey = new Map<string, number>();",
-        "  readonly #hidden = new Set<string>();",
-        "  readonly pair = [new WeakMap<object, number>(), new WeakMap<object, number>()];",
-        "  readonly caches = { summaries: new WeakSet<object>() };",
-        "  public constructor(readonly given: Map<string, number> = new Map()) {",
-        "    this.later = new Map();",
-        "  }",
-        "  public fill(outer: Map<string, Map<string, number>>, key: string): void {",
-        "    this.lazy ??= new Set();",
-        "    this.nested = { inner: new Map() };",
-        "    captured = { passes: new WeakMap() };",
-        "  }",
-        "}",
-        "const mutable = new Map<string, number>();",
-        "let table = new Set([1, 2]);",
-        "let captured: object | null = null;",
-        "function chained(owner: { slots: Map<string, number>[] }): void {",
-        "  let steps: Map<string, number> | undefined;",
-        "  owner.slots[0] = steps = new Map();",
-        "}",
-      ].join("\n"),
-    ),
-    // (line 3's private field twice: a collection kept as made, and a private field the recorder cannot see)
-    [2, 3, 3, 4, 4, 5, 6, 7, 10, 11, 12, 15, 16, 20],
+  assertMarked(
+    [
+      "class Owner {",
+      "  readonly byKey = new Map<string, number>(); // refused",
+      // (a collection kept as made, and a private field the instrument cannot see)
+      "  readonly #hidden = new Set<string>(); // refused refused",
+      "  readonly pair = [new WeakMap<object, number>(), new WeakMap<object, number>()]; // refused refused",
+      "  readonly caches = { summaries: new WeakSet<object>() }; // refused",
+      "  public constructor(readonly given: Map<string, number> = new Map()) { // refused",
+      "    this.later = new Map(); // refused",
+      "  }",
+      "  public fill(outer: Map<string, Map<string, number>>, key: string): void {",
+      "    this.lazy ??= new Set(); // refused",
+      "    this.nested = { inner: new Map() }; // refused",
+      "    captured = { passes: new WeakMap() }; // refused",
+      "  }",
+      "}",
+      "const mutable = new Map<string, number>(); // refused",
+      "let table = new Set([1, 2]); // refused",
+      "let captured: object | null = null;",
+      "function chained(owner: { slots: Map<string, number>[] }): void {",
+      "  let steps: Map<string, number> | undefined;",
+      "  owner.slots[0] = steps = new Map(); // refused",
+      "}",
+      // (a native constructor is the one the checker resolves, under any name)
+      "const Native = Map;",
+      "const aliased = new Native<string, number>(); // refused",
+    ].join("\n"),
   );
 });
 
 test("a collection that stands where no owner keeps it as made passes (#1072)", () => {
-  assert.deepEqual(
-    reported(
-      [
-        "const TABLE: ReadonlySet<string> = new Set(['a', 'b']);",
-        "const ROWS: ReadonlyMap<string, number> = new Map([['a', 1]]);",
-        "function local(list: readonly string[], seen?: Set<string>): number {",
-        "  const counts = new Map<string, number>();",
-        "  const unique = seen ?? new Set<string>();",
-        "  for (const each of new Set(list)) counts.set(each, 1);",
-        "  use(new Map(counts), [...new Set(list)]);",
-        "  if (new Set(list).has('a')) return counts.size;",
-        "  return (new Map() as Map<string, number>).size;",
-        "}",
-        "const made = (): Set<string> => new Set();",
-        "function copy(rows = new Map<string, number>()): Map<string, number> {",
-        "  return new Map(rows);",
-        "}",
-        "function fill(outer: Map<string, Map<string, number>>, key: string): void {",
-        "  let inner = outer.get(key);",
-        "  if (inner === undefined) outer.set(key, (inner = new Map()));",
-        "  outer.set(key, { list: [new Set<string>()] } as never);",
-        "}",
-        "function chosen(flag: boolean): Map<string, number> {",
-        "  const map = flag ? new Map<string, number>() : new Map<string, number>([['b', 2]]);",
-        "  return map;",
-        "}",
-      ].join("\n"),
-    ),
-    [],
+  assertMarked(
+    [
+      "const TABLE: ReadonlySet<string> = new Set(['a', 'b']);",
+      "const ROWS: ReadonlyMap<string, number> = new Map([['a', 1]]);",
+      "function local(list: readonly string[], seen?: Set<string>): number {",
+      "  const counts = new Map<string, number>();",
+      "  const unique = seen ?? new Set<string>();",
+      "  for (const each of new Set(list)) counts.set(each, 1);",
+      "  use(new Map(counts), [...new Set(list)]);",
+      "  if (new Set(list).has('a')) return counts.size;",
+      "  let later: Set<string>;",
+      "  later = new Set();",
+      "  return (unique.size + later.size) as number;",
+      "}",
+      "const make = (): Map<string, number> => new Map();",
+      "function build(): Set<string> {",
+      "  return new Set();",
+      "}",
+      "function withDefault(seen: Set<string> = new Set()): number {",
+      "  return seen.size;",
+      "}",
+      // (a class of its own named `Map` is no native collection)
+      "class Mapping<K, V> { readonly entries: [K, V][] = []; }",
+      "class Holder { readonly made = new Mapping<string, number>(); }",
+    ].join("\n"),
   );
 });
 
 test("a file scoped at its top level is checked there only: its classes keep no retained state (#1072)", () => {
   const text = [
-    "const memos = new WeakMap<object, number>();",
     "class Answers {",
-    "  readonly #stores = new Map<string, number>();",
+    "  readonly byKey = new Map<string, number>();",
+    "  #lazy: Map<string, number> | null = null;",
+    "}",
+    "const captured = new Map<string, number>(); // refused",
+  ].join("\n");
+  assertMarked(text, "module");
+});
+
+test("a private field is readonly and made by a maker the checker resolves, or exposed by its class's `hidden`, or refused (#1072)", () => {
+  assertMarked(
+    [
+      "class Owner {",
+      "  readonly #made = Retained.map<string, number>('Owner.#made');",
+      "  #lazy: Map<string, number> | null = null; // refused",
+      "  #size: Set<string> | null = null; // refused",
+      "  readonly #given: Owner | null;",
+      "  #slot = Retained.set<string>('Owner.#slot'); // refused",
+      "  public constructor(given: Owner | null) {",
+      "    this.#given = given;",
+      "    Retained.owner(this, 'Owner', (owner) => ({ lazy: owner.#lazy, size: owner.#size?.size, given: owner.#given }));",
+      "  }",
+      "}",
+      "class Static {",
+      "  static readonly #hidden = (owner: Static) => ({ count: owner.#count, seen: owner.#seen });",
+      "  #count = 0; // refused",
+      "  readonly #seen = 0;",
+      "  #other = 0; // refused",
+      "  public constructor() {",
+      "    Retained.owner(this, 'Static', Static.#hidden);",
+      "  }",
+      "}",
+      "class GuardIndex {",
+      "  #narrowing = null;",
+      "  #queries = null;",
+      "  #other = null; // refused",
+      "}",
+      "class Unregistered {",
+      "  #state = 0; // refused",
+      "}",
+      "class Held {",
+      "  readonly #payload = Retained.held(this, Retained.map<string, number>('Held.#payload')); // refused",
+      "}",
+      // (a maker by its resolved declaration, however it is reached)
+      "const { record } = Retained;",
+      "const api = { Retained };",
+      "class Reached {",
+      "  readonly #alias = record('Reached.#alias', { n: 0 });",
+      "  readonly #carried = api.Retained.arena<number>('Reached.#carried');",
+      "}",
+      // (a call that resolves to no maker, or to none, is not one)
+      "const Shadow = { map: () => new Map<string, number>() };",
+      "declare const untyped: any;",
+      "class Unresolved {",
+      "  readonly #shadowed = Shadow.map(); // refused",
+      "  readonly #untyped = untyped.map('Unresolved.#untyped'); // refused",
+      "}",
+    ].join("\n"),
+  );
+});
+
+test("the indexed program's own classes give each private field to the program walk (#1072 R61)", () => {
+  const text = [
+    "class Indexed {",
+    "  readonly #byId = new Map<number, string>();",
+    "  readonly #order: number[] = [];",
+    "  readonly #missed = new Set<number>(); // refused",
+    "  #counted = 0; // refused",
+    "  public index(): void {",
+    "    Retained.programPart(this, (part) => ({ byId: part.#byId, order: part.#order, counted: part.#counted }));",
+    "  }",
     "}",
   ].join("\n");
-  assert.deepEqual(reported(text, "module"), [1]);
-  assert.deepEqual(reported(text, "file"), [1, 3, 3]);
-});
-
-test("a private field is readonly, a `Retained` kind or exposed by its class's `hidden`, or refused (#1072)", () => {
   assert.deepEqual(
-    reported(
-      [
-        "class Owner {",
-        "  readonly #made = Retained.map<string, number>('Owner.#made');",
-        "  #lazy: Map<string, number> | null = null;",
-        "  #size: Set<string> | null = null;",
-        "  readonly #given: Owner | null;",
-        "  #slot = Retained.set<string>('Owner.#slot');",
-        "  public constructor(given: Owner | null) {",
-        "    this.#given = given;",
-        "    Retained.owner(this, 'Owner', (owner) => ({ lazy: owner.#lazy, size: owner.#size?.size, given: owner.#given }));",
-        "  }",
-        "}",
-        "class Static {",
-        "  static readonly #hidden = (owner: Static) => ({ count: owner.#count });",
-        "  #count = 0;",
-        "  #other = 0;",
-        "  public constructor() {",
-        "    Retained.owner(this, 'Static', Static.#hidden);",
-        "  }",
-        "}",
-        "class GuardIndex {",
-        "  #narrowing = null;",
-        "  #queries = null;",
-        "  #other = null;",
-        "}",
-        "class Unregistered {",
-        "  #state = 0;",
-        "}",
-        "class Held {",
-        "  readonly #payload = Retained.held(this, new Map<string, number>());",
-        "}",
-      ].join("\n"),
-    ),
-    [3, 4, 6, 14, 15, 23, 26, 29],
+    scratch([{ name: "scratch", text, level: "program" }]).get("scratch"),
+    marked(text),
   );
-});
-
-/** The lines the guard lines report in `text` as a core file of `level`, or as a test helper. */
-const guarded = (text, level = "file") =>
-  retainedStateDiagnostics([
-    {
-      file: level === "helper" ? "tests/helpers/scratch.ts" : "src/type-inference/core/scratch.ts",
-      text,
-      level,
-    },
-  ])
-    .map(({ line }) => line)
-    .sort((x, y) => x - y);
-
-test("a native writer taken from a prototype is refused in any position, in core files and test helpers (#1072 R24)", () => {
-  const lines = [
-    "const bound = Map.prototype.set.bind(map);",
-    "Set.prototype.add.call(set, 1);",
-    "Array.prototype.push.apply(list, items);",
-    "const writers = WeakMap.prototype;",
-    "Reflect.get(Map.prototype, 'set');",
-    "const index = Map.prototype['set'];",
-    "WeakSet.prototype.delete.call(weak, key);",
-    "const { set } = Map.prototype;",
-    "const sorted = Array.prototype.slice.call(list);",
-    "const read = Map.prototype.get.call(map, key);",
-    "const known = Set.prototype.has;",
-  ].join("\n");
-  assert.deepEqual(guarded(lines, "helper"), [1, 2, 3, 4, 5, 6, 7, 8]);
-  // (in type inference the closed meta-object layer refuses every `.prototype`, a reader's too)
-  for (const level of ["file", "module", null, "meta"])
-    assert.deepEqual(
-      [...new Set(guarded(lines, level))],
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-      String(level),
-    );
-});
-
-test("a maker is given a fresh literal or nothing (#1072 R25)", () => {
-  assert.deepEqual(
-    guarded(
-      [
-        "const fields = { n: 0 };",
-        "Retained.record('a', fields);",
-        "Retained.record('b', { n: 0 });",
-        "Retained.record('c');",
-        "Retained.arena('d', items);",
-        "Retained.arena('e', [0]);",
-        "Retained.arena('f');",
-        "Retained.array('g', [...items]);",
-        "Retained.array('h', []);",
-        "Retained.array('i', [], extra);",
-      ].join("\n"),
-    ),
-    [2, 4, 5, 10],
-  );
-});
-
-test("`Retained` stands only as the object of a direct call, in every checked file but the retained API's own (#1072 R38)", () => {
-  /** The closed-form findings of `text` as a file of `file` at `level`. */
-  const formed = (text, level, file = "src/type-inference/core/scratch.ts") =>
-    retainedStateDiagnostics([
-      { file: level === "helper" ? "tests/helpers/scratch.ts" : file, text, level },
-    ])
-      .filter(({ message }) => message.includes("#1072 R38"))
-      .map(({ line }) => line);
-  // (one line per refused form, each refused alone)
-  const refused = [
-    "const { record } = Retained;",
-    "const made = Retained;",
-    "use(Retained);",
-    "const api = { made: Retained };",
-    "const list = [Retained];",
-    "Retained['record']('T', { n: 0 });",
-    "const make = Retained.record;",
-    "const make = Retained.record.bind(null);",
-    "retainedModule('T', Retained.record);",
-    "retainedModule(Retained.weakMap, 'T');",
-    'import { Retained as Kept } from "./retained/retained.js";',
-    'import * as retained from "./retained/retained.js";',
-    'export { Retained } from "./retained/retained.js";',
-    'export * from "./retained/retained.js";',
-  ];
-  // (a control per allowed form)
-  const passed = [
-    'import { Retained, amend } from "./retained/retained.js";',
-    "const state = Retained.record('T', { n: 0 });",
-    "const kept = Retained.map<string, number>('T');",
-    "const MEMO = retainedModule('T', Retained.weakMap<object, number>);",
-    "const SET = retainedModule('T', Retained.set);",
-    "type Api = typeof Retained;",
-    'export { amend } from "./retained/retained.js";',
-  ];
-  for (const level of ["file", "module", null, "meta", "helper"]) {
-    for (const form of refused) assert.deepEqual(formed(form, level), [1], `${level}: ${form}`);
-    for (const form of passed) assert.deepEqual(formed(form, level), [], `${level}: ${form}`);
-  }
-  // (the retained API defines `Retained`, outside its closed form)
-  assert.deepEqual(
-    formed(refused.join("\n"), null, "src/type-inference/core/retained/retained.ts"),
-    [],
-  );
-});
-
-test("`structuredClone` is refused in the checked core files alone (#1072 R21)", () => {
-  const lines = "const copy = structuredClone(value);";
-  for (const level of ["file", "module"]) assert.deepEqual(guarded(lines, level), [1], level);
-  for (const level of [null, "meta", "helper"])
-    assert.deepEqual(guarded(lines, level), [], String(level));
 });
 
 test("the meta-object layer is closed in type inference: `Object`'s listed members, assignment and a kind's own methods alone (#1072 R30)", () => {
@@ -289,30 +256,152 @@ test("the meta-object layer is closed in type inference: `Object`'s listed membe
     "type Keys = keyof typeof value; const shown: Record<string, number> = { constructor: 1, eval: 2 };",
     "interface Shape { prototype: number; Reflect(): void }",
   ];
-  for (const level of ["file", "module", null, "meta"]) {
-    for (const form of refused)
-      assert.deepEqual([...new Set(guarded(form, level))], [1], `${level}: ${form}`);
-    for (const form of passed) assert.deepEqual(guarded(form, level), [], `${level}: ${form}`);
+  const files = [];
+  for (const level of ["file", "module", null, "meta", "helper"])
+    for (const [index, form] of [...refused, ...passed].entries())
+      files.push({ name: `scratch-${String(level)}-${index}`, text: form, level });
+  const found = scratch(files);
+  for (const { name, text, level } of files) {
+    const expected = level !== "helper" && refused.includes(text) ? [1] : [];
+    assert.deepEqual([...new Set(found.get(name))], expected, `${level}: ${text}`);
   }
-  assert.deepEqual(guarded([...refused, ...passed].join("\n"), "helper"), []);
 });
 
-test("a function is registered right below the comment naming its captures (#1072 R26)", () => {
+test("the retained API's own folder is the trusted implementation the meta-object and `catch` lines leave out (#1072 R46)", () => {
+  const program = scratchProgram(repositoryRoot, [
+    {
+      file: "src/type-inference/core/retained/scratch.ts",
+      text: "export const copy = (given: object): object => Object.assign(Object.create(Object.getPrototypeOf(given)), given);",
+    },
+  ]);
   assert.deepEqual(
-    guarded(
-      [
-        "// (#1072 R26: captures `frontier`, an owner)",
-        "const a = Retained.closure('a', () => frontier);",
-        "const b = Retained.closure('b', () => frontier);",
-        "// (#1072 R26: as `a`)",
-        "const c = Retained.closure('c', () => frontier);",
-        "// (#1072 R26: captures `frontier`, an owner, and",
-        "// `steps`, fixed when it is made)",
-        "use(Retained.closure('d', () => steps));",
-        "// a comment naming nothing",
-        "use(Retained.closure('e', () => steps));",
-      ].join("\n"),
+    retainedStateDiagnostics(
+      program,
+      repositoryRoot,
+      new Map([["src/type-inference/core/retained/scratch.ts", null]]),
     ),
-    [3, 10],
+    [],
+  );
+});
+
+test("a `catch` handles only type inference's own errors, and a `finally` completes normally (#1072 R60)", () => {
+  const classes = [
+    "class Stop extends Error {}",
+    "class Decline extends Error {}",
+    "class Nested extends Stop {}",
+    "class Native extends TypeError {}",
+    "declare function work(): void;",
+    "declare function cleanup(): void;",
+  ].join("\n");
+  // (one function per refused form: its first line the refused `catch` or exit)
+  const refused = [
+    // (the design check's witness: V8's refusal of a frozen write, handled by its class)
+    "function f() { try { work(); } catch (error) { if (error instanceof TypeError) return; throw error; } }",
+    "function f() { try { work(); } catch (error) { if (error instanceof Error) return; throw error; } }",
+    "function f() { try { work(); } catch (error) { if (error instanceof Native) return; throw error; } }",
+    "function f() { try { work(); } catch (error) { if (error instanceof Nested) return; throw error; } }",
+    "function f() { try { work(); } catch { return; } }",
+    "function f() { try { work(); } catch (error) { cleanup(); } }",
+    "function f() { try { work(); } catch (error) { return; } }",
+    "function f() { try { work(); } catch (error) { if (error instanceof Error) throw new Stop(); throw error; } }",
+    "function f() { try { work(); } catch (error) { if (ready()) return; if (!(error instanceof Stop)) throw error; } }",
+    "function f() { try { work(); } catch (error) { throw new Stop(); } }",
+    // (the design check's other witness: a pending error replaced by a generator's `finally`)
+    "function* f() { try { work(); } finally { yield 0; } }",
+    "function f() { try { work(); } finally { return; } }",
+    "function f() { for (;;) { try { work(); } finally { break; } } }",
+    "function f() { for (;;) { try { work(); } finally { continue; } } }",
+    "function f() { try { work(); } finally { throw new Stop(); } }",
+  ];
+  // (a control per form: a class of type inference's own, a guard, a translation under its test, a cleanup that
+  // rethrows, a `finally` that only cleans up)
+  const passed = [
+    "function f() { try { work(); } catch (error) { if (error instanceof Stop) return; throw error; } }",
+    "function f() { try { work(); } catch (error) { if (!(error instanceof Stop)) throw error; return; } }",
+    "function f() { try { work(); } catch (error) { if (!(error instanceof Stop) && !(error instanceof Decline)) throw error; return; } }",
+    "function f() { try { work(); } catch (error) { if (!(error instanceof Stop) || ready()) throw error; return; } }",
+    "function f() { try { work(); } catch (error) { cleanup(); if (!(error instanceof Stop)) throw error; return; } }",
+    "function f() { try { work(); } catch (error) { if (error instanceof Stop) throw new Decline(); throw error; } }",
+    "function f() { try { work(); } catch (error) { if (!(error instanceof Stop)) throw error; throw new Decline(); } }",
+    "function f() { try { work(); } catch (error) { cleanup(); throw error; } }",
+    "function f() { try { work(); } catch (error) { for (const each of [1]) { if (each) break; } throw error; } }",
+    "function f() { try { work(); } finally { cleanup(); } }",
+    "function f() { try { work(); } finally { for (const each of [1]) { if (each) break; } } }",
+  ];
+  const files = [...refused, ...passed].map((form, index) => ({
+    name: `catch-${index}`,
+    text: `${form}\n${classes}\ndeclare function ready(): boolean;`,
+    level: "file",
+  }));
+  const found = scratch(files);
+  for (const [index, form] of [...refused, ...passed].entries())
+    assert.deepEqual(found.get(`catch-${index}`), index < refused.length ? [1] : [], form);
+});
+
+test("a class declared outside type inference is not one of its errors (#1072 R60)", () => {
+  assertMarked(
+    [
+      'import { AsyncLocalStorage } from "node:async_hooks";',
+      "class Stop extends Error {}",
+      "declare function work(): void;",
+      "export function f(): void {",
+      "  try {",
+      "    work();",
+      "  } catch (error) { // refused",
+      "    if (error instanceof AsyncLocalStorage) return;",
+      "    throw error;",
+      "  }",
+      "}",
+      "export function g(): void {",
+      "  try {",
+      "    work();",
+      "  } catch (error) {",
+      "    if (error instanceof Stop) return;",
+      "    throw error;",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+});
+
+test("a function is registered right below the comment naming its captures, its call found by resolution (#1072 R26)", () => {
+  assertMarked(
+    [
+      "declare const frontier: object;",
+      "declare const steps: object;",
+      "declare function use(value: unknown): void;",
+      "// (#1072 R26: captures `frontier`, an owner)",
+      "const a = Retained.closure('a', () => frontier);",
+      "const b = Retained.closure('b', () => frontier); // refused",
+      "// (#1072 R26: as `a`)",
+      "const c = Retained.closure('c', () => frontier);",
+      "// (#1072 R26: captures `frontier`, an owner, and",
+      "// `steps`, fixed when it is made)",
+      "use(Retained.closure('d', () => steps));",
+      "// a comment naming nothing",
+      "use(Retained.closure('e', () => steps)); // refused",
+      "const { closure } = Retained;",
+      "use(closure('f', () => steps)); // refused",
+    ].join("\n"),
+  );
+});
+
+test("a module the compiler reaches only through another module is read (#1072 R46)", () => {
+  const program = scratchProgram(repositoryRoot, [
+    {
+      file: "src/type-inference/core/scratch-reached.ts",
+      text: 'export { kept } from "./scratch-missed.mjs";\n',
+    },
+    {
+      file: "src/type-inference/core/scratch-missed.mts",
+      text: "export const kept = Reflect.get({}, 'n');\n",
+    },
+  ]);
+  const found = retainedStateDiagnostics(program, repositoryRoot).filter(({ fileName }) =>
+    fileName.startsWith("src/type-inference/core/scratch-"),
+  );
+  assert.deepEqual(
+    found.map(({ fileName, line }) => `${fileName}:${line}`),
+    ["src/type-inference/core/scratch-missed.mts:1"],
   );
 });
