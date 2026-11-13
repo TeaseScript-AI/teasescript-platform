@@ -464,26 +464,34 @@ test("a record page's anchors are exactly those the doc-links check resolves, he
   }
 });
 
+/**
+ * A Git repository in `root` holding the lint runner's entry, `checkCommentForecasts`, as on this repository: its module
+ * and the files it reads, with empty lists. Returns its `git` and a `write` that makes a file's folders.
+ */
+function forecastsCheckTree(root) {
+  const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
+  const write = (file, text) => {
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), text);
+  };
+  git("init", "-q");
+  write(".gitignore", "ignored/\nnode_modules\n");
+  for (const file of ["check-comment-forecasts.mjs", "comments.mjs"])
+    write(`tools/oxlint/comments/${file}`, readFileSync(new URL(file, import.meta.url)));
+  write("tools/oxlint/files.mjs", readFileSync(new URL("../files.mjs", import.meta.url)));
+  write(
+    "tools/repository-checks/markdown.mjs",
+    readFileSync(new URL("../../repository-checks/markdown.mjs", import.meta.url)),
+  );
+  write("tools/oxlint/comments/comment-forecasts-allowed.json", "[]\n");
+  write("tools/oxlint/comments/comment-citations.json", "{}\n");
+  return { git, write };
+}
+
 test("the TABLE citation check reads every file Git lists, by its exact path, and refuses a name it cannot read", async () => {
   const root = mkdtempSync(join(tmpdir(), "table-citations-"));
   try {
-    const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
-    const write = (file, text) => {
-      mkdirSync(dirname(join(root, file)), { recursive: true });
-      writeFileSync(join(root, file), text);
-    };
-    git("init", "-q");
-    write(".gitignore", "ignored/\nnode_modules\n");
-    // the lint runner's entry, `checkCommentForecasts`, run on this repository: its module and the files it reads
-    for (const file of ["check-comment-forecasts.mjs", "comments.mjs"])
-      write(`tools/oxlint/comments/${file}`, readFileSync(new URL(file, import.meta.url)));
-    write("tools/oxlint/files.mjs", readFileSync(new URL("../files.mjs", import.meta.url)));
-    write(
-      "tools/repository-checks/markdown.mjs",
-      readFileSync(new URL("../../repository-checks/markdown.mjs", import.meta.url)),
-    );
-    write("tools/oxlint/comments/comment-forecasts-allowed.json", "[]\n");
-    write("tools/oxlint/comments/comment-citations.json", "{}\n");
+    const { git, write } = forecastsCheckTree(root);
     // entries on every record page Git lists: the README, a nested page and another Markdown extension too
     const record = "docs/specifications/type-inference-accepted-record";
     write(
