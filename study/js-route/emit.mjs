@@ -5,6 +5,20 @@
 // (`Unsupported`), never guessed. Values are the native values of #2684; everything but the fast cases calls the
 // runtime library (`runtime.mjs`), which calls today's helpers, so faults and messages stay today's.
 
+import { conditionalExpressionPlanChildren, expressionPlanChildren } from "../../dist/src/plan/expression-children.js";
+
+const childrenOf = expressionPlanChildren;
+const conditionalChildren = (e) => conditionalExpressionPlanChildren(e);
+
+/** A copy of `node` with each object `map` holds replaced by its value; parts not in `map` are copied as they are. */
+function substitute(node, map) {
+  if (map.has(node)) return map.get(node);
+  if (Array.isArray(node)) return node.map((item) => substitute(item, map));
+  if (node !== null && typeof node === "object")
+    return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, substitute(value, map)]));
+  return node;
+}
+
 export class Unsupported extends Error {
   constructor(what) {
     super(`study emitter: ${what}`);
@@ -193,9 +207,30 @@ export function emitProgram(plan) {
           return `rt.unit(${konst(e)}, ${expr(e.operand)})`;
         case "call":
           return call(e);
+        case "dict":
+        case "set":
+        case "regex":
+        case "duration":
+        case "calendarDuration":
+        case "angleUnit":
+        case "typeTest":
+        case "tagQuery":
+        case "debugMode":
+        case "playerProfileField":
+        case "storageLoad":
+          return bridged(e);
         default:
           throw new Unsupported(`the expression kind '${e.kind}'`);
       }
+    }
+
+    /** Today's evaluator for `e`, over its parts evaluated here in order (`rt.bridge`). */
+    function bridged(e) {
+      if (conditionalChildren(e).length > 0) throw new Unsupported(`a ${e.kind} with a part that runs only on some ways`);
+      const children = childrenOf(e);
+      const map = new Map(children.map((child, index) => [child, { kind: "temporary", temporaryId: 1e9 + index, span: child.span }]));
+      const values = children.map((child) => (e.kind === "dict" || e.kind === "set" ? own(child) : expr(child)));
+      return `rt.bridge(${konst(substitute(e, map))}, [${values.join(", ")}], -1)`;
     }
 
     function binary(e) {
@@ -252,19 +287,21 @@ export function emitProgram(plan) {
           return `rt.randRange(${konst(e)}, ${JSON.stringify(name)}, ${own(e.arguments[0].value)})`;
       }
       const receiver = callee.kind === "property" ? expr(callee.object) : "null";
-      const positional = [];
-      const named = [];
+      const args = [];
       e.arguments.forEach((argument, index) => {
-        if (index === lazy) return;
-        if (argument.kind === "positional") positional.push(own(argument.value));
-        else named.push(`${JSON.stringify(argument.name)}: ${own(argument.value)}`);
+        if (index !== lazy) args.push(own(argument.value));
       });
-      // Arguments run in written order: a named one before a positional one keeps its place.
-      const order = e.arguments.every((a, i) => i === lazy || a.kind === "positional" || e.arguments.slice(i + 1).every((b, j) => i + 1 + j === lazy || b.kind !== "positional"));
-      if (!order) throw new Unsupported("a call with a named argument before a positional one");
+      // Without a lazy default, today's evaluator can run a call the native operations do not have.
+      let synthetic = "null";
+      if (lazy === -1) {
+        const map = new Map();
+        let slot = 0;
+        if (callee.kind === "property") map.set(callee.object, { kind: "temporary", temporaryId: 1e9 + slot++, span: callee.object.span });
+        for (const argument of e.arguments) map.set(argument.value, { kind: "temporary", temporaryId: 1e9 + slot++, span: argument.value.span });
+        synthetic = konst(substitute(e, map));
+      }
       const r = x();
-      const recv = x();
-      const head = `(${recv} = ${receiver}, ${r} = rt.call(${konst(e)}, ${recv}, [${positional.join(", ")}], {${named.join(", ")}}, ${lazy !== -1}))`;
+      const head = `(${r} = rt.call(${konst(e)}, ${synthetic}, ${receiver}, [${args.join(", ")}], ${lazy}))`;
       if (lazy === -1) return `(${head}, ${r} === rt.NEEDS ? rt.throwIt(new Error("study: a call that needs a default it does not have")) : ${r})`;
       const fallback = e.arguments[lazy].value;
       return `(${head}, ${r} === rt.NEEDS ? rt.acceptDefault(${konst(e)}, ${own(fallback)}, ${konst(fallback.span)}) : ${r})`;
@@ -343,17 +380,25 @@ export function emitProgram(plan) {
               line(`if (${c} !== true) { if (${c} === false) break; throw rt.notBool(${konst(ins.expression)}, ${c}); }`);
               scopes.push(new Map());
             } else if (ins.loopKind === "for") {
-              if (ins.valueVariable !== undefined) throw new Unsupported("a 'for' loop with a value variable");
               const s = x();
-              const n = x();
-              line(`${s} = ${expr(ins.expression)};`);
-              line(`${n} = rt.forRange(${konst(ins)}, ${s});`);
-              const i = `i${ins.loopId}_${pc}`;
-              line(`${label}: for (let ${i} = 0, a${pc} = ${s}.start, n${pc} = ${n}; ${i} < n${pc}; ${i}++) {`);
+              line(`${s} = rt.forSource(${konst(ins)}, ${expr(ins.expression)});`);
+              const i = `i${pc}`;
+              line(`${label}: for (let ${i} = 0, a${pc} = ${s}.start, n${pc} = ${s}.length, it${pc} = ${s}.items, vs${pc} = ${s}.values; ${i} < n${pc}; ${i}++) {`);
               indent += 1;
               scopes.push(new Map());
               const v = declare(ins.variable);
-              line(`let ${v.code} = a${pc} + ${i};`);
+              line(`let ${v.code} = it${pc} === null ? a${pc} + ${i} : it${pc}[${i}];`);
+              if (ins.valueVariable !== undefined) {
+                const w = declare(ins.valueVariable);
+                const c = x();
+                line(`let ${w.code} = (${c} = vs${pc}[${i}], typeof ${c} === "object" && ${c} !== null ? rt.copy(${c}) : ${c});`);
+              }
+            } else if (ins.loopKind === "repeat") {
+              const n = x();
+              line(`${n} = rt.repeatCount(${konst(ins.expression)}, ${expr(ins.expression)});`);
+              line(`${label}: for (let r${pc} = ${n}; r${pc} > 0; r${pc}--) {`);
+              indent += 1;
+              scopes.push(new Map());
             } else throw new Unsupported(`a '${ins.loopKind}' loop`);
             emitRange(pc + 1, endLoop);
             scopes.pop();
@@ -446,7 +491,7 @@ export function emitProgram(plan) {
             if (root.kind === "property") steps.unshift(root.name);
             root = root.kind === "group" ? root.expression : root.object;
           }
-          if (root.kind !== "identifier" || ins.expression.kind === "identifier")
+          if (root.kind !== "identifier")
             throw new Unsupported("a prepared reference that is not a place inside a variable");
           const placeLabel = label ? JSON.stringify([root.name, ...steps].join(".")) : "null";
           line(`${temp(ins.destinationTemporary)} = ${expr(ins.expression)}; rt.referenceLabels[${ins.destinationTemporary}] = ${placeLabel};`);

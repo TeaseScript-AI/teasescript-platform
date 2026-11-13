@@ -282,7 +282,7 @@ function iterationValue(
 }
 
 /** `TSR043` for a `repeat` count that is not a whole number of at least 0, with the fix for the value it is. */
-function badRepeatCount(
+export function badRepeatCount(
   plan: ExpressionPlan,
   value: SerializableRuntimeValue,
   program: InstructionPlan,

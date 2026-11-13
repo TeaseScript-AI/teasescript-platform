@@ -9,11 +9,17 @@ import {
   templateText,
   unitDuration,
 } from "../../dist/src/runtime/evaluator.js";
+import { Evaluator } from "../../dist/src/runtime/evaluator.js";
 import { haltForExit } from "../../dist/src/runtime/engine.js";
+import { DICT_ACCESS } from "../../dist/src/dict-operations.js";
+import { isRepeatCount } from "../../dist/src/loop-rules.js";
+import { badRepeatCount } from "../../dist/src/runtime/instructions/loops.js";
+import { collectionTooLong, MAX_COLLECTION_LENGTH } from "../../dist/src/runtime/values/collection-size.js";
+import { NativeNotImplementedError } from "../../dist/src/runtime/native/operations/not-implemented.js";
 import { randomIntegerInRange } from "../../dist/src/runtime/evaluation/draws.js";
 import { loweredLogicalOperator } from "../../dist/src/runtime/evaluation/lowered-operands.js";
 import { notBoolean, notLogicalOperand } from "../../dist/src/runtime/evaluation/operators.js";
-import { notIndexable } from "../../dist/src/runtime/evaluation/access.js";
+import { dictKey, notIndexable } from "../../dist/src/runtime/evaluation/access.js";
 import { fault } from "../../dist/src/runtime/evaluation/support.js";
 import {
   declaredSpeaker,
@@ -76,6 +82,8 @@ export class Runtime {
     this.referenceLabels = [];
     this.session = session;
     this.NEEDS = NEEDS_DEFAULT;
+    /** How many calls and expressions today's evaluator ran for the program (`bridge`). */
+    this.bridged = 0;
   }
 
   preparedReferenceLabel(temporaryId) {
@@ -163,9 +171,43 @@ export class Runtime {
     throw new Error(`study: a read of '${name}' before it has a value is not emitted`);
   }
 
-  // Calls.
-  call(expression, receiver, positional, named, lazy) {
-    return nativeCall(this, expression, receiver, positional, named, lazy);
+  // Calls: the native operations, else today's evaluator over the evaluated parts (`bridge`).
+  call(expression, synthetic, receiver, args, lazy) {
+    const positional = [];
+    const named = {};
+    let next = 0;
+    expression.arguments.forEach((argument, index) => {
+      if (index === lazy) return;
+      const value = args[next++];
+      if (argument.kind === "positional") positional.push(value);
+      else named[argument.name] = value;
+    });
+    try {
+      return nativeCall(this, expression, receiver, positional, named, lazy !== -1);
+    } catch (error) {
+      if (!(error instanceof NativeNotImplementedError) || synthetic === null) throw error;
+      this.bridged += 1;
+      return expression.callee.kind === "property"
+        ? this.bridge(synthetic, [receiver, ...args], 0)
+        : this.bridge(synthetic, args, -1);
+    }
+  }
+  /**
+   * Today's evaluator on `synthetic`, an expression whose evaluated parts are temporaries 1e9 + i holding `values` as
+   * canonical values; the value at `receiver` (a method's receiver, -1 for none) takes back what the call changed in it.
+   */
+  bridge(synthetic, values, receiver) {
+    const snapshot = this.snapshot;
+    const base = snapshot.temporaries.length;
+    values.forEach((value, index) => snapshot.temporaries.push({ id: 1e9 + index, value: shown(value) }));
+    const evaluator = new Evaluator(snapshot, this.capabilities, this.events, this.plan);
+    try {
+      return fromCanonical(evaluator.evaluate(synthetic));
+    } finally {
+      const changed = receiver >= 0 ? snapshot.temporaries[base + receiver].value : null;
+      snapshot.temporaries.length = base;
+      if (receiver >= 0) syncInPlace(values[receiver], changed);
+    }
   }
   acceptDefault(expression, value, fallbackSpan) {
     acceptedDefault(
@@ -191,22 +233,48 @@ export class Runtime {
   }
 
   // Loops.
-  forRange(instruction, value) {
+  /** What a `for` loop goes through, as it is when the loop starts: a range's start and length, or its own items. */
+  forSource(instruction, value) {
+    const pair = instruction.valueVariable !== undefined;
+    if (!pair && Array.isArray(value)) return { start: 0, length: value.length, items: copyNativeValue(value), values: null };
+    if (!pair && value instanceof NativeSet) {
+      const items = copyNativeValue(value).items;
+      return { start: 0, length: items.length, items, values: null };
+    }
+    if (value instanceof NativeDict) {
+      const keys = [...value.entries.keys()];
+      const values = pair ? [...value.entries.values()] : null;
+      return { start: 0, length: keys.length, items: keys, values };
+    }
     const source = forLoopSource(this.plan, instruction, shown(value));
-    if (!isRange(source)) throw new Error("study: a 'for' loop over a list, set or dict is not emitted yet");
-    return rangeLength(source);
+    if (!isRange(source)) throw new Error("study: forLoopSource accepted an unknown source");
+    return { start: source.start, length: rangeLength(source), items: null, values: null };
+  }
+  repeatCount(expression, value) {
+    if (typeof value !== "number" || !isRepeatCount(value)) throw badRepeatCount(expression, shown(value), this.plan);
+    return value;
   }
 
   // Stores.
   storeIndex(target, object, index, value) {
     if (object instanceof NativeSet) throw notIndexable(this, "TSR004", target.object, shown(object), target.span);
-    if (object instanceof NativeDict) throw new Error("study: a store into a dict is not emitted yet");
+    if (object instanceof NativeDict) {
+      // A new key is added at the end; an existing key keeps its position.
+      const key = dictKey(this, shown(index), target.index);
+      if (object.entries.size >= MAX_COLLECTION_LENGTH && !object.entries.has(key))
+        throw collectionTooLong("dict", DICT_ACCESS.store.grows, target.span, object.entries.size + 1);
+      object.entries.set(key, value);
+      return;
+    }
     if (!Array.isArray(object)) throw notIndexable(this, "TSR005", target.object, shown(object), target.span);
     object[nativeListPosition(this, object, target.object, target.index, index, "assign")] = value;
   }
   checkIndexStore(target, object, index) {
     if (object instanceof NativeSet) throw notIndexable(this, "TSR004", target.object, shown(object), target.span);
-    if (object instanceof NativeDict) throw new Error("study: a store into a dict is not emitted yet");
+    if (object instanceof NativeDict) {
+      dictKey(this, shown(index), target.index);
+      return;
+    }
     if (!Array.isArray(object)) throw notIndexable(this, "TSR005", target.object, shown(object), target.span);
     nativeListPosition(this, object, target.object, target.index, index, "assign");
   }
@@ -324,5 +392,25 @@ export class Runtime {
   }
   fault(code, message, span) {
     return fault(code, message, span);
+  }
+}
+
+/** Makes a native composite hold what its changed canonical form holds, keeping the composite's identity. */
+function syncInPlace(target, canonical) {
+  if (canonical === null || typeof canonical !== "object") return;
+  const fresh = fromCanonical(canonical);
+  if (Array.isArray(target) && Array.isArray(fresh)) {
+    target.length = 0;
+    for (const item of fresh) target.push(item);
+  } else if (target instanceof NativeObject && fresh instanceof NativeObject) {
+    target.properties.clear();
+    for (const [k, v] of fresh.properties) target.properties.set(k, v);
+  } else if (target instanceof NativeDict && fresh instanceof NativeDict) {
+    target.entries.clear();
+    for (const [k, v] of fresh.entries) target.entries.set(k, v);
+  } else if (target instanceof NativeSet && fresh instanceof NativeSet) {
+    target.items.length = 0;
+    for (const item of fresh.items) target.items.push(item);
+    target.membership = null;
   }
 }
