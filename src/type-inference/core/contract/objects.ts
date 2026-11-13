@@ -44,7 +44,7 @@ import { resultOf, valueRoute } from "./value-kinds.js";
  * property, a stored `missing`), and the keys whose own stores and written type at a further property it does not
  * cover. Its read at `rest.s` for a property `s` then names its pure `missing` by `absentWriterAt` without reading `s`.
  * A demand once per value and path, read through `Solver.proven`; a route it does not follow declines (`complete`
- * false), and its reader (`absentWriterAt`) answers uncovered. Routed as `valueAt` routes (`valueRoute`).
+ * false). Routed as `valueAt` routes (`valueRoute`).
  */
 export function objectsAt(
   contract: Contract,
@@ -90,8 +90,7 @@ export function keyObjects(contract: Contract, asked: Key): ProofDemand<ObjectsP
  * #1747: the pure `missing` writer of `value`'s contract read at `rest.s` (the earliest), from its objects at `rest`
  * (`objectsAt`): the writers met on the way and, of each object list there, its first object lacking `s`
  * (`lackingAt`); `covered` false where the query declines, `s` is stored or typed below a key it reads or that key's
- * read at `s` stopped, or an entry stands at `s` below a list. Each support node of the proof once. The analysis does
- * not call it: its one caller is the objects query's test (`type-core-objects.test.ts`).
+ * read at `s` stopped, or an entry stands at `s` below a list. Each support node of the proof once. Test-only.
  */
 export function* absentWriterAt(
   contract: Contract,

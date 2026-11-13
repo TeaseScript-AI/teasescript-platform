@@ -707,8 +707,7 @@ function prefixFound(
  * The sources a prefix's property reads apart from the shared entries, in their keys' order, each with the prefix's
  * stores that brought a layer listing it (the candidates for a conflict): those its layers list under the property's
  * first step with stores of their own at the property's path or above it below their root (`layerSupport`). The exact
- * enumeration, which costs its output: a consumer that needs less reads a layer's summary (`summaryItems` and its
- * siblings).
+ * enumeration, which costs its output.
  */
 export function relevantSubs(
   contract: Contract,
