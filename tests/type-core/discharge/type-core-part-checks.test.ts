@@ -1,29 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProjectWithBackend, compileSourceWithBackend } from "../../src/compiler.js";
-import { INSTRUCTION_PLAN_VERSION, type InstructionPlan } from "../../src/plan/model.js";
-import { validateInstructionPlan } from "../../src/plan/validation.js";
-import { run } from "../../src/runtime/engine.js";
+import { compileProjectWithBackend, compileSourceWithBackend } from "../../../src/compiler.js";
+import { INSTRUCTION_PLAN_VERSION, type InstructionPlan } from "../../../src/plan/model.js";
+import { validateInstructionPlan } from "../../../src/plan/validation.js";
+import { run } from "../../../src/runtime/engine.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../../src/runtime/snapshot/checkpoint.js";
+} from "../../../src/runtime/snapshot/checkpoint.js";
 import {
   createSerializableList,
   createSerializableObject,
   type SerializableRuntimeValue,
-} from "../../src/runtime/values/serializable-values.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
-import { withoutRecords } from "../../src/type-inference/core/consumers.js";
-import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
-import { planFileOf } from "../helpers/site-keys.js";
-import { completedCore, coreRequest } from "../helpers/type-core-analysis.js";
-import { HELD_MODES } from "../helpers/type-core-held-host.js";
-import { partProblems } from "../helpers/type-core-oracles.js";
+} from "../../../src/runtime/values/serializable-values.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { withTestDemandAllowance } from "../../../src/type-inference/core/budget.js";
+import { withoutRecords } from "../../../src/type-inference/core/consumers.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
+import { planFileOf } from "../../helpers/site-keys.js";
+import { completedCore, coreRequest } from "../../helpers/type-core-analysis.js";
+import { HELD_MODES } from "../../helpers/type-core-held-host.js";
+import { partProblems } from "../../helpers/type-core-oracles.js";
 
 /*
  * A typed part below a variable that holds host data (#1224, the lead's ruling (c)): the analysis owes the part's check

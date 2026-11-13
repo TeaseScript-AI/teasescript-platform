@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProjectWithBackend } from "../../src/compiler.js";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { checkedResult } from "../../src/type-inference/core/check-result/check-result.js";
-import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
-import { coreRecord } from "../../src/type-inference/core/result.js";
-import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
-import { inMode, MODES, stopSet } from "../helpers/type-core-oracles.js";
-import { runGlobals } from "../helpers/type-core-route.js";
-import { sampled } from "../helpers/sweep.js";
+import { compileProjectWithBackend } from "../../../src/compiler.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { checkedResult } from "../../../src/type-inference/core/check-result/check-result.js";
+import { coreMessage, messageSource } from "../../../src/type-inference/core/messages.js";
+import { coreRecord } from "../../../src/type-inference/core/result.js";
+import { coreRequest, type SourceFile } from "../../helpers/type-core-analysis.js";
+import { inMode, MODES, stopSet } from "../../helpers/type-core-oracles.js";
+import { runGlobals } from "../../helpers/type-core-route.js";
+import { sampled } from "../../helpers/sweep.js";
 
 // #2378, the owner's decision of 2026-11-12 (V30 §12): a function's written result type travels to the copies of its
 // result, as a variable's written type travels to the copies of the variable (ADR 0021 1.1-1.3). A call of such a

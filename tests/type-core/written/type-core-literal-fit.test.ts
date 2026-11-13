@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { analyseCore } from "../../src/type-inference/core/answers.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
-import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
-import { CoreProgram } from "../../src/type-inference/core/program.js";
-import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
-import { inMode, MODES } from "../helpers/type-core-oracles.js";
+} from "../../../src/type-inference/core/budget.js";
+import { coreMessage, messageSource } from "../../../src/type-inference/core/messages.js";
+import { CoreProgram } from "../../../src/type-inference/core/program.js";
+import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
+import { inMode, MODES } from "../../helpers/type-core-oracles.js";
 
 // #2289, decision B's B1: a literal's type is the one all its elements fit, in any order (ADR 0021 1.3, V30 §12); the
 // place is strict where an element is declared with exactly that type (rule 5).

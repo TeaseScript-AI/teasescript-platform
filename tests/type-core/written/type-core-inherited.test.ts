@@ -4,18 +4,18 @@ import test from "node:test";
 import {
   Admission,
   admissionRunsInsideSolverRuns,
-} from "../../src/type-inference/core/admission.js";
-import { analyseCore, solveDemands } from "../../src/type-inference/core/answers.js";
-import { DemandExhausted } from "../../src/type-inference/core/budget.js";
-import { exportNames, isKeyId } from "../../src/type-inference/core/contract/key-ids.js";
-import { keyOf } from "../../src/type-inference/core/definitions.js";
-import { inheritedAt } from "../../src/type-inference/core/inherited/inherited.js";
-import { CoreProgram } from "../../src/type-inference/core/program.js";
-import { withSolverSeam } from "../../src/type-inference/core/solver.js";
-import type { PlaceId } from "../../src/type-inference/graph.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
-import { inMode, MODES, publication } from "../helpers/type-core-oracles.js";
+} from "../../../src/type-inference/core/admission.js";
+import { analyseCore, solveDemands } from "../../../src/type-inference/core/answers.js";
+import { DemandExhausted } from "../../../src/type-inference/core/budget.js";
+import { exportNames, isKeyId } from "../../../src/type-inference/core/contract/key-ids.js";
+import { keyOf } from "../../../src/type-inference/core/definitions.js";
+import { inheritedAt } from "../../../src/type-inference/core/inherited/inherited.js";
+import { CoreProgram } from "../../../src/type-inference/core/program.js";
+import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
+import type { PlaceId } from "../../../src/type-inference/graph.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { narrowingPass } from "../../helpers/type-core/type-core-narrowing.js";
+import { inMode, MODES, publication } from "../../helpers/type-core-oracles.js";
 
 /*
  * #1072 A2 checkpoint 2a: A4's inherited written type (ADR 0021 1.3) as a solver proof per key, a read of a key whose

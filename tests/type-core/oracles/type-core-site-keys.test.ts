@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProject } from "../../src/compiler.js";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { enclosingFunction, planFileOf, planSiteKey, siteKey } from "../helpers/site-keys.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
+import { compileProject } from "../../../src/compiler.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { enclosingFunction, planFileOf, planSiteKey, siteKey } from "../../helpers/site-keys.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
 
 test("a site's key names its file: a plan's instruction by the file it comes from, a function in the site's own file (#1700)", () => {
   // (two files whose offsets meet: other.tease's function spans offsets where main.tease reads `xs` outside any, and its
