@@ -102,14 +102,6 @@ export abstract class RouteEntries extends RouteCandidates {
     into: Entry,
   ): Work<Definition | null>;
 
-  /**
-   * In a program the default holds, the arms its corridors pass through none of (`RouteTests.feasibility`), set by the
-   * first `required` there (`NarrowingRoutes`); `null` elsewhere, where every route query is main's. Under it an entry
-   * route is taken only where r4-451's program default admits it (`standsAt`, `#reached`), and its relation carries
-   * no entry on (r4-451).
-   */
-  protected feasible: Feasibility | null = null;
-
   /** The candidates a seed may be, by body: the key's stores (`seedAt`'s). */
   protected abstract seedLists(key: Key): Work<readonly ReadonlyMap<TreeBlock, Candidates>[]>;
 
