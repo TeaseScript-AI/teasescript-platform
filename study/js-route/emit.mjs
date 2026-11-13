@@ -296,11 +296,28 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
         case "tagQuery":
         case "debugMode":
         case "playerProfileField":
-        case "storageLoad":
           return bridged(e);
+        case "storageLoad": {
+          if (e.default === null || closed(e.default)) return bridged(e);
+          // A default that reads the program runs only when the load needs it: the load without it first, then the
+          // load again with the default's value (a load reads; doing it twice changes nothing).
+          const key = x();
+          const pair = x();
+          const keyTemp = { kind: "temporary", temporaryId: 1e9, span: e.key.span };
+          const without = konst({ ...e, key: keyTemp, default: null });
+          const withValue = konst({ ...e, key: keyTemp, default: { kind: "temporary", temporaryId: 1e9 + 1, span: e.default.span } });
+          return `(${key} = ${expr(e.key)}, ${pair} = rt.withoutDefault(${without}, [${key}]), ${pair}[1] ? rt.bridge(${withValue}, [${key}, ${expr(e.default)}], -1) : ${pair}[0])`;
+        }
         default:
           throw new Unsupported(`the expression kind '${e.kind}'`);
       }
+    }
+
+    /** The synthetic expression and evaluated parts of `e` for today's evaluator, as `rt.bridge` takes them. */
+    function bridgedParts(e) {
+      const children = childrenOf(e);
+      const map = new Map(children.map((child, index) => [child, { kind: "temporary", temporaryId: 1e9 + index, span: child.span }]));
+      return `${konst(substitute(e, map))}, [${children.map((child) => expr(child)).join(", ")}]`;
     }
 
     /** Today's evaluator for `e`, over its parts evaluated here in order (`rt.bridge`). */
@@ -761,11 +778,18 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
           line(`${expr(ins.expression)};`);
           return;
         case "storeTemporary": {
-          if (ins.defaultTemporary !== undefined || ins.defaultOf !== undefined || ins.repair !== undefined)
-            throw new Unsupported("a temporary that holds a default");
+          if (ins.repair !== undefined) throw new Unsupported("a temporary that holds a repaired record");
+          if (ins.defaultTemporary !== undefined) {
+            // The call or load without its default, by today's evaluator; the next instructions run the default if needed.
+            const pair = x();
+            line(`${pair} = rt.withoutDefault(${bridgedParts(ins.value)});`);
+            line(`${temp(ins.temporaryId)} = ${pair}[0]; ${temp(ins.defaultTemporary)} = ${pair}[1];`);
+            return;
+          }
           let value = own(ins.value);
-          if (ins.typeCheck !== undefined) value = typeChecked(value, ins.typeCheck, ins.value.span);
-          if (ins.fallbackCheck !== undefined) value = `rt.fallbackCheck(${value}, ${konst(ins.fallbackCheck)}, ${konst(ins.value.span)})`;
+          if (ins.defaultOf !== undefined) value = `rt.acceptDefaultOf(${konst(ins)}, ${value})`;
+          if (ins.defaultOf === undefined && ins.typeCheck !== undefined) value = typeChecked(value, ins.typeCheck, ins.value.span);
+          if (ins.defaultOf === undefined && ins.fallbackCheck !== undefined) value = `rt.fallbackCheck(${value}, ${konst(ins.fallbackCheck)}, ${konst(ins.value.span)})`;
           const t = temp(ins.temporaryId);
           line(`${t} = ${value};`);
           if (ins.expectBoolean)

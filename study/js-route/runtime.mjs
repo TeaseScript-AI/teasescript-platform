@@ -268,6 +268,24 @@ export class Runtime {
       if (receiver >= 0) syncInPlace(values[receiver], changed);
     }
   }
+  /** Today's `evaluateWithoutDefault` on `synthetic` over `values`: [value, whether the default is needed]. */
+  withoutDefault(synthetic, values) {
+    const snapshot = this.snapshot;
+    const base = snapshot.temporaries.length;
+    values.forEach((value, index) => snapshot.temporaries.push({ id: 1e9 + index, value: shown(value) }));
+    this.bridged += 1;
+    try {
+      const { needed, value } = new Evaluator(snapshot, this.capabilities, this.events, this.plan).evaluateWithoutDefault(synthetic);
+      return [fromCanonical(value), needed];
+    } finally {
+      snapshot.temporaries.length = base;
+    }
+  }
+  /** A default that ran as instructions, checked as its call checks it (`StoreTemporaryInstruction.defaultOf`). */
+  acceptDefaultOf(instruction, value) {
+    acceptedDefault(instruction.defaultOf, shown(value), instruction.typeCheck, instruction.value.span, instruction.fallbackCheck);
+    return value;
+  }
   acceptDefault(expression, value, fallbackSpan) {
     acceptedDefault(
       lazyDefaultCallOperation(expression),
@@ -377,6 +395,8 @@ export class Runtime {
       speakerId: speaker.id,
       identifier: instruction.name,
     });
+    // As today's engine: the speaker's global is in the state too, where today's helpers look a speaker up by name.
+    snapshot.globals.push({ name: instruction.name, value: { kind: "speakerReference", speakerId: speaker.id, identifier: instruction.name } });
     for (const property of instruction.properties) {
       if (property.value.kind !== "literal") throw new Error("study: a computed speaker property is not emitted");
       speaker.properties.push({
