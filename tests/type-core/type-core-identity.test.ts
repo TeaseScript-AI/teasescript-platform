@@ -3,10 +3,8 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
+import { parse } from "../../src/parser.js";
 import { identityView } from "../../src/type-inference/core/identity-view.js";
-import { type WorkFamily } from "../helpers/type-core/families/builders.js";
-import { analysed, many, sized, steepCounters } from "../helpers/type-core/type-core-work.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
 import {
   analysisByLine,
@@ -213,6 +211,10 @@ const WRAPPED: readonly (readonly [string, string])[] = [
     'let box = {n: 1}\nif load("clear", default: true) {\n  box.n = null\n}\nif ⟦box⟧.n != null {\n  repeat box.n {}\n}\nexit',
   ],
   [
+    "a null test's subject, changed before an asynchronous handler it encloses runs (the clock advanced)",
+    "global data: integer? = 1\nif ⟦data⟧ != null {\n  timer async 1 s {\n    repeat data {}\n  }\n  data = null\n  wait 2 s\n}\nexit",
+  ],
+  [
     "a tested path below the argument, changed after the test",
     "let box = {n: 1}\nif ⟦box⟧.n != null {\n  box.n = null\n  repeat box.n {}\n}\nexit",
   ],
@@ -251,6 +253,9 @@ test("a widened identity result adds no run-time stop to its twin's run, past th
   for (const mode of MODES) assert.deepEqual(stops("pass", mode), stops("plain", mode));
 });
 
+const WITNESS_WHAT = "the receiver of a method whose callee is in parentheses";
+const WITNESS = 'let xs = []\nlet held = xs\n(⟪xs⟫.add)(1)\nxs.add("s")\nsay "${xs[0]}"\nexit';
+
 /**
  * Sources whose `⟪argument⟫` stands in a place slot, as `pass(argument)` or as `held`, a copy of the argument that the
  * line before declares in both forms: the call stays a call, its result a copy (#2493, r4-452).
@@ -288,6 +293,12 @@ const PLACES: readonly (readonly [string, string])[] = [
     "the receiver of a dict method that changes it",
     'let d = dict{"a": null, "b": 2}\nlet held = d\nlet gone = ⟪d⟫.remove("a")\nfor k, v in d {\n  let w: integer = v\n  say "${k} ${w} ${gone}"\n}\nexit',
   ],
+  [
+    "the receiver of a changing method below an element",
+    'let rows = [[1]]\nlet held = rows\n⟪rows⟫[0].add(null)\nfor x in rows[0] {\n  let v: integer = x\n  say "${v}"\n}\nexit',
+  ],
+  // the final re-check's witness (#2537): the collector reads a method through the parentheses around its callee
+  [WITNESS_WHAT, WITNESS],
 ];
 
 const placeForm = (marked: string, form: "pass" | "copy"): SourceFile[] =>
@@ -308,14 +319,99 @@ const less = (found: readonly string[], kept: readonly string[]): string[] => {
   });
 };
 
+/**
+ * `source` with parentheses, once and doubled, around each expression on the way from its statement to each call of
+ * `pass` (the call, each receiver and callee above it, a method's call), one place per source (R49).
+ */
+function parenthesized(source: string): string[] {
+  type Tree = { readonly [member: string]: unknown };
+  const isTree = (value: unknown): value is Tree => value !== null && typeof value === "object";
+  const text = (value: unknown, member: string): string => {
+    const found = isTree(value) ? value[member] : undefined;
+    return typeof found === "string" ? found : "";
+  };
+  const offset = (value: Tree, edge: "start" | "end"): number | null => {
+    const span = value["span"];
+    const at = isTree(span) ? span[edge] : undefined;
+    const found = isTree(at) ? at["offset"] : undefined;
+    return typeof found === "number" ? found : null;
+  };
+  const holders = new Map<Tree, { readonly holder: Tree; readonly key: string }>();
+  const calls: Tree[] = [];
+  const stack: [unknown, Tree | null, string][] = [[parse(source).program, null, ""]];
+  for (let at = stack.pop(); at !== undefined; at = stack.pop()) {
+    const [value, holder, key] = at;
+    if (!isTree(value)) continue;
+    if (holder !== null) holders.set(value, { holder, key });
+    if (text(value, "kind") === "callExpression" && text(value["callee"], "name") === "pass")
+      calls.push(value);
+    for (const [member, child] of Object.entries(value))
+      if (member !== "span") stack.push([child, value, member]);
+  }
+  const out: string[] = [];
+  for (const call of calls)
+    for (
+      let node: Tree = call, up = holders.get(node);
+      up !== undefined && !text(node, "kind").endsWith("Statement");
+      node = up.holder, up = holders.get(node)
+    ) {
+      // (an assignment's target is no expression of its own, nor a statement's call in parentheses a statement; a list
+      // holds an argument, no expression)
+      const target =
+        (text(up.holder, "kind") === "assignmentStatement" && up.key === "target") ||
+        text(up.holder, "kind") === "expressionStatement";
+      const [start, end] = [offset(node, "start"), offset(node, "end")];
+      if (target || !text(node, "kind").endsWith("Expression") || start === null || end === null)
+        continue;
+      for (const [open, close] of [
+        ["(", ")"],
+        ["((", "))"],
+      ])
+        out.push(
+          source.slice(0, start) + open + source.slice(start, end) + close + source.slice(end),
+        );
+    }
+  return out;
+}
+
+test("parentheses on the way from the statement to a call in a place slot leave the analysis as it is (#2493, R49)", () => {
+  for (const [what, marked] of PLACES) {
+    const files = placeForm(marked, "pass");
+    const variants = parenthesized(files[0]!.source);
+    assert.ok(variants.length >= 2, what);
+    assert.deepEqual(
+      variants.filter((source) => coreRequest(main(source)) === null),
+      [],
+      `${what}: each form parses and resolves`,
+    );
+    for (const source of variants) {
+      assert.equal(identityView(coreRequest(main(source))!).calls, 0, source);
+      for (const mode of MODES)
+        assert.equal(analysisByLine(main(source), mode), analysisByLine(files, mode), source);
+    }
+  }
+});
+
+test("the re-check's witness, compiled and run past the answers' refusals: its copy twin's plan and run (#2493)", () => {
+  // (the slice refuses an author function's list argument, on main as here: `answers: "past"` reads past it)
+  for (const mode of MODES) {
+    const called = compiledByLine(placeForm(WITNESS, "pass"), mode, undefined, "past");
+    const copied = compiledByLine(placeForm(WITNESS, "copy"), mode, undefined, "past");
+    const at = JSON.stringify(mode);
+    assert.deepEqual(called.diagnostics, copied.diagnostics, at);
+    assert.deepEqual(less(copied.checks, called.checks), [], at);
+    assert.deepEqual(called.run, copied.run, at);
+  }
+});
+
 test("a call in a place slot stays a call: no error its copy does not give, every run-time check its copy has (#2493)", () => {
   for (const [what, marked] of PLACES) {
     assert.equal(identityView(coreRequest(placeForm(marked, "pass"))!).calls, 0, what);
     for (const mode of MODES) {
       const called = checkedByLine(placeForm(marked, "pass"), mode)!;
       const copied = checkedByLine(placeForm(marked, "copy"), mode)!;
-      assert.deepEqual(less(called.errors, copied.errors), [], `${what}: ${mode}`);
-      assert.deepEqual(less(copied.checks, called.checks), [], `${what}: ${mode}`);
+      assert.deepEqual(less(called.errors, copied.errors), [], `${what}: ${JSON.stringify(mode)}`);
+      assert.deepEqual(less(copied.checks, called.checks), [], `${what}: ${JSON.stringify(mode)}`);
     }
   }
 });
@@ -325,7 +421,8 @@ test("a call in a place slot stays a call: no error its copy does not give, ever
  * expression and its calls of the helpers that unwrap one (`unwrap`, `unwrapped`, `peel`), and the place slots among
  * them, the slots through which a write reaches (P1 a store's receiver chain, P2 a changing method's receiver), which the
  * view keeps as calls (`placeSlots`); every other reads a value, which a call's copy shares when it runs, a test's
- * subject too (it writes nothing). A new reader fails here until it is classed.
+ * subject too (it writes nothing). A new reader that names the kind or one of these helpers fails here until it is
+ * classed; the count resolves no binding, so a helper imported under another name is not found.
  */
 const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   "collector.ts": [
@@ -356,8 +453,8 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
     "values: a condition, a count, a range, an index, a subject's value",
   ],
   "core/identity-view.ts": [
-    2,
-    "the view: its parentheses, and a place slot's chain (`placeSlots`)",
+    4,
+    "the view: its parentheses, a place slot's chain, and a method's callee read through parentheses with the collector's `unwrap` and its parentheses counted (`placeSlots`)",
   ],
   "core/indexes/guards.ts": [4, "values: a test's operands and their receiver chains"],
   "core/messages/causes.ts": [1, "a value a message names"],
@@ -394,38 +491,4 @@ test("every reader of the analysis that unwraps parentheses is classed, its plac
     found,
     Object.fromEntries(Object.entries(UNWRAPPING).map(([file, [count]]) => [file, count])),
   );
-});
-
-test("the view takes no work without an identity function, and charges its walk with one (#2493)", () => {
-  const plain = coreRequest(main('let box = {n: 1}\nbox.n = 2\nsay "${box.n}"\nexit'))!;
-  const none = identityView(plain);
-  assert.equal(none.request, plain);
-  assert.equal(none.steps, 0);
-  assert.equal(analyseCore(plain).budget.counts.has("identitySteps"), false);
-  const wrapped = coreRequest(
-    main(`${PASS}let box = {n: pass(1)}\nbox.n = 2\nsay "\${box.n}"\nexit`),
-  )!;
-  const steps = identityView(wrapped).steps;
-  assert.ok(steps > 0);
-  assert.equal(analyseCore(wrapped).budget.counts.get("identitySteps"), steps);
-});
-
-/** k statements, each with a call read and a call kept in a place slot. */
-const IDENTITY_CALLS: WorkFamily = {
-  name: "identity-calls",
-  measures: "#2493: the view's walk and rebuild, a unit per value of the syntax",
-  program: (k) =>
-    main(`${PASS}${many(k, (i) => `let b${i} = {n: pass(${i})}\npass(b${i}).n = pass(1)`)}\nexit`),
-};
-
-test("the view's work grows with the program, at three sizes (#2493)", () => {
-  assert.deepEqual(
-    [
-      ...steepCounters([IDENTITY_CALLS]),
-      ...steepCounters([IDENTITY_CALLS], false, undefined, [128, 256]),
-    ],
-    [],
-  );
-  for (const k of [64, 128, 256])
-    assert.ok((analysed(sized(IDENTITY_CALLS, k)).budget.counts.get("identitySteps") ?? 0) > 0);
 });

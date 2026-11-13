@@ -9,6 +9,7 @@ import { planCheckList } from "./plan-checks.js";
 import { coreRequest, type SourceFile } from "./type-core-analysis.js";
 import { inMode, type Mode } from "./type-core-oracles-modes.js";
 import { run } from "../../src/runtime/engine.js";
+import { observeTime } from "../../src/runtime/operations/observe-time.js";
 
 /** The identity helper a marked source's expressions pass through. */
 const HELPER = "global function pass(given) {\n  return given\n}\n";
@@ -89,15 +90,22 @@ export interface CompiledByLine {
 /**
  * A source compiled to its end in `mode` with the core past the slice's syntax check (`coreOutcome`), which refuses a
  * function, and its plan run with immediate pacing: each diagnostic by path, line, severity and code, without its
- * message, which quotes the expression; each check by its line and what it checks.
+ * message, which quotes the expression; each check by its line and what it checks. A run that waits is given the clock
+ * a minute later, at most 8 times, so a timer's handler runs. `answers: "past"` passes the answers' refusals too (an
+ * author function's list argument, which the slice does not cover yet).
  */
 export function compiledByLine(
   files: readonly SourceFile[],
   mode: Mode,
   globals: readonly string[] = ["hostValue"],
+  answers: "refused" | "past" = "refused",
 ): CompiledByLine {
   const result = inMode(mode, () =>
-    compileProjectWithBackend(files, { globals }, { name: "core", analyze: coreOutcome }),
+    compileProjectWithBackend(
+      files,
+      { globals },
+      { name: "core", analyze: (request) => coreOutcome(request, answers) },
+    ),
   );
   const diagnostics = result.diagnostics.map(
     (diagnostic) =>
@@ -107,12 +115,20 @@ export function compiledByLine(
   const checks = planCheckList(result.plan).map(({ offset: _offset, end: _end, ...check }) =>
     JSON.stringify(check),
   );
-  const ran = run(result.plan, createImmediatePacingRuntimeSnapshot(result.plan));
+  const plan = result.plan;
+  let ran = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  const events = [...ran.events];
+  for (let minute = 1; ran.snapshot.status === "waiting" && minute <= 8; minute += 1) {
+    const observed = observeTime(plan, ran.snapshot, minute * 60_000);
+    events.push(...observed.events);
+    ran = run(plan, observed.snapshot);
+    events.push(...ran.events);
+  }
   return {
     diagnostics,
     checks,
     run: [
-      ...ran.events.flatMap((event) =>
+      ...events.flatMap((event) =>
         event.kind === "say"
           ? [`say ${event.text}`]
           : event.kind === "runtimeFailure"
