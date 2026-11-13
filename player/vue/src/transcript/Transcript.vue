@@ -161,6 +161,8 @@ function itemKeyFor(entries: readonly PlayerTranscriptEntryPresentation[]) {
   return entryKey;
 }
 const measurement = new ChangedContentMeasurement();
+// DIAG
+const diag = (entry: Record<string, unknown>) => { const w = window as unknown as { __follow?: unknown[] }; (w.__follow ??= []).push({ at: Math.round(performance.now()), top: scrollElement.value?.scrollTop, max: scrollElement.value ? scrollElement.value.scrollHeight - scrollElement.value.clientHeight : null, following: following.value, ...entry }); };
 watch(
   () => props.entries,
   () => measurement.clear(),
@@ -169,6 +171,7 @@ watch(
 // until Vue renders it.
 const measureEntry: typeof measureElement<HTMLElement> = (element, entry, instance) => {
   const key = element.dataset.rowKey;
+  diag({ t: "measure", key, h: element.getBoundingClientRect().height, unmeasuredFirst });
   if (key === unmeasuredFirst) unmeasuredFirst = null;
   if (key !== undefined) measurement.measured(key, element.dataset.content, entry !== undefined);
   return measureElement(element, entry, instance);
@@ -252,6 +255,7 @@ watch(
     const firstKey = firstNewEntry === null ? null : rowKey(list()[first]!);
     unmeasuredFirst =
       firstKey !== null && !virtualizer.value.itemSizeCache.has(firstKey) ? firstKey : null;
+    diag({ t: "update", starts: [...starts], firstNewEntry, firstKey, unmeasuredFirst, len: props.entries.length, pending: shown.pending });
     if (
       initialPositioning ||
       opening ||
@@ -337,6 +341,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
             options.adjustments === undefined && firstNewEntry !== null
               ? instance.measurementsCache[firstNewEntry]?.start
               : undefined;
+          diag({ t: "scroll", offset, adj: options.adjustments, first, firstNewEntry });
           if (first !== undefined && offset > first + 1) {
             offset = first;
             following.value = false;
@@ -496,6 +501,7 @@ function readingLatest() {
 }
 function rememberFollow() {
   if (!initialPositioning && !touching.value) following.value = readingLatest();
+  diag({ t: "remember" });
 }
 // Shrinking row measurements can mimic reaching the end; do not resume follow here.
 function releaseFollow() {

@@ -189,6 +189,8 @@ export async function instantAnswersScenario(cdp, origin) {
         );
         return before?.join() === keys.join() ? [] : [`${index}: ${keys.slice(-4).join(" ")}`];
       });
+      const follow = await value(cdp, `JSON.stringify((window.__follow ?? []).slice(-60))`);
+      console.log(`DIAG ${follow}`);
       throw new Error(
         `Following did not stop at the start of the block's message: ${JSON.stringify(state)}; rows by frame ${changes.join(" | ")}; entered ${left.entered.join(" ")}`,
       );
