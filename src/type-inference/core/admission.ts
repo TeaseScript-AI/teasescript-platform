@@ -76,7 +76,6 @@ import {
   carried,
   carriedBy,
   carriedByRead,
-  keepsOwn,
   keepsOwnRead,
   type DispatchReads,
   type CarrierRole,
@@ -124,7 +123,7 @@ export { requiredKind } from "./admission/boundaries.js";
 export { withoutChains } from "./admission/classes.js";
 export { withMemberOracle } from "./admission/decision.js";
 export { concrete, contributes, deciding, fits, isExternal, isOpaque } from "./admission/kinds.js";
-export type { Candidate, DecidedAt, Decision } from "./admission/model.js";
+export type { DecidedAt, Decision } from "./admission/model.js";
 
 /*
  * Admission and the boundary checks of external data. A place's type is decided once, in source order, at a destination
@@ -217,19 +216,19 @@ export class Admission {
    * The previous pass's rejected stores by the place and path each was rejected at: this pass leaves them out there.
    */
   readonly retaken = new Map<Key, Definition[]>();
-  get a4Keys(): ReceivingDomain["a4Keys"] {
-    return this.pass.receivingDomain.a4Keys;
+  get copyLandingKeys(): ReceivingDomain["copyLandingKeys"] {
+    return this.pass.receivingDomain.copyLandingKeys;
   }
-  get a4Places(): ReceivingDomain["a4Places"] {
-    return this.pass.receivingDomain.a4Places;
+  get copyLandingPlaces(): ReceivingDomain["copyLandingPlaces"] {
+    return this.pass.receivingDomain.copyLandingPlaces;
   }
   get openSteps(): ReceivingDomain["openSteps"] {
     return this.pass.receivingDomain.openSteps;
   }
   /** The parameters with a default (ADR 0021 1.5). */
   readonly #defaulted = new Set<PlaceId>();
-  get a4Copies(): ReceivingDomain["a4Copies"] {
-    return this.pass.receivingDomain.a4Copies;
+  get writtenCopyLandings(): ReceivingDomain["writtenCopyLandings"] {
+    return this.pass.receivingDomain.writtenCopyLandings;
   }
   /** Whether each decision admits `null` (a copy of a written type without one does not). */
   readonly nullable = new Map<CanonicalKey, boolean>();
@@ -247,8 +246,8 @@ export class Admission {
   get copies(): ReceivingDomain["copies"] {
     return this.pass.receivingDomain.copies;
   }
-  get a4Inherits(): ReceivingDomain["a4Inherits"] {
-    return this.pass.receivingDomain.a4Inherits;
+  get inheritingCopyLandings(): ReceivingDomain["inheritingCopyLandings"] {
+    return this.pass.receivingDomain.inheritingCopyLandings;
   }
   get inheriting(): ReceivingDomain["inheriting"] {
     return this.pass.receivingDomain.inheriting;
@@ -389,7 +388,8 @@ export class Admission {
   /** Per such snapshot, its stops a list join carries (`earliestDecider`), each asked whatever came before it. */
   readonly joinedLists = new WeakMap<readonly Stop[], readonly Stop[]>();
   readonly resolved = new Map<IngressNode, boolean>();
-  readonly f18 = new Map<
+  /** Per call's result, its `typedCallKinds` answer, once per call. */
+  readonly typedCallKindsByResult = new Map<
     PlaceId,
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
   >();
@@ -566,15 +566,15 @@ export class Admission {
             );
             landing = { at, key: keptKey(this.work, d.place, at) };
             landed.set(path, landing);
-            this.a4Keys.add(landing.key);
-            this.a4Places.set(d.place, null);
+            this.copyLandingKeys.add(landing.key);
+            this.copyLandingPlaces.set(d.place, null);
           }
           const { at, key } = landing;
           if (term !== null) {
-            this.a4Copies.push({ place: d.place, path: at, term });
+            this.writtenCopyLandings.push({ place: d.place, path: at, term });
             if (literal) this.literalLandings.add(key);
           } else
-            this.a4Inherits.push({
+            this.inheritingCopyLandings.push({
               place: d.place,
               path: at,
               from: binding,
@@ -584,9 +584,9 @@ export class Admission {
             });
         }
       }
-    for (const { path, term } of this.a4Copies)
+    for (const { path, term } of this.writtenCopyLandings)
       this.reach = Math.max(this.reach, path.length + levelsOf(this, term).length - 1);
-    for (const { path } of this.a4Inherits) this.reach += path.length;
+    for (const { path } of this.inheritingCopyLandings) this.reach += path.length;
   }
 
   /**
@@ -599,7 +599,7 @@ export class Admission {
       this.work,
       "checks",
       // (#1072 R26: captures `this`, the admission)
-      Retained.closure("Admission.dirty", () => [...this.rejectedKeys, ...this.a4Keys]),
+      Retained.closure("Admission.dirty", () => [...this.rejectedKeys, ...this.copyLandingKeys]),
     ));
   }
 
@@ -629,7 +629,7 @@ export class Admission {
     if (this.pass.solver.running) {
       runsInsideSolverRuns += 1;
       throw new Error(
-        "Admission ran a computation inside a solver run (#1072 A2): yield it as a read.",
+        "Admission ran a computation inside a solver run (#1072): yield it as a read.",
       );
     }
     return this.host.run(work);
@@ -982,12 +982,10 @@ export class Admission {
     return arrayStrip(this.pass.program, steps);
   }
 
-  /** Whether the receiver's or the key's decision leaves a value's operation its own value (`keepsOwn`). */
-  public keepsOwn(value: PlaceId): boolean {
-    return keepsOwn(this.pass.program, value, this.#dispatch);
-  }
-
-  /** `keepsOwn` with the receiver's decision a read (`Read`, #1072). */
+  /**
+   * Whether the receiver's or the key's decision leaves a value's operation its own value (`keepsOwnRead`), the
+   * receiver's decision a read (`Read`, #1072).
+   */
   public keepsOwnRead(value: PlaceId): Reads<boolean> {
     return keepsOwnRead(this.pass.program, value, (receiver) =>
       this.#dispatchReads.reference(receiver),
@@ -1159,8 +1157,8 @@ export class Admission {
     boundariesAt(this, items, here);
   }
 
-  /** The typed calls whose expected type the finishing read left open after a stop (`f18Kinds`). */
-  readonly f18Open = new Set<PlaceId>();
+  /** The typed calls whose expected type the finishing read left open after a stop (`typedCallKinds`). */
+  readonly typedCallsOpen = new Set<PlaceId>();
 
   public ingressStores(
     skip?: (site: SourceSite) => boolean,

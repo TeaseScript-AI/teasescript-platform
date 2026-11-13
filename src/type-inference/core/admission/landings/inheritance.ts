@@ -321,7 +321,7 @@ export function inheritance(admission: Admission): Inheritance {
   const seeds = new Map<PlaceId, Map<string, Set<TypeTerm>>>();
   // (once per landing path and written type: k copies of one binding into one literal are one)
   const copied = new Map<Key, Set<TypeTerm>>();
-  for (const { place, path, term } of admission.a4Copies) {
+  for (const { place, path, term } of admission.writtenCopyLandings) {
     const key = keptKey(admission.work, place, path);
     let terms = copied.get(key);
     if (terms === undefined) copied.set(key, (terms = new Set()));
@@ -345,7 +345,7 @@ export function inheritance(admission: Admission): Inheritance {
   const owned = new Map<PlaceId, Set<string>>();
   const bySource = new Map<PlaceId, InheritedCopy[]>();
   const distinct = new Set<string>();
-  for (const copy of admission.a4Inherits) {
+  for (const copy of admission.inheritingCopyLandings) {
     const list = bySource.get(copy.from);
     if (list === undefined) bySource.set(copy.from, [copy]);
     else list.push(copy);
@@ -366,7 +366,7 @@ export function inheritance(admission: Admission): Inheritance {
   const wholes = new Map<PlaceId, WholeCycle>();
   admission.inherits = { seeds, into, owned, cycleOf, cycles, fed, order, wholes };
   // (whether a live store makes each copy)
-  for (const copy of admission.a4Inherits) {
+  for (const copy of admission.inheritingCopyLandings) {
     const id = keptParts(admission.work, copy.place, copy.path, copy.from, copy.strip);
     if (
       copy.store !== undefined &&

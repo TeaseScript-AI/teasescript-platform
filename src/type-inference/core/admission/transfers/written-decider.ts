@@ -32,7 +32,7 @@ import {
   type WrittenCandidate,
   type WrittenSummary,
 } from "./regions.js";
-import { rootMember } from "./transferred-decider.js";
+import { rootMember, type DeciderRoot } from "./transferred-decider.js";
 
 /**
  * A region path's written copies as the decider's scan reads them (`earliestDecider`'s `snapshots`): of one member's
@@ -114,7 +114,7 @@ export function* writtenDecider(
   admission: Admission,
   task: Expansion,
   asked: Rest,
-  found: { readonly root: DeciderGroup | null; readonly ids: ((rest: number) => number) | null },
+  decider: DeciderRoot,
 ): Inheriting<{
   readonly term: TypeTerm | null;
   readonly site: SourceSite | null;
@@ -127,10 +127,10 @@ export function* writtenDecider(
   const { program, contract } = admission.pass;
   const work = program.work;
   const at = restRef(contract, asked);
-  const ids = found.ids!;
+  const ids = decider.ids;
   const root =
     caches.deciders === admission.deciders
-      ? found.root!
+      ? decider.root
       : groupOf(admission, [rootMember(task)], caches);
   type Kind = "written" | "value" | "bound";
   interface Frame {

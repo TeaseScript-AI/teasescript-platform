@@ -303,10 +303,10 @@ function* firstValue(
 
 /**
  * The earliest value that decides a stored value's path (`earliestDecider`), read from its carriers' transfers:
- * `undefined` where a written copy on the path asks a type (its type may wait on another decision, `inheritedInto`),
- * with the root and its rests' ids left in `written`; outside every decision and into no decision's place the
- * written-decider summary then answers (`writtenDecider`), else the scan of the stops (`earliestDecider`). Else the
- * first value that decides, with the kinds it decides by, `null` for none.
+ * `undefined` where a written copy on the path asks a type (its type may wait on another decision, `inheritedInto`):
+ * outside every decision and into no decision's place the written-decider summary then answers (`writtenDecider`),
+ * else the scan of the stops (`earliestDecider`). Else the first value that decides, with the kinds it decides by,
+ * `null` for none.
  * The value's own task and the literals it holds, by path, then each carrier's operands, their roles merged at each
  * common operand in their keys' order, each group's answer once per pass for its rest of the path, whatever value
  * walks to it (`groupOf`).
@@ -315,14 +315,10 @@ export function* transferredDecider(
   admission: Admission,
   task: Expansion,
   asked: Rest,
-  written?: { root: DeciderGroup | null; ids: ((rest: number) => number) | null },
-  decider: DeciderRoot = deciderRoot(admission, task, asked),
+  decider: DeciderRoot,
 ): Reads<DecidingValue | null | undefined> {
   const { root, at, ids } = decider;
-  if (yield* writtenOn(admission, root, at, ids)) {
-    if (written !== undefined) [written.root, written.ids] = [root, ids];
-    return undefined;
-  }
+  if (yield* writtenOn(admission, root, at, ids)) return undefined;
   // #1384: below an indexed run of `+` (`plusRun`) whose own value holds no definite kind at the path, no value below
   // it decides: each mask there holds only kinds that value holds definitely (`narrowed`); a span's step read only
   // there, a charged visit
@@ -341,7 +337,10 @@ export function* transferredDecider(
   return yield* firstValue(admission, root, at, ids);
 }
 
-/** A stored value's root group and asked path with its rests' ids, as `transferredDecider` and `literalOn` read them. */
+/**
+ * A stored value's root group and asked path with its rests' ids, made once per asked path (`deciderRoot`) and read by
+ * `literalRoute`, `transferredDecider` and `writtenDecider`.
+ */
 export interface DeciderRoot {
   readonly root: DeciderGroup;
   readonly at: PathRef;

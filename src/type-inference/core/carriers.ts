@@ -186,17 +186,9 @@ export interface Dispatch {
 /**
  * F19a, F19: whether the receiver's or the key's decision leaves a value's operation its own value, before any operand
  * is selected or a written type carried: a projection, a `get` or a method of a receiver that may be a reference (the
- * runtime's member, opaque), a `load` of a computed key (external data, whatever its default).
+ * runtime's member, opaque), a `load` of a computed key (external data, whatever its default). The receiver's decision
+ * is a read (`Read`, #1072 A2).
  */
-export function keepsOwn(program: CoreProgram, value: PlaceId, dispatch: Dispatch): boolean {
-  return readNow(
-    keepsOwnRead(program, value, function* (receiver) {
-      return dispatch.reference(receiver);
-    }),
-  );
-}
-
-/** `keepsOwn` of a receiver decision that is a read (`Read`, #1072 A2). */
 export function* keepsOwnRead(
   program: CoreProgram,
   value: PlaceId,
