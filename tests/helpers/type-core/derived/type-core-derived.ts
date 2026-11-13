@@ -117,8 +117,18 @@ export function syntaxOf(source: string): Syntax {
 /** Every statement of a program, nested blocks included, in source order. */
 export function allStatements(statements: readonly Statement[]): Statement[] {
   return statements.flatMap((statement) => {
-    if (statement.kind === "repeatStatement" || statement.kind === "forStatement")
+    if (
+      statement.kind === "repeatStatement" ||
+      statement.kind === "forStatement" ||
+      statement.kind === "whileStatement"
+    )
       return [statement, ...allStatements(statement.body.statements)];
+    if (statement.kind === "switchStatement")
+      return [
+        statement,
+        ...statement.cases.flatMap((switchCase) => allStatements(switchCase.body.statements)),
+        ...allStatements(statement.defaultBlock?.statements ?? []),
+      ];
     if (statement.kind === "ifStatement") {
       return [
         statement,
@@ -366,7 +376,11 @@ export function expressions(statements: readonly Statement[]): Expression[] {
     else if (statement.kind === "sayStatement") walk(statement.value);
     else if (statement.kind === "expressionStatement") walk(statement.expression);
     else if (statement.kind === "forStatement") walk(statement.iterable);
-    else if (statement.kind === "gotoStatement" && statement.target.kind === "scriptTarget")
+    else if (statement.kind === "whileStatement") walk(statement.condition);
+    else if (statement.kind === "switchStatement") {
+      walk(statement.subject);
+      for (const switchCase of statement.cases) switchCase.values.forEach(walk);
+    } else if (statement.kind === "gotoStatement" && statement.target.kind === "scriptTarget")
       walk(statement.target.expression);
   }
   return out;
