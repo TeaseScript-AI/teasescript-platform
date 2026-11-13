@@ -61,7 +61,8 @@ const inContext = (sample: Sample, command: string, context: string): string =>
 
 /** The samples the guard judges here: those a declared refusal names are the row guard's. */
 const SAMPLES = samples().filter(
-  (sample) => !DECLARED_REFUSALS.some((declared) => declared.refused === sample.command),
+  (sample) =>
+    !DECLARED_REFUSALS.some((declared) => declared.refused === sample.prelude + sample.command),
 );
 
 /**
@@ -107,9 +108,12 @@ function failureOf(run: string): [string, number, number] | null {
 const ROUTE_ONLY: readonly string[] = ["TSV010", "TSV011", "TSV012", "TSV041", "TSV043"];
 const TODAY_ONLY: readonly string[] = ["TSV046"];
 
+/** Where an ask's template (`let r = <the ask>`) holds its ask. */
+const ASK_START = "let r = ".length;
+
 /**
- * Where a reaching run fails: the command, the value in it, or the call holding the value (a transfer's `script(…)`), in
- * a source whose command starts at `start`.
+ * Where a reaching run fails: the command, the value in it, the call holding the value (a transfer's `script(…)`), or
+ * the ask holding it (the whole of `let r = <the ask>` but its start), in a source whose command starts at `start`.
  */
 function reached(sample: Sample, start: number): Set<string> {
   const declared = position(sample)!;
@@ -119,7 +123,9 @@ function reached(sample: Sample, start: number): Set<string> {
       ? [start, start + sample.command.length]
       : declared.at === "value"
         ? [value, value + sample.value.length]
-        : [value - "script(".length, value + sample.value.length + ")".length];
+        : declared.at === "ask"
+          ? [start + ASK_START, start + sample.command.length]
+          : [value - "script(".length, value + sample.value.length + ")".length];
   return new Set(declared.failure.map((code) => `failed ${code}@${from}:${to}`));
 }
 
@@ -202,7 +208,7 @@ function judge(
       );
       return;
     }
-    const reference: Entry = twinMode.plan ? twinMode : twinRecord.checker;
+    const reference: Entry = twinMode?.plan ? twinMode : twinRecord.checker;
     const start = source.indexOf(sample.command, sample.prelude.length);
     const value = start + OPERAND_TEMPLATES[sample.row]![sample.operand]![0]!.indexOf("hostValue");
     const shift = twinCommand(sample).length - sample.command.length;
@@ -455,10 +461,13 @@ test("a declared position's instruction refuses a value it does not take before 
           `${at} with ${JSON.stringify(hostValue)}: ${JSON.stringify(failed)}`,
         );
         // nothing of the statement's effect: no event of it but the failure, and the session's state as before the
-        // statement, but for the run's own bookkeeping (the ingress's store is before it)
+        // statement, but for the run's own bookkeeping (the ingress's store is before it); an ask's form (R38): no
+        // field or button opens and the run does not wait, its question perhaps said by its own instruction before
+        const ask = sample.row === "interactionExpression";
         const own = result.events.filter(
           (event) =>
             event.kind !== "runtimeFailure" &&
+            !(ask && event.kind === "say") &&
             "span" in event &&
             event.span !== null &&
             event.span.start.offset >= start &&
@@ -469,7 +478,13 @@ test("a declared position's instruction refuses a value it does not take before 
           [],
           at,
         );
-        if (sample.prelude === "") {
+        if (ask)
+          assert.deepEqual(
+            [result.snapshot.status, result.snapshot.foregroundAction],
+            ["failed", null],
+            `${at}: no field or button opens`,
+          );
+        else if (sample.prelude === "") {
           const after = fieldsOf(result.snapshot);
           const changed = [...new Set([...before.keys(), ...after.keys()])].filter(
             (key) => !BOOKKEEPING.includes(key) && before.get(key) !== after.get(key),
