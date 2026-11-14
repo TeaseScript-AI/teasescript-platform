@@ -822,6 +822,13 @@ the candidate's closure digest. A runner that never answers, or fails before it 
 job's deadline. A behaviour changed after the pin shows as a difference to explain; nothing requires the pin to be
 re-sealed.
 
+## Generated-code comparison
+
+Generated code has neither instruction steps nor interpreter state, so it cannot be a side of the differential harness.
+`tests/helpers/generated-comparison/` compares it with today's engine after every host operation of one deterministic
+play instead; [its command's README](../tools/generated-comparison/README.md) gives the verdicts, what is compared and
+the known holes.
+
 ## Replay through the bridge
 
 `tests/helpers/bridge/replay-harness.ts` is the L5 gate's shared replay harness (#1919). `tests/bridge/player-bridge-recording.test.ts`
