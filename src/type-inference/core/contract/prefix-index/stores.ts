@@ -29,11 +29,7 @@ import type {
 import { aliasLayer, projectedLayer } from "./layers.js";
 import { Retained } from "../../retained/retained.js";
 
-/**
- * The root a store copies whole where `prefixWork` follows the copy into its source's own stores: a live whole store,
- * neither a parameter's default nor an argument of an unwritten parameter with several sites, copying (not calling)
- * an unguarded read of a copy-only place's root; `null` for every other store.
- */
+/** The root a store copies whole, where the copy is followed into its source's stores; `null` for any other store. */
 function copiedRoot(contract: Contract, d: Definition): PlaceId | null {
   const { program, lists, guards } = contract.pass;
   if (!lists.live(d) || d.kind !== "whole" || d.how === "parameter default") return null;
