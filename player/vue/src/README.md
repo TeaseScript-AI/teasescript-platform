@@ -1,12 +1,12 @@
-# Player components
+# Playroom components
 
-This is the Player implementation. Keep development fixtures separate from the components that own Player presentation.
+This is the Playroom implementation. Keep development fixtures separate from the components that own Playroom presentation.
 
 ## Design lint
 
-The required [Player design lint](../../../docs/LINTING.md#player-design-lint) checks these Player components,
+The required [Playroom design lint](../../../docs/LINTING.md#playroom-design-lint) checks these Playroom components,
 shared UI definitions and the story-button wrapper. `player/vue/components.json` selects `style.css` for utility
-resolution; the component and theme boundaries remain defined by the Player implementation and its maintained UI
+resolution; the component and theme boundaries remain defined by the Playroom implementation and its maintained UI
 specification.
 
 ## Adding a shadcn-vue component
@@ -25,12 +25,12 @@ npx prettier --write 'src/components/ui/<component>/*.ts'
 
 `npx shadcn-vue view <component>` lists the npm packages the component needs. Most, such as `reka-ui` and
 `@vueuse/core`, are root dependencies already. Any other one is added to the root `package.json` under the dependency
-rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScript settings, such as
+rule in `AGENTS.md`. The copied code may need changes for the Playroom's TypeScript settings, such as
 `exactOptionalPropertyTypes`, so run `npm run typecheck:player`. Knip reports a component that nothing imports yet.
 
 ## Responsibility boundaries
 
-- `shell/PlayerApp.vue` composes the product Player from props and slots. It installs `shell/usePlayerKeyboardFocus.ts`
+- `shell/PlayerApp.vue` composes the product Playroom from props and slots. It installs `shell/usePlayerKeyboardFocus.ts`
   once, including for body-portaled controls; the [focus contract](../../../docs/ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior)
   defines input modality and composer/Send focus.
 - The session composable is its owners, each one `use…` function under `session/`:
@@ -60,7 +60,7 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   [timers and scene time](../../../docs/RUNTIME.md#timers-and-scene-time). The host prepares a new session for
   the explicit Start control on the start page (`start-and-end/SessionActivation.vue`, with the header's title and author) and
   creates it only on that click. It keeps the session in `player/persistence/kept-sessions.ts`, so a reload shows Continue, which
-  restores it, or Start with the reason when a Player update changed the session's format (`start-and-end/ProblemCard.vue`, the card
+  restores it, or Start with the reason when a Playroom update changed the session's format (`start-and-end/ProblemCard.vue`, the card
   `start-and-end/ScriptProblems.vue` shows too); closing the end dialog after `exit` returns to the start page. With `room=debug`, or once Debug goes on in
   the normal room, the debug room ([`DEBUGGER.md`](../../../docs/DEBUGGER.md#debug-room)) stands in with its own saved
   values, photos, and session; `debug/DebugRoomMark.vue` marks it in the title pill, and `shell/ConfirmDialog.vue` asks before Debug
@@ -69,15 +69,15 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   projection onto `Audio` elements, reports loading through the adapter, and measures progress. Media progress is
   included in every clock observation; while media loads or plays, sampling offers an observation opportunity every
   100 ms. Start and Continue first open the
-  session camera (`player/media/session-camera.ts`) when the Player has the camera capability, and a Start with script
+  session camera (`player/media/session-camera.ts`) when the Playroom has the camera capability, and a Start with script
   storage, which `main.ts` always gives, then reads the script's saved values again
   ([`DATA-AND-API.md`](../../../docs/DATA-AND-API.md#script-storage-in-the-browser)). The session is created after these
-  waits, so in the shipped Player only a Continue without the camera starts it within the click. Because some browsers
+  waits, so in the shipped Playroom only a Continue without the camera starts it within the click. Because some browsers
   (Safari) allow playback per element only from a user activation, which the session may outlive while it waits, the
   host reuses released elements and, within a Start or Continue click that waits, plays silence on every spare one,
   ensuring at least two; elements allocated beyond the pool fall back to the refused-playback retry. For the same reason, as Safari grants a page's
   first screen wake lock only right after a click, `session/useScreenWakeLock.ts` asks for it within that click, before the
-  camera opens, and holds it while the session plays. In a Player that can capture or read stored
+  camera opens, and holds it while the session plays. In a Playroom that can capture or read stored
   photos, a save first stores the captured photos its value references (`player/media/captured-media-persistence.ts`);
   captured references resolve only through that trusted store, and authored
   media references only through the host-supplied `resolveAsset`. `shell/PlayerApp.vue` derives the Stage image from
@@ -115,15 +115,15 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   The preview only passes the initial `?dev` and `time=skip` state.
 - `shell/PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
   `shell/PlayerApp.vue` adds the Debug panel and `shell/AbTestsPanel.vue`, the A/B tests, while their Settings switches are on.
-  Its tool slot supplies content; its default slot supplies the Player. Closing a visited panel retains its content.
+  Its tool slot supplies content; its default slot supplies the Playroom. Closing a visited panel retains its content.
   Tool bodies scroll vertically; the outer carousel handles overflow between panels. Shared shadcn-vue/Reka
   `components/ui/scroll-area` supports per-location visibility without reserving width. The transcript currently
   reveals its thumb during scrolling or track hover; native textareas keep browser editing/scrolling. Visibility
   remains a visual trial.
-- `interaction/usePlayerConditions.ts` owns the five independent Player conditions: horizontal and vertical space, touch/hover
+- `interaction/usePlayerConditions.ts` owns the five independent Playroom conditions: horizontal and vertical space, touch/hover
   capability, raised keyboard, and composer edge clearance. The shell exposes these as `data-player-*` attributes;
   descendants consume the provided signals. Keep feature-specific fit calculations with their layout owner and use
-  actual pointer events for hybrid mouse/touch interactions. See [Player conditions](../../../docs/ui/PLAYER-UI.md#player-conditions)
+  actual pointer events for hybrid mouse/touch interactions. See [Playroom conditions](../../../docs/ui/PLAYER-UI.md#playroom-conditions)
   before adding a responsive rule.
 - `shell/ResizeHandle.vue` supplies the separator, marker and tooltip for menu/panel widths. Panel handles sit outside
   scrolling content; menu handles share existing right padding. Dotted grips move entire panels.
@@ -149,14 +149,14 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   `playerRuntimeForeground` maps authored backgrounds from live/restored actions; `player/theme/story-choice.ts`
   supplies theme/authored button material. See [ADR 0018](../../../docs/decisions/0018-first-standard-library-poc-contract.md)
   for syntax and completion semantics.
-- `stage/useImageCapture.ts` holds the Player-only state of an `askImage` request's two steps and its preview, which
+- `stage/useImageCapture.ts` holds the Playroom-only state of an `askImage` request's two steps and its preview, which
   `interaction/RuntimeInteraction.vue` answers with on "Use image". Its camera step uses the session camera while that is open,
   without opening or releasing it; otherwise it opens a camera of its own, which only it uses, and turns it off when the
   step ends. `interaction/ForegroundControls.vue` draws the steps' controls, `stage/Stage.vue` the preview, and `stage/ImageCapture.vue` the
   camera step's status and countdown on the viewfinder, through `stage/Stage.vue`'s `camera` slot or
   `stage/FloatingViewfinder.vue`'s default slot, with the shadcn Alert.
 - `shell/usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
-  `stage/stagePhotos.ts` downloads a Stage photo once into the Player's Cache Storage, for the Stage and for measuring it in
+  `stage/stagePhotos.ts` downloads a Stage photo once into the Playroom's Cache Storage, for the Stage and for measuring it in
   `stage/stagePhotoWorker.ts` where the browser's image decoder can, and loads the images the script names
   (`playerRuntimeStageImages`) ahead;
   `stage/useStagePhoto.ts` shows a new photo together with its colours, which `stage/usePhotoColour.ts` applies and
@@ -171,11 +171,11 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
 The development preview opens with one runtime choice scenario. Composer dimensions and height caps remain visual
 trials.
 
-Story-button ink and transcript readability follow the current Player treatment in
-[Player UI](../../../docs/ui/PLAYER-UI.md); Visual Lab does not offer contrast-method switches.
+Story-button ink and transcript readability follow the current Playroom treatment in
+[Playroom UI](../../../docs/ui/PLAYER-UI.md); Visual Lab does not offer contrast-method switches.
 
 Shared chrome geometry lives in `style.css`; the
-[Player geometry contract](../../../docs/ui/PLAYER-UI.md#global-geometry-and-overflow) records dimensions and their tuning status.
+[Playroom geometry contract](../../../docs/ui/PLAYER-UI.md#global-geometry-and-overflow) records dimensions and their tuning status.
 Top controls, menu and tool headers share edge/control tokens. The menu width ruler avoids a second JavaScript formula;
 its resize target shares right padding. The right rail derives top clearance from header height. Timer diameter and rail
 width are selected separately from the shared space conditions, independently of root font size; no outside halo space
