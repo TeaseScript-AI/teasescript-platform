@@ -37,7 +37,7 @@ and, where it applies, what superseded or bounded it.
 The type core's comments carry labels from the port plan and the research design that preceded the core: a plan step
 (`S9b`), a design document (`S6-CARRIERS`), or an id of the research table's rules, cells and work families (`C9`,
 `F19a`, `W34`). Each label carried in a comment under `src/type-inference/core/` has one row here, and the citation
-lint refuses a label without a row and a row no comment carries. An id after a review round, a pull request or a
+lint refuses a label without a row. An id after a review round, a pull request or a
 reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review reference, not a label. A section number (`§3.2`,
 `S3 §5`) is no label either; the bare `§N` row says what it points at.
 

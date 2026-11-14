@@ -238,7 +238,7 @@ test("a property store missing from literals the levels fold names the object wr
 /**
  * #1323 (Sol's `fresh-growth` family): k calls of `read({noise:hostValue,p:{}})` and k reads of `x.p.f_i` in `read`,
  * every read a `missing` of the same objects: the members' reads that name it are shared between the reads the fold
- * proves alike (`membersMissing`'s classes), so the reads beyond the present-property control grow linearly in k, not
+ * proves alike (`absenceClass`'s classes), so the reads beyond the present-property control grow linearly in k, not
  * as k², with the sharing on, as the diagnostics do. #1948: and with k more calls whose arguments lack `p`, so that
  * the reads below `p` come from the property index, its holders' fold kept once per path (`holderGroups`).
  */

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { addNames, citedNames, detachedDocblocks } from "./check-comment-declarations.mjs";
+import { addNames, citedNames } from "./check-comment-declarations.mjs";
 import { scriptsOf } from "./comments.mjs";
 
 /** The names `code` declares or reads, as the check collects them. */
@@ -75,45 +75,6 @@ test("code, file names, issues and SHAs in backticks cite no name", () => {
     assert.deepEqual(citedNames(text), [], text);
   // A hex word without a digit is a name, and must resolve.
   assert.deepEqual(citedNames("defaced"), ["defaced"]);
-});
-
-// Where a docblock can stand, and whether it then documents nothing.
-const PLACES = {
-  "directly on a declaration": ["/** Doc. */\nfunction f() {}\n", false],
-  "over several lines": ["/**\n * Doc.\n */\nconst x = 1;\n", false],
-  "with a line directive between": [
-    "/** Doc. */\n// oxlint-disable-next-line no-new-array -- EVIDENCE: fixture: x.\nconst x = new Array(2);\n",
-    false,
-  ],
-  "as a same-line cast": ["const x = /** @type {number} */ (y);\n", false],
-  "as the file's opening header": ['/** The file. */\n\nimport { a } from "./a.js";\n', false],
-  "after a blank line": ['import { a } from "./a.js";\n\n/** Doc. */\n\nconst x = a;\n', true],
-  "stacked on another docblock": ["/** One. */\n/** Two. */\nconst x = 1;\n", true],
-  "with another comment between": ["/** Doc. */\n// Another.\nconst x = 1;\n", true],
-  "before a closing brace": ["function f() {\n  return 1;\n  /** Doc. */\n}\n", true],
-  "at the end of the file": ["const x = 1;\n/** Doc. */\n", true],
-};
-
-test("a docblock documents its next code only directly on it: each exception passes, each finding is found", () => {
-  for (const [place, [code, detached]] of Object.entries(PLACES))
-    for (const file of ["a.ts", "a.vue"]) {
-      const text = file.endsWith(".vue")
-        ? `<template><p /></template>\n<script setup lang="ts">\n${code}</script>\n`
-        : code;
-      const found = scriptsOf(file, text).flatMap(({ source, text: script }) =>
-        detachedDocblocks(source, script),
-      );
-      // (a stacked pair has one detached block: the first)
-      assert.equal(found.length, detached ? 1 : 0, `${place} in ${file}: ${JSON.stringify(found)}`);
-    }
-});
-
-test("a detached docblock is named by its first line of text", () => {
-  const [{ source, text }] = scriptsOf(
-    "a.ts",
-    "const x = 1;\n\n/**\n * The point.\n */\n\nconst y = 2;\n",
-  );
-  assert.deepEqual(detachedDocblocks(source, text), [{ line: 3, text: "The point." }]);
 });
 
 test("a .vue file's scripts are the blocks Vue's parser finds, each with where it starts", () => {

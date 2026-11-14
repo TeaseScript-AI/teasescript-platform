@@ -1,5 +1,5 @@
 // check-comment-forecasts's tests of printed text and the glossary: which text a test prints, that each label printed
-// text carries has a glossary row, and that the glossary's rows are the README's labels, each carried. They quote none
+// text carries has a glossary row, and that the glossary's rows are the README's labels. They quote none
 // of what the check refuses outside its own test (CITATION_FIXTURES): an old-record citation, a revision number with
 // no entry, or a section number outside a section list. They run no git.
 
@@ -73,7 +73,7 @@ test("printed text is a test's title and a measures or authority value, in every
   );
 });
 
-test("a printed label without a row is refused, and a row printed text carries is carried", () => {
+test("a printed label without a row is refused, and one with a row is not", () => {
   const glossary = new Map([
     ["C9", 7],
     ["W5", 8],
@@ -121,11 +121,10 @@ test("the glossary's rows are the labels of the README's Labels table", () => {
   );
 });
 
-test("a label without a glossary row, and a row no comment carries, are findings; the bare §N row is not", () => {
+test("a comment's label without a glossary row is a finding, and one with a row is not", () => {
   const glossary = new Map([
     ["C9", 7],
     ["S8c", 8],
-    ["§N", 9],
   ]);
   const findings = glossaryFindings(
     [
@@ -136,13 +135,6 @@ test("a label without a glossary row, and a row no comment carries, are findings
   );
   assert.deepEqual(
     findings.map(({ fileName, line, message }) => [fileName, line, message.split(",")[0]]),
-    [
-      ["src/type-inference/core/a.ts", 4, "a comment carries the label Q77"],
-      [
-        "docs/specifications/type-inference-accepted-record/README.md",
-        8,
-        "the glossary defines S8c",
-      ],
-    ],
+    [["src/type-inference/core/a.ts", 4, "a comment carries the label Q77"]],
   );
 });

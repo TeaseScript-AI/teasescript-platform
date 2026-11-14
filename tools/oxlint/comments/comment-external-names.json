@@ -38,5 +38,50 @@
     "name": "regexp_last_match_info",
     "kind": "external API",
     "source": "V8's isolate field for the last RegExp match"
+  },
+  {
+    "name": "MarkerSeverity",
+    "kind": "external API",
+    "source": "Monaco Editor's `monaco.MarkerSeverity` enum"
+  },
+  {
+    "name": "sumPrecise",
+    "kind": "external API",
+    "source": "TC39's `Math.sumPrecise`, which this TypeScript's lib does not declare"
+  },
+  {
+    "name": "days_from_civil",
+    "kind": "external algorithm",
+    "source": "Howard Hinnant, \"chrono-Compatible Low-Level Date Algorithms\""
+  },
+  {
+    "name": "NCName",
+    "kind": "grammar production",
+    "source": "W3C Namespaces in XML 1.0"
+  },
+  {
+    "name": "waitLabel",
+    "kind": "example name",
+    "source": "a name TSV001's fix suggests in place of a protected one"
+  },
+  {
+    "name": "waitValue",
+    "kind": "example name",
+    "source": "a name TSV001's fix suggests in place of a protected one"
+  },
+  {
+    "name": "base2",
+    "kind": "example name",
+    "source": "a name a fix generates after `base` (#1274)"
+  },
+  {
+    "name": "hostValu2",
+    "kind": "example name",
+    "source": "a host read renamed to a same-length global by the derived companions"
+  },
+  {
+    "name": "f_i",
+    "kind": "example name",
+    "source": "the i-th property of a generated test program"
   }
 ]

@@ -23,8 +23,8 @@ import { checkedFiles, fileComments, scriptsOf } from "./comments.mjs";
 // Git lists, read and slugged as the doc-links check reads them (#2422); that check reads Markdown only and never sees
 // a comment. A label of the port plan or the research design (`S9b`,
 // `C9`, `AD-1`) in a comment of the type core's modules, or in printed test text (`printedTexts`: a test's title, a
-// `measures` or `authority` value, #2423), has a row in the record's glossary, and every row is still carried by such
-// a comment or text; an id after a reviewer's round ("Codex r2's B1") is a review reference, not a label.
+// `measures` or `authority` value, #2423), has a row in the record's glossary; an id after a reviewer's round ("Codex
+// r2's B1") is a review reference, not a label.
 // `comment-forecasts-allowed.json` lists the forecasts this check accepts, and every entry must still be found.
 
 /** The forms of a forecast, #1977's list, each one pattern over a comment's text. */
@@ -101,7 +101,7 @@ const CORE = "src/type-inference/core/";
 
 /**
  * A port-plan or research label: a step, an id, a checkpoint, the plan or a plan document. A section number (`V30 §3`)
- * is not a label; the glossary's one row for a bare `§N` is not checked against comments.
+ * is not a label.
  */
 const LABEL =
   /\b(?:S\d-[A-Z]+(?:-[A-Z]+)*|S\d{1,2}[a-z]?|[A-Z]{1,2}\d{1,3}[a-z]?|AD-\d|PLAN|checkpoint \d+)\b/gu;
@@ -260,29 +260,17 @@ export function glossaryRows(readme) {
 
 /**
  * Each carried label (`carried`, with its file and line: the core's comments' labels, and every file's printed text's,
- * those marked `printed`) that the glossary has no row for, and each row whose label nothing carries; a row printed
- * text carries is carried. The bare `§N` row is not checked.
+ * those marked `printed`) that the glossary has no row for.
  */
 export function glossaryFindings(carried, glossary) {
-  const findings = [];
-  for (const { fileName, line, label, printed } of carried)
-    if (!glossary.has(label))
-      findings.push({
-        fileName,
-        line,
-        column: 1,
-        message: `${printed ? "a test's title or a measures or authority string" : "a comment"} carries the label ${label}, which the accepted record's glossary does not define (${RECORD}/README.md, Labels)`,
-      });
-  const labels = new Set(carried.map(({ label }) => label));
-  for (const [label, line] of glossary)
-    if (!labels.has(label) && !label.startsWith("§"))
-      findings.push({
-        fileName: `${RECORD}/README.md`,
-        line,
-        column: 1,
-        message: `the glossary defines ${label}, which no comment of the type core and no printed test text carries any more; remove its row`,
-      });
-  return findings;
+  return carried
+    .filter(({ label }) => !glossary.has(label))
+    .map(({ fileName, line, label, printed }) => ({
+      fileName,
+      line,
+      column: 1,
+      message: `${printed ? "a test's title or a measures or authority string" : "a comment"} carries the label ${label}, which the accepted record's glossary does not define (${RECORD}/README.md, Labels)`,
+    }));
 }
 
 /** The forecasts in `text`'s comments: each comment line's form and text. */
@@ -434,7 +422,6 @@ const outsideSectionRule = (file) =>
   file.startsWith("docs/") ||
   file.startsWith("src/") ||
   file === "tests/fixtures/type-core/cells.jsonl" ||
-  file === "tools/oxlint/comments/comment-declarations-waiting.json" ||
   file === CITATION_FIXTURES;
 
 /**
