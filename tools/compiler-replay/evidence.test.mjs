@@ -1045,7 +1045,7 @@ test("evidence: in each record form, a source not run once in each mode it owes 
   assert.equal(
     area(
       AREA.map((mode) => [mode, "publication"]),
-      undefined,
+      null,
     ).base,
     "uncompared",
   );
