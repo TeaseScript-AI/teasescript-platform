@@ -43,7 +43,8 @@ their executable or topic sources rather than this task router.
 ## Documentation routing
 
 Start with applicable `AGENTS.md` instructions and the assigned issue or pull
-request. Select the capability route in `docs/agents/README.md`, then load only
+request. Select the capability route and the
+[workflow startup sections for your role](docs/agents/README.md#workflow-reading-before-starting), then load only
 the task-controlling sources required by that route. Before
 implementation, final self-review, or an explicitly assigned pull-request review,
 read `docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`. Read
@@ -58,7 +59,7 @@ milestone, gate, integration-status, or current-capability work.
 - `docs/review-and-audit/`: role-based implementation, review, and explicitly
   assigned audit guidance.
 - `docs/DEVELOPMENT-WORKFLOW.md`: universal issue, branch, pull-request,
-  review, documentation, merge, and verification rules.
+  review, documentation, merge, and verification rules; the capability router selects startup sections by role.
 - `docs/agents/README.md`: technical capability router for source acquisition,
   permitted writes, verification, and publication constraints; task guidance is routed separately.
 - `tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md`: project-agent source and installed-layout contract.

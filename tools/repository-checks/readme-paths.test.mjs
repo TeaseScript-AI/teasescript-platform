@@ -10,7 +10,7 @@ import { isolateGit } from "../fixture-git.mjs";
 
 isolateGit();
 
-// The check over the two Player READMEs, run in a Git checkout that holds them.
+// The Player maps and start/ownership route must reject stale names without treating commands as files.
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const tool = fileURLToPath(new URL("./readme-paths.mjs", import.meta.url));
@@ -35,6 +35,10 @@ function check({ player = "", component = "" }, files = {}) {
   const root = checkout({
     "player/README.md": player,
     "player/vue/src/README.md": component,
+    "README-FIRST.md": "",
+    "docs/agents/README.md": "",
+    "docs/agents/DIRECT-REPOSITORY.md": "",
+    "docs/ORCHESTRATION.md": "# Orchestration\n\n## Repository ownership\n",
     ...files,
   });
   try {
@@ -66,6 +70,80 @@ test("a stale path fails, naming the README, the line and the token", () => {
     "player/README.md:4: `runtime/gone.ts` names no tracked file or folder",
     "player/vue/src/README.md:1: `PlayerApp.vue` names no tracked file or folder",
   ]);
+});
+
+test("area.sh in ownership and a stale name in each route document fail with their locations", () => {
+  const result = check(
+    {},
+    {
+      "docs/ORCHESTRATION.md": "# Orchestration\n\n## Repository ownership\n\n`area.sh`\n",
+      "README-FIRST.md": "`docs/absent.md`\n",
+      "docs/agents/README.md": "[`missing.mjs`](../../tools/real.mjs)\n",
+      "docs/agents/DIRECT-REPOSITORY.md": "`nowhere/*.ts`\n",
+      "tools/real.mjs": "",
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.deepEqual(result.problems, [
+    "README-FIRST.md:1: `docs/absent.md` names no tracked file or folder",
+    "docs/agents/README.md:1: `missing.mjs` names no tracked file or folder",
+    "docs/agents/DIRECT-REPOSITORY.md:1: `nowhere/*.ts` names no tracked file or folder",
+    "docs/ORCHESTRATION.md:5: `area.sh` names no tracked file or folder",
+  ]);
+});
+
+test("tracked globs and unique basenames resolve; qualified context resolves otherwise ambiguous names", () => {
+  const result = check(
+    {},
+    {
+      "README-FIRST.md":
+        "`tests/families/*`, `stalls.mjs`, `tests/`, `docs/agents/README.md#heading`\n",
+      "docs/ORCHESTRATION.md":
+        "## Repository ownership\n\n`src/plan/` owns `model.ts` and `validation/`.\n",
+      "tests/families/stalls.mjs": "",
+      "src/plan/model.ts": "",
+      "src/other/model.ts": "",
+      "src/plan/validation/check.ts": "",
+    },
+  );
+  assert.deepEqual(result, { status: 0, problems: [] });
+});
+
+test("an ambiguous bare basename fails and directory context does not leak into the next paragraph", () => {
+  const result = check(
+    {},
+    {
+      "docs/ORCHESTRATION.md":
+        "## Repository ownership\n\n`src/plan/` owns `model.ts`.\n\n`model.ts`\n",
+      "src/plan/model.ts": "",
+      "src/other/model.ts": "",
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.deepEqual(result.problems, [
+    "docs/ORCHESTRATION.md:5: `model.ts` names no tracked file or folder",
+  ]);
+});
+
+test("ownership checks stop at the next peer heading and exclude commands, URLs and external paths", () => {
+  const result = check(
+    {},
+    {
+      "docs/ORCHESTRATION.md": [
+        "## Elsewhere",
+        "`untracked.mjs`",
+        "## Repository ownership",
+        "`git diff -M`, `node tools/absent.mjs`, `https://example.test/absent.md`, `~/external.md`, `/opt/external.md`",
+        "### Child",
+        "`tools/real.mjs`",
+        "## After",
+        "`other.sh`",
+        "",
+      ].join("\n"),
+      "tools/real.mjs": "",
+    },
+  );
+  assert.deepEqual(result, { status: 0, problems: [] });
 });
 
 test("a true path passes, from the README's folder or the top folder, and so does a tracked folder", () => {

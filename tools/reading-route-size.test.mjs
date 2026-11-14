@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { ROUTE } from "./reading-route-size.mjs";
+import { ROUTE, sectionsOf, workflowSections } from "./reading-route-size.mjs";
 import { isolateGit } from "./fixture-git.mjs";
 
 isolateGit();
@@ -15,6 +15,7 @@ const tool = fileURLToPath(new URL("./reading-route-size.mjs", import.meta.url))
 const root = fileURLToPath(new URL("..", import.meta.url));
 const listed = [
   ...ROUTE.everyTask,
+  ROUTE.workflow.path,
   ...ROUTE.whenNeeded.map((document) => document.path),
   ...ROUTE.notRead.map((document) => document.path),
 ];
@@ -25,6 +26,15 @@ test("every document the route lists exists in this checkout", () => {
     [],
     "listed in ROUTE (tools/reading-route-size.mjs) but missing",
   );
+});
+
+test("every workflow heading the canonical route names exists, including conditional sections", () => {
+  const router = readFileSync(join(root, ROUTE.workflow.route), "utf8");
+  assert.ok(sectionsOf(router).has("workflow-reading-before-starting"));
+  const selected = workflowSections(router);
+  assert.notEqual(selected, undefined);
+  const headings = sectionsOf(readFileSync(join(root, ROUTE.workflow.path), "utf8"));
+  assert.deepEqual(selected.map(({ anchor }) => anchor).sort(), [...headings.keys()].sort());
 });
 
 /** A repository holding `files` (path → text or Buffer) in one commit; its directory and that commit. */
@@ -51,11 +61,39 @@ function run(directory, args = []) {
   return { status: result.status, out: result.stdout + result.stderr };
 }
 
-/** Every routed document, each one character long. */
-const allRouted = () =>
-  Object.fromEntries(
+const INTRO = "# Workflow\n\n";
+const BUILD = "## Build\n\né😀\n\n```md\n# Fenced, not a heading\n```\n\n";
+const CHILD = "### Child\n\nconditional\n\n";
+const REVIEW = "## Review\n\nr\n";
+const WORKFLOW = INTRO + BUILD + CHILD + REVIEW;
+const ROUTER = [
+  "# Capabilities",
+  "",
+  "## Workflow reading before starting",
+  "",
+  "| Workflow section | Startup roles |",
+  "| --- | --- |",
+  "| [Workflow](../DEVELOPMENT-WORKFLOW.md#workflow) | A B R F C |",
+  "| [Build](../DEVELOPMENT-WORKFLOW.md#build) | A B |",
+  "| [Child](../DEVELOPMENT-WORKFLOW.md#child) | — |",
+  "| [Review](../DEVELOPMENT-WORKFLOW.md#review) | R F C |",
+  "",
+].join("\n");
+
+/** Small committed documents and a route with different builder/reviewer sections and a conditional child. */
+const allRouted = () => ({
+  ...Object.fromEntries(
     [...ROUTE.everyTask, ...ROUTE.whenNeeded.map((document) => document.path)].map((p) => [p, "a"]),
-  );
+  ),
+  [ROUTE.workflow.path]: WORKFLOW,
+  [ROUTE.workflow.route]: ROUTER,
+});
+
+const commonSize = (files) =>
+  ROUTE.everyTask.reduce((total, path) => total + [...(files[path] ?? "")].length, 0);
+const workflowSize = (role) => [...(INTRO + ("AB".includes(role) ? BUILD : REVIEW))].length;
+const roleTotal = (out, role) =>
+  Number(out.match(new RegExp(`^  ${role} [^\\n]*?: (\\d+)`, "mu"))?.[1]);
 
 /** The size column (and the difference column, when present) of the line ending in `name`. */
 function columns(out, name) {
@@ -67,23 +105,25 @@ function columns(out, name) {
 }
 
 test(
-  "sizes are code points of the committed text; the total holds only the every-task documents",
+  "startup sizes count committed Unicode text, the role's sections, and no child or conditional document",
   { timeout: 30_000 },
   () => {
     const [first, second] = ROUTE.everyTask;
     const conditional = ROUTE.whenNeeded[0].path;
-    const { directory } = repository({
+    const files = {
       ...allRouted(),
       [first]: "﻿é😀\n", // a byte-order mark, a two-byte and a four-byte character, a newline: 4 code points
       [conditional]: "x".repeat(1000),
-    });
+    };
+    const { directory } = repository(files);
     try {
       writeFileSync(join(directory, second), "uncommitted text is not read");
       const { status, out } = run(directory);
       assert.equal(status, 0, out);
       assert.deepEqual(columns(out, first), ["4"]);
       assert.deepEqual(columns(out, second), ["1"]);
-      assert.deepEqual(columns(out, "total"), [String(4 + ROUTE.everyTask.length - 1)]);
+      for (const role of Object.keys(ROUTE.roles))
+        assert.equal(roleTotal(out, role), commonSize(files) + workflowSize(role));
       assert.deepEqual(columns(out, conditional).slice(0, 1), ["1000"]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -105,8 +145,23 @@ test(
       assert.equal(status, 0, out);
       assert.deepEqual(columns(out, first), ["3", "+2"]);
       assert.deepEqual(columns(out, second), ["2", "new"]);
-      assert.deepEqual(columns(out, ROUTE.everyTask[2]), ["1", "0"]);
-      assert.deepEqual(columns(out, "total"), [String(ROUTE.everyTask.length + 3), "+4"]);
+      assert.deepEqual(columns(out, ROUTE.everyTask[2]), [
+        String([...routed[ROUTE.everyTask[2]]].length),
+        "0",
+      ]);
+      for (const role of Object.keys(ROUTE.roles)) {
+        assert.equal(
+          roleTotal(out, role),
+          commonSize({ ...routed, [first]: "abc", [second]: "xy" }) + workflowSize(role),
+        );
+        assert.match(
+          out,
+          new RegExp(
+            `^  ${role} .*\\(before ${commonSize(routed) + workflowSize(role)}, change 4\\)$`,
+            "mu",
+          ),
+        );
+      }
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -125,12 +180,65 @@ test(
       const { status, out } = run(directory);
       assert.equal(status, 1, out);
       assert.match(out, new RegExp(`missing  ${absent.replaceAll(".", "\\.")}`, "u"));
-      assert.deepEqual(columns(out, "total"), [String(ROUTE.everyTask.length - 1)]);
+      assert.equal(roleTotal(out, "A"), commonSize(routed) + workflowSize("A"));
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   },
 );
+
+test("a renamed startup or conditional workflow heading fails instead of disappearing from the route", () => {
+  for (const title of ["Build", "Child"]) {
+    const { directory } = repository({
+      ...allRouted(),
+      [ROUTE.workflow.path]: WORKFLOW.replace(title, "Renamed"),
+    });
+    try {
+      const { status, out } = run(directory);
+      assert.equal(status, 1, out);
+      assert.ok(out.includes(`${ROUTE.workflow.path}#${title.toLowerCase()}`), out);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("a renamed route-table heading or unknown role is reported as invalid", () => {
+  for (const router of [
+    ROUTER.replace(ROUTE.workflow.heading, "Renamed"),
+    ROUTER.replace("A B |", "X |"),
+  ]) {
+    const { directory } = repository({ ...allRouted(), [ROUTE.workflow.route]: router });
+    try {
+      const { status, out } = run(directory);
+      assert.equal(status, 2, out);
+      assert.match(out, /missing route heading|invalid workflow route row/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("--base measures the earlier whole-workflow route and each later role's section route", () => {
+  const files = { ...allRouted(), [ROUTE.workflow.route]: "# Capabilities\n" };
+  const { directory, commit: base } = repository(files);
+  try {
+    commit(directory, { [ROUTE.workflow.route]: ROUTER });
+    const { status, out } = run(directory, ["--base", base]);
+    assert.equal(status, 0, out);
+    const before = commonSize(files) + [...WORKFLOW].length;
+    for (const role of Object.keys(ROUTE.roles)) {
+      const after = commonSize({ ...files, [ROUTE.workflow.route]: ROUTER }) + workflowSize(role);
+      assert.equal(roleTotal(out, role), after);
+      assert.match(
+        out,
+        new RegExp(`^  ${role} .*\\(before ${before}, change ${after - before}\\)$`, "mu"),
+      );
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test(
   "a revision that is no commit, a file that is not UTF-8 and an unknown argument exit 2",
