@@ -635,7 +635,7 @@ export function unwrap(expression: Expression): Expression {
 /**
  * A check into a function's parameter or result without a written type: the core's contract there is one over every call
  * and return (F21), not what the function requires of each call (V30 §11), so the slice publishes no check against it
- * (#2667's ruling, R1).
+ * (#2667's ruling on untyped places).
  */
 export const UNTYPED_FUNCTION_PLACE =
   "a check into a function's parameter or result without a written type";
