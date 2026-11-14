@@ -71,19 +71,16 @@ interface Landing {
 
 /**
  * The contracts the plan content of one program carries, each read from the core's answers, never rebuilt from the
- * source: a place's contract at a path, objects with their decided properties; the type a typed parse or load reads its
- * value as, the core's own answer at the call; where a fallback lands, for whether its elements may be `null`. Built
- * on one task stack, so deep values do not deepen the native stack.
+ * source. Built on one task stack, so deep values do not deepen the native stack.
  */
 export class Contracts {
   readonly #landings = new Map<Expression, Landing | null>();
   readonly #literals = new Map<Expression, Expression | null>();
   /** The stores' contracts (`ContractDescriptors`), read through the answers' places. */
   readonly #descriptors: ContractDescriptors<readonly Expression[]>;
-  /** Each checked store's contract result, as `stored` made it. */
   readonly #results = new Map<Store, ContractResult>();
 
-  /** Each store's contract result, recorded by `stored` as it is asked, where it makes one. */
+  /** Each checked store's contract result. */
   public get results(): ReadonlyMap<Store, ContractResult> {
     return this.#results;
   }
@@ -309,7 +306,7 @@ export class Contracts {
 
   /**
    * The complete contract of the value a fallback stands in for at `steps` below it (ADR 0021 7.2): a `get`'s value,
-   * an `otherwise`'s left one without `null`, as `#provenanceOf` finds it; `null` for another owner.
+   * an `otherwise`'s left one without `null`; `null` for another owner.
    */
   public direct(
     owner: BinaryExpression | CallExpression,
@@ -337,14 +334,7 @@ export class Contracts {
 
   /**
    * The value an expression gives at `path` below it as the core answers for it, with the provenance of each level below
-   * that: the fallback completion's one lookup. Parentheses give their content's value, as `nodeOf` reads them. A
-   * place's value has its place's contract, each level written where the core answers its domain as written or as
-   * inherited from a written type. A `get`'s value is its receiver's element. An `otherwise` chain's value joins its
-   * operands' as the core admits a join: a level is written where any operand that brings a collection (a `null` or
-   * a scalar brings none) is written there; the contract is theirs where they agree, else the core's admitted contract
-   * of the place the value at `path` lands in (`landing`, the one its receiving check is against), and none where it
-   * lands in none or an operand's is open. Any other value is the core's answer for it by its own text (a literal, an
-   * operation, another call), unwritten.
+   * that: the fallback completion's one lookup.
    */
   #provenanceOf(value: Expression, path: readonly string[], landing: Landing | null): Provenance {
     const read = unwrap(value);
@@ -478,12 +468,8 @@ export class Contracts {
    * The core's answer at `path` below a call's value as a plan: its kinds (a written target's, else the default's),
    * integers among numbers as numbers (the decided family, ADR 0021 1.2), a collection's elements and an object's
    * properties below by the same rule. At the call itself an unknown or no kind gives no plan; below it such a level
-   * takes every value (ADR 0021 2.6: `[]` leaves the element type open, a `null` in the default stays unknown). A
-   * record's field that some of its sources lack (`missing`) has the kinds the others give, and a missing one is the
-   * default's. The program leaves the slice (`OutsideContract`) where the plan cannot carry the core's answer exactly:
-   * where a stop left a level open (#1767), where the place the call lands in types such an open level (the core
-   * answers the call and the place differently there), where records of a list a parse reads lack fields no default
-   * supplies, and deeper than the slice follows.
+   * takes every value (ADR 0021 2.6: `[]` leaves the element type open, a `null` in the default stays unknown). The
+   * program leaves the slice (`OutsideContract`) where the plan cannot carry the core's answer exactly.
    */
   *#answerTask(
     at: AnsweredCall,
@@ -702,8 +688,6 @@ function readsPlace(fallback: Expression): boolean {
         for (const value of selected) pending.push({ at: value, projected: true });
         break;
       }
-      // a typed parse or load inside the default answers by its own default, which the outer call reads through,
-      // whatever its key
       case "loadExpression":
         if (at.defaultValue !== null) pending.push({ at: at.defaultValue, projected });
         break;

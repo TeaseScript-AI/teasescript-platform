@@ -52,7 +52,7 @@ interface Owers {
   readonly stopped: Set<CheckSite>;
 }
 
-/** A selected fallback's checks (the fallback rule's): the fallback and each depth its obligations name. */
+/** A selected fallback's checks (the fallback rule's). */
 interface Selected {
   readonly fallback: Expression;
   readonly depths: FallbackDepth[];
@@ -65,9 +65,7 @@ interface Owed {
   readonly by: Set<CheckSite>;
 }
 
-/**
- * The checks the warnings owe, the published warnings' and then those a stop moved to the runtime.
- */
+/** The checks the warnings owe, the published warnings' and then those a stop moved to the runtime. */
 function warningChecks(
   answers: Answers,
   index: SliceIndex,
@@ -105,8 +103,7 @@ function warningChecks(
               kinds: diagnostic.rule.rule === "store" ? diagnostic.rule.type : null,
               by,
             });
-          // a fallback: a load's default is checked as the load's result; any other where it is selected, all its
-          // depths at once
+          // (a load's default is checked as the load's result)
           else if (owner.kind !== "loadExpression") {
             const found = fallbacks.get(owner) ?? { fallback: expression, depths: [] };
             found.depths.push({ steps: steps!, against: diagnostic.obligation.against });
@@ -164,12 +161,8 @@ function movedChecks(
 }
 
 /**
- * The runtime checks the core's obligations owe: the store rule's and a boundary's at the store that brings the value
- * into its place, the destination's written type or, else, its admitted type at the stored path, one check per store
- * whatever the obligations inside its value; a typed load's own type, which repairs an object per field (ADR 0021 rule
- * 6.5); and the new content only the core emits (`CoreRuntimeChecks`): a property store that needs the property (a
- * `member-read` warning), a list `get` that needs a whole number (an `integer-use` warning), the check of a selected
- * fallback or default (the fallback rule) and `fromJson`'s expected type. A boundary at a load or a `fromJson` that no
+ * The runtime checks the core's obligations owe: one check per store, whatever the obligations inside its value; a
+ * typed load's own type repairs an object per field (ADR 0021 rule 6.5). A boundary at a load or a `fromJson` that no
  * store takes is its own type's.
  */
 export function runtimeChecks(
@@ -218,7 +211,6 @@ export function runtimeChecks(
         ),
         by: owers.published,
       });
-  // the types a typed load and a `fromJson` read their value as
   const typed = new Set<Expression>();
   for (const load of index.loads) {
     const type = contracts.expected(load);
@@ -270,10 +262,8 @@ export function runtimeChecks(
     const type = contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null);
     if (type !== null) checks.set(store, type);
   }
-  // after a demand stop, the obligations the receiving completion's own store checks owe (#1682): the natural walk's of
-  // the decisions it made on the settled pass's inputs, each at its store as the unstopped one is, for that store's
-  // parts only (its own check stays the store check's), merged into its owed ones in the published order (none where the
-  // completion's records are left out: no completion runs, `asked`)
+  // (after a demand stop, the receiving completion's own store checks owe at each store what the unstopped analysis
+  // places there, #1682)
   const completed = new Map<Store, Obligation[]>();
   for (const warning of answers.completedWarnings()) {
     if (leftOutWarning(warning) || index.fallbackOf(index.expressionAt(warning.site)) !== undefined)
@@ -297,7 +287,6 @@ export function runtimeChecks(
       );
   }
   for (const [store, obligations] of atStore) {
-    // (the label of the place it stores into, as `stored` finds it: no question beyond the store's own check's)
     const destination = contracts.destination(store);
     if (destination === undefined) continue;
     const whole = checks.get(store)?.type ?? null;
@@ -362,7 +351,6 @@ export function lostCheck(
         UNDECIDED_AT_BUDGET,
       );
     }
-  // (the stores the completion's own destination-type check owes a check at, each once)
   const warned = new Set<Store>();
   for (const warning of answers.completedWarnings()) {
     if (leftOutWarning(warning)) continue;
@@ -412,11 +400,7 @@ function settledOwed(answers: Answers, index: SliceIndex): void {
 }
 
 /**
- * The part checks a store's owed obligations below its destination make (#1224): one per obligation
- * the analysis owes at the store below its destination (`destination`, the label of the place it stores into), with
- * the obligation's kinds at the steps its target names below the destination (`pathText`'s: a property's name, quoted
- * for an internal one, `element`, `entry` or `index` for an element). None is made for an obligation at the destination
- * itself, for one whose kinds leave its part open, or for a step of another form: nothing is checked that the analysis
+ * The part checks a store's owed obligations below its destination make (#1224): nothing is checked that the analysis
  * does not owe there.
  */
 function partChecksOf(destination: string, obligations: readonly Obligation[]): PartCheckPlan[] {
@@ -549,10 +533,8 @@ function fallbackSteps(target: string, name: string | null): string[] | null {
 
 /**
  * The check of a selected fallback from the fallback rule's obligations at its depths (ADR 0021 7.2, nested literals by
- * their elements): at each depth the kinds required there, `null` below the fallback itself where `takesNull` allows
- * it, the collection below it as the fallback's literal is one, else a list or a set for an element and a dict for an
- * entry; `null` where no depth requires a kind. Where the fallback rule publishes nothing below a collection no literal
- * holds, that collection is checked whole, as the value the fallback stands in for is at that depth (`whole`), not its
+ * their elements); `null` where no depth requires a kind. Where the fallback rule publishes nothing below a collection
+ * no literal holds, that collection is checked whole, as the value the fallback stands in for is at that depth, not its
  * first level alone (#1539); where that value gives no collection there the program leaves the slice.
  */
 function fallbackPlan(
