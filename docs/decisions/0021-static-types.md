@@ -44,10 +44,10 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    or store instead, and the error there names the copy that brought it: following such a cycle would make the
    compiler's work grow faster than the script. A list, set, or dict that reaches a place through a cycle of copies,
    arguments, returns, and stores that nests it one level deeper or more on each turn, such as a function that returns
-   its argument in a list and is called on its own result, is known one level deeper than what enters the cycle; below
-   that level, its elements and values are values the compiler cannot know (rule 1.7). The decided type holds wherever
-   the place is used, also before the value that decided it, and a read inside an expression sees the value at that
-   point of evaluation, as the runtime does.
+   its argument in a list and is called on its own result, is known one level deeper than what enters the cycle, also
+   where the place's written type leaves that level open; below that level, its elements and values are values the
+   compiler cannot know (rule 1.7). The decided type holds wherever the place is used, also before the value that
+   decided it, and a read inside an expression sees the value at that point of evaluation, as the runtime does.
 2. `let x = null` without a type takes the type `T?` of the earliest non-null value stored into it. A different non-null
    type is an error that names both places. This is the ordinary rule applied to the first real value, not a general
    union inference. Storing `null` later also makes a place optional: after `let count = 1`, `count = null` makes

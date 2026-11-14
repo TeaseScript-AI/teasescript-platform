@@ -355,5 +355,5 @@ an open level, so a recursive function that fills a written `dict` with its own 
 route the index saw no cycle, and a consumer that reads a level deeper on each turn ran to the allowance (#2771,
 ToyExpanded).
 
-**Source.** The lead's acceptance of #2771's plan 0 (construction C1 and C2), 2026-11-14; ADR 0021 rule 1.1's clause
-for written places is the owner's to accept.
+**Source.** The owner's acceptance of ADR 0021 rule 1.1's clause "also where the place's written type leaves that level
+open", and the lead's acceptance of #2771's plan 0 (construction C1 and C2), 2026-11-14.
