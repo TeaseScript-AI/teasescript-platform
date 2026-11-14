@@ -17,13 +17,11 @@ import type { Definition, Key } from "../definitions.js";
 import type { Proof, ProofDemand } from "../solver.js";
 
 /**
- * A4, the written type a copy of a written binding brings into an unwritten place
- * (docs/specifications/type-inference-accepted-record/admission.md#r4-375): its state, one per pass
- * (`CorePass.receivingDomain`), made with the pass's parts and asking nothing when made. Admission builds it
- * (`copyGraph`) and reads it (`inheritedAt`) as its client; F18 does not read it (#1072). Each key's inherited type
- * is a proof of the pass's solver (`inheritedProof`); what its runs found, the keys that wait on each other and the
- * own-level bits, is the pass's too. It also holds admission's memos of landings, scans, listings and prefix holders;
- * each admission made on the pass starts those and the rest afresh (`reset`).
+ * The written type a copy of a written binding brings into an unwritten place
+ * (docs/specifications/type-inference-accepted-record/admission.md#r4-375): its state, one per pass, made with the
+ * pass's parts and asking nothing when made. Each key's inherited type is a proof of the pass's solver
+ * (`inheritedProof`); what its runs found, the keys that wait on each other and the own-level bits, is the pass's too.
+ * It also holds admission's memos of landings, scans, listings and prefix holders.
  */
 export class ReceivingDomain {
   /**
@@ -70,7 +68,7 @@ export class ReceivingDomain {
   >();
   /** The copies of places that may inherit a written type (`inheriting`), where they land. */
   a4Inherits: InheritedCopy[] = [];
-  /** A4 through copies (`copyGraph`): the unwritten places a copy of a written binding reaches, copy by copy. */
+  /** The unwritten places a copy of a written binding reaches, copy by copy. */
   inheriting = new Set<PlaceId>();
   /**
    * #1901: per unwritten place and path, whether the copy that decides it reads its written type at its own root (a
@@ -121,7 +119,7 @@ export class ReceivingDomain {
   >();
   /** Per place and path id, its frontier past wrappers (`wrappedFrontier`). */
   frontiers = new Map<string, Frontier>();
-  /** Per place and step, its wrapper's step as A2's scan reads it (`scanHop`). */
+  /** Per place and step, its wrapper's step as the earliest contribution's scan reads it (`scanHop`). */
   scanHops = new Map<
     string,
     { readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null
@@ -131,7 +129,7 @@ export class ReceivingDomain {
     Stops,
     { readonly written: number; readonly values: number; readonly literals: number }
   >();
-  /** A4 through copies' landings (`inheritance`). */
+  /** Where copies of written types land (`inheritance`). */
   inherits: Inheritance | null = null;
   /** Per place and path, whether its copies land it (`landed`). */
   landedPaths = new Map<string, boolean>();

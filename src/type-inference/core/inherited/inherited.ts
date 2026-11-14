@@ -31,7 +31,7 @@ import { copySources, stopsOfRead } from "../admission/walk.js";
 import { wholeOf } from "../admission/eligibility.js";
 import { positions } from "../positions.js";
 
-// A4 through copies: the written type an unwritten place's decision inherits, from the graph of copies.
+// Inheritance through copies: the written type an unwritten place's decision inherits, from the graph of copies.
 
 /**
  * A copied written type as a place's own decision admits it: with its `null` where the decision is nullable beside the
@@ -44,9 +44,9 @@ export function optionalOf(term: TypeTerm | null, nullable: boolean): TypeTerm |
 }
 
 /**
- * A4 through copies (ADR 0021 1.3: a copy of a binding with a written type keeps that type, so a copy of that copy does
- * too), from every definition's stores: the unwritten places a copy of a written binding lands in, then
- * those a copy of such a place lands in, at any path (`inheriting`). Only their copies carry an inherited type.
+ * Inheritance through copies (ADR 0021 1.3: a copy of a binding with a written type keeps that type, so a copy of that
+ * copy does too), from every definition's stores: the unwritten places a copy of a written binding lands in, then those
+ * a copy of such a place lands in, at any path (`inheriting`). Only their copies carry an inherited type.
  */
 export function copyGraph(admission: Admission): void {
   const { program, definitions } = admission.pass;
@@ -81,19 +81,20 @@ export function copyGraph(admission: Admission): void {
 }
 
 /**
- * A4 through copies (ADR 0021 1.3, (1a)): the written type an unwritten place's own decision copies at a
- * path, through whatever copy of a written binding it comes (a chain of copies, a projection, a selected carrier, a
- * literal, a parameter's default), at every collection level: `scanAt`'s copied type, with the place's own `null`
- * where its decision is nullable beside the copy (`optionalOf`), `null` where a value decides the path or nothing does. A copy of the place carries that type there. Once per place and path, iteratively: a scan
- * that needs another place's type first is suspended where it stands (`Inheriting`) and goes on from there once that
- * type is known, so a chain of copies never deepens the native stack and a scanned prefix is never scanned again for a
- * sibling resolved later (#1049). A scan that needs the very place and path
- * whose own scan is waiting closes a cycle of copies: those waiting from there on are joined (`cycles`), and a copy
- * between two of them carries no written type (`cut`): a cycle of copies decides nothing written, whichever of its
- * places is asked first. A scan whose own cycle grew while it waited is taken again from its start, since the cut may
- * now drop a copy it already read; nothing else changes what it read. A place at another path is no cycle (`a.q = a`:
- * `a.q.p` needs `a.p`). Past the deepest path a written type reaches (`reach`) a place inherits only what its path's
- * prefix there leaves below it (an unrestricted part), so a copy nesting a place in itself never deepens without end.
+ * Inheritance through copies (ADR 0021 1.3, (1a)): the written type an unwritten place's own decision copies at a path,
+ * through whatever copy of a written binding it comes (a chain of copies, a projection, a selected carrier, a literal,
+ * a parameter's default), at every collection level: `scanAt`'s copied type, with the place's own `null` where its
+ * decision is nullable beside the copy (`optionalOf`), `null` where a value decides the path or nothing does. A copy of
+ * the place carries that type there. Once per place and path, iteratively: a scan that needs another place's type first
+ * is suspended where it stands (`Inheriting`) and goes on from there once that type is known, so a chain of copies
+ * never deepens the native stack and a scanned prefix is never scanned again for a sibling resolved later (#1049). A
+ * scan that needs the very place and path whose own scan is waiting closes a cycle of copies: those waiting from there
+ * on are joined (`cycles`), and a copy between two of them carries no written type (`cut`): a cycle of copies decides
+ * nothing written, whichever of its places is asked first. A scan whose own cycle grew while it waited is taken again
+ * from its start, since the cut may now drop a copy it already read; nothing else changes what it read. A place at
+ * another path is no cycle (`a.q = a`: `a.q.p` needs `a.p`). Past the deepest path a written type reaches (`reach`) a
+ * place inherits only what its path's prefix there leaves below it (an unrestricted part), so a copy nesting a place in
+ * itself never deepens without end.
  */
 export function inheritedAt(
   admission: Admission,
@@ -131,7 +132,7 @@ function inheritedAtKey(admission: Admission, key: Key): TypeTerm | null {
 }
 
 /**
- * A key's inherited written type (A4, ADR 0021 1.3) as a solver proof (#1072: a read inside it is yielded, never run):
+ * A key's inherited written type (ADR 0021 1.3) as a solver proof (#1072):
  * its term, optional where its decision is nullable beside the copy (`optionalOf`), or none; and whether the deciding
  * copy reads its written type at its own root (#1901). Its signature spells both, so a changed type or level reruns its
  * readers whatever its items.
@@ -154,8 +155,8 @@ export class InheritedProof implements Proof {
  * A key's inherited proof (#1072): one demand per canonical key, made when asked and asking nothing until it runs.
  * Its run is the key's own scan (`scanOf`), each semantic read it makes yielded (`Read`), each key it waits on read
  * through that key's proof; a key that is a member of a component still being solved, its own included, is a copy
- * the scan's cycle cuts: joined to it (`join`) and read as none, as A4's cycle rule reads a copy between two places
- * that wait on each other (`waiting.ts`).
+ * the scan's cycle cuts: joined to it (`join`) and read as none, as a copy between two places that wait on each other
+ * is read.
  */
 function inheritedProof(admission: Admission, key: CanonicalKey): ProofDemand<InheritedProof> {
   const site = admission.pass.program.places[keyPlace(key)]?.site ?? null;
@@ -220,7 +221,6 @@ function* waitOn(
  * as one top-level run (#1072), and the proof's own-level bit recorded for the scans that read it (#1901).
  */
 function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
-  // (a key in its identity, as the proofs hold it)
   const key = canonicalKey(admission.pass.contract, asked);
   settleCyclesIfForgotten(admission);
   let proof: InheritedProof | null;
@@ -283,9 +283,10 @@ function ownScanOf(admission: Admission, next: CanonicalKey): Inheriting<Waiting
 }
 
 /**
- * Where a key's inherited type stands past wrappers (`Contract.wrapperHop`): the read its path's last wrapper
- * holds, with the path below it, when its first step passes one and each wrapper on the way is one for A2's scan too
- * (`scanHop`); `null` where the first step passes none. Once per place and path (by its id), from its parent's.
+ * Where a key's inherited type stands past wrappers (`Contract.wrapperHop`): the read its path's last wrapper holds,
+ * with the path below it, when its first step passes one and each wrapper on the way is one for the earliest
+ * contribution's scan too (`scanHop`); `null` where the first step passes none. Once per place and path (by its id),
+ * from its parent's.
  */
 function* wrappedFrontier(
   admission: Admission,
@@ -324,7 +325,7 @@ function* wrappedFrontier(
 }
 
 /**
- * A wrapper's step as A2's scan reads it (`scanAt`, `earliestDecider`), or `null`: the binding is a wrapper at
+ * A wrapper's step as the earliest contribution's scan reads it (`scanAt`), or `null`: the binding is a wrapper at
  * the step (`Contract.wrapperHop`) whose declaration is its key's one eligible store, no other definition's class, and
  * its literal's stops at the step are the read's own (a written stop where its binding is written or inherits one, and
  * its value), none at the literal's root or below the read. So the scan of a key `place|step·rest` finds the read's
@@ -425,7 +426,6 @@ function* wrapped(
   const { program, values, contract } = admission.pass;
   // (the hop the frontier found, known by then)
   const decl = admission.scanHops.get(joinParts(place, first))!.decl;
-  // (a cursor's path read by its id)
   const position = () =>
     typeof path === "number"
       ? values.valuePositionAt(decl.value!, decl.node, path)
@@ -525,7 +525,7 @@ export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): 
 }
 
 /**
- * Whether a written type a copy decides at a prefix of a path leaves the path unrestricted (A4 through copies, #1215: a
+ * Whether a written type a copy decides at a prefix of a path leaves the path unrestricted (#1215: a
  * copied written type is the written type below it too): a prefix copies land at (`landed`) whose decision copies a
  * written type (`inheritedAt`) unrestricted at the rest (`permittedAt`), as an own written type is below it, whatever a
  * store on the path decided before the copy. Only in a place copies land in, walked down from its root one step at a

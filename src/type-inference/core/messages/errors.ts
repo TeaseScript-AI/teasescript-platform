@@ -1020,7 +1020,7 @@ export function joinFix(
 
 /**
  * The kinds other than text that `${...}` shows as text, not in a notation (as a script reference or a regex is): those
- * a text join's fix puts in `${...}` (`joined`, which refuses `null` among them).
+ * a text join's fix puts in `${...}`.
  */
 const TEXT_JOIN_KINDS: ReadonlySet<ItemTag> = new Set([
   "integer",
