@@ -232,50 +232,57 @@ function codesOf(diagnostics) {
   return codes;
 }
 
-/** The core's own analysis of the package in `mode`, past the syntax gate. */
+/**
+ * The core's own analysis of the package in `mode`, past the syntax gate, every digest made inside the mode as the
+ * analysis was (an answer can be computed lazily, when it is first asked); `units` the analysis's own, before its
+ * digests' questions, which its trace and questions do count.
+ */
 function analysed(tree, mode, files) {
   const request = tree.analysis.coreRequest(files, GLOBALS);
-  const {
-    value: a,
-    error,
-    kept,
-  } = observed(tree, () => mode.run(() => tree.answers.analyseCore(request)));
-  if (error !== null) return { error: errorText(error), ...kept };
-  return {
-    error: null,
-    answers: part(() => tree.oracles.everyAnswer(a)),
-    diagnostics: part(() => encode(a.diagnostics)),
-    codes: codesOf(a.diagnostics),
-    checks: part(() => encode(a.checks)),
-    counts: part(() => encode([...a.budget.counts].sort())),
-    checked: part(() => encode(tree.checkResult.checkedResult(a, request))),
-    ...kept,
-  };
+  const made = {};
+  let units = 0;
+  const { error, kept } = observed(tree, () =>
+    mode.run(() => {
+      const a = tree.answers.analyseCore(request);
+      units = tree.run.trace.units;
+      Object.assign(made, {
+        answers: part(() => tree.oracles.everyAnswer(a)),
+        diagnostics: part(() => encode(a.diagnostics)),
+        codes: codesOf(a.diagnostics),
+        checks: part(() => encode(a.checks)),
+        counts: part(() => encode([...a.budget.counts].sort())),
+        checked: part(() => encode(tree.checkResult.checkedResult(a, request))),
+      });
+    }),
+  );
+  return { error: errorText(error), ...made, ...kept, units: error === null ? units : kept.units };
 }
 
-/** The package's compile in `mode` with the core's research route (`coreOutcome(request, "past")`) as its analysis. */
+/**
+ * The package's compile in `mode` with the core's research route (`coreOutcome(request, "past")`) as its analysis, its
+ * digests made inside the mode.
+ */
 function routed(tree, mode, files) {
-  let outcome = null;
+  const made = { plan: null, diagnostics: null, codes: {}, checked: null, facts: null };
   const backend = {
     name: "core",
     analyze(request) {
-      outcome = tree.backend.coreOutcome(request, "past");
+      const outcome = tree.backend.coreOutcome(request, "past");
+      made.checked = part(() => encode(outcome.checked));
+      made.facts = part(() => encode(outcome.facts()));
       return outcome;
     },
   };
-  const {
-    value: result,
-    error,
-    kept,
-  } = observed(tree, () =>
-    mode.run(() => tree.compiler.compileProjectWithBackend(files, { globals: GLOBALS }, backend)),
+  const { error, kept } = observed(tree, () =>
+    mode.run(() => {
+      const result = tree.compiler.compileProjectWithBackend(files, { globals: GLOBALS }, backend);
+      made.plan = result?.plan == null ? null : sha(JSON.stringify(result.plan));
+      made.diagnostics = sha(JSON.stringify(result.diagnostics));
+      made.codes = codesOf(result.diagnostics);
+    }),
   );
   return {
-    plan: result?.plan == null ? null : sha(JSON.stringify(result.plan)),
-    diagnostics: result == null ? null : sha(JSON.stringify(result.diagnostics)),
-    codes: codesOf(result?.diagnostics),
-    checked: outcome === null ? null : part(() => encode(outcome.checked)),
-    facts: outcome === null ? null : part(() => encode(outcome.facts())),
+    ...made,
     error: errorText(error),
     outside:
       error?.name === "CandidateOutsideSlice" ? (error.limit === true ? "limit" : "slice") : null,
