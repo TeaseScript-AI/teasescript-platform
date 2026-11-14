@@ -107,7 +107,6 @@ interface Sequence {
 /**
  * Reads the region with a list of open sequences, not by recursion: valid source may nest deeper than the call stack
  * reaches. Every target is checked against the sequence around it, so what starts inside a construct ends inside it.
- * The instructions that start a construct are named in the switch; every other instruction is part of a run.
  */
 function readStructure(
   instructions: readonly Instruction[],

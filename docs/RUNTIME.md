@@ -2143,6 +2143,10 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Instruction plan history
 
+- Revision 105: A check of a part of a stored value (#1224; only the new type analysis's plans carry it): a
+  `declareBinding` or an `assign` may carry `partChecks`, each a path of properties and elements, a type and a place,
+  which the runtime checks in the value it stores where the value has that part; plan validation previously rejected
+  the field.
 - Revision 104: A typed reading into a written `object` (#1223; only the new type analysis's plans carry it): an object type may carry `keepExtra: true`, with which a typed `fromJson` keeps a JSON object's other keys, and a `storageLoad` may carry `repair` beside a union with an object member, as an `object?`'s; plan validation previously rejected both.
 - Revision 103: The new type analysis's runtime checks (the port of the coarse core, step S7; only its plans carry them
   until it is selected): an `assign` of a property may carry `requireExisting`, a call `indexCheck`, `fallbackCheck`,
@@ -2524,6 +2528,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 132: The engine-independent colours' snapshot contract (#2147).
 - Revision 130: The plan contract of a check of a part of a stored value.
 - Revision 129: The plan contract of a typed reading into a written `object`.
 - Revision 128: The form-presentation snapshot contract.
