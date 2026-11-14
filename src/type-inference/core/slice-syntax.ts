@@ -212,10 +212,10 @@ const SHOWN_TEXT: OperandCheck = {
 const UI_CHECK: OperandCheck = { file: INTERACTION, function: "materializeInteractionUi" };
 
 /**
- * A command or request operand's rule (#2488's command operand table, step 1½): `takes`, the kinds its instruction
- * takes; `form`, a rule on the operand as written (a known text, a choice object written in place); `today`, today's
- * compile errors for a value the operand does not take; `check`, where the instruction refuses such a value whatever the
- * plan says.
+ * A command or request operand's rule (#2488's command operand table, step 1½): `takes`, the kinds the route admits
+ * there, as today's checker does, of which the instruction may still refuse a value as it runs; `form`, a rule on the
+ * operand as written (a known text, a choice object written in place); `today`, today's compile errors for a value the
+ * route does not admit; `check`, where the instruction refuses a value it does not take whatever the plan says.
  */
 export interface OperandRule {
   readonly takes: readonly ItemTag[];
@@ -243,9 +243,8 @@ const CHOICE_CHECK: OperandCheck = {
   function: "expandChoiceOptions",
 };
 /**
- * A choice's rule; `button`, an operand that gives a button itself, where a choice object written in place must have
- * its shape (today's `#choiceEntry`): a `text`, and no property a choice object does not hold (`isChoiceObjectProperty`),
- * nor a `value` where the button returns the value written before `:` (`"labelled"`).
+ * A choice's rule; `button`, an operand that gives a button itself, whose choice object written in place needs its
+ * shape.
  */
 const choice = (takes: readonly ItemTag[], button: "returns" | "labelled" | null): OperandRule => ({
   takes,
@@ -421,10 +420,7 @@ const ASK_NAMES: Readonly<Record<InteractionExpression["interactionKind"], strin
 
 /**
  * A command's or an ask's operands by the table's positions (`COMMAND_OPERANDS`), in source order; an operand the table
- * names no position for is not listed. A `wait` with a unit after its length takes an amount of that unit (`amount`);
- * an `askChoice`'s option is its `label` where a name or number labels it, a labelled list's elements each a
- * `labelledElement`; else a list's elements each an `element`, or the `option` itself; a choice object written in any of
- * these gives its `text` (`returnedText` where the button returns it), `value` and `background` (`choiceObject`).
+ * names no position for is not listed.
  */
 export function commandOperands(
   node: Statement | InteractionExpression,
