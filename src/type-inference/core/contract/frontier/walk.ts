@@ -227,8 +227,6 @@ function goalRules(frontier: Frontier, goal: Goal): void {
     if (own.length > 0) selfMarks(frontier, goal.node, own, s, into);
     return;
   }
-  // a literal's index node: its child at the step, a missing property's `missing` where an object lacks it, its reads
-  // one step below
   const { literal, index, at, id } = node;
   if (at.reference) throw new Decline("reference");
   if (at.others.length > 0) throw new Decline("native");

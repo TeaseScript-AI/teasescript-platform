@@ -245,7 +245,6 @@ function* valueAt(
     return STOPPED;
   }
   try {
-    // (a cursor's span read by its path's id, its key a cursor and a literal's demand named by it)
     const ref = restRef(contract, rest);
     if (ref.length === 0) return yield* contract.contractOfValue(value, flow);
     const { program, guards } = contract.pass;
@@ -514,7 +513,6 @@ function* contractLength(
     if (item.tag === "string" || item.tag === "list" || item.tag === "set" || item.tag === "dict") {
       if (rest.length === 0) out.push(carried(makeItem("integer", item.writer), [item]));
     } else if (item.tag === "object" || REFERENCE.has(item.tag))
-      // an object's own `length`, a reference's member
       out.push(...(yield* contract.contractOfValueAt(owner, joinSteps([step], rest), flow)));
     else if (heldAsIs(item)) {
       unknowns = true;

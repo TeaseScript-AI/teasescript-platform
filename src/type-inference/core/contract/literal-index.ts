@@ -128,7 +128,6 @@ export function pathAt(contract: Contract, parent: number, step: string): number
   contract.pathParents.push(parent);
   contract.pathDepths.push(contract.pathDepths[parent]! + 1);
   contract.pathLastSteps.push(step);
-  // (the cursors' metadata, each from its parent's and the step alone: `key-ids.ts`)
   contract.pathFirstSteps.push(parent === 0 ? step : contract.pathFirstSteps[parent]!);
   contract.pathMembers.push(memberStep([step], 0) === 0 ? id : contract.pathMembers[parent]!);
   contract.pathProperties.push(contract.pathProperties[parent]! && propertyOnly(step));

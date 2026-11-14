@@ -95,7 +95,6 @@ export function* contractOfOp(
     return items;
   }
   if (c.kind === "load") {
-    // a computed key: an external unknown, with `null` where its default holds only `null`
     if (c.key === null) {
       const nullDefault =
         rest.length === 0 &&
@@ -119,9 +118,7 @@ export function* contractOfOp(
     heldReference(yield* contract.valueReceiver(c.receiver))
   )
     return [unknownItem(REASON.opaque)];
-  // an interpolation: always text
   if (family === "interpolation") return rest.length === 0 ? [makeItem("string")] : [];
-  // a message's handle
   if (family === "say")
     return rest.length > 0 ? [unknownItem(REASON.opaque)] : [makeItem("messageHandle")];
   // `2 s`, `1 calendar day`, `20 deg`
@@ -140,7 +137,6 @@ export function* contractOfOp(
     );
   }
   const method = family === "method" && c.receiver !== null ? methodCategory(name) : undefined;
-  // a declared result, or what a removal gives
   if (method !== undefined && c.receiver !== null && method.gives.kind !== "copy") {
     const gives = method.gives;
     const out: Item[] = [];
@@ -277,7 +273,6 @@ export function* contractOfOp(
       scope,
     );
   if (rest.length > 0) return [unknownItem(REASON.opaque)];
-  // the runtime's operator table
   const operator = operatorOf(c);
   if (operator !== null) {
     const operands: (readonly Item[])[] = [];
@@ -290,9 +285,7 @@ export function* contractOfOp(
     return [makeItem("boolean")];
   const member = family === "member" ? memberResult(name) : undefined;
   if (member !== undefined) return member.map((kind) => makeItem(kind));
-  // a timer's or a media's handle
   if (family === "timer" || family === "media") return [makeItem(family)];
-  // a button's, a popup's or a camera's fixed result
   const shown = shownResult(name);
   if (shown !== undefined) return [makeItem(shown)];
   if (family === "range") return [makeItem("range")];

@@ -136,7 +136,6 @@ export function holderOfKey(contract: Contract, key: CanonicalKey): Holder {
   const known = contract.holders.get(`k${key}`);
   if (known !== undefined) return known;
   const holder = newHolder(contract, `k${key}`);
-  // (a cursor's parent and last step from the arena)
   const parent = contract.keyParent(key);
   if (parent !== null)
     refer(contract, holder, holderOfKey(contract, parent), [contract.keyLast(key)!]);
@@ -465,7 +464,6 @@ function isPath(rest: Rest | PathSteps): rest is readonly string[] {
 export function marksAt(contract: Contract, holder: Holder | null, asked: Rest): boolean {
   if (holder === null) return false;
   collectMarks(contract);
-  // a holder that reaches no guarded path and no read marks no path (`marksNothing`, once per holder)
   if (marksNothing(contract, holder)) return false;
   // (a span's steps made through the charged boundary, copied out for the walk's own paths: a holder that marks nothing
   // never asks them)
