@@ -53,16 +53,11 @@ import {
 } from "../helpers/type-core/row-templates.js";
 
 /*
- * The command operand table (#2488's step 1½, `COMMAND_OPERANDS`): each command and request operand position holds each
- * sample's value (`samples`: each origin with its own kinds), compiled by today's checker and by the candidate route in
- * the four held modes, and run with the host global at every value of the domain and, for a typed ingress, at a value
- * of its kind. Where today's checker refuses the source with the position's compile error, the route refuses it at the
- * operand. Where today's checker plans, the route publishes with today's checks and runs, but where the value's origin
- * is one the table declines (`DECLINED_ORIGINS`: an outside value carried, R10), which is counted (R11). The same holds
- * in each context (`CONTEXTS`); where the route refuses the value alone there, it refuses the command alike (R16).
+ * The command operand table (#2488's step 1½): the route refuses at an operand what today's checker refuses there, and
+ * publishes as today what it plans, but for the declines it counts.
  */
 
-/** The text of the table's refusal (`outsideAnswers`, `src/type-inference/core/backend.ts`). */
+/** The text of the table's refusal. */
 const TABLE_REFUSAL = "an operand its instruction does not take";
 
 const ruleOf = (sample: Sample): OperandRule | undefined =>
@@ -159,8 +154,6 @@ function judge(
       return;
     }
     if (!record.checker.plan) {
-      // today refuses the source: the route publishes nothing (R1); where today's errors are the position's, each is
-      // one the rule names
       if (mode.plan) failures.push(`${at}: today ${today.join(" ")}, the route a plan`);
       if (today.some((code) => rule.today.includes(code)))
         for (const code of today)
@@ -170,8 +163,6 @@ function judge(
       return;
     }
     if (mode.outside !== undefined) {
-      // today plans: the route declines only an outside value carried, by the table's refusal or, at a choice's
-      // position, by its refusal of a core diagnostic (`CORE_REFUSED_AT`); each is counted (R11)
       const by =
         mode.outside === TABLE_REFUSAL
           ? "table"
@@ -184,7 +175,6 @@ function judge(
       } else failures.push(`${at}: today a plan, the route refuses (${mode.outside})`);
       return;
     }
-    // both publish: with today's checks, and their runs are equal
     if (!mode.plan) failures.push(`${at}: today a plan, the route none`);
     const carried = new Set(mode.plan?.checks.map(checkKey) ?? []);
     for (const check of record.checker.plan.checks.map(checkKey))
@@ -202,7 +192,6 @@ function judge(
 test("each sampled kind, origin and position: where today refuses it, the route refuses it; where today plans, it publishes alike or declines a carried outside value", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "declared-positions-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
-  // each sample straight, and the context samples in every context; each with its value alone
   const sources = new Map<
     string,
     { readonly sample: Sample; readonly hosts: readonly unknown[] }
@@ -233,13 +222,11 @@ test("each sampled kind, origin and position: where today refuses it, the route 
         .flatMap((context) => judge(sample, context, found, seen, declined)),
     ),
   ];
-  // each position's rule refuses some source today refuses with one of its codes
   for (const row of Object.keys(COMMAND_OPERANDS))
     for (const [operand, rule] of Object.entries(operandRules(row) ?? {}))
       if (!rule.today.some((code) => seen.has(`${row} ${operand} ${code}`)))
         failures.push(`${row} ${operand}: no sample today refuses with ${rule.today.join(" ")}`);
   assert.deepEqual(failures, []);
-  // the carried outside values the route declines where today plans (R11): the table declines each declining origin
   t.diagnostic(`declined: ${JSON.stringify(Object.fromEntries([...declined].sort()))}`);
   assert.deepEqual(
     [
@@ -275,7 +262,6 @@ test("the table refuses a value its position does not take at the operand, with 
             CORE_BACKEND,
           ),
         );
-        // (or the core's own diagnostic, without a plan)
         assert.equal(plan, null, at);
       } catch (error) {
         if (!(error instanceof CandidateOutsideSlice)) throw error;
@@ -317,7 +303,6 @@ test("a property read that finds no such property fails at the read: the table j
 });
 
 test("no table operand inside the slice holds an unknown of a reason the table does not admit: its refusal of one has no witness at a command operand", () => {
-  // (the family's sources in every context, and the guard's templates of the table's rows)
   const pair = (row: SyntaxKind, source: string): readonly [SyntaxKind, string] => [row, source];
   const sources = [
     ...SAMPLES.map((sample) => pair(sample.row, inContext(sample, sample.command, "straight"))),
@@ -418,7 +403,6 @@ test("the samples' origins are complete: each conversion the slice admits, and a
     );
   for (const kind of kinds)
     if (!VALUE_KINDS[kind].written) assert.ok(kind in HOSTLESS_VALUES, kind);
-  // every position of the table is sampled: it has a template
   for (const row of Object.keys(COMMAND_OPERANDS))
     for (const operand of Object.keys(operandRules(row) ?? {}))
       assert.ok(templatesOf(row, operand) !== undefined, `${row} ${operand}`);
@@ -486,7 +470,7 @@ test("the host global at a position, the unknown the table admits: its instructi
             `${at} with ${JSON.stringify(hostValue)}: ${JSON.stringify(failure)}`,
           );
           // nothing of the statement's effect: no event of it but the failure, and the session's state as before the
-          // statement, but for the run's own bookkeeping; an ask's form (R38): no field or button opens and the run
+          // statement, but for the run's own bookkeeping; an ask's form: no field or button opens and the run
           // does not wait, its question perhaps said by its own instruction before
           const ask = kind === "interactionExpression";
           const own = result.events.filter(
