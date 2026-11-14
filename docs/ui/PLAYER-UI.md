@@ -158,6 +158,11 @@ content, while a wide/short shape can preserve vertical control extent because h
 A narrow tall desktop window and a similarly shaped phone should therefore converge on the same layout reasoning.
 Foldables likewise use their currently available dimensions rather than a special device category.
 
+Phones are portrait only. The owner's words, translated: "A landscape screen is unrealistic; make it only for portrait
+mode on phones. A landscape screen can only occur on tablets, desktops and laptops; a phone is always portrait." A
+phone-sized landscape viewport is no test case or layout target; tablet, laptop and desktop landscape sizes stay. Owner
+decision, 2026-11-13.
+
 Manual open/closed tool intent is preserved across resizing and rotation when the tool region owns focus or remains the
 active interaction context. A responsive change must not spontaneously open a previously closed drawer. When an open
 docked strip becomes an overlay drawer while focus is elsewhere, it may close so that it does not unexpectedly block the
