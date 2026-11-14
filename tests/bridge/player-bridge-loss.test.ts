@@ -271,7 +271,6 @@ interface LossHost {
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugHistorySpill: () => Promise<null>;
   readonly resolveAsset?: (path: string) => string | null;
   readonly scriptStorage?: ScriptStorageProvider;
   readonly keptSessions?: KeptSessionStore;
@@ -416,7 +415,6 @@ async function mount(
   const player = scope.run(() =>
     usePlayerSession({
       bridge: Promise.resolve(transport.bridge),
-      debugHistorySpill: async () => null,
       resolveAsset: (path) => `https://fixture/${path}`,
     }),
   )!;
@@ -607,7 +605,6 @@ async function keepingPage(
   const player = scope.run(() =>
     usePlayerSession({
       bridge: Promise.resolve(transport.bridge),
-      debugHistorySpill: async () => null,
       scriptStorage,
       keptSessions: kept,
     }),
@@ -717,10 +714,7 @@ RERUN.rows(
     const transport = await topologyBridge(context, topology, { delayMs: 50 });
     const scope = effectScope();
     const player = scope.run(() =>
-      usePlayerSession({
-        bridge: Promise.resolve(transport.bridge),
-        debugHistorySpill: async () => null,
-      }),
+      usePlayerSession({ bridge: Promise.resolve(transport.bridge) }),
     )!;
     context.after(() => scope.stop());
     await player.bridge;
@@ -770,9 +764,7 @@ RERUN.rows(
       .then((connected) => new bridgeModule.PlayerBridge(connected));
     const scope = effectScope();
     const unhandled = await unhandledDuring(async () => {
-      const player = scope.run(() =>
-        usePlayerSession({ bridge: connecting, debugHistorySpill: async () => null }),
-      )!;
+      const player = scope.run(() => usePlayerSession({ bridge: connecting }))!;
       // The host's own callers see the failure; nothing else leaves it unhandled.
       await assert.rejects(player.bridge);
     });
@@ -792,9 +784,7 @@ test("the Worker's readiness that fails leaves no rejection unhandled", async ()
     const failed = Promise.reject(
       new client.BridgeStartupError("The engine Worker could not start."),
     );
-    const player = scope.run(() =>
-      usePlayerSession({ bridge: failed, debugHistorySpill: async () => null }),
-    )!;
+    const player = scope.run(() => usePlayerSession({ bridge: failed }))!;
     // The host's own callers see the failure; nothing else leaves it unhandled.
     await assert.rejects(player.bridge, client.BridgeStartupError);
   });
@@ -1008,10 +998,7 @@ RERUN.rows(
     const transport = await topologyBridge(context, topology, { delayMs: 50 });
     const scope = effectScope();
     const player = scope.run(() =>
-      usePlayerSession({
-        bridge: Promise.resolve(transport.bridge),
-        debugHistorySpill: async () => null,
-      }),
+      usePlayerSession({ bridge: Promise.resolve(transport.bridge) }),
     )!;
     context.after(() => scope.stop());
     await player.bridge;

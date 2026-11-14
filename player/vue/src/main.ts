@@ -1,4 +1,5 @@
 import { createApp, h } from "vue";
+import { openEngineWorker } from "../../engine-bridge/browser-client.js";
 import { openIndexedDbMediaRepository } from "../../media/indexeddb-media-repository.js";
 import {
   memoryKeptRoomStore,
@@ -16,11 +17,16 @@ import { browserStorage } from "./shell/usePlayerPreference";
 import { usePlayerSession } from "./session/usePlayerSession";
 import "./style.css";
 
+// The engine's module Worker, started first so that its fetch and start overlap the page's IndexedDB opens: the one
+// backend of this page, given to whichever view it shows. A Worker that cannot start rejects it, possibly before the page
+// is built; the page shows that failure once it is, so the rejection is observed here and not reported as unhandled.
+const bridge = openEngineWorker();
+bridge.catch(() => {});
+const query = new URLSearchParams(window.location.search);
 // Fixtures and labs live in a separate chunk: always on the development server, and in a build
 // only after the explicit `?dev` opt-in. The default build plays the repository demo through the runtime,
 // or with `?package=<id>` a package of the playground server's development package root; the development preview
 // plays that package too, with its development tools.
-const query = new URLSearchParams(window.location.search);
 const developmentPreview = import.meta.env.DEV || query.has("dev");
 const packageId = query.get("package");
 const host: ScriptHost =
@@ -38,6 +44,7 @@ const keptSessions = await openIndexedDbKeptSessionStore().catch(() => memoryKep
 const debugRooms = await openIndexedDbKeptRoomStore().catch(() => memoryKeptRoomStore());
 const app = developmentPreview
   ? createApp((await import("./development/DevelopmentPreview.vue")).default, {
+      bridge,
       capturedMediaRepository,
       keptSessions,
       debugRooms,
@@ -47,6 +54,10 @@ const app = developmentPreview
     createApp({
       setup: () => {
         const player = usePlayerSession({
+          bridge,
+          // After a lost connection, the player's click opens a fresh engine Worker, which the Player ends; this page
+          // keeps the first one.
+          nextConnection: openEngineWorker,
           resolveAsset: host.resolveAsset,
           scriptStorage: createLocalScriptStorage(browserStorage(), host.storageScope),
           // An image the script saves a reference to stays in this browser for later runs.

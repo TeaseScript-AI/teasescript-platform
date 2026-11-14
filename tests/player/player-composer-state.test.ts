@@ -76,7 +76,6 @@ interface SessionHost {
 type Modules = {
   usePlayerSession: (options: {
     readonly bridge: Promise<PlayerBridge>;
-    readonly debugHistorySpill: () => Promise<null>;
     readonly keptSessions?: KeptSessionStore;
   }) => SessionHost;
   useComposerState: (host: {
@@ -216,7 +215,6 @@ async function page(context: TestContext, topology: Topology, script: string) {
   const made = scope.run(() => {
     const player = modules.usePlayerSession({
       bridge: Promise.resolve(connection.bridge),
-      debugHistorySpill: async () => null,
       keptSessions: memoryKeptSessionStore(),
     });
     const shown = () => (player.stopped.value ? null : player.session.value);

@@ -75,7 +75,6 @@ interface SessionHost {
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugHistorySpill: () => Promise<null>;
   readonly keptSessions?: KeptSessionStore;
 }) => SessionHost;
 let composerDescriptor: (shown: {
@@ -238,7 +237,6 @@ async function page(
   const made = scope.run(() => {
     const player = usePlayerSession({
       bridge: Promise.resolve(connection.bridge),
-      debugHistorySpill: async () => null,
       keptSessions: memoryKeptSessionStore(),
     });
     const shown = () => (player.stopped.value ? null : player.session.value);

@@ -1,73 +1,126 @@
 // The artifact inventory of one Player build (`l5-gate.md` part 4, bytes): each served file of its output (source maps
-// left out) with its raw, gzip and brotli size, and its classes: eager (what `index.html` names and their static
-// imports), Worker (each Worker entry, a file whose name says Worker, and its static imports), lazy (the rest). A file in
-// two classes is listed once, under both, and counted once in the overall total.
+// left out) with its raw, gzip and brotli size, and its classes:
+// - eager: what `index.html` names, and the files those import statically;
+// - Worker: each Worker entry (a file whose name says Worker), and the files it imports, statically or by `import()`;
+// - lazy: the rest of what `index.html`'s files reach by `import()`, and every file that is not JavaScript.
+// A file in two classes is listed once, under both, and counted once in the overall total. Imports are read from each
+// file's syntax tree (TypeScript's parser), so text that only looks like one, in a string or a comment, is none: an
+// import declaration, an `export … from` and an `import()` call. Each must name a file of the build as `./name`, an
+// `import()` by a string or a template without substitutions; a JavaScript file that no root reaches, or an import of
+// any other form, fails the inventory, as its class would be a guess.
 //   node tools/player-gate/artifacts.mjs --app DIR --build NAME > inventory.json
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import ts from "typescript";
 
-const { values } = parseArgs({ options: { app: { type: "string" }, build: { type: "string" } } });
-if (!values.app || !values.build) throw new Error("usage: artifacts.mjs --app DIR --build NAME");
-
-const files = [];
-const walk = (dir) => {
-  for (const name of readdirSync(dir)) {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) walk(path);
-    else if (!name.endsWith(".map")) files.push(relative(values.app, path));
-  }
-};
-walk(values.app);
-const text = (file) => readFileSync(join(values.app, file), "utf8");
-const byName = new Map(files.map((file) => [file.split("/").at(-1), file]));
-
-/** The files `file` imports statically (`import "./x.js"`, `from "./x.js"`), by their output path. */
-function staticImports(file) {
-  if (!file.endsWith(".js")) return [];
+/**
+ * The imports of the script `source` (named `file` in errors), as `{ name, dynamic }` with `name` the imported file's
+ * name; throws for an import whose target is not a literal `./name`.
+ */
+function importsOf(file, source) {
   const found = [];
-  for (const match of text(file).matchAll(/(?:\bfrom|\bimport)\s*["']\.\/([^"']+)["']/gu)) {
-    const target = byName.get(match[1]);
-    if (target !== undefined) found.push(target);
-  }
+  const target = (node, what) => {
+    const literal =
+      node !== undefined && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node));
+    if (!literal || !node.text.startsWith("./") || node.text.slice(2).includes("/"))
+      throw new Error(
+        `${file}: an ${what} of a form the inventory does not read: ${node?.getText() ?? "none"}`,
+      );
+    return node.text.slice(2);
+  };
+  const visit = (node) => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier)
+      found.push({ name: target(node.moduleSpecifier, "import"), dynamic: false });
+    else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)
+      found.push({ name: target(node.arguments[0], "import()"), dynamic: true });
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS));
   return found;
 }
-/** `roots` and everything they import statically. */
-function closure(roots) {
-  const seen = new Set();
-  const visit = (file) => {
-    if (seen.has(file)) return;
-    seen.add(file);
-    for (const next of staticImports(file)) visit(next);
+
+/** The inventory of the build in `app`, named `build`; throws for a file it cannot class. */
+export function inventoryOf(app, build) {
+  const files = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (!name.endsWith(".map")) files.push(relative(app, path));
+    }
   };
-  for (const root of roots) visit(root);
-  return seen;
+  walk(app);
+  const text = (file) => readFileSync(join(app, file), "utf8");
+  const byName = new Map(files.map((file) => [file.split("/").at(-1), file]));
+  const isScript = (file) => file.endsWith(".js");
+  /** Each script's imports, by output path. */
+  const edges = new Map(
+    files.filter(isScript).map((file) => [
+      file,
+      importsOf(file, text(file)).map(({ name, dynamic }) => {
+        const path = byName.get(name);
+        if (path === undefined)
+          throw new Error(`${file}: imports ./${name}, which the build does not hold`);
+        return { path, dynamic };
+      }),
+    ]),
+  );
+  /** `roots` and what they import, statically, or also by `import()` when `dynamic`. */
+  const closure = (roots, dynamic) => {
+    const seen = new Set();
+    const visit = (file) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      for (const edge of edges.get(file) ?? []) if (dynamic || !edge.dynamic) visit(edge.path);
+    };
+    for (const root of roots) visit(root);
+    return seen;
+  };
+
+  const named = [...text("index.html").matchAll(/(?:src|href)="[^"]*\/([^"/]+)"/gu)]
+    .map((match) => byName.get(match[1]))
+    .filter((file) => file !== undefined);
+  const eager = closure(["index.html", ...named], false);
+  const lazy = closure(eager, true);
+  const worker = closure(
+    files.filter((file) => /worker/iu.test(file.split("/").at(-1))),
+    true,
+  );
+  const unreached = files.filter((file) => isScript(file) && !lazy.has(file) && !worker.has(file));
+  if (unreached.length > 0)
+    throw new Error(`no root reaches ${unreached.join(", ")}: their class is unknown`);
+  const inventory = files.sort().map((file) => {
+    const bytes = readFileSync(join(app, file));
+    const classes = [
+      eager.has(file) && "eager",
+      worker.has(file) && "Worker",
+      !eager.has(file) && (lazy.has(file) || !isScript(file)) && "lazy",
+    ].filter(Boolean);
+    return {
+      file,
+      classes,
+      raw: bytes.length,
+      gzip: gzipSync(bytes, { level: 9 }).length,
+      brotli: brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } })
+        .length,
+    };
+  });
+  const totals = {};
+  const add = (name, entry) => {
+    totals[name] ??= { raw: 0, gzip: 0, brotli: 0 };
+    for (const size of ["raw", "gzip", "brotli"]) totals[name][size] += entry[size];
+  };
+  for (const entry of inventory) {
+    for (const name of entry.classes) add(name, entry);
+    add("all, each file once", entry);
+  }
+  return { build, files: inventory, totals };
 }
 
-const named = [...text("index.html").matchAll(/(?:src|href)="[^"]*\/([^"/]+)"/gu)]
-  .map((match) => byName.get(match[1]))
-  .filter((file) => file !== undefined);
-const eager = closure(["index.html", ...named]);
-const worker = closure(files.filter((file) => /worker/iu.test(file.split("/").at(-1))));
-const inventory = files.sort().map((file) => {
-  const bytes = readFileSync(join(values.app, file));
-  const classes = [eager.has(file) && "eager", worker.has(file) && "Worker"].filter(Boolean);
-  return {
-    file,
-    classes: classes.length === 0 ? ["lazy"] : classes,
-    raw: bytes.length,
-    gzip: gzipSync(bytes, { level: 9 }).length,
-    brotli: brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }).length,
-  };
-});
-const totals = {};
-const add = (name, entry) => {
-  totals[name] ??= { raw: 0, gzip: 0, brotli: 0 };
-  for (const size of ["raw", "gzip", "brotli"]) totals[name][size] += entry[size];
-};
-for (const entry of inventory) {
-  for (const name of entry.classes) add(name, entry);
-  add("all, each file once", entry);
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const { values } = parseArgs({ options: { app: { type: "string" }, build: { type: "string" } } });
+  if (!values.app || !values.build) throw new Error("usage: artifacts.mjs --app DIR --build NAME");
+  console.log(JSON.stringify(inventoryOf(values.app, values.build), null, 2));
 }
-console.log(JSON.stringify({ build: values.build, files: inventory, totals }, null, 2));
