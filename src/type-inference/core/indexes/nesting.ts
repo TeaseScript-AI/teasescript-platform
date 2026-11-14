@@ -49,6 +49,12 @@ function writtenDepth(term: TypeTerm): number {
   return depth;
 }
 
+/** Whether a text key may hold two element steps or more: two `element`s in its text, read without making its path. */
+export function twoElementSteps(key: string): boolean {
+  const first = key.indexOf("element", key.indexOf("|"));
+  return first >= 0 && key.indexOf("element", first + 1) >= 0;
+}
+
 /**
  * Where a key's path lies in the nesting graph: the property it passes (`""` for none) and its element steps; `null` for
  * a path through two properties or more, which the graph does not follow by name and so never cuts.
@@ -129,40 +135,53 @@ function layered<N>(
 export class NestingIndex {
   /** Each place with a position in a growing component: the cut depth of each of its properties (`""` its root). */
   readonly #cut = Retained.map<PlaceId, Map<string, number>>("NestingIndex.#cut");
+  /** Whether `#cut` is built (#1072 1b: a record, the one thing it fills later). */
+  readonly #state = Retained.record("NestingIndex.state", { built: false });
 
   /**
    * `live` says which of the pass's definitions take effect (A6); `operands` is the carrier table, given so that this
-   * index does not depend on the contract the table reads.
+   * index does not depend on the contract the table reads. Both are fixed for the pass, so the index is the same
+   * whenever its first query builds it.
    */
   public constructor(
-    program: CoreProgram,
-    definitions: DefinitionIndex,
-    live: (d: Definition) => boolean,
-    operands: (value: PlaceId) => readonly Operand[],
+    readonly program: CoreProgram,
+    readonly definitions: DefinitionIndex,
+    readonly live: (d: Definition) => boolean,
+    readonly operands: (value: PlaceId) => readonly Operand[],
   ) {
-    Retained.owner(this, "NestingIndex", (index) => ({ cut: index.#cut }));
+    Retained.owner(this, "NestingIndex", (index) => ({ cut: index.#cut, state: index.#state }));
+  }
+
+  /** The index, built by its first query as every later one's (`shared`); a build a stop ends is made again whole. */
+  #build(): void {
+    if (this.#state.built) return;
+    const program = this.program;
     const work = program.work;
-    const routes = routesOf(program, definitions, live, operands);
-    const graph = new Map<PlaceId, Edge<PlaceId>[]>();
-    for (const [receiver, list] of routes)
-      graph.set(
-        receiver,
-        list.map((route) => ({ producer: route.producer, weight: route.weight })),
+    work.shared(() => {
+      this.#cut.clear();
+      const routes = routesOf(program, this.definitions, this.live, this.operands);
+      const graph = new Map<PlaceId, Edge<PlaceId>[]>();
+      for (const [receiver, list] of routes)
+        graph.set(
+          receiver,
+          list.map((route) => ({ producer: route.producer, weight: route.weight })),
+        );
+      layered(
+        work,
+        graph,
+        (place) => {
+          const written = writtenAt(program, place);
+          return written !== null ? writtenDepth(written) : ownDepth(program, place);
+        },
+        (component, entering, gain, depth) => {
+          // (a bound on every member's known levels, names ignored: what reads the component takes it)
+          const bound = Math.max(entering, 0) + gain;
+          this.#byName(program, routes, component, depth, Math.max(entering, 0), bound);
+          return bound;
+        },
       );
-    layered(
-      work,
-      graph,
-      (place) => {
-        const written = writtenAt(program, place);
-        return written !== null ? writtenDepth(written) : ownDepth(program, place);
-      },
-      (component, entering, gain, depth) => {
-        // (a bound on every member's known levels, names ignored: what reads the component takes it)
-        const bound = Math.max(entering, 0) + gain;
-        this.#byName(program, routes, component, depth, Math.max(entering, 0), bound);
-        return bound;
-      },
-    );
+    });
+    this.#state.built = true;
   }
 
   /**
@@ -261,6 +280,7 @@ export class NestingIndex {
 
   /** Whether some position of `place` is cut: else none of its paths is. */
   public cuts(place: PlaceId): boolean {
+    this.#build();
     return this.#cut.has(place);
   }
 
@@ -269,6 +289,7 @@ export class NestingIndex {
    * `null` for any other, which is never cut.
    */
   public cutDepth(place: PlaceId, label = ""): number | null {
+    this.#build();
     return this.#cut.get(place)?.get(label) ?? null;
   }
 }
