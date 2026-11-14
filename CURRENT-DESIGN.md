@@ -3,7 +3,7 @@
 ## System map
 
 TeaseScript AI is a browser-first community platform with accounts, forum, catalog, authoring tools, and an
-interactive player. PHP 8 with Laravel is the only public backend and PostgreSQL is the database. Laravel owns
+interactive Playroom. PHP 8 with Laravel is the only public backend and PostgreSQL is the database. Laravel owns
 accounts, forum, catalog, publishing, moderation, persistent state, media metadata, and public platform APIs. A local
 Node/TypeScript CLI may support development or Laravel-invoked tooling, but there is no second public Node server.
 
@@ -15,7 +15,7 @@ save/checkpoint format.
 Production browser UI uses Vue 3 with Tailwind CSS 4 and repository-owned shadcn-vue/Reka primitives. TanStack Vue
 Virtual owns transcript windowing and scroll anchoring, and the windowing of long unwrapped code blocks, while
 browser-native CSS owns layout geometry and responsive composition. The engine and shared domain contracts remain
-framework-independent TypeScript. The Player implementation is under `player/vue/src/`; its presentation contract lives
+framework-independent TypeScript. The Playroom implementation is under `player/vue/src/`; its presentation contract lives
 in [`docs/ui/PLAYER-UI.md`](docs/ui/PLAYER-UI.md). The Vue boundary and deliberately minimal frontend toolchain are
 accepted in [`ADR 0020`](docs/decisions/0020-vue-3-production-browser-ui.md).
 
@@ -24,19 +24,19 @@ contracts and current implementation surfaces belong in the topic documents link
 
 ## Trust, isolation, and platform ownership
 
-The accepted production boundary places the complete player, engine, Platform Standard Library, package libraries,
-Standard UI, and custom UI inside a sandboxed cross-origin iframe, preferably on a separate player origin. Main-site
-cookies remain host-only and unavailable to the player. The parent, player, server, and future integrations exchange
+The accepted production boundary places the complete Playroom, engine, Platform Standard Library, package libraries,
+Standard UI, and custom UI inside a sandboxed cross-origin iframe, preferably on a separate Playroom origin. Main-site
+cookies remain host-only and unavailable to the Playroom. The parent, Playroom, server, and future integrations exchange
 only selected validated typed plain data.
 
-Package code may use HTML, CSS, canvas, DOM APIs, and optional Shadow DOM only inside that player boundary. It cannot
+Package code may use HTML, CSS, canvas, DOM APIs, and optional Shadow DOM only inside that Playroom boundary. It cannot
 access the parent DOM, account cookies, forum state, or internal site data and has no unrestricted external network
 access. Published media uses platform-managed storage/CDN. Future third-party services and device acquisition
-require platform-managed integrations rather than direct package access; the Player brokers camera and microphone
+require platform-managed integrations rather than direct package access; the Playroom brokers camera and microphone
 streams that capability-authorized package code may then use locally (ADR 0017).
 
 Laravel remains authoritative for authentication, authorization, persistence, publishing, moderation, and public API
-validation. The player/controller may render Standard UI, invoke browser capabilities, transport checkpoints, and
+validation. The Playroom/controller may render Standard UI, invoke browser capabilities, transport checkpoints, and
 submit typed observations or outcomes, but it may not directly mutate canonical runtime state or continuations.
 Camera, file, media, and similar browser resources cross the engine boundary only through validated engine-managed
 references, never as live browser objects in canonical state.
@@ -128,7 +128,7 @@ Use these current sources for detail:
 - [`docs/RUNTIME.md`](docs/RUNTIME.md): execution, pending actions, checkpoints, formats, and runtime limits;
 - [`docs/LIBRARIES.md`](docs/LIBRARIES.md): engine, Standard Library, package-library, and privileged-adapter boundary;
 - [`docs/SECURITY.md`](docs/SECURITY.md): isolation, capture, validation, privacy, and capability restrictions;
-- [`docs/DATA-AND-API.md`](docs/DATA-AND-API.md): Laravel ownership, current APIs, persistence, and host/player data
+- [`docs/DATA-AND-API.md`](docs/DATA-AND-API.md): Laravel ownership, current APIs, persistence, and host/Playroom data
   boundaries;
 - [`docs/CODE-EDITOR.md`](docs/CODE-EDITOR.md): browser code-editor direction and tooling integration;
 - [`docs/DEBUGGER.md`](docs/DEBUGGER.md): runtime inspection, simulation, and debug-execution direction;
