@@ -41,9 +41,12 @@ const PROGRAMS: readonly Readonly<Record<string, string>>[] = [
   },
 ];
 
+/** What the tests give `program(rt)`: no runtime entry exists yet, and the frame calls none. */
+type RuntimeStandIn = Readonly<Record<string, never>>;
+
 /** A generated module's program, as the frame defines it. */
 interface LoadedProgram {
-  default(rt: object): {
+  default(rt: RuntimeStandIn): {
     files: (() => object)[];
     functions: Record<number, () => number>;
     blocks: Record<number, () => number>;
@@ -59,13 +62,18 @@ async function loadProgram(module: string): Promise<LoadedProgram> {
  * The plan of `guards/30000` of the families' builtin-value spreads, whose 30,000-term `and` chain nests 30,008 deep
  * in the plan: deeper than native `JSON.stringify` reaches.
  */
+/** A families generator module: its named cases (the families' module contract). */
+interface FamilyModule {
+  readonly cases: readonly (readonly [string, string])[];
+}
+
 async function deepPlan(): Promise<InstructionPlan> {
   const load = async <T>(path: string): Promise<T> =>
     // EVIDENCE: the families' modules: `sources.mjs` exports `sourcesOf`, a generator module its cases (their contract).
     (await import(pathToFileURL(resolve(process.cwd(), path)).href)) as T;
   const { sourcesOf } = await load<{
     sourcesOf(
-      generator: object,
+      generator: FamilyModule,
     ): {
       readonly name: string;
       readonly files: readonly { readonly path: string; readonly source: string }[];
@@ -73,7 +81,7 @@ async function deepPlan(): Promise<InstructionPlan> {
     }[];
   }>("tests/families/sources.mjs");
   const source = sourcesOf(
-    await load<object>(
+    await load<FamilyModule>(
       "tests/families/copies/builtin-values/wide-builtin-value-and-spread-source-forms.mjs",
     ),
   ).find((candidate) => candidate.name === "guards/30000")!;
@@ -110,13 +118,11 @@ test("a plan nested deeper than native JSON reaches is refused, and its table an
   assert.equal(digest, createHash("sha256").update(writeJson(plan)).digest("hex"));
   const table = new ProgramTable(plan, digest).table();
   assert.equal(table.planSha256, digest);
-  // The deepest instruction as a constant, which the module's code reads from its pool.
-  const deepest = plan.instructions.reduce((longest, instruction) =>
-    writeJson(instruction).length > writeJson(longest).length ? instruction : longest,
-  );
-  const module = programModule(table, [deepest], "  const file0 = () => K[0];");
+  // The plan itself as a constant, which native JSON cannot write and the module's code reads from its pool.
+  assert.throws(() => JSON.stringify([plan]), RangeError);
+  const module = programModule(table, [plan], "  const file0 = () => K[0];");
   const loaded = await loadProgram(module);
-  assert.equal(writeJson(loaded.default({}).files[0]!()), writeJson(deepest));
+  assert.equal(writeJson(loaded.default({}).files[0]!()), writeJson(plan));
 });
 
 test("the same plan gives the same table, names and module, also after its JSON round trip", () => {

@@ -124,6 +124,8 @@ const PROGRAMS: readonly Readonly<Record<string, string>>[] = [
     '        say "${inner}", instant',
     "    }",
     "    wait 1 s",
+    "    wait 1 s",
+    "    wait 1 s",
     '    say "${count}", instant',
     "}",
     "offer(1)",
@@ -175,15 +177,42 @@ const PROGRAMS: readonly Readonly<Record<string, string>>[] = [
     ].join("\n"),
     "rooms/last.tease": ["let e = 1", 'say "${e}", instant', "exit"].join("\n"),
   },
+  // A function reads a top-level variable its file sets only later, on ways that do not run.
+  main([
+    "function f: integer {",
+    "    return 7 otherwise x",
+    "}",
+    "function g: boolean {",
+    "    return true or x > 0",
+    "}",
+    "let result = f()",
+    "let other = g()",
+    "let x = 1",
+    'say "${result} ${other}", instant',
+    "exit",
+  ]),
 ];
+
+/** The plays each program gets: first answers, and one that also presses permanent buttons. */
+const PLAYS = ["first", { seed: 1 }] as const;
 
 test("every name read in a played session is the variable or global planNames names", () => {
   for (const files of PROGRAMS) {
     const plan = compiled(files);
-    const result = checkNamesAgainstEngine(plan);
-    assert.deepEqual(result.mismatches, [], Object.keys(files).join(" "));
-    assert.equal(result.ended, "halted", Object.keys(files).join(" "));
-    assert.ok(result.scoped > 10, `${result.scoped} scoped reads`);
+    const entered = new Set<number>();
+    for (const play of PLAYS) {
+      const result = checkNamesAgainstEngine(plan, { play });
+      const label = `${Object.keys(files).join(" ")} ${JSON.stringify(play)}`;
+      assert.deepEqual(result.mismatches, [], label);
+      assert.equal(result.ended, "halted", label);
+      assert.ok(result.scoped > 0, label);
+      for (const id of result.entered) entered.add(id);
+    }
+    // Every function and block ran in some play, so each of its reads was checked.
+    assert.deepEqual(
+      plan.functions.filter((definition) => !entered.has(definition.id)).map(({ name }) => name),
+      [],
+    );
   }
 });
 
@@ -261,7 +290,7 @@ test("the engine check reports a name planNames gives the wrong variable", () =>
         ),
       ),
   };
-  const result = checkNamesAgainstEngine(plan, swapped);
+  const result = checkNamesAgainstEngine(plan, { names: swapped });
   assert.ok(result.mismatches.length > 0);
   assert.match(result.mismatches[0]!, /'total' is v\d+, not v\d+/u);
   const asGlobal: PlanNames = {
@@ -274,7 +303,7 @@ test("the engine check reports a name planNames gives the wrong variable", () =>
         ]),
       ),
   };
-  assert.match(checkNamesAgainstEngine(plan, asGlobal).mismatches[0]!, /not a global/u);
+  assert.match(checkNamesAgainstEngine(plan, { names: asGlobal }).mismatches[0]!, /not a global/u);
   // The two sibling `let a` merged into one variable: every read still finds it, so only the declarations tell.
   const [first, second] = plan.instructions.flatMap((instruction, index) =>
     instruction.kind === "declareBinding" && instruction.name === "a" ? [index] : [],
@@ -291,7 +320,47 @@ test("the engine check reports a name planNames gives the wrong variable", () =>
       new Map([...names.readsAt(index)].map(([name, target]) => [name, merge(target)])),
     declaredAt: (index) => (index === second ? [firstA] : names.declaredAt(index)),
   };
-  assert.deepEqual(checkNamesAgainstEngine(plan, merged).mismatches, [
+  assert.deepEqual(checkNamesAgainstEngine(plan, { names: merged }).mismatches, [
     `v${firstA.id} 'a' is declared by instructions ${first}, ${second}`,
   ]);
+});
+
+test("the engine check reports a wrong variable in a block a press runs, and a variable taken for a global", () => {
+  const blocks = compiled(PROGRAMS[2]!);
+  const names = planNames(blocks);
+  const button = blocks.functions.find((definition) => definition.handler === "button")!;
+  const parameter = names.variables.find((variable) => variable.kind === "parameter")!;
+  const inButton: PlanNames = {
+    ...names,
+    readsAt: (index) =>
+      index < button.entryInstruction || index >= button.endInstruction
+        ? names.readsAt(index)
+        : new Map(
+            [...names.readsAt(index)].map(([name, target]): [string, NameTarget] => [
+              name,
+              name === "count" ? { kind: "variable", variable: parameter } : target,
+            ]),
+          ),
+  };
+  const pressed = checkNamesAgainstEngine(blocks, { names: inButton, play: PLAYS[1] });
+  assert.ok(pressed.entered.has(button.id));
+  assert.match(pressed.mismatches[0]!, /'count' is v\d+, not v\d+/u);
+
+  // `x` is read only on ways that do not run, where the engine finds no variable: the plan's names tell.
+  const lazy = compiled(PROGRAMS[4]!);
+  const lazyNames = planNames(lazy);
+  const asGlobal: PlanNames = {
+    ...lazyNames,
+    readsAt: (index) =>
+      new Map(
+        [...lazyNames.readsAt(index)].map(([name, target]): [string, NameTarget] => [
+          name,
+          name === "x" ? { kind: "global", name } : target,
+        ]),
+      ),
+  };
+  const result = checkNamesAgainstEngine(lazy, { names: asGlobal });
+  assert.ok(result.mismatches.length > 0);
+  for (const mismatch of result.mismatches)
+    assert.match(mismatch, /'x' is a variable's name, not a global/u);
 });
