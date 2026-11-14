@@ -765,7 +765,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         scopes.push(new Map());
       } else throw new Unsupported(`a '${ins.loopKind}' loop`);
       // A body that holds a loop, or a long one, is outlined; in the generator form a body that waits is a generator.
-      if ((containsLoop(pc + 1, endLoop) && endLoop - pc > OUTLINE_WITH_LOOP) || endLoop - pc > OUTLINE_LENGTH)
+      if (!flatRegion && ((containsLoop(pc + 1, endLoop) && endLoop - pc > OUTLINE_WITH_LOOP) || endLoop - pc > OUTLINE_LENGTH))
         outlinedBody(ins, pc, endLoop, roundVars, regionYields && containsWait(pc + 1, endLoop));
       else emitRange(pc + 1, endLoop);
       scopes.pop();
@@ -880,7 +880,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
      * function, so the next chunks see them.
      */
     function emitChunked(from, to) {
-      if (flat || to - from <= CHUNK_LENGTH) return emitRange(from, to);
+      // Not in a resumable region: its structured parts may hold a flat loop's `continue D`, which no nested function sees.
+      if (flat || flatRegion || to - from <= CHUNK_LENGTH) return emitRange(from, to);
       emitItems(itemsOf(from, to));
     }
 
