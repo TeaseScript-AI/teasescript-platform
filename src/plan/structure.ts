@@ -3,8 +3,8 @@ import type { Instruction } from "./model.js";
 /**
  * A region's ifs, loops, parameter defaults and blocks, read back from its jumps. Each construct covers instructions
  * `from` up to `to`; a sequence of constructs covers its range without gaps, in order.
- * - `run`: instructions that start no construct. Exits stand here: `goto`, `transfer`, `loopControl`, returns, `exit`,
- *   `end`, whose targets other checks hold.
+ * - `run`: instructions that start no construct, never next to another run. Exits stand here: `goto`,
+ *   `transfer`, `loopControl`, returns, `exit`, `end`, whose targets other checks hold.
  * - `if`: the `jumpIfFalse` at `at`, its true way `whenTrue`, and its false way `whenFalse` when
  *   the true way ends in the `jump` at `elseJump` past it; without one, the false way goes on after `to`.
  * - `loop`: the `loopStart` at `at`; `head`, the instructions before it that each round runs again (a `while`'s
