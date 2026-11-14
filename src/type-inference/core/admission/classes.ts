@@ -101,10 +101,6 @@ function* aliasKey(admission: Admission, d: Definition): Reads<string | null> {
     alias = { source: whole.source, read: whole.read, at: [], value: d.value };
     written = whole.written;
   } else if (program.hasOf.has(d.value)) {
-    // (one read, one guard: equal reads of one source in one literal are one entry, alike guarded or not; and the
-    // read the only contribution at and below its path, no term, object or empty collection of the literal's own
-    // there beside it, nor an object on the way to it without its next step, whose `missing` stands there too:
-    // `Contract.loneRead`)
     const cell = contract.loneRead(d.value);
     if (cell === null) return null;
     const path = pathText(cell.steps);
@@ -127,7 +123,6 @@ function* aliasKey(admission: Admission, d: Definition): Reads<string | null> {
   if (end !== null) alias.chained = true;
   const read = end ?? { ...alias, written };
   return [
-    // (an add's class stands below its added value, element by element or as its elements)
     d.kind === "add" ? `add:${d.how === "elements" ? "elements" : "element"}` : "",
     shape,
     end === null || untested(admission, alias.source) ? "" : alias.source,
@@ -139,7 +134,6 @@ function* aliasKey(admission: Admission, d: Definition): Reads<string | null> {
     // to: `let b: integer[] = raw` is no `let a = raw`,
     // docs/specifications/type-inference-accepted-record/sharing.md#r4-72)
     yield* writtenDomainKey(admission, alias),
-    // (what its read's narrowing makes of its answer)
     admission.pass.values.narrowingMark(alias.value),
   ].join("|");
 }

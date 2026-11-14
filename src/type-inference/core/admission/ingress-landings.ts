@@ -269,7 +269,6 @@ export function typedCallKinds(
   let found: { readonly label: string; readonly tags: readonly ItemTag[] } | null = null;
   const node = c.kind === "load" || parses ? program.exprAt(c.site) : null;
   if (node !== null && program.live(node)) {
-    // (after a stop, as the finishing read answers it: a typed call's expected type by its syntax)
     const items = withoutEmpty(
       admission.host.read?.(c.result, node, []) ??
         admission.run(values.valueItems(c.result, node, [])),

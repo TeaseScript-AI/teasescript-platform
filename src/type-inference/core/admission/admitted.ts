@@ -22,7 +22,6 @@ import { inputsAt, scanAt } from "./scan.js";
 function lazily(admission: Admission, place: PlaceId, path: readonly string[]): void {
   const key = keyAt(admission.pass.contract, place, path);
   if (admission.attempted.has(key) || !landed(admission, place, path)) return;
-  // (after a stop admission decides nothing more, nor below a decision that stopped)
   if (admission.pass.program.work.stopped !== null || admission.decisionStopped(place, path))
     return;
   const closure = admission.pass.closure;
@@ -363,8 +362,6 @@ export function admittedLevel(
   // (after a stop nothing is decided but what is written, unless admission had settled: its decisions stand)
   if (after.stopped && !after.settled) return { by: "undecided" };
   const kinds = admitted(admission, place, path);
-  // (after a stop admission decides nothing more: where what it retained leaves the path undecided, what every
-  // store's syntax decides answers, as the finishing read's last source before `STOPPED`)
   if (kinds.length === 0 && after.stopped) {
     const decided = after.cheap(place, path);
     if (decided !== null)
