@@ -619,24 +619,29 @@ function* contractAlong(
       // an add, a clear or a removal leaves the collection's kind unchanged
       if (d.kind !== "whole") continue;
       const parameter = program.place(place).kind;
-      if (
+      const untyped =
         (d.how === "argument" || d.how === "parameter default") &&
         parameter.kind === "parameter" &&
-        parameter.written === null &&
-        !lists.singleSite(d.fn)
-      )
+        parameter.written === null;
+      if (untyped && !lists.singleSite(d.fn))
         out.push(unknownItem(REASON.deferred, definitions.writerOf(d)));
       const whole = flow?.child() ?? null;
       // #1655: a chain of property reads of a binding in a copy cycle through a projection, read one step at a time
       // below the writing edge (`frontier.ts`)
       const pushed = pushedValueSlot(contract, d.value!);
+      const read = withWriter(
+        pushed !== null
+          ? yield* pushedRead(contract, pushed, d.value!, whole)
+          : yield* contract.contractOfValueAt(d.value!, [], whole),
+        definitions.writerOf(d),
+      );
+      // (what a parameter without a written type holds depends on it: no unused-fallback warning, V30 §18)
       out.push(
-        ...withWriter(
-          pushed !== null
-            ? yield* pushedRead(contract, pushed, d.value!, whole)
-            : yield* contract.contractOfValueAt(d.value!, [], whole),
-          definitions.writerOf(d),
-        ),
+        ...(untyped
+          ? read.map((item) =>
+              item.tag === "empty" ? item : { ...item, untypedParameter: true as const },
+            )
+          : read),
       );
       if (whole !== null) flow!.attach(whole, "writer");
     }

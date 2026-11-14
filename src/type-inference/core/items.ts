@@ -91,6 +91,11 @@ export interface Item {
    */
   readonly called?: true;
   /**
+   * The value depends on a parameter without a written type: set beside `called` on a read of such a parameter, and
+   * travelling as `called` does. Such a value gets no unused-fallback warning (V30 §18).
+   */
+  readonly untypedParameter?: true;
+  /**
    * A kind a type test proved of external data (`narrowedItems`, #1073), or a stopped read of an ingress: the kind is
    * proved or unknown, never the ingress, so a consumer still asks C9's boundary of the ingress the data came by.
    */
@@ -177,17 +182,22 @@ export function makeItem(
 
 /**
  * The marks an item made from others takes from them, each where one of them has it: the guard mark (`guarded`), the
- * through-a-call flag (`called`, AD-3) and a test's kind of external data (`fromExternal`). A new mark that travels
+ * through-a-call flag (`called`, AD-3) with its untyped parameter's (`untypedParameter`) and a test's kind of external
+ * data (`fromExternal`). A new mark that travels
  * belongs here and in `computedMarks`.
  */
 export function marksOf(from: readonly Item[]): {
   readonly guarded?: true;
   readonly called?: true;
+  readonly untypedParameter?: true;
   readonly fromExternal?: true;
 } {
   return {
     ...(from.some((each) => each.guarded === true) ? { guarded: true as const } : {}),
     ...(from.some((each) => each.called === true) ? { called: true as const } : {}),
+    ...(from.some((each) => each.untypedParameter === true)
+      ? { untypedParameter: true as const }
+      : {}),
     ...(from.some((each) => each.fromExternal === true) ? { fromExternal: true as const } : {}),
   };
 }
@@ -201,10 +211,14 @@ export function marksOf(from: readonly Item[]): {
 export function computedMarks(from: readonly Item[]): {
   readonly guarded?: true;
   readonly called?: true;
+  readonly untypedParameter?: true;
 } {
   return {
     ...(from.some((each) => each.guarded === true) ? { guarded: true as const } : {}),
     ...(from.some((each) => each.called === true) ? { called: true as const } : {}),
+    ...(from.some((each) => each.untypedParameter === true)
+      ? { untypedParameter: true as const }
+      : {}),
   };
 }
 
@@ -596,7 +610,7 @@ export function itemsSignature(items: readonly Item[], scope: ItemScope): string
         item.writer === null ? "" : writerKey(item.writer),
         item.context ?? "",
         item.word ?? "",
-        `${item.guarded === true ? "g" : ""}${item.called === true ? "c" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}${item.fromExternal === true ? "x" : ""}`,
+        `${item.guarded === true ? "g" : ""}${item.called === true ? "c" : ""}${item.untypedParameter === true ? "u" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}${item.fromExternal === true ? "x" : ""}`,
         item.fan ?? "",
         spellingIdentity(item.spelling),
       ].join("|"),
