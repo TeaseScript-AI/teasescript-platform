@@ -3,9 +3,8 @@ import type { ScalarValue } from "../static-types.js";
 import type { ValueKind } from "../value-kinds.js";
 
 // The constraint graph of a project: the places that keep a type, the written and known evidence about them, and the
-// relations between them that the source states. The collector (`collector.ts`) makes it in one walk and decides
-// nothing; the type core (`core/`) decides every type from it. Each constraint carries where it stands in the source,
-// what the author sees there, and the code it stands in.
+// relations between them that the source states. Each constraint carries where it stands in the source, what the
+// author sees there, and the code it stands in.
 
 export type PlaceId = number;
 export type FunctionId = number;
@@ -164,7 +163,7 @@ export type ProjectionStep =
   "element" | "entry" | "index" | "iteration" | { readonly property: string };
 
 export type ContractFamily =
-  /** A method or property of the receiver's kind, which the core resolves from the receiver's kinds. */
+  /** A method or property of the receiver's kind. */
   | "method"
   | "member"
   | "operator"
@@ -202,7 +201,7 @@ export interface ContractRef {
  * What the source says about an operation beyond its operands' types, which the owning result rules read: a written
  * form descriptor is not a computed one, a written `allowSkip: false` proves a photo is taken, an `askChoice` option
  * with a label before `:` returns that label. Built from the branches of those rules, one entry per written element,
- * each with the place of its expression, whose value the core reads where a rule needs it. Collected without
+ * each with the place of its expression. Collected without
  * reading any type.
  */
 export type SyntaxEvidence =
@@ -325,9 +324,8 @@ export type Constraint = Origin &
   (
     | { readonly kind: "has"; readonly place: PlaceId; readonly type: TypeTerm }
     /**
-     * The value flows into the place as a copy taken where the value stands (ADR 0014); uniformity, fit, promotion,
-     * optionality and guards are the core's. A `call`'s arguments, a `return`'s value and a `fallback`'s operands are
-     * copy boundaries too; a `read` and a `project` are not.
+     * The value flows into the place as a copy taken where the value stands (ADR 0014). A `call`'s arguments, a
+     * `return`'s value and a `fallback`'s operands are copy boundaries too; a `read` and a `project` are not.
      */
     | {
         readonly kind: "store";

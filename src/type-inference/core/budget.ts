@@ -5,8 +5,7 @@
  * and a read chain's depth have their own limits. A stop is no compile error (D4): the ledger then only finishes, every
  * later charge counted apart and none stopping it, and each unit before the stop is counted to the place that spent it,
  * so one warning can name the heaviest. A demand's own allowance, its measure and its signal are here
- * (`demandAllowanceFor`, `own`, `DemandExhausted`); the solver gives the demand up, and its reader answers
- * as `DemandExhausted` says.
+ * (`demandAllowanceFor`, `own`, `DemandExhausted`).
  */
 
 /** The allowance every program has, however small. */
@@ -245,8 +244,7 @@ const LIMIT_NAMES: Readonly<Record<BudgetLimit, string>> = {
 
 /**
  * A demand that crossed its allowance: the solver gives it up between two steps of its computations, so no computation
- * is cut midway; its reader answers with its key's contract and the reason `budget`, or `STOPPED` where it has none or
- * that too crosses the allowance (`Consumers.run`).
+ * is cut midway.
  */
 export class DemandExhausted extends Error {
   public constructor() {
@@ -267,10 +265,8 @@ export class CapReached extends Error {
 }
 
 /**
- * Thrown by `charge` at the unit that exceeds the allowance, by `checkReadDepth` past the read-depth limit, and by a
- * decision that stops again in a pass restarted for one that stopped (`consumers/stores/stores.ts`): the analysis
- * catches it and stops proving. A statement nested past the nesting limit stops nothing: it is checked when the script
- * runs (`nesting`).
+ * The analysis's stop at a limit: the analysis catches it and stops proving. A statement nested past the nesting limit
+ * stops nothing: it is checked when the script runs (`nesting`).
  */
 export class BudgetExhausted extends Error {
   public constructor(public readonly limit: BudgetLimit) {
@@ -509,10 +505,8 @@ export class WorkLedger {
   }
 
   /**
-   * Runs `callback` as finishing work without a stop, counted apart and never stopping it: among its callers, the
-   * checks of statements nested past the nesting limit after an analysis that ran to its end (D4), a diagnostic's fix
-   * facts, and what a stop forgets by (`countApart`). Inside another `apart` callback it stays apart to that callback's
-   * end.
+   * Runs `callback` as finishing work without a stop, counted apart and never stopping it. Inside another `apart`
+   * callback it stays apart to that callback's end.
    */
   public apart<T>(callback: () => T): T {
     const outer = this.#apart;
@@ -577,9 +571,7 @@ let testAllowance: number | null = null;
 let testDemandAllowance: number | null = null;
 
 /**
- * A demand's allowance: 256 × `nodes`, or a test's (`withTestDemandAllowance`). A read passes the flow nodes of its
- * site's function, or the program's outside one (`Consumers`); a decision and a completion pass the program's
- * (`consumers/stores/stores.ts`, `consumers.ts`).
+ * A demand's allowance: 256 × `nodes`, or a test's (`withTestDemandAllowance`).
  */
 export function demandAllowanceFor(nodes: number): number {
   return testDemandAllowance ?? WORK_PER_NODE * nodes;

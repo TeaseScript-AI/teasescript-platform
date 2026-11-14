@@ -63,7 +63,7 @@ export interface ContractLevel {
  * A store's required contract: complete (each level written, decided, or proved open), open (nothing constrains it), or
  * lost (a required level's proof is unfinished: the stop of the analysis or of a decision cut it; or, in a receiving
  * completion, a decision it read would reject a store or retarget a selecting store, #1526). A lost contract keeps
- * the part it holds (`partial`), which the plan carries; it is never complete.
+ * the part it holds (`partial`); it is never complete.
  */
 export type ContractResult =
   | { readonly state: "complete"; readonly ref: ContractRef; readonly epoch: number }
