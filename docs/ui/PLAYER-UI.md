@@ -1,23 +1,23 @@
-# Standard Player UI specification
+# Standard Playroom UI specification
 
-- **Status:** Provisional maintained normative specification for the intended Standard Player presentation.
-- **Purpose:** Define the intended Standard Player presentation built on the Vue Player: observable layout,
+- **Status:** Provisional maintained normative specification for the intended Standard Playroom presentation.
+- **Purpose:** Define the intended Standard Playroom presentation built on the Vue Playroom: observable layout,
   responsive behavior, interaction presentation, and visual states, independently of the current HTML/CSS/JavaScript
   implementation.
 - **Authority:** Accepted ADRs and accepted specifications remain higher authority for the exact architecture, runtime,
   language, isolation, and persistence scope they decide. The temporary [Upstream contract integration](#upstream-contract-integration)
-  section below records Owner-decided Player behavior that still needs synchronization into those upstream contracts.
-- **Implementation state:** The Player is the Vue implementation under `player/vue/src/`. Its implemented
+  section below records Owner-decided Playroom behavior that still needs synchronization into those upstream contracts.
+- **Implementation state:** The Playroom is the Vue implementation under `player/vue/src/`. Its implemented
   transcript, foreground interaction, pacing, runtime timer, Stage image, and audio paths use the shared runtime
   adapter. Browser video playback, production host integration, and several provisional presentation values remain
   incomplete.
 
 This document may lead the implementation. A missing POC feature or an implementation bug does not redefine the desired
-Player contract. Conversely, behavior found only in current HTML/CSS/JavaScript is evidence rather than contract until it
+Playroom contract. Conversely, behavior found only in current HTML/CSS/JavaScript is evidence rather than contract until it
 is adopted here or by a higher-authority source. When implementation is deliberately changed first, this specification
 must be synchronized once the desired result is accepted.
 
-A competent implementation should be able to reproduce the maintained Standard Player from this document plus the
+A competent implementation should be able to reproduce the maintained Standard Playroom from this document plus the
 accepted platform/runtime contracts without copying the existing source. A review agent should likewise use this
 observable contract instead of treating current selectors, DOM structure, CSS techniques, or demo fixtures as
 requirements.
@@ -35,19 +35,19 @@ The most relevant higher-authority sources are:
 - [accepted V30 syntax](../specifications/accepted-syntaxes-v30.md): accepted permanent-button, media, speaker colour,
   font, avatar, and other capability semantics;
 - [ARCHITECTURE.md](../ARCHITECTURE.md), [RUNTIME.md](../RUNTIME.md), [SECURITY.md](../SECURITY.md), and
-  [DATA-AND-API.md](../DATA-AND-API.md): Player/runtime/host ownership and isolation boundaries.
+  [DATA-AND-API.md](../DATA-AND-API.md): Playroom/runtime/host ownership and isolation boundaries.
 
-This document owns the maintained **Standard Player presentation**: what surfaces exist, where they appear, how they
+This document owns the maintained **Standard Playroom presentation**: what surfaces exist, where they appear, how they
 respond to viewport constraints and user panel choices, and how Standard controls look and behave. It does not define
 TeaseScript syntax, action settlement, host message schemas, package permissions, persistence formats, or custom-view
 lifecycle.
 
 General reusable UI engineering and visual-design guidance lives in
 [UI-DESIGN-AND-ENGINEERING.md](UI-DESIGN-AND-ENGINEERING.md). That guide informs implementation quality but does not
-replace the Player-specific contract here.
+replace the Playroom-specific contract here.
 
-Player verification follows [`TESTING.md`](../TESTING.md), including its local browser and scoped visual-check route.
-Before READY, a change to what the Player shows takes screenshots in light and dark, on desktop and phone, and READY
+Playroom verification follows [`TESTING.md`](../TESTING.md), including its local browser and scoped visual-check route.
+Before READY, a change to what the Playroom shows takes screenshots in light and dark, on desktop and phone, and READY
 answers from them (owner, 2026-11-08):
 
 - Is any information shown twice?
@@ -66,11 +66,11 @@ ADR 0001 fixes the responsive PWA direction; exact offline, storage, cache, and 
 
 Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.md);
 [`player/README.md`](../../player/README.md) records implementation seams and development-only behavior. This
-specification may lead the implementation. The Player presents supported transcript, foreground interaction, and
+specification may lead the implementation. The Playroom presents supported transcript, foreground interaction, and
 pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds Visual
 Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The default
 build plays the repository demo without that preview; the development server or explicit `?dev` URL opt-in loads it.
-Player Settings' Debug menu adds the Debug panel ([Player Settings](#player-settings)); `player/README.md` describes
+Playroom Settings' Debug menu adds the Debug panel ([Playroom Settings](#playroom-settings)); `player/README.md` describes
 its controls.
 Runtime timers, permanent buttons, the Stage image, and audio are wired; browser video playback and production host
 integration remain separate work. Values marked for retesting remain provisional tuning baselines.
@@ -92,12 +92,12 @@ controlling source adopts it; remove this section and its router references when
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
   optional labeling. Authored timers carry visible/mystery/hidden display and optional labels (see
   [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime/runtime-adapter.ts` derives presented timers and
-  observation deadlines from runtime state. The Player renders runtime timers in its right rail; its
+  observation deadlines from runtime state. The Playroom renders runtime timers in its right rail; its
   development preview shows timer fixtures only while no runtime timer is presented. Stable generic-label numbering across timer lifecycle changes remains unsynchronized.
 
 ## Surface hierarchy
 
-The Standard Player fills the available Player viewport and uses the following normal presentation regions. A region
+The Standard Playroom fills the available Playroom viewport and uses the following normal presentation regions. A region
 may reserve space, overlay another region, or temporarily hide according to the responsive and custom-presentation
 rules, but changing a backing surface must not implicitly delete unrelated controls.
 
@@ -114,17 +114,17 @@ rules, but changing a backing surface must not implicitly delete unrelated contr
 
 `stage` is the structural name. Standard image/video/media presentation is one kind of stage content; later canvas,
 custom HTML, games, and other accepted custom presentation may use the same structural region without forcing the
-surrounding Player geometry to change.
+surrounding Playroom geometry to change.
 
 ### Visual hierarchy
 
-- **Canvas surface:** the continuous Player background, including stage and conversation ambience.
+- **Canvas surface:** the continuous Playroom background, including stage and conversation ambience.
 - **Chrome surface:** the tools menu and opaque tools drawer.
 - **Component surface:** tool panels, composer, and ordinary Standard controls.
 - **Media-control surface:** translucent title/global controls and timer material over the stage.
 - **Stage surface:** the structural primary-content region; media may use its available rectangle.
 - **Content identity:** speaker, authored control, and theme colours remain distinct from unrelated application chrome
-  roles; the Stage photo's colours colour the whole Player
+  roles; the Stage photo's colours colour the whole Playroom
   ([Stage and media presentation](#stage-and-media-presentation)).
 
 The tools framework sits beside the primary stage/conversation composition on comfortable layouts and becomes an
@@ -132,9 +132,9 @@ overlay drawer when constrained. Title/global controls and the timer/background 
 controls belong to the transcript scroll surface; the composer overlays its bottom. The stage and transcript remain
 present even when empty.
 
-## Player conditions
+## Playroom conditions
 
-The Player combines independent conditions rather than choosing a phone, tablet, or desktop mode. The Player exposes
+The Playroom combines independent conditions rather than choosing a phone, tablet, or desktop mode. The Playroom exposes
 them on its shell; [`usePlayerConditions.ts`](../../player/vue/src/interaction/usePlayerConditions.ts) owns their
 shared browser signals. Add a responsive rule to the condition that describes its actual constraint; do not infer device
 identity or add a separate width breakpoint for touch or rounded corners.
@@ -146,11 +146,11 @@ identity or add a separate width breakpoint for touch or rounded corners.
 | Touch and hover | `any-pointer: coarse` and `any-hover: hover`, independently; each pointer event still identifies the pointer actually used | Touch taps, mouse hover, and keyboard focus retain their distinct menu behavior, including on hybrid devices. Primary coarse input without hover identifies the fallback corner-clearance case. |
 | Raised software keyboard | Composer input focused while the visual viewport shrinks by more than the current `120px` detection allowance on a touch-capable browser | The composer uses the normal reading width above the keyboard; Send keeps the existing focus behavior. |
 | Composer edge clearance | Browser safe-area inset; when it reports zero, a touch-first viewport spans the screen width and the composer is at the bottom near its sides | Only the composer receives up to `32px` side clearance. A narrow browser window on a touchscreen laptop keeps the normal composer width. This does not change the transcript, tool layout, or bottom spacing. |
-| Fullscreen top clearance | Browser top safe-area inset; in fullscreen, a touch-first viewport reaching the display edge also needs a minimum when the browser reports zero at a camera cutout | The Player shell begins its usable rectangle below that clearance. Media, title controls, tools, transcript, and composer all stay inside it. The canvas background continues behind the clearance. Normal presentation uses the browser-reported inset. |
+| Fullscreen top clearance | Browser top safe-area inset; in fullscreen, a touch-first viewport reaching the display edge also needs a minimum when the browser reports zero at a camera cutout | The Playroom shell begins its usable rectangle below that clearance. Media, title controls, tools, transcript, and composer all stay inside it. The canvas background continues behind the clearance. Normal presentation uses the browser-reported inset. |
 
 These conditions can overlap. For example, a tablet in split screen can have constrained horizontal space, touch
-input, and a raised keyboard at the same time. Fullscreen is a Player/browser state, separate from a future package
-full-player takeover.
+input, and a raised keyboard at the same time. Fullscreen is a Playroom/browser state, separate from a future package
+full-Playroom takeover.
 
 Use available dimensions rather than device classes. Portrait/landscape or aspect ratio may be used as an optimization
 signal when both axes are constrained: a tall shape can spend relatively more vertical space to preserve horizontal
@@ -166,21 +166,21 @@ decision, 2026-11-13.
 Manual open/closed tool intent is preserved across resizing and rotation when the tool region owns focus or remains the
 active interaction context. A responsive change must not spontaneously open a previously closed drawer. When an open
 docked strip becomes an overlay drawer while focus is elsewhere, it may close so that it does not unexpectedly block the
-active Player region. A future persistent user preference may refine this session-local policy separately.
+active Playroom region. A future persistent user preference may refine this session-local policy separately.
 
-The Player must size against the currently usable visual viewport when a software keyboard or similar browser UI reduces
+The Playroom must size against the currently usable visual viewport when a software keyboard or similar browser UI reduces
 available space.
 
 ## Global geometry and overflow
 
-The Player shell itself does not normally scroll. Scrolling belongs to the specific region that owns the overflowing
+The Playroom shell itself does not normally scroll. Scrolling belongs to the specific region that owns the overflowing
 content. Major numerical values below are POC reconstruction/tuning baselines unless explicitly marked otherwise.
 
 | Item | POC baseline / intended rule |
 | --- | --- |
-| Player viewport | full viewport width and currently usable visual-viewport height; `100dvh` is the CSS baseline and the outer document is not the normal scroll owner |
-| Player chrome outer spacing | fixed `8px` for top controls, menu edges and right rail; independent of root font size |
-| Player chrome control size | compact controls use `calc(1rem + 16px)`; top controls share a size derived from icon/text size and padding |
+| Playroom viewport | full viewport width and currently usable visual-viewport height; `100dvh` is the CSS baseline and the outer document is not the normal scroll owner |
+| Playroom chrome outer spacing | fixed `8px` for top controls, menu edges and right rail; independent of root font size |
+| Playroom chrome control size | compact controls use `calc(1rem + 16px)`; top controls share a size derived from icon/text size and padding |
 | top-control overlay | shared control size plus `8px` outer spacing above and below; it does not reserve a separate title row in the stage/conversation split |
 | content below top controls | one 16px visible gap from the controls' lower edge to the first tool-menu control or timer; no separate outer timer-halo space is reserved |
 | stage/conversation allocation | user-adjustable split, currently starting at 60% stage / 40% conversation; the starting ratio and panel minimums remain provisional. See [Stage and media presentation](#stage-and-media-presentation) |
@@ -195,15 +195,15 @@ both portrait and landscape media remain useful. Side panels should not casually
 but a rigid 1:1 rule must not cause surprising responsive transitions. Final dock/overlay decisions should use the full
 set of layout constraints.
 
-Current dynamic safe-area insets reported by the browser affect Player chrome and controls. The bottom composer has the
+Current dynamic safe-area insets reported by the browser affect Playroom chrome and controls. The bottom composer has the
 limited touch-first side-clearance fallback described above because browsers can report zero beside rounded corners;
-viewport width comparisons tolerate small browser rounding and scrollbar differences. The whole Player viewport has a
+viewport width comparisons tolerate small browser rounding and scrollbar differences. The whole Playroom viewport has a
 scoped touch-first top minimum in fullscreen when a browser reports zero despite drawing through a camera cutout. Do not
 infer a device model or apply that fallback to a narrow desktop window, including one with touch input. A maximized
 touch-first rectangular screen can still qualify because the web platform cannot report its corner shape. Stage/media
 remains allowed to occupy its complete visual region rather than receiving identical safe-area padding by default.
 Development-only Visual Lab controls live in the development preview. Their fixture content and provisional
-presentation values do not redefine this specification. The shared `2px` focus outline remains the accepted Player
+presentation values do not redefine this specification. The shared `2px` focus outline remains the accepted Playroom
 baseline rather than a tuning control.
 
 Scrolling ownership:
@@ -214,7 +214,7 @@ Scrolling ownership:
 - each tool body: its own vertical scrolling;
 - right background-control/status stack: vertical scrolling when needed;
 - composer input: internal vertical scrolling after its constraint-based growth limit;
-- Player shell: no normal scrolling.
+- Playroom shell: no normal scrolling.
 
 Input axes remain predictable. Vertical wheel input stays vertical and horizontal wheel input stays horizontal; reaching
 an edge on one axis must not silently repurpose that input to the other axis. Nested content should not create a second
@@ -226,9 +226,9 @@ Current typography and component geometry are provisional visual baselines. Valu
 `Visual Lab` before production without implying a compatibility promise.
 The reading size is shared by transcript bubbles, loose prose, and composer input. Headings scale relative to that size,
 and authored `[size]` spans scale relative to their containing text, including inside headings. Changing the reading
-size therefore scales ordinary text, headings, and authored size spans together without changing Player chrome text.
+size therefore scales ordinary text, headings, and authored size spans together without changing Playroom chrome text.
 
-| Element | Current Player baseline |
+| Element | Current Playroom baseline |
 | --- | --- |
 | UI font stack | system stack `ui-sans-serif, system-ui, sans-serif`; the POC bundles no UI web font |
 | title | `14px`, weight `500` |
@@ -238,25 +238,25 @@ size therefore scales ordinary text, headings, and authored size spans together 
 | normal composer text / Send | composer uses the shared reading size; Send remains `14px`, weight `700` |
 | narrow composer text | composer keeps the shared reading size; Send remains `14px` |
 | timer time/value | tabular numerals; size follows timer diameter, with smaller text for visible times of one hour or more. Mystery typography does not expose duration; exact type proportions remain provisional |
-| Player action button label | `0.875rem` (14px at the current browser base), weight `600`, line-height `1.3` |
+| Playroom action button label | `0.875rem` (14px at the current browser base), weight `600`, line-height `1.3` |
 | global controls | shared derived top-control size and corner radius (`--player-top-control-radius`), also for the truncating title pill and the sidebar's own controls, tool icons, and panel-header controls; display controls share a translucent group |
 | dialog close (X) | a `32px` button with a `20px` icon, centred `24px` from the dialog's top and right edges; its click target reaches `4px` further on each side (`40px`) |
 | tool panel | per-tool width presets capped by available allocation; see the global geometry table |
 | tool-panel header | shared chrome spacing/control sizes; a title, reordering grip, Panel settings, and pin control. Panel settings uses a compact trigger when its full label does not fit |
 | integrated composer shell (POC tuning candidate) | `42px` high for one line at the current reading size, `24px` corner radius, `2px` vertical padding, and `8px`/`4px` start/end padding |
 | composer input / Send (POC tuning candidate) | `36px` minimum height at the current reading size; input has `6px` vertical padding and grows upward for longer text; Send keeps its full button bounds while its fill is inset `2px` vertically |
-| right background control | wraps inside the current stage-rail allocation and uses the shared Player action-button material; exact rail sizing remains provisional |
+| right background control | wraps inside the current stage-rail allocation and uses the shared Playroom action-button material; exact rail sizing remains provisional |
 
 Tool-panel header and body share one component surface. The header separator and shared controls provide hierarchy
 without adding a second chrome-colour band.
 
 The shared UI guide adopts the current `1px` border, moderate-radius, visible-focus, and interaction-state
-vocabulary as a shared starting baseline. Player-specific widths, heights, and spacing remain owned here rather than
+vocabulary as a shared starting baseline. Playroom-specific widths, heights, and spacing remain owned here rather than
 becoming universal dimensions.
 
 ## Title and global panel controls
 
-The Player's top controls overlay the stage without reserving a separate title row. The surrounding bar is transparent;
+The Playroom's top controls overlay the stage without reserving a separate title row. The surrounding bar is transparent;
 the title pill and individual control groups use shared translucent media-control material. The title truncates when
 space is constrained; a bar narrower than `200px` hides the title visually while keeping it for assistive technology.
 Display controls include the light/dark toggle and the rightmost fullscreen control. Tools access
@@ -271,7 +271,7 @@ while Debug runs, named by the bar's tooltip "Debug session · Debug on" or "Deb
 Which identity a multi-script package or the active script should show remains open.
 
 The same top-control overlay serves normal and fullscreen presentation. On short screens outside fullscreen, the
-Title bar on short screens A/B test ([A/B tests](#player-settings)) chooses the presentation:
+Title bar on short screens A/B test ([A/B tests](#playroom-settings)) chooses the presentation:
 
 - **A · Always visible, controls left** (default): the bar stays visible and its controls move left of the timer rail;
 - **B · Auto-hide, controls right**: the bar hides and reveals on mouse entry, a tap on unused bar space, or keyboard
@@ -281,21 +281,21 @@ Title bar on short screens A/B test ([A/B tests](#player-settings)) chooses the 
 Tools access, fullscreen exit, and other critical global controls must remain discoverable and reachable in both
 variants. Timing and exact reveal zones remain tuning details.
 
-## Player Settings
+## Playroom Settings
 
-The settings control at the bottom of the tools menu opens Player Settings: user preferences for the Player interface,
+The settings control at the bottom of the tools menu opens Playroom Settings: user preferences for the Playroom interface,
 available in every build to every user. It currently offers:
 
 - **Menu Sidebar labels:** icons only, icons with a temporary label preview, or icons with labels;
 - **Contrast:** Standard or High, an accessibility preference that strengthens theme contrast and authored-colour
   treatment and is kept when switching light/dark;
-- **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)); on
+- **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#playroom-debug)); on
   in the normal room, play goes on in the [debug room](../DEBUGGER.md#debug-room).
   **Download debug export…** beside it opens the [debug export dialog](#session-end-and-failure) once a session has
   started, also with the Debug menu off;
 - **Testing · A/B tests** (on by default): adds the **A/B tests** panel to the tools menu, after Debug. It holds only
   the A/B tests the owner approved, each with its options, so a variant can be flipped while the panel stays open
-  beside the playing Player. A test shown as radio buttons takes either option in one click; a test shown as a
+  beside the playing Playroom. A test shown as radio buttons takes either option in one click; a test shown as a
   dropdown, today the photo colour family, also has a **Next option** button that steps to the following option and
   wraps around without opening the dropdown:
   - **Title bar on short screens:** A or B above (default A);
@@ -307,13 +307,13 @@ available in every build to every user. It currently offers:
   - **Photo colour blending:** A, Oklab (default), or B, sRGB, for the same fade.
 
 Apart from the Debug menu, these settings and the A/B test choices are presentation preferences, not canonical runtime
-state. The Player keeps them in this browser's local storage
+state. The Playroom keeps them in this browser's local storage
 across reloads, treats stored text as external input that falls back to the default when unknown, and works without
 storage when the host frame denies it. Account settings may later take over or synchronize them. The Debug menu is not
 stored: every load in the normal room starts with it off, so a tester who opens another script never debugs it by
 accident, and every load in the debug room with it on; the development preview's `?dev` starts it on.
 
-Player Settings also contains a **Saved data** section, on every Player page whatever script it shows. Saved data
+Playroom Settings also contains a **Saved data** section, on every Playroom page whatever script it shows. Saved data
 belongs to the player, like an account's: **Export…** and **Import…** take the saved data of every script this browser
 has played at once, or of the scripts the player keeps ticked ([format](../DATA-AND-API.md#saved-data-transfer)), which
 is not a session checkpoint, or the session the player plays, to continue it in another browser
@@ -321,7 +321,7 @@ is not a session checkpoint, or the session the player plays, to continue it in 
 
 **Export…** offers **Saved data**, chosen when it opens, or **This session**, which says why it is unavailable while no
 session runs or waits for Continue, and in the debug room. Saved data is read freshly for every script, also during a
-session, so saves already stored count. It lists each script that has saved values, by its title when a Player has
+session, so saves already stored count. It lists each script that has saved values, by its title when a Playroom has
 shown it, otherwise by its storage scope, with its values, photos, and size; all are ticked, with **Select all** and
 **Select none**, and a long list scrolls; and it warns that the export can contain private photos. This session takes
 the session as it is when it is chosen, the one that runs or waits or the one Continue goes on with: it names the
@@ -347,8 +347,8 @@ then offers Start, which begins a new session with the imported data, and leaves
 A script that cannot be imported keeps its saved data, and the dialog names it. Import is unavailable while saved data
 is imported or cleared.
 
-An exported session is taken only by the Player of its script outside the debug room. A session of another script, of
-another version of this script or of the Player, one that is damaged, and one that has ended are refused with that
+An exported session is taken only by the Playroom of its script outside the debug room. A session of another script, of
+another version of this script or of the Playroom, one that is damaged, and one that has ended are refused with that
 reason. Its review asks "Import this session? This cannot be undone.", names the script with what the
 session brings, says that it replaces this script's saved values and any session kept for it in this browser, and
 suggests exporting first. While a session of the script runs, waits for Continue, or is starting, the confirmation is
@@ -357,7 +357,7 @@ that session, replaces the script's saved data with the session's, keeps the ses
 find it, and offers Continue, which goes on where the session was exported.
 
 When the host persists the shown script's storage, the section also offers **Clear saved script data**, which removes,
-after a confirmation, only the values this script saved for later runs; Player Settings, checkpoints, account data, and
+after a confirmation, only the values this script saved for later runs; Playroom Settings, checkpoints, account data, and
 other scripts are unaffected, and the next new session starts without them. It is available before Start and after the
 session has ended, but not while a session runs or waits for Continue, because a running session keeps its own view of
 the saved values, and not when this browser's storage could not be read. The dialogs fit narrow screens, and their own
@@ -365,7 +365,7 @@ controls and rows are at least 44px tall.
 
 ## Left tools area
 
-The Standard Player owns the tools menu, sidebar visibility, temporary/pinned panels, shared headers, panel order and
+The Standard Playroom owns the tools menu, sidebar visibility, temporary/pinned panels, shared headers, panel order and
 width, horizontal dock overflow, and responsive drawer composition. A tool owns its body content.
 
 ### Panel state
@@ -373,15 +373,15 @@ width, horizontal dock overflow, and responsive drawer composition. A tool owns 
 The tools sidebar starts visible on comfortable layouts and closed when constrained. The toggle and `Ctrl/Meta+B` change
 its visibility; the shortcut is ignored while focus is in the composer or another text-editing control.
 Resizing does not spontaneously reopen a closed sidebar. An open dock becoming a drawer stays open only when tools own
-the active focus, drag, or resize context; otherwise it closes to avoid covering the Player unexpectedly.
+the active focus, drag, or resize context; otherwise it closes to avoid covering the Playroom unexpectedly.
 
 Closing keeps the sidebar contents visible until its slide-out motion ends; reduced motion removes the slide and
-reopening cancels the pending cleanup. A closed sidebar is inert, open Player Settings or panel-settings popups close
+reopening cancels the pending cleanup. A closed sidebar is inert, open Playroom Settings or panel-settings popups close
 with it, and focus that was inside it returns to the visible sidebar toggle. Sidebar, splitter and reorder-grip hints
 use the shared tooltip after a `700ms` hover delay; keyboard focus shows the tooltip immediately, a mouse click does
 not leave a focus tooltip behind, and `Escape` still closes a narrow drawer while a tooltip is open.
 
-An open dock reserves horizontal space. A constrained layout presents an opaque tools drawer over the Player without
+An open dock reserves horizontal space. A constrained layout presents an opaque tools drawer over the Playroom without
 shrinking the stage or conversation.
 
 ### Narrow drawer behavior
@@ -391,14 +391,14 @@ The narrow drawer:
 - shows the tools menu or one active tool, using the constrained-width baseline in the geometry table;
 - remains opaque so stage/transcript content does not bleed through;
 - leaves a visible outside area covered by a scrim;
-- intercepts outside pointer input so activation does not pass through to underlying Player controls;
+- intercepts outside pointer input so activation does not pass through to underlying Playroom controls;
 - closes when the scrim is activated;
 - closes on `Escape` and returns keyboard focus to the tools toggle;
 - remains below critical/global chrome in z-order.
 
 ### Tool panels and lifecycle
 
-Tools open from the Player-owned menu. The dock can contain pinned panels and one temporary panel. Opening another
+Tools open from the Playroom-owned menu. The dock can contain pinned panels and one temporary panel. Opening another
 temporary tool replaces the previous temporary panel in its visual position. Pinning retains a panel when other tools
 are selected; unpinning makes it the temporary panel. Pin state and visual order are independent.
 
@@ -408,7 +408,7 @@ pinning. The menu's tools are flat, with a fill on hover; an open tool keeps the
 title, Panel settings, pin control, and reordering grip. Panel settings offers width presets and Move left/right;
 pointer/touch dragging provides another way to reorder panels.
 
-A tool mounts when first visited and retains its body state and scroll position until the Player unmounts. Closing,
+A tool mounts when first visited and retains its body state and scroll position until the Playroom unmounts. Closing,
 replacing, hiding, reordering, or moving it between dock and drawer does not reset that retained body. This does not
 define reload persistence or alter canonical runtime/tool data.
 
@@ -417,7 +417,7 @@ replace or restyle the shared menu/header controls. Global theme APIs remain sep
 
 ### Standard tool controls
 
-The Standard Player's built-in structured tool vocabulary deliberately avoids drag-based sliders/range controls. Use the
+The Standard Playroom's built-in structured tool vocabulary deliberately avoids drag-based sliders/range controls. Use the
 simplest fitting control from:
 
 - momentary button;
@@ -432,7 +432,7 @@ independent booleans can use multiple switches. Fully custom tool HTML/CSS/TypeS
 control, including sliders; the restriction applies only to the Standard structured control set.
 
 The exact developer-facing declaration that combines a tool title, ordered static content, and these typed controls
-into a Player-generated Standard tool remains open. This specification fixes the presentation vocabulary and shared
+into a Playroom-generated Standard tool remains open. This specification fixes the presentation vocabulary and shared
 tool ownership only; it does not invent author syntax, value binding, submission, or persistence semantics. That contract
 is tracked in [OPEN-DECISIONS.md](../OPEN-DECISIONS.md).
 
@@ -441,7 +441,7 @@ is tracked in [OPEN-DECISIONS.md](../OPEN-DECISIONS.md).
 The active tool body occupies the remaining panel height and owns vertical overflow. Its title is not repeated as a body
 heading merely because it already appears in the shared header. A fully custom tool body is confined to its assigned
 surface; Shadow DOM remains the preferred isolation candidate when custom CSS/DOM is allowed. Custom-body isolation
-is not yet implemented in the Player.
+is not yet implemented in the Playroom.
 
 Open docked panels share one horizontal scroll surface when they exceed the dock allocation; each body keeps its own
 vertical scrolling. Native pointer/trackpad/touch and keyboard scrolling remain available. Proximity snapping helps
@@ -463,9 +463,9 @@ dock composition determine whether the tools framework uses a dock or drawer. Ex
 individual panels are capped by available allocation while retaining their chosen width preset. Conversation bounds and
 the stage-shape goal remain provisional visual inputs, not additional device modes.
 
-`Visual Lab` and `Layout Debug` are development-preview tools, not Standard Player product tools. The Debug panel is
-the Standard Player's platform Debugger tool ([DEBUGGER.md](../DEBUGGER.md#player-debug)); it appears first in the
-tools menu while Player Settings' Debug menu is on, and turning that menu off removes it from every panel state. Its
+`Visual Lab` and `Layout Debug` are development-preview tools, not Standard Playroom product tools. The Debug panel is
+the Standard Playroom's platform Debugger tool ([DEBUGGER.md](../DEBUGGER.md#playroom-debug)); it appears first in the
+tools menu while Playroom Settings' Debug menu is on, and turning that menu off removes it from every panel state. Its
 time controls stand above its tabs (shadcn-vue Tabs): Now, Variables, Log, and Storage, with its saved-value editor in
 a Dialog, when the host persists script storage. The tabs wrap to a second row in the narrowest panel, each still a
 44 px target; Now, Variables, and Storage wrap long paths, keys, names, and values
@@ -478,10 +478,10 @@ Debug off removes the buttons without re-creating the transcript's rows.
 
 ## Session start and user activation
 
-The Player does not run a script on page load. It opens on the start page: the menu and the title bar, and in the
+The Playroom does not run a script on page load. It opens on the start page: the menu and the title bar, and in the
 middle the `title` and "by" `author` of the script's `main.tease` header, either alone when only it is given and
 neither without them, above an explicit **Start** control, which takes focus. The transcript, composer, and Stage stay
-hidden until a session is shown. A script that does not compile cannot start: instead of Start, the Player shows "This
+hidden until a session is shown. A script that does not compile cannot start: instead of Start, the Playroom shows "This
 Tease cannot start" and "A file of this Tease cannot be read, so the Tease cannot start. The creator of this Tease needs
 to fix the file." when an error is a package file the host could not load (`TSC011`), else "This Tease contains an
 error, so the Tease cannot start. The creator of this Tease needs to fix the error." (owner decision, 2026-10-27).
@@ -490,7 +490,7 @@ Warnings are for the creator's tools, not the start page. The player's activatio
 later audible media playback relies on, so scripts may play audio from their first statement without a separate unlock
 step.
 
-The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
+The Playroom keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
 too, also one that asks again after a block, when it ends, and when the page
 is hidden, it stores the session's state, the events that led to it, and the photos only the session uses, which no
 save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/persistence/kept-sessions.ts`). Opening the script
@@ -499,7 +499,7 @@ goes on from the last kept point, with those photos as session media again; a st
 stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
 a kept session whose events the engine's `interpreterEventProblem` refuses, such as a message without its markup or an
 answer without its form, is not continued, and Start shows instead. Nor is a kept session whose plan or state is of
-another revision than this Player's, as after a Player update ([format evolution](../RUNTIME.md#format-evolution)):
+another revision than this Playroom's, as after a Playroom update ([format evolution](../RUNTIME.md#format-evolution)):
 the start page then shows "This session cannot continue" and "The Player has been updated and can no longer resume
 this session. Choose Start to begin this Tease again." before Start, the debug room's with "Choose Start debug session
 to begin this Tease again.", in the card of a Tease that cannot start, whose **Technical details** give the runtime's
@@ -509,8 +509,8 @@ changed script, an ended session, or one that cannot be read shows Start alone. 
 moment after an answer or a lost engine connection ([session end](#session-end-and-failure)), can be lost. A state this browser cannot write, such as one holding a list too long to save,
 is not kept, and the session kept before is discarded, in the debug room without its saved data and photos, so a
 reload never goes on from an earlier point as if it were the current one; while the session runs or waits, a warning
-[notice](#player-notices) says that a reload would lose it, until a later state is kept. A saved-data import of the script discards its kept session
-([transfer](../DATA-AND-API.md#saved-data-transfer)); a session import replaces it ([Player Settings](#player-settings)).
+[notice](#playroom-notices) says that a reload would lose it, until a later state is kept. A saved-data import of the script discards its kept session
+([transfer](../DATA-AND-API.md#saved-data-transfer)); a session import replaces it ([Playroom Settings](#playroom-settings)).
 A script a host prepares without its plan, such as a development
 scenario, keeps none. The debug room has a start page of its own, with its restarts
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-room)). Start and Continue
@@ -518,22 +518,22 @@ also record the wall clock and the player's time zone and numeric date and time 
 the account setting when the host supplies one, else the browser's. They are session data
 ([Date and time context](../RUNTIME.md#date-and-time-context)).
 
-If the browser still refuses required audible playback, the Player surfaces a deliberate activation/retry control. It
+If the browser still refuses required audible playback, the Playroom surfaces a deliberate activation/retry control. It
 does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its
-cues and settlement wait, and an **Enable audio** [player notice](#player-notices) retries playback from the user's
-click. In the Player the
+cues and settlement wait, and an **Enable audio** [Playroom notice](#playroom-notices) retries playback from the user's
+click. In the Playroom the
 session is created only when Start is activated; Continue resumes a kept session. A player moves a session to another
-browser or device by hand with its export ([Player Settings](#player-settings)); keeping sessions in step across
+browser or device by hand with its export ([Playroom Settings](#playroom-settings)); keeping sessions in step across
 browsers or devices, and reconciling a continued session's view of saved data with saves made meanwhile, such as in
 another tab, are not implemented.
 
-While a session plays, the Player keeps the screen on with the browser's screen wake lock, so a long wait without input
+While a session plays, the Playroom keeps the screen on with the browser's screen wake lock, so a long wait without input
 does not let the screen dim, turn off, or lock. It asks for the lock at the Start or Continue click, also when a camera
 opens first, and holds it while the session runs or waits, also while Debug holds the session at an inspected state or a
-random draw. The browser releases the lock while the page is hidden; the Player asks again when the page is shown while
-the session still plays. The Player releases it once the session ends with `exit`, so the end dialog has none, once an
+random draw. The browser releases the lock while the page is hidden; the Playroom asks again when the page is shown while
+the session still plays. The Playroom releases it once the session ends with `exit`, so the end dialog has none, once an
 error stops the session, and once the start page shows or the page is left. Where the browser has no wake lock, such as
-on plain HTTP, or refuses one, such as on low battery, the session plays as before and the Player says nothing.
+on plain HTTP, or refuses one, such as on low battery, the session plays as before and the Playroom says nothing.
 
 ## Session end and failure
 
@@ -546,7 +546,7 @@ with Close or Escape, returns to the [start page](#session-start-and-user-activa
 and takes focus.
 
 When a script error stops the session, a line above the composer says "The script stopped because of an error." and
-offers **Details**. An exception of the Player itself also stops the session until the next Start: it no longer runs,
+offers **Details**. An exception of the Playroom itself also stops the session until the next Start: it no longer runs,
 observes time, or takes input; its captures, cameras, and media end; and late answers and reports, including save
 acknowledgements, are dropped. The line then says "The Player ran into an error." An error notice with
 **Details** supplements the line until a new session starts. Both open one error dialog, which never opens by itself. It
@@ -554,14 +554,14 @@ shows "Script error" and "In rules.tease, line 3.", then **Technical details**, 
 runtime's message ("TSR036: Division by zero: '1 / zero' has no result because 'zero' is 0. Check that 'zero' is not 0
 first."), the failing line with the failing expression marked, when the host supplied the script's source, and, for an
 error inside a function, called file, or timer, media, or button block, the call path, such as "in punish(), called from
-main.tease:6". After a Player exception it shows "Player error" and "The script did not cause this.", with the error's
+main.tease:6". After a Playroom exception it shows "Player error" and "The script did not cause this.", with the error's
 name as its technical detail. **Download debug export** and, for a script error while Debug runs, **Open in Debug**
 close it and open the debug export dialog, or the Debug panel's Now tab, which names the error and its statement;
 **Close** returns focus to the line. Apart from those hand-overs, each dialog closes only with **Close** or Escape.
 Media warnings are notices, never failures. The transcript and Stage stay for inspection, with the transcript's end
 scrolling clear of the line. The dialogs fit narrow screens, and their buttons are at least 44px tall.
 
-A lost connection to the engine also stops a session that runs or waits, as a Player exception does, but the line says
+A lost connection to the engine also stops a session that runs or waits, as a Playroom exception does, but the line says
 "The session stopped unexpectedly. You can continue from the last kept point. Progress since then may be lost." with
 **Continue from last kept point** when this browser keeps an unended session of the script; else it says only "The
 session stopped unexpectedly." with **Start again**. It has no **Details** and no error notice. With no session shown,
@@ -574,7 +574,7 @@ before its click looks unchanged, and its Start or Continue recovers. A session 
 shown: after `exit`, the start page's Start recovers; after a script error, as before, nothing does. A loss before the
 start page is ready stays a failure to open the script. An open session import closes without importing.
 
-The error dialog, Player Settings, and the Debug panel open one **Download debug export** dialog for a developer
+The error dialog, Playroom Settings, and the Debug panel open one **Download debug export** dialog for a developer
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a
 labelled switch with its help text, off whenever the dialog opens, and engine replay data can be turned on only after
 saved values, answers, and session text, which its state copies. With photos on, the photos the session used are listed
@@ -585,16 +585,16 @@ the file contains; every change prepares the file again, and **Download debug ex
 player's press. An export larger than an issue attachment allows is not offered. The dialog fits narrow screens and
 scrolls, and its rows and buttons are at least 44px tall.
 
-## Player notices
+## Playroom notices
 
-Player notices tell the player that something about the session's environment matters, such as blocked audio,
+Playroom notices tell the player that something about the session's environment matters, such as blocked audio,
 unavailable storage, or a camera problem. They never stop the session and are separate from runtime developer warnings,
-which are creator diagnostics about a script location. Host features publish them through one Player-owned channel
-(`player/presentation/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
+which are creator diagnostics about a script location. Host features publish them through one Playroom-owned channel
+(`player/presentation/notices.ts`) with fixed Playroom wording per condition; a condition has one notice, which it replaces or
 withdraws, so repeated causes do not stack.
 
-Notices belong to the Player, not the story, so they never appear in the conversation. A new or replaced notice shows
-as a temporary toast (shadcn-vue Sonner) at the top centre of the window, below the Player's top controls, whether or
+Notices belong to the Playroom, not the story, so they never appear in the conversation. A new or replaced notice shows
+as a temporary toast (shadcn-vue Sonner) at the top centre of the window, below the Playroom's top controls, whether or
 not a side panel is open; on a narrow screen the toast spans the window and may cover the timer. Each toast shows a level icon (info, warning, or error), its text, and at
 most one action control that runs from the player's click (such as **Enable audio**). Up to three toasts show as a
 stack with the newest in front; the pointer expands the stack and pauses expiry. Info toasts expire after 5 seconds,
@@ -612,7 +612,7 @@ audio, is labelled **Needs action**, offers no dismiss control, and disappears o
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
 (info: saved progress is not kept), a failed script-storage write (warning, for the run it happened in; a new
 Start withdraws it), a session this browser cannot keep for a reload (warning, withdrawn once a later state is kept), an image request that allows only the camera where no camera can be used (warning,
-withdrawn when the request ends), a media file the script refers to that the Player cannot use (warning, see
+withdrawn when the request ends), a media file the script refers to that the Playroom cannot use (warning, see
 [Stage and media presentation](#stage-and-media-presentation)), and a session stopped by an error (error, with
 **Details**; see [Session end and failure](#session-end-and-failure)). Each level also has a theme status colour, following
 the usual convention: info blue, warning orange, error red. A toast uses the level's soft tint as its surface and its
@@ -625,7 +625,7 @@ The stage is a dedicated structural surface above the transcript in the main con
 when no media is active. An empty stage shows its normal background/ambience rather than collapsing and expanding the
 transcript into that space.
 
-The Player currently starts with a 60% stage / 40% conversation split. A keyboard-accessible horizontal handle lets the
+The Playroom currently starts with a 60% stage / 40% conversation split. A keyboard-accessible horizontal handle lets the
 user adjust the division; only its compact centered grip starts a drag. The composer grows inside the conversation
 allocation. The chosen split survives viewport resizing for the current mount. The starting ratio and 20% minimum per
 panel remain provisional visual baselines.
@@ -641,26 +641,26 @@ A script can show the user what the session camera sees, for example to get into
 control, and the script alone takes photos with `takePhoto()`. It shows a live image at the camera's aspect ratio,
 without a visible label, mirrored (selfie view) by default, except a camera the browser reports as facing back, which
 is not mirrored, as in camera apps. Captured photos are never mirrored. Its controls sit in the view's lower left
-corner, clear of the Player's top controls over the top of the Stage and of the timer rail along its right side: a
-mirror button switches the mirroring off and on while the Player is mounted, and where the browser reports two or more
+corner, clear of the Playroom's top controls over the top of the Stage and of the timer rail along its right side: a
+mirror button switches the mirroring off and on while the Playroom is mounted, and where the browser reports two or more
 cameras, a Switch camera button beside it opens the next camera in the browser's order, wrapping around, so a phone
 flips between its front and back cameras. Its accessible name says which camera comes next where the browser reports
 that, such as "Switch to back camera", and is "Switch camera" otherwise. A camera switched to starts from its own
 mirroring default. The script keeps running, and `takePhoto()` and an image request's camera step use the chosen
-camera. The Player opens the browser's default camera until the player switches, and remembers the chosen camera in
-this browser, like its [settings](#player-settings); a camera that is gone falls back to the default. A camera whose
+camera. The Playroom opens the browser's default camera until the player switches, and remembers the chosen camera in
+this browser, like its [settings](#playroom-settings); a camera that is gone falls back to the default. A camera whose
 stream the browser or the system ends or stops, as when another app takes it while the browser is in the background,
 opens again by itself with the same camera once the page is shown, while the view keeps its last picture and
 `takePhoto()` waits for it; one that is refused, cannot be opened again after a few tries, or keeps stopping right after
-it opened again stays off. Without an available camera the view is not shown. In the window it floats over the Player
+it opened again stays off. Without an available camera the view is not shown. In the window it floats over the Playroom
 with a slim title bar. Like a desktop window, the user drags it anywhere and resizes it from any edge or corner, keeping
-the camera's aspect; focused, the arrow keys move it and + and - resize it. It floats in the whole Player, so showing or
+the camera's aspect; focused, the arrow keys move it and + and - resize it. It floats in the whole Playroom, so showing or
 hiding the tools sidebar never moves it: it lies over the docked sidebar, and the narrow layout's drawer slides over it.
-It keeps its place while the Player is mounted, also when the script moves the view to the Stage and back. Over the
+It keeps its place while the Playroom is mounted, also when the script moves the view to the Stage and back. Over the
 Stage, the view covers the Stage image, which stays loaded underneath, and the Stage takes the camera's aspect until the
-view goes. The Player's camera view is the only one: the browser's own picture-in-picture is not offered for it.
+view goes. The Playroom's camera view is the only one: the browser's own picture-in-picture is not offered for it.
 
-Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
+Media playback is script-controlled. Audio and video elements show no native browser controls, and the Playroom offers
 no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress
 disagree with the canonical timeline. A progress indicator may extrapolate between reports for display only. Whether
 users may ever control playback is open; if accepted, such controls send typed host input to the runtime rather than
@@ -669,9 +669,9 @@ acting on the media element ([`RUNTIME.md`](../RUNTIME.md#stage-image-and-media-
 The trusted host resolves authored package-relative references, such as `sounds/bell.mp3`, to playable sources; the
 runtime keeps them opaque, and arbitrary external URLs are not resolved. An audio reference the host cannot resolve, or
 that the browser cannot load, is reported as a failed load; a Stage image that does not resolve, or that the browser
-cannot load or decode, leaves the Stage empty. The Player plays audio; a `playVideo` request is reported as a failed
+cannot load or decode, leaves the Stage empty. The Playroom plays audio; a `playVideo` request is reported as a failed
 load ("Video playback is not supported by this Player yet."), so the script continues with the runtime's warning. Each
-such package file is a warning [player notice](#player-notices), once per session and authored path, for example
+such package file is a warning [Playroom notice](#playroom-notices), once per session and authored path, for example
 "Image not found: images/hall.jpg" or "Audio could not be loaded: sounds/bell.wav (main.tease, line 4)"; audio and
 video also name the file and line of the play that started them. Audio that loaded and then fails while it plays, as
 when the browser's audio output errors, reads "Audio could not be played: …" instead, and the script goes on as after a
@@ -681,7 +681,7 @@ video playback itself is missing; captured photos, chosen images, and stored fil
 reported. A stored file that is not an image, such as SVG or HTML from `fileFromBase64`, is never shown, and stored audio
 and video are not played ([stored files](../RUNTIME.md#stored-files)). An
 authored Stage image has no alternative text yet. Explicit transitions and custom stage rendering are not yet
-implemented in the Player; the development preview's Stage media picker can override the Stage for layout comparison.
+implemented in the Playroom; the development preview's Stage media picker can override the Stage for layout comparison.
 
 Standard image/video-like presentation:
 
@@ -693,39 +693,39 @@ Standard image/video-like presentation:
   or around the media, and stay pointer-neutral; text and controls on it keep readable contrast. Readable contrast is
   required once a change has settled; a short colour transition, such as the photo fade, may pass through lower
   contrast. An accepted author/media capability may still provide an explicit stage/background presentation. Tool
-  panels and Player controls keep their own materials. Stage and transcript remain separate regions with separate
+  panels and Playroom controls keep their own materials. Stage and transcript remain separate regions with separate
   content and scrolling ownership;
 - uses a direct replacement as the Standard default transition; V30 `fade`/`crossfade` belong to the future layered
   scene and are not part of the Stage image and media foundation;
 - does not add duplicate filename, fit, or scene-information captions merely because those values exist elsewhere.
 
-The Stage image colours the whole Player: the photo decides the hue and colourfulness, from one of its swatches for
-the current mode, and the Player's own tones per mode decide how light each surface is, so text keeps its contrast. The
+The Stage image colours the whole Playroom: the photo decides the hue and colourfulness, from one of its swatches for
+the current mode, and the Playroom's own tones per mode decide how light each surface is, so text keeps its contrast. The
 Photo colour family A/B test chooses the swatch: A, the Vibrant family (DarkVibrant in dark mode, LightVibrant in light
 mode, else Vibrant); B, the Muted family in the same way; C, the default, a Vibrant-family swatch only when it covers at
 least the set share of the photo's measured pixels, else a Muted-family swatch that does, else the largest of them, so a
-small detail does not colour the Player. A photo without a swatch of that family takes the other family's, the larger
+small detail does not colour the Playroom. A photo without a swatch of that family takes the other family's, the larger
 Vibrant one first. The background,
 message bubbles, composer, buttons, and tools follow the photo together. The background is deepest in colour around
 what the Stage shows: the photo, or an image request's preview or the camera view over it, which keep the photo's
 colour; without any, the middle of the Stage. Towards its far edges it darkens in dark mode and pales in
 light mode. With the Photo accent A/B test's A,
 the accent (Send, the preselected ring, and the other accent marks) takes the photo's hue too; B, the default, keeps the
-theme's accent, as does a photo with too little colour. A grey photo makes the Player neutral at the
+theme's accent, as does a photo with too little colour. A grey photo makes the Playroom neutral at the
 same tones. Without a Stage image, also when one fails to load, the theme's own colour for the mode applies, at the
 same tones and up to the same colourfulness as a photo's. A new photo and its
 colour appear together: while the photo is downloaded once, decoded, and measured, the previous photo and its colour
 stay, and then the photo and the colour change at once. If the colour is not ready shortly after the photo is, the
-photo shows with the previous colour, and its own colour follows. After Start, the Player downloads every Stage image
+photo shows with the previous colour, and its own colour follows. After Start, the Playroom downloads every Stage image
 the script names, by its path or as a candidate of `showImage tagged`, into its Cache Storage and measures it, in the
 background, one at a time and after any photo the Stage waits for; such a photo then shows from that copy without a new
 download and only needs decoding. An image path the script computes while it runs is downloaded into the cache when it
-shows. In memory the Player keeps each photo's colours, and the file only of the photo the Stage shows or prepares. The
-Player empties its cache when a newly opened page loads a script, so a later visit downloads changed files again, and
+shows. In memory the Playroom keeps each photo's colours, and the file only of the photo the Stage shows or prepares. The
+Playroom empties its cache when a newly opened page loads a script, so a later visit downloads changed files again, and
 keeps only the images a script names when another script starts. Without Cache Storage, as outside a secure context, a
-photo is downloaded again each time it shows. When the browser does not let the Player read an image's pixels,
+photo is downloaded again each time it shows. When the browser does not let the Playroom read an image's pixels,
 the previous photo's colour stays; a camera view or an image request's preview over the Stage does not change it. The
-Player reuses recent image measurements, also when the photo colour family or its share changes. Whenever the photo
+Playroom reuses recent image measurements, also when the photo colour family or its share changes. Whenever the photo
 colour changes (to the first photo's colour, from one photo's colour to the next, back to the theme's colours, and with
 a mode change), every colour it drives fades together, starting with the photo: the background and its vignette, the
 message bubbles, the buttons, the accent, and the composer. Two A/B tests set the fade, each B as in Milovana's player:
@@ -734,13 +734,13 @@ sRGB (B). Reduced motion removes the fade. The colours are measured as node-vibr
 (`player/theme/node-vibrant/`).
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content
-without changing the surrounding Standard Player geometry. Per-asset fit/background/transition metadata may be needed
+without changing the surrounding Standard Playroom geometry. Per-asset fit/background/transition metadata may be needed
 for randomly selected assets, but exact author-facing media metadata/API remains owned by the media contract rather than
 filename conventions in this UI specification.
 
 ## Transcript
 
-The Standard Player has one visible conversation transcript surface even when it is empty, and it remains visible during
+The Standard Playroom has one visible conversation transcript surface even when it is empty, and it remains visible during
 foreground interactions. The visible transcript is a presentation over conversation/history data; a future author action
 may start a new visible segment without implying that retained canonical history needed for runtime/history/LLM policy
 has been destroyed. Exact retention and LLM context policy remain upstream work.
@@ -748,7 +748,7 @@ has been destroyed. Exact retention and LLM context policy remain upstream work.
 The transcript:
 
 - uses the canvas surface, continuous with the stage background above it;
-- owns a stable horizontal center shared by the stage media and composer: all remain centered in the Player viewport until the docked tools framework consumes the reading column's free margin, then move together to stay visible; changing media or resizing the stage vertically does not move or narrow the reading column, while media fits within the remaining space around that center;
+- owns a stable horizontal center shared by the stage media and composer: all remain centered in the Playroom viewport until the docked tools framework consumes the reading column's free margin, then move together to stay visible; changing media or resizing the stage vertically does not move or narrow the reading column, while media fits within the remaining space around that center;
 - keeps the maintained ultrawide readability cap pending visual retuning;
 - places one viewport of empty scroll space before the messages, so even a single message can be scrolled; at the latest
   position, messages and active controls sit above the composer and new messages grow the conversation upward;
@@ -803,11 +803,11 @@ Content shows directly, without entering: the transcript at Start and Continue a
 also when input adopts one; a session's first content, also when it follows Start in a later update; what development
 time jumps add; and an update with many entries or, under smart follow, with more than the transcript shows at once. End and error notices and Debug's own status lines do not enter. With a
 reduced-motion preference nothing enters or glides. The duration, the rise, and what counts as many are tuning of the
-Player, not behavior a script can observe.
+Playroom, not behavior a script can observe.
 
 ### Message presentation and provenance
 
-Received bubbles align left and player-authored bubbles align right. The Player owns bubble placement and text
+Received bubbles align left and player-authored bubbles align right. The Playroom owns bubble placement and text
 alignment; authors can set `position` and `align` only for prose, as defined by the language contract below. Messages
 occupy at most `75%` of the conversation width and `65ch`. Consecutive messages group only while both the speaker and
 presentation kind remain the same. The first received bubble in a group shows its avatar and name. Player-authored
@@ -819,27 +819,27 @@ start 12px apart. Prose keeps its own spacing.
 
 The runtime adapter supplies resolved message presentation according to the
 [language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides). Where that
-contract reports no authored choice, the Player supplies one. Prose has no avatar, defaults its block and text alignment
+contract reports no authored choice, the Playroom supplies one. Prose has no avatar, defaults its block and text alignment
 to centre, uses the same width limits as bubbles, and has no panel unless the author supplies a background.
 
-When an authored foreground sits on a Player-generated bubble or prose surface, the Player measures it against that
+When an authored foreground sits on a Playroom-generated bubble or prose surface, the Playroom measures it against that
 surface unless an inline authored background encloses it; prose on a Stage photo's background is measured against both
 the background and its vignette at full strength, and inline code with the fill it lays under its text. It leaves
 readable pairs alone using APCA or a WCAG ratio backed by a minimum APCA score; neither is a universal readability
 guarantee. For other pairs it compares a subtle local backing with an ink lightness change by colour difference, and can
 combine both when gamut mapping would wash out the authored colour. It retains the ink's original light/dark direction.
-Inline coloured text on a Player-generated surface follows the same rule. When an author supplies the bubble or prose
+Inline coloured text on a Playroom-generated surface follows the same rule. When an author supplies the bubble or prose
 background, authored text remains unchanged, including inline colours and high-contrast mode. Without an authored
-foreground, the Player chooses default black or white ink for that background. Authored text inside an inline background
+foreground, the Playroom chooses default black or white ink for that background. Authored text inside an inline background
 (including inherited message colour) also remains unchanged. Compile-time feedback for a poorly contrasting authored
 pair is tracked in #434.
-The High contrast setting in [Player Settings](#player-settings) gives one-sided colours stronger treatment.
+The High contrast setting in [Playroom Settings](#playroom-settings) gives one-sided colours stronger treatment.
 
 An authored typeface uses the theme font stack as its fallback. Font bundling is tracked in
 [`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).
 
 Authored Standard-chat `say` messages carry the typed structure defined by the
-[message-markup specification](../specifications/message-markup.md). The Player renders only those controlled blocks,
+[message-markup specification](../specifications/message-markup.md). The Playroom renders only those controlled blocks,
 spans, values, and validated HTTP(S) links; it does not interpret authored HTML or use a raw-HTML rendering path. Links
 open a new browsing context with opener isolation. Spoiler markup and reveal controls are removed.
 Answers remain plain text and do not enter the markup parser; a message of `player` is an authored message.
@@ -851,11 +851,11 @@ following, the newest content stays readable when an earlier entry changes heigh
 in view stays in place, also when an entry that changed out of view is measured again as it scrolls back. When a change
 removes the element inside the message that had focus, such as a link, focus moves to the message itself without
 scrolling, which is a tab stop only until focus leaves it. Because a changed message may be out of view or already read,
-the Player speaks changes that live play produces from a polite status region outside the transcript list, as
+the Playroom speaks changes that live play produces from a polite status region outside the transcript list, as
 `speaker: text`, or `message cleared` for empty text: coalesced per message to its latest text, one at a time, at most
 one each second and the same message at most once every five seconds, and not when the visible text is what was last
 shown or spoken. Start, Continue, and states that Debug's rewind shows speak nothing of their history. The intervals are
-accessibility tuning of the Player, not limits a script can observe.
+accessibility tuning of the Playroom, not limits a script can observe.
 
 A script message can also leave the conversation through its handle's `remove()` (#836). From then on the transcript
 leaves it out, also in history, after Continue, and in the states Debug's rewind shows: it takes no row and no list
@@ -871,19 +871,19 @@ momentary action is shown as a player-authored transcript action; toggle/select 
 when shown, uses a neutral session-event presentation rather than implying spoken prose. Programmatic control updates
 are not user activations and use the same neutral event family with their script origin identified. Visual markers must
 not become canonical punctuation; their exact appearance remains tuning work.
-Long-lived control activation/update history is not yet implemented in the Player.
+Long-lived control activation/update history is not yet implemented in the Playroom.
 
 The POC's letter-glyph avatars use twelve fixed colour families, with a light fill and dark letter in light mode and the
-inverse in dark mode. On a speaker's first bubble, the Player assigns the colour used by the fewest messages so far;
+inverse in dark mode. On a speaker's first bubble, the Playroom assigns the colour used by the fewest messages so far;
 ties follow a fixed, perceptually spaced palette order. Later messages increase that colour's count, and the speaker
 keeps the assignment. Authored text and bubble colours do not choose avatar colours. An authored V30 speaker `avatar`
 image replaces the glyph and is decorative beside the visible speaker name. Like Stage media, the reference is
 package-relative and resolved by the trusted host. An avatar that does not resolve or does not load keeps the glyph and,
-like a Stage image, is a warning [player notice](#player-notices).
+like a Stage image, is a warning [Playroom notice](#playroom-notices).
 
 ## Composer and foreground interactions
 
-The Standard Player uses one persistent composer at the bottom of the conversation area. It is the normal chat input and
+The Standard Playroom uses one persistent composer at the bottom of the conversation area. It is the normal chat input and
 the answer field for `askText` and `askNumber`; `askChoice` and `showButton` controls appear after the latest message
 inside the same vertically scrolling transcript. The composer stays at the bottom. Its shell has a 12px gap above and
 below in the normal viewport; a larger bottom safe-area inset takes precedence where needed.
@@ -891,7 +891,7 @@ Invalid submissions show a short red notice anchored to the composer input witho
 In a tight layout the floating notice may temporarily cover a choice. It clears when typing resumes, the interaction
 changes, after a brief delay, or when the player taps outside it.
 
-While Debug runs ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)), one small muted status line below the foreground
+While Debug runs ([`DEBUGGER.md`](../DEBUGGER.md#playroom-debug)), one small muted status line below the foreground
 controls counts down the current foreground wait, also while the Debug panel is closed: **Debug · Continues in 4 s**,
 **Debug · Press within 4 s**, or **Debug · Pacing: 4 s remaining**. It is not a timer: it has no card, ring, or
 right-rail entry, takes no input, is not announced each second, and never enters the transcript.
@@ -926,30 +926,30 @@ and the composer may never grow larger than the conversation area available bene
 contain the complete measured input and Send control; a growing textarea may not paint beyond that row or beneath the
 visual-viewport/keyboard boundary.
 
-The Player re-evaluates during and after keyboard/orientation transitions. The top page requests
+The Playroom re-evaluates during and after keyboard/orientation transitions. The top page requests
 `interactive-widget=resizes-content`, so a supporting browser shrinks the layout viewport to the space above the software
-keyboard, in and out of fullscreen, and the Player sizes against the visual viewport within it. The Player's own page
-requests it; a page that frames the Player must request it too, because a frame's own setting has no effect and its
-visual viewport does not shrink for the keyboard. A browser without that setting keeps its own resizing. The Player adds
+keyboard, in and out of fullscreen, and the Playroom sizes against the visual viewport within it. The Playroom's own page
+requests it; a page that frames the Playroom must request it too, because a frame's own setting has no effect and its
+visual viewport does not shrink for the keyboard. A browser without that setting keeps its own resizing. The Playroom adds
 no keyboard offset of its own: where a browser reports more height than the keyboard leaves, as Firefox for Android does
 in fullscreen, the composer's lower edge stays partly behind the keyboard.
 
-The following keyboard allocation behavior is intended but not yet fully implemented in the Player.
+The following keyboard allocation behavior is intended but not yet fully implemented in the Playroom.
 
-An open measured keyboard does not select a separate Player composition. The normal stage, transcript, foreground, and
+An open measured keyboard does not select a separate Playroom composition. The normal stage, transcript, foreground, and
 composer ownership remains intact. The stage may shrink below its preferred height so the complete measured composer,
 any foreground controls, and a `5rem` transcript target reserve fit in the actually available height. That reserve is
 bounded by the real remainder rather than enforced as a hard minimum; the transcript may receive more when the stage is
-already at its preferred height, or less when less space exists. The Player itself never grows or becomes a vertical
+already at its preferred height, or less when less space exists. The Playroom itself never grows or becomes a vertical
 scroll owner. A fullscreen browser that reports neither keyboard nor viewport geometry keeps the stable normal
-composition rather than guessing an occlusion or replacing the Player with a full-area editor. Browser-reported safe
+composition rather than guessing an occlusion or replacing the Playroom with a full-area editor. Browser-reported safe
 areas remain in force, but a measured open keyboard already owns the usable bottom edge and is not combined with a
-second bottom-safe-area reservation. While that keyboard is open, the measured usable height also owns the outer Player
+second bottom-safe-area reservation. While that keyboard is open, the measured usable height also owns the outer Playroom
 height instead of being capped again by a potentially stale dynamic-viewport unit. For a shifted visual viewport, that
 usable bottom edge includes its reported top offset rather than treating its height alone as a document coordinate.
 
 The composer receives focus by default, except on touch-only devices, where automatic focus would raise the software
-keyboard; there the user taps the input to start typing. Non-interactive Player clicks should not arbitrarily steal
+keyboard; there the user taps the input to start typing. Non-interactive Playroom clicks should not arbitrarily steal
 typing focus. A click on a permanent button, the theme or fullscreen control, or a camera view button gives typing focus
 back to the composer where it has default focus, unless text is selected; while the composer has nothing to answer,
 such as while a permanent button's block runs, it takes focus once it can. An explicitly focused tool/input/control,
@@ -963,7 +963,7 @@ Focus indication distinguishes navigation from text editing. Clicking or touchin
 not add a focus outline. Keyboard navigation into its input marks the integrated composer shell; Tab to Send removes
 that shell outline and marks only Send. Shift+Tab back marks the shell again. Send remains a separate keyboard focus
 target and invokes the same submission as Enter in the input. Ordinary editing keys do not switch pointer-origin focus
-to keyboard navigation. Player controls and body-portaled tool controls share this input-modality policy.
+to keyboard navigation. Playroom controls and body-portaled tool controls share this input-modality policy.
 
 Standard keyboard behavior is:
 
@@ -997,7 +997,7 @@ decrypt call is the same masked field; an encrypt call's adds a "Repeat password
 with its own eye button, "Show repeated password" or "Hide repeated password". Enter in the first moves to it, and Send
 or Enter there locks only when both match, else the composer notice says "The passwords do not match", the repeat
 empties, and the password is selected. A call with openers written `true` shows its lock dialog once the passwords
-match, and locks with both answers. While the Player locks or opens, the fields are read-only. The field starts empty
+match, and locks with both answers. While the Playroom locks or opens, the fields are read-only. The field starts empty
 each time it shows, also after a block interrupted it, and takes the focus back when the player was typing in the
 composer before it; nothing typed in it is kept. A prefill starts as the
 composer text, which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint
@@ -1007,7 +1007,7 @@ restore the composer shows the prefill again, and unsent edits are not kept.
 request's `hint:` as the input's hint, or "Add an image…" without one. The paperclip opens the browser's native file
 picker for one image, with the request's `types` and `mime` as its `accept` hint. A file dragged over the composer
 marks it as a drop target ("Drop the image here") and is taken when dropped; dragged text or links are not taken.
-Outside such a request there is no paperclip and no drop target. The Player identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
+Outside such a request there is no paperclip and no drop target. The Playroom identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
 AVIF, or BMP), requires the extension and the type to match `types` and `mime` when given, and has the browser decode
 it; a file that fails, more than one file, or typed text shows the composer notice and the request keeps waiting, as
 does a cancelled picker. A file chosen in a picker opened for a request that is no longer presented, for example
@@ -1038,15 +1038,15 @@ leaves it on; otherwise it opens a camera of its own, only for itself, and turns
 and when the request ends. A camera that ends or stops opens again by itself, as for the camera view; one that is
 denied, missing, or broken, or cannot be opened again, shows why in an alert on the viewfinder, and the chat offers
 **Try again**, which asks for it again, and Back. The steps belong to their request: they close, dropping the preview,
-when the request ends or is interrupted, or its session is replaced or stopped by a Player error; a restored or resumed
+when the request ends or is interrupted, or its session is replaced or stopped by a Playroom error; a restored or resumed
 request starts at the first step without a preview and never takes a photo by itself. Where no camera can be used, such
 as on a page that is not a secure context, the first step offers no Open camera, and a request that allows only the
-camera cannot be answered with an image; a [player notice](#player-notices) says so.
+camera cannot be answered with an image; a [Playroom notice](#playroom-notices) says so.
 
 Skip, or its exact text submitted from the composer, answers the request with `null`, which the transcript records as
 the player message `Skip`; a camera the request opened turns off, as after any answer. Skip waits while a chosen image
 is being checked. Other typed text shows the composer notice, which names the routes the request offers and then also
-Skip, such as "Take a photo with the camera, attach or drop an image, or choose Skip.", and the player notice of a
+Skip, such as "Take a photo with the camera, attach or drop an image, or choose Skip.", and the Playroom notice of a
 request that allows only the camera, where none can be used, says "The camera cannot be used here. Choose Skip to
 answer without an image." A request without `allowSkip: true` shows no Skip.
 
@@ -1056,15 +1056,15 @@ answer without an image." A request without `allowSkip: true` shows no Skip.
 - `showButton`: clicking the rendered button or submitting its exact non-empty visible label in the composer activates
   the same action, and so does Space in the empty composer, since its button is always preselected; other text does
   not;
-- a primary click on unrelated/blank Player space does **not** activate `showButton`;
-- a `showButton` timeout removes the button without a transcript message; the Player observes time at the timeout
+- a primary click on unrelated/blank Playroom space does **not** activate `showButton`;
+- a `showButton` timeout removes the button without a transcript message; the Playroom observes time at the timeout
   so the button disappears on schedule;
 - while any mandatory foreground interaction is active, other composer text does not advance ordinary canonical script
   execution. In the deterministic first POC it is an invalid attempt and the same interaction remains active with the
   accepted validation/retry behavior. A future LLM clarification/interpretation layer may consume non-matching text
   without silently changing the deterministic choice, but that is outside the current POC contract.
 
-`showPopup` adds no controls to the chat. A dialog over the session, in the look of the other Player dialogs, shows
+`showPopup` adds no controls to the chat. A dialog over the session, in the look of the other Playroom dialogs, shows
 the popup's message, which names the dialog, and one button with its `buttonText`, `OK` by default, which takes focus.
 The button, by click, Enter, or Space, and Escape close it, not a click beside it; closing it continues the script and
 adds nothing to the transcript. Meanwhile the composer takes no answer. A block that interrupts the popup closes it
@@ -1078,7 +1078,7 @@ long lines and scrolls, and the buttons **Copy**, which takes focus, **Download*
 text to the clipboard and confirms it; when the browser refuses or cannot, as Android's clipboard does above about 1 MB,
 Copy tries the browser's older copy of the selected text, and otherwise leaves the text selected with a short hint to
 copy it by hand or use Download. Download saves the text as a UTF-8 file with the script's file name, made only then.
-Neither closes the dialog, and the Player never copies or downloads by itself. Close, or Escape, closes it and lets the
+Neither closes the dialog, and the Playroom never copies or downloads by itself. Close, or Escape, closes it and lets the
 script go on; a click beside it does not, and nothing enters the transcript. Its keys, modality, and placement while
 Debug runs, and its return after a block or a reload, are a popup's.
 
@@ -1113,30 +1113,30 @@ password opens it. Unlock tries the
 key when one is given, otherwise the password, and without a password opener it waits for a key; a wrong key keeps it
 open with "That key does not open it." under the field, which takes focus. A wrong password keeps it open with "That
 password does not open it." under the field; a
-passed time lock whose relays the Player cannot reach shows "Its time has passed, but the time service could not be
+passed time lock whose relays the Playroom cannot reach shows "Its time has passed, but the time service could not be
 reached." and **Try again** instead of its moment; and a time lock whose moment comes while it shows opens it without
 the player. A password field masks its text, has an eye button, **Show password** or **Hide password**, says "Caps Lock
-is on" under it while it is, and offers no saved or suggested password. While the Player locks or opens with what the
+is on" under it while it is, and offers no saved or suggested password. While the Playroom locks or opens with what the
 player gave, the dialog stays and takes no input but keeps focus, and the button that started it reads **Locking…** or
 **Opening…**, as does a line when a time lock opens it by itself. As for a popup, a key held down since before it opened
 does nothing. A block that interrupts the dialog closes it, and it asks again afterwards with empty fields; its modality
 and placement while Debug runs are a popup's.
 
 `openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
-form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script goes
+form, while the browser still counts it as the player's activation, the Playroom opens the tab at once and the script goes
 on, with nothing in the chat. Otherwise, when the browser does not open the tab, and always for an `openUrl` written
 with `alwaysButton: true`, it shows a button where `showButton` shows its button: its `buttonText`, **Open link** by
 default, never the address, which may be meant as a surprise; the composer takes no answer; default focus goes to the
 button instead of the composer, and the player's click opens the tab and lets the script go on. A request that a reload,
 a restore, Debug's rewind, or its Return brought back always shows the button, also when turning Debug off reinstates
-its session: the Player never opens an address by itself. The tab starts blank and loses its opener before it loads the
-address, so the page there cannot reach the Player; the browser sends it at most the Player's origin as referrer.
+its session: the Playroom never opens an address by itself. The tab starts blank and loses its opener before it loads the
+address, so the page there cannot reach the Playroom; the browser sends it at most the Playroom's origin as referrer.
 Neither the address nor the button enters the transcript.
 
 `askForm` presents one group of controls after the latest message that stays in place while the player edits it, named
 by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the
 viewport height (at most `24rem`), and the submit button and the cancel button of a form written with `cancel:` stay
-below it, without a count of the answers: each field shows its own. A toggle is a Player action button with toggle
+below it, without a count of the answers: each field shows its own. A toggle is a Playroom action button with toggle
 semantics (`aria-pressed`), its label behind a check or cross mark that alone shows whether it is on; like any action
 button, it looks pressed in only while held (Owner decision on #512, 2026-10-09). With authored options it shows
 `label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next
@@ -1157,23 +1157,23 @@ unambiguous text of one field label or of the submit or cancel button activates 
 `askChoice`. A form with a time limit closes at it without a transcript line, as a `showButton` timeout does.
 
 This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
-click/tap on a message, its speaker avatar, or Player background/unused space, or Space with the empty focused composer,
+click/tap on a message, its speaker avatar, or Playroom background/unused space, or Space with the empty focused composer,
 may settle that gate under ADR 0018. A click/tap settles only the gate presented when the press began; if that gate
 ended while the press was held, the release settles nothing. Actual interactive controls and the composer always take
 precedence and must not also fire the viewport-wide pacing shortcut, and a press that selects text settles nothing.
 
-Constraint-driven dropdown presentation under ADR 0018 is not yet implemented in the Player; it currently uses wrapping
+Constraint-driven dropdown presentation under ADR 0018 is not yet implemented in the Playroom; it currently uses wrapping
 buttons.
 
 A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
 the transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its
 buttons and wraps onto additional rows rather than scrolling horizontally. It adds no inline padding beyond the
 transcript reading gutter; each button retains its own label padding. The gap from the preceding message to the
-group follows the separate-bubble gap (12px). The Player action button is the shared style
+group follows the separate-bubble gap (12px). The Playroom action button is the shared style
 for script-driven foreground and right-rail actions, including `askChoice` and `showButton`: minimum height `44px`,
 `8px` vertical and `12px` horizontal padding, `8px` gaps in both directions, `0.875rem` label text, and unitless `1.3`
 line-height. Short buttons take their content width; long labels wrap and grow the button vertically. These dimensions
-apply on desktop and touch alike. Player action buttons use the shared shadcn Button with a soft-bevel
+apply on desktop and touch alike. Playroom action buttons use the shared shadcn Button with a soft-bevel
 presentation: modest rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting
 without moving the label; pressing reduces the depth. Neither changes the rim colour or the button's size; only keyboard
 focus (`:focus-visible`) draws an outline. A preselected button, a `showButton` or the one `prefill:` names, wears a
@@ -1191,22 +1191,22 @@ hover/pressed feedback, and cannot run their action. They retain native disabled
 focusable while unavailable, such as an inactive right-rail control or Use image before there is an image, which is
 exposed as disabled with `aria-disabled`. Right-rail action buttons use the same opaque material as foreground buttons.
 
-The [Player action button design rationale](UI-DESIGN-AND-ENGINEERING.md#player-action-button-design-rationale) explains the
+The [Playroom action button design rationale](UI-DESIGN-AND-ENGINEERING.md#playroom-action-button-design-rationale) explains the
 material choice and its reuse boundaries.
 
-Validation content and retry semantics come from the controlling interaction/runtime contract. The Player must not
+Validation content and retry semantics come from the controlling interaction/runtime contract. The Playroom must not
 invent a competing inline-error semantic merely because the current POC lacks the richer accepted V30 `invalidMessage`
 /`invalidLlmInstruction` compatibility path.
 
 ## Right timer and background rail
 
-The Player's right timer/background rail is an overlay at the Player's right edge, not another tool panel. Timer and background-control
+The Playroom's right timer/background rail is an overlay at the Playroom's right edge, not another tool panel. Timer and background-control
 content have separate overflow owners. Presentation remains separate from runtime action/lifecycle ownership; fixture
 content in the development preview does not create a second runtime model.
 
 ### Timer presentation
 
-The Standard Player supports three timer-presentation classes:
+The Standard Playroom supports three timer-presentation classes:
 
 1. **visible timer** — circular timer with actual remaining time and determinate elapsed-progress ring;
 2. **mystery timer** — the same visible timer vocabulary, but the center displays `?` and the accent ring uses a stable
@@ -1286,15 +1286,15 @@ Recorded background-control activation history follows the transcript provenance
 
 ### Vertical placement and overflow
 
-The complete control/status group is vertically centred on the Player viewport, not on the Stage, whenever it fits. The
+The complete control/status group is vertically centred on the Playroom viewport, not on the Stage, whenever it fits. The
 centre is a preference, not a fixed coordinate: the whole group shifts only as far as needed to stay below the timers
-and inside the usable Player area, and individual controls are never clipped. A software keyboard reduces that usable
+and inside the usable Playroom area, and individual controls are never clipped. A software keyboard reduces that usable
 area. When the group cannot fit even after shifting, only the group scrolls and the timers remain fixed. With multiple
 timers, the timer pane owns vertical timer overflow and the action pane continues to own action overflow.
 
 ### Stage overlay and material
 
-The rail never reserves a right-hand track and has no backing toggle. It spans the full Player height while it stays
+The rail never reserves a right-hand track and has no backing toggle. It spans the full Playroom height while it stays
 clear of the reading column, overlaying the Stage and the conversation margin. When it would cover transcript or composer
 content, it falls back to the Stage height, with the controls directly below the timers. Rail dimensions remain
 provisional. Timer surfaces use the current graded translucent timer material. Right-rail action
@@ -1311,7 +1311,7 @@ Ordinary neutral controls use the shared progression without geometric movement:
 3. pressed/active: `border-strong` plus `surface-pressed` fill;
 4. keyboard focus: a `2px` outline in the neutral `focus-ring` role, the primary text tone, with `2px` visible
    separation and no layout shift. The outline is the only focus mark; components add no ring of their own. The
-   Player's neutral colour and `2px` separation replace the shared accent and `1px` baseline, so focus looks alike in
+   Playroom's neutral colour and `2px` separation replace the shared accent and `1px` baseline, so focus looks alike in
    both modes, does not follow an author's accent, and stays apart from the accent of primary actions;
 5. disabled: dedicated readable disabled surface/border/text roles and non-interactive semantics/cursor behavior.
 
@@ -1319,18 +1319,18 @@ A non-interactive status item is a separate semantic/visual class, not a disable
 
 ### Primary and authored control colours
 
-The primary `Send` action uses the Player/theme solid accent family. Per-control authored colour does not redefine the
-Player accent; changing the global accent belongs to an explicit theme API.
+The primary `Send` action uses the Playroom/theme solid accent family. Per-control authored colour does not redefine the
+Playroom accent; changing the global accent belongs to an explicit theme API.
 
-For supported authored Standard controls, the developer provides only a base/fill colour. The Player derives enabled
-hover/pressed states from that fill, keeps Player-owned focus/disabled treatment, and chooses readable black or white
+For supported authored Standard controls, the developer provides only a base/fill colour. The Playroom derives enabled
+hover/pressed states from that fill, keeps Playroom-owned focus/disabled treatment, and chooses readable black or white
 label text; Standard control text colour is not separately author-overridable. Derived colours are presentation state,
 not compiler/source semantics. The calculation is an implementation detail provided it gives the same readable result
-and does not repaint unrelated Player chrome, speaker identity, or theme accent.
+and does not repaint unrelated Playroom chrome, speaker identity, or theme accent.
 
 ### Input capability and motion
 
-Player scroll regions use theme-colored overlay scrollbars that hide when inactive. Visibility may be configured per region;
+Playroom scroll regions use theme-colored overlay scrollbars that hide when inactive. Visibility may be configured per region;
 the exact hover-versus-scroll choice remains under visual evaluation.
 They do not reserve extra content width or introduce another panel border. Native text-editing fields retain their
 browser scroll behavior with matching scrollbar colors.
@@ -1346,27 +1346,27 @@ browser scroll behavior with matching scrollbar colors.
 
 ## Z-order, overlays, and click-through
 
-The complete blocking/custom-overlay and critical-global-control hierarchy is not yet implemented in the Player.
+The complete blocking/custom-overlay and critical-global-control hierarchy is not yet implemented in the Playroom.
 
 The maintained relative layering direction is:
 
-1. ordinary Standard Player content;
+1. ordinary Standard Playroom content;
 2. floating timer/background-control surfaces;
 3. tools drawer and its scrim, with the drawer above its own scrim;
 4. blocking modal or custom overlay;
-5. critical fullscreen/global auto-hide controls needed to leave or operate the Player.
+5. critical fullscreen/global auto-hide controls needed to leave or operate the Playroom.
 
 Exact numeric `z-index` values are implementation detail. The drawer scrim intentionally intercepts outside activation.
 Decorative stage/media effects are pointer-neutral. Floating right controls remain interactive over the stage. A visible
 overlay must not create accidental click-through into covered controls.
 
 Custom tool/stage HTML/CSS is confined to its assigned surface and cannot escape through accidental selectors or
-`z-index`. A deliberate full-player takeover uses its future explicit capability rather than CSS leakage from a smaller
+`z-index`. A deliberate full-Playroom takeover uses its future explicit capability rather than CSS leakage from a smaller
 custom surface.
 
 ## Default themes
 
-The Standard Player generates its semantic colour roles from a theme intent (`player/theme/palette.ts`) and applies
+The Standard Playroom generates its semantic colour roles from a theme intent (`player/theme/palette.ts`) and applies
 them before components consume them. The defaults are a warm light theme (surface hue `70°`, tint `75%` of the
 mode's chroma cap, rose accent `#D63B61`) and a cool dark theme (surface hue `240°`, otherwise the same surface
 intent, blue accent `#2255EE`). Switching light/dark applies that mode's default palette and keeps the contrast
@@ -1381,24 +1381,24 @@ there is no Radix runtime or CSS dependency.
 
 The application palette does not own speaker/person colours, authored transcript spans, authored per-control fills, or
 technical masks; the Stage photo's colours feed it ([Stage and media presentation](#stage-and-media-presentation)). The
-Player/theme accent remains theme-owned; local control colour never changes it, and only the Stage photo does, under
+Playroom/theme accent remains theme-owned; local control colour never changes it, and only the Stage photo does, under
 the Photo accent A/B test's A.
 
-Standard Player theme precedence is: explicit user-selected theme, package/developer-selected default, then platform
+Standard Playroom theme precedence is: explicit user-selected theme, package/developer-selected default, then platform
 default. A package may select a default but cannot force it against a user override.
 
 Custom themes are standalone, light, or dark. A developer may provide one or a light/dark pair; both variants are not
 required. A standalone theme is used as authored. A mode-qualified theme uses the variant matching the effective
 light/dark mode; a missing variant falls back to the corresponding platform theme. Do not synthesize or auto-convert it.
 Exact author-facing schema/names remain upstream API work. Theme registration, user/package precedence, and
-missing-variant fallback are not yet implemented in the Player.
+missing-variant fallback are not yet implemented in the Playroom.
 
 Standard theming covers defined semantic colour roles, not arbitrary CSS. Geometry, fonts, spacing, DOM/chrome
-ownership, and other Standard Player properties remain Player-owned unless a later explicit capability says otherwise.
+ownership, and other Standard Playroom properties remain Playroom-owned unless a later explicit capability says otherwise.
 Authored speaker/rich-text/control colours that carry script meaning are content semantics, not theme defaults. User
 theme or accessibility preferences must preserve that meaning: for example, a story-defined red control cannot simply
 be recoloured blue. Accessibility treatment may add or alter non-semantic presentation while retaining the authored
-distinction. Theme API shape, preference persistence beyond [Player Settings](#player-settings), exact authored-colour
+distinction. Theme API shape, preference persistence beyond [Playroom Settings](#playroom-settings), exact authored-colour
 fallback mechanics, and numeric accessibility thresholds remain open; see [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). Ordinary
 transcript text does not accept unrestricted raw HTML. Fully custom HTML/CSS/TypeScript uses the separate custom
 view/tool/stage capability inside the accepted sandbox.
@@ -1406,7 +1406,7 @@ view/tool/stage capability inside the accepted sandbox.
 ## Accessibility invariants
 
 Higher-authority ADR 0018 requires a programmatic accessible name for every Standard UI text field, number field, choice
-group, and button. The Player preserves that requirement regardless of visible hint text or authored styling: a button's
+group, and button. The Playroom preserves that requirement regardless of visible hint text or authored styling: a button's
 visible label is its accessible name, and the localized default names it only when the label is blank.
 
 Additional maintained presentation invariants:
@@ -1420,7 +1420,7 @@ Additional maintained presentation invariants:
 - switches/toggles and selects expose their correct control semantics;
 - tool-carousel next/previous controls and horizontal scrolling remain keyboard/pointer accessible when those controls are
   present;
-- authored Standard control fills receive Player-owned readable black/white label text;
+- authored Standard control fills receive Playroom-owned readable black/white label text;
 - reduced-motion preference suppresses non-essential motion without changing layout or interaction semantics.
 
 Broader text scaling, final minimum-control sizing, custom-view accessibility responsibility, and exact numeric contrast
@@ -1429,7 +1429,7 @@ project-wide threshold here without an accepted source.
 
 ## Open decisions
 
-Unresolved Player product/design choices are owned by [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). This specification
+Unresolved Playroom product/design choices are owned by [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). This specification
 marks affected behavior as open at the point where it matters, rather than maintaining a second checklist here. An open
 question is not permission for an implementation to choose a durable project policy silently; a POC may use a local
 reversible presentation choice only while it remains identified as provisional.
