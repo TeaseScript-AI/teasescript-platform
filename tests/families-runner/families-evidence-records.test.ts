@@ -189,7 +189,7 @@ export const compileSourceWithBackend = (source) => compileProjectWithBackend([{
       .modes.map(({ base, head }) =>
         [base, head].map(({ allowance, stopped, outside }) => ({ allowance, stopped, outside })),
       );
-  const each = (one: Classed) => Array(4).fill([one, one]);
+  const each = (one: Omit<Classed, "thrown">) => Array(4).fill([one, one]);
   assert.deepEqual(fields("fine"), each({ allowance: 1000, stopped: null, outside: null }));
   assert.deepEqual(fields("stops"), each({ allowance: 1000, stopped: "work", outside: null }));
   assert.deepEqual(fields("limit"), each({ allowance: 1000, stopped: null, outside: "limit" }));
