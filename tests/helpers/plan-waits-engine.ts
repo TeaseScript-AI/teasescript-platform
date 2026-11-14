@@ -1,3 +1,4 @@
+import { PlanControlFlow } from "../../src/plan/control-flow.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { planWaits, type PlanWaits } from "../../src/plan/waits.js";
 import type { InterpreterEvent } from "../../src/runtime/events.js";
@@ -6,13 +7,13 @@ import { createFreshRuntimeSession, type RuntimeSession } from "../../src/runtim
 /*
  * `planWaits` against today's engine: a session of the plan is played, and at every wait it enters each live part must
  * be marked: the waiting instruction itself (`waitsAt`), each running function or block (`functionMayWait`), and each
- * file call below it (`mayWaitAt` of its `call`). Each finding names a soundness defect of the analysis.
+ * file call below it (`mayWaitAt` of its `call`, `fileMayWait` of the file it entered). Each finding names a soundness
+ * defect of the analysis.
  *
  * Every wait counts, also one that catch-up settles inside the same operation: each foreground action the engine
  * requests is read from the operation's events, with the call frame it stands in (`ownerCallFrameId`). An instruction
  * observer records each frame, with the frames below it, when it is created, before it runs anything: after the
- * `callFunction` or the file `call` that pushed it, at which a file call's frame is checked, or as a block is
- * dispatched.
+ * `callFunction` or the file `call` that pushed it, with the file it entered, or as a block is dispatched.
  *
  * The play answers what it can without a Player: a delay or a reading time by observing its deadline (which also starts
  * the blocks due by then), a media load as loaded and 5 s long, a storage write as stored, a button by pressing it, a
@@ -38,8 +39,9 @@ const FRESH = { seed: 1, wallClockMs: Date.UTC(2026, 0, 5, 9, 0, 0) };
 interface Frame {
   /** The function or block, or `null` for a file call's activation. */
   readonly functionId: number | null;
-  /** For a file call's frame, the `call` that pushed it. */
+  /** For a file call's frame, the `call` that pushed it and the file it entered. */
   readonly callInstruction: number | null;
+  readonly file: number | null;
   readonly stack: readonly number[];
 }
 
@@ -50,27 +52,33 @@ export function checkWaitsAgainstEngine(
   waits: PlanWaits = planWaits(plan),
 ): WaitCheck {
   const session = createFreshRuntimeSession(plan, FRESH);
+  const flow = new PlanControlFlow(plan);
   const frames = new Map<number, Frame>();
   const unmarked: string[] = [];
   const live = new Set<number>();
   let checked = 0;
   const instructionObserver = {
-    // Only a `callFunction` and a file `call` push a frame when they complete; a block's frame is pushed as it starts.
-    after: (instruction: number): void => {
+    after: (instruction: number, next: number): void => {
       const stack = session.callFrameIds();
       const top = stack.at(-1);
       if (top === undefined || frames.has(top)) return;
       const created = plan.instructions[instruction]!;
       if (created.kind === "callFunction")
-        frames.set(top, { functionId: created.functionId, callInstruction: null, stack });
+        frames.set(top, { functionId: created.functionId, callInstruction: null, file: null, stack });
       else if (created.kind === "transfer")
-        frames.set(top, { functionId: null, callInstruction: instruction, stack });
+        frames.set(top, {
+          functionId: null,
+          callInstruction: instruction,
+          file: flow.fileOf(next),
+          stack,
+        });
       else unmarked.push(`call frame ${top} was pushed by a ${created.kind}`);
     },
     dispatch: (block: number, frame: number): void => {
       frames.set(frame, {
         functionId: block,
         callInstruction: null,
+        file: null,
         stack: [...session.callFrameIds(), frame],
       });
     },
@@ -104,10 +112,14 @@ export function checkWaitsAgainstEngine(
             unmarked.push(
               `wait ${checked}: function or block ${below.functionId} is live unmarked`,
             );
-        } else if (below.callInstruction === null || !waits.mayWaitAt(below.callInstruction))
-          unmarked.push(
-            `wait ${checked}: the file call at ${below.callInstruction} is live unmarked`,
-          );
+        } else {
+          if (below.callInstruction === null || !waits.mayWaitAt(below.callInstruction))
+            unmarked.push(
+              `wait ${checked}: the file call at ${below.callInstruction} is live unmarked`,
+            );
+          if (below.file === null || !waits.fileMayWait(below.file))
+            unmarked.push(`wait ${checked}: the file ${below.file} it entered is live unmarked`);
+        }
       }
     }
   };

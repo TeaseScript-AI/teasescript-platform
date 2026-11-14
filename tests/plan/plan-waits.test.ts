@@ -342,6 +342,17 @@ test("a block made due in a file call's destination marks the activation the cal
     missed.some((line) => line.endsWith(`the file call at ${call} is live unmarked`)),
     missed.join("\n"),
   );
+  // So is the entered file alone, as before this case was repaired: the call stays marked, since its destination
+  // starts the block, and the file's own flag is what the check reads.
+  const fileMissed = checkWaitsAgainstEngine(plan, 200, {
+    ...waits,
+    fileMayWait: (file) => file !== quiet && waits.fileMayWait(file),
+  }).unmarked;
+  assert.ok(
+    fileMissed.some((line) => line.endsWith(`the file ${quiet} it entered is live unmarked`)),
+    fileMissed.join("\n"),
+  );
+  assert.ok(!fileMissed.some((line) => line.includes("the file call at")), fileMissed.join("\n"));
 });
 
 test("a computed file call whose destination may start a block marks every activation it may enter", () => {
@@ -464,8 +475,22 @@ test("the engine check reports every unmarked live part, also at a wait settled 
     "rooms/hall.tease": "wait 1 s\nend",
   }).plan;
   const missedCall = checkWaitsAgainstEngine(called, 200, none).unmarked;
+  const hall = called.files.findIndex((file) => file.path === "rooms/hall.tease");
   assert.ok(
     missedCall.some((line) => line.includes("the file call at")),
     missedCall.join("\n"),
+  );
+  assert.ok(
+    missedCall.some((line) => line.endsWith(`the file ${hall} it entered is live unmarked`)),
+    missedCall.join("\n"),
+  );
+  // The entered file is checked by its own flag, also when its call is marked.
+  const waits = planWaits(called);
+  assert.deepEqual(
+    checkWaitsAgainstEngine(called, 200, {
+      ...waits,
+      fileMayWait: (file) => file !== hall && waits.fileMayWait(file),
+    }).unmarked,
+    [`wait 1: the file ${hall} it entered is live unmarked`],
   );
 });
