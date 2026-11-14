@@ -584,7 +584,9 @@ test("the command compares each program in a worker of its own and counts the ve
     .trim()
     .split("\n");
   assert.equal(output.length, 3);
-  for (const line of output.slice(0, 2)) assert.match(line, /"verdict":\{"kind":"refused"/u);
+  // The stage's refusal, with the form and the instruction it names.
+  for (const line of output.slice(0, 2))
+    assert.match(line, /"verdict":\{"kind":"refused","form":"instruction:say","instruction":0,/u);
   assert.deepEqual(JSON.parse(output[2]!), { counts: { refused: 2 } });
   rmSync(folder, { recursive: true });
 });
