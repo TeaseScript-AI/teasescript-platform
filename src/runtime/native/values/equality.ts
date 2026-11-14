@@ -29,8 +29,8 @@ export function nativeEquals(left: NativeValue, right: NativeValue): boolean {
     } else if (a instanceof NativeDict) {
       if (!(b instanceof NativeDict) || !compareNamed(a.entries, b.entries, pending)) return false;
     } else if (a instanceof NativeSet) {
-      if (!(b instanceof NativeSet) || a.items.length !== b.items.length) return false;
-      for (const item of a.items) if (!b.has(item)) return false;
+      if (!(b instanceof NativeSet) || a.size !== b.size) return false;
+      for (const item of a) if (!b.has(item)) return false;
     } else {
       if (isNativeComposite(b) || !serializableEquals(a, b)) return false;
     }

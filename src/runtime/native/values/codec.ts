@@ -122,10 +122,9 @@ export function toCanonical(value: NativeValue): SerializableRuntimeValue {
   while (work.length > 0) {
     const [source, target] = work.pop()!;
     if (Array.isArray(source) || source instanceof NativeSet) {
-      const items = Array.isArray(source) ? source : source.items;
       // EVIDENCE: invariant: `convert` pairs a list with a new canonical list and a set with a new canonical set.
       const into = (target as { readonly items: SerializableRuntimeValue[] }).items;
-      for (const item of items) into.push(part(item));
+      for (const item of source) into.push(part(item));
     } else if (source instanceof NativeObject) {
       // EVIDENCE: invariant: `convert` pairs a `NativeObject` with a new canonical object.
       const into = (target as { readonly properties: SerializableRuntimeProperty[] }).properties;

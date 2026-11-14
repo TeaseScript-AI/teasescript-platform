@@ -23,9 +23,13 @@ export class NativeSet {
     return set;
   }
 
-  /** The members in insertion order. */
-  public get items(): readonly NativeValue[] {
-    return this.#items;
+  public get size(): number {
+    return this.#items.length;
+  }
+
+  /** The members in insertion order, through an iterator, which gives no way to change them. */
+  public [Symbol.iterator](): IterableIterator<NativeValue> {
+    return this.#items.values();
   }
 
   /** Whether the set has a member equal (`==`) to `value`. */

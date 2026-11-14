@@ -179,7 +179,7 @@ function changeEverything(value: NativeValue): void {
       current.entries.set("changed", 1);
     } else if (current instanceof NativeSet) {
       // Its members are changed too, which a set never does, to find a member shared with another value.
-      work.push(...current.items);
+      work.push(...current);
       current.add("changed-member");
     }
   }
@@ -370,26 +370,29 @@ test("values 10,000 deep convert, copy, compare and key without native recursion
 test("a set's members and index change only through its methods", () => {
   const set = NativeSet.of([1]);
   assert.ok(set.has(1));
-  // Writes from outside that compiled before the storage was private; they never run.
+  // Writes from outside that compiled while the storage was public, or reached it through a view; they never run.
   const typed = () => {
-    // @ts-expect-error -- `items` is a read-only view.
+    // @ts-expect-error -- the members are private: no `items` to push to.
     set.items.push(2);
-    // @ts-expect-error -- `items` has no setter.
-    set.items = [];
+    // @ts-expect-error -- nor one to hold as an alias and write through.
+    const members: { [index: number]: NativeValue } = set.items;
+    members[0] = 2;
     // @ts-expect-error -- the index is private.
     set.membership = null;
   };
   assert.equal(typeof typed, "function");
-  // Past the types, a `membership` written from outside is a property the set never reads.
-  Object.assign(set, { membership: { scalars: new Set([2]), keyed: new Map() } });
+  // Reading gives an iterator over the members, never the array that holds them.
+  assert.equal(Array.isArray(set[Symbol.iterator]()), false);
+  // Past the types, a `membership` or `items` written from outside is a property the set never reads.
+  Object.assign(set, { membership: { scalars: new Set([2]), keyed: new Map() }, items: [2] });
   assert.equal(set.has(2), false);
   assert.ok(set.add(2));
-  assert.deepEqual(set.items, [1, 2]);
+  assert.deepEqual([...set], [1, 2]);
 });
 
 test("a set of 10,000 distinct lists keeps each once", () => {
   const items: NativeValue[] = Array.from({ length: 10_000 }, (_, at) => [at, "z".repeat(at % 50)]);
   const set = NativeSet.of([...items, ...items.map(copyNativeValue)]);
-  assert.equal(set.items.length, 10_000);
+  assert.equal(set.size, 10_000);
   for (const item of items) assert.ok(set.has(copyNativeValue(item)));
 });

@@ -27,7 +27,7 @@ export function nativeValueKey(value: NativeValue): string {
         open: "(",
         close: ")",
         labels: null,
-        parts: composite.items,
+        parts: [...composite],
         unordered: true,
         keys: [],
       };
