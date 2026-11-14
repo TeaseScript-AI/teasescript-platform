@@ -89,6 +89,9 @@ function warningChecks(
     for (const diagnostic of diagnostics) {
       if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget") continue;
       if (leftOutWarning(diagnostic)) continue;
+      // (an operator's warning owes no plan content: the runtime checks its operands itself; it may be sited at a whole
+      // compound assignment, #2807, so its site is not read as an expression)
+      if (diagnostic.kind === "operator") continue;
       const expression = index.expressionAt(diagnostic.site);
       switch (diagnostic.kind) {
         case "written-target": {
@@ -134,8 +137,6 @@ function warningChecks(
           }
           break;
         }
-        case "operator":
-          break;
       }
     }
   return { owed, fallbacks };
