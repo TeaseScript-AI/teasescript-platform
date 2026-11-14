@@ -127,10 +127,8 @@ function layered<N>(
  * through it is cut; an `M` taken over every route, names ignored, never puts a cut above a level known without it.
  */
 export class NestingIndex {
-  /** Each position (`place|property`) of a growing component, with its cut depth. */
-  readonly #cut = Retained.map<string, number>("NestingIndex.#cut");
-  /** The places with a position cut: only their paths are looked at (`cuts`). */
-  readonly #places = Retained.set<PlaceId>("NestingIndex.#places");
+  /** Each place with a position in a growing component: the cut depth of each of its properties (`""` its root). */
+  readonly #cut = Retained.map<PlaceId, Map<string, number>>("NestingIndex.#cut");
 
   /**
    * `live` says which of the pass's definitions take effect (A6); `operands` is the carrier table, given so that this
@@ -142,7 +140,7 @@ export class NestingIndex {
     live: (d: Definition) => boolean,
     operands: (value: PlaceId) => readonly Operand[],
   ) {
-    Retained.owner(this, "NestingIndex", (index) => ({ cut: index.#cut, places: index.#places }));
+    Retained.owner(this, "NestingIndex", (index) => ({ cut: index.#cut }));
     const work = program.work;
     const routes = routesOf(program, definitions, live, operands);
     const graph = new Map<PlaceId, Edge<PlaceId>[]>();
@@ -189,15 +187,31 @@ export class NestingIndex {
           labels.add(route.from);
           labels.add(route.to);
         }
-    const position = (place: PlaceId, label: string): string => `${place}|${label}`;
-    const graph = new Map<string, Edge<string>[]>();
-    const entry = new Map<string, number>();
-    const edge = (receiver: string, producer: string, weight: number): void => {
+    // (each place and property, numbered as first met)
+    const numbers = new Map<PlaceId, Map<string, number>>();
+    const positions: { readonly place: PlaceId; readonly label: string }[] = [];
+    const position = (place: PlaceId, label: string): number => {
+      let byLabel = numbers.get(place);
+      if (byLabel === undefined) {
+        byLabel = new Map();
+        numbers.set(place, byLabel);
+      }
+      let at = byLabel.get(label);
+      if (at === undefined) {
+        at = positions.length;
+        positions.push({ place, label });
+        byLabel.set(label, at);
+      }
+      return at;
+    };
+    const graph = new Map<number, Edge<number>[]>();
+    const entry = new Map<number, number>();
+    const edge = (receiver: number, producer: number, weight: number): void => {
       const list = graph.get(receiver);
       if (list === undefined) graph.set(receiver, [{ producer, weight }]);
       else list.push({ producer, weight });
     };
-    const enter = (at: string, level: number): void => {
+    const enter = (at: number, level: number): void => {
       entry.set(at, Math.max(entry.get(at) ?? NOTHING, level));
     };
     for (const receiver of members) {
@@ -232,8 +246,13 @@ export class NestingIndex {
       (component, inner) => {
         const cut = Math.max(inner, entering, 0) + 1;
         for (const at of component) {
-          this.#cut.set(at, cut);
-          this.#places.add(Number(at.slice(0, at.indexOf("|"))));
+          const { place, label } = positions[at]!;
+          let byLabel = this.#cut.get(place);
+          if (byLabel === undefined) {
+            byLabel = new Map();
+            this.#cut.set(place, byLabel);
+          }
+          byLabel.set(label, cut);
         }
         return cut;
       },
@@ -242,7 +261,7 @@ export class NestingIndex {
 
   /** Whether some position of `place` is cut: else none of its paths is. */
   public cuts(place: PlaceId): boolean {
-    return this.#places.has(place);
+    return this.#cut.has(place);
   }
 
   /**
@@ -250,6 +269,6 @@ export class NestingIndex {
    * `null` for any other, which is never cut.
    */
   public cutDepth(place: PlaceId, label = ""): number | null {
-    return this.#cut.get(`${place}|${label}`) ?? null;
+    return this.#cut.get(place)?.get(label) ?? null;
   }
 }
