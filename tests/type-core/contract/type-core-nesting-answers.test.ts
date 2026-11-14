@@ -249,3 +249,49 @@ test("a chain of a helper that wraps its argument demands no key below the cut, 
     `${small!.length} keys at 16 calls, ${large!.length} at 32`,
   );
 });
+
+/**
+ * #2771: a recursive function that fills a written `dict` with its own result nests it without end below the `dict`'s
+ * level: below an open element the contract reads the stores, and below a closed one (`string dict`) a copy reads them
+ * too, since the store has a runtime check (#2814). `asList`, called on the elements of its own result, reads one level
+ * deeper on each turn. Before the written place took its routes, each level was a new key and the analysis ran to the
+ * allowance; now the analysis settles in every mode, and `value` is unknown a level below what the cut keeps.
+ */
+regressionCase(
+  "a recursive function filling a written dict with its own result, read a level deeper on each turn, settles (#2771)",
+  { pr: 2794, atBase: /a recursive loader into a written dict: the analysis settles in .+/ },
+  () => {
+    for (const written of ["dict", "string dict"]) {
+      const source =
+        "function loadValue(key) {\n  let value = load key, default: null\n  if value == null {\n" +
+        `    let names: string[] = []\n    if names.length > 0 {\n      let entries: ${written} = dict{}\n` +
+        '      for name in names {\n        entries[name] = loadValue("${key}.${name}")\n      }\n' +
+        "      value = entries\n    }\n  }\n  return value\n}\n" +
+        "function asList(value) {\n  return value otherwise []\n}\n" +
+        "function pick(spec) {\n  for part in asList(spec) {\n  }\n}\n" +
+        "function walk(specs) {\n  for spec in asList(specs) {\n    pick(spec)\n  }\n}\n" +
+        'walk(loadValue("x"))\nexit\n';
+      const request = coreRequest([{ path: "main.tease", source }], []);
+      assert.ok(request !== null, written);
+      for (const mode of MODES)
+        inMode(mode, () => {
+          const answers = withTestAllowance(300_000, () => analyseCore(request));
+          assert.equal(
+            answers.budget.exhausted,
+            null,
+            `a recursive loader into a written ${written}: the analysis settles in ${JSON.stringify(mode)}`,
+          );
+        });
+      const [root, below] = kindsAt(source, "value", ["", "element.element.element"]);
+      assert.ok(
+        root!.some((item) => item.tag === "dict"),
+        written,
+      );
+      assert.deepEqual(
+        below!.map((item) => [item.tag, item.context]),
+        [["unknown", "unmodelled"]],
+        written,
+      );
+    }
+  },
+);
