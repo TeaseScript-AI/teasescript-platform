@@ -52,13 +52,6 @@ function writtenDepth(term: TypeTerm): number {
   return depth;
 }
 
-/** How many of a key's steps are element steps: its depth in nested lists. */
-export function elementDepth(path: readonly string[]): number {
-  let depth = 0;
-  for (const step of path) if (step === "element") depth += 1;
-  return depth;
-}
-
 /**
  * Where a key's path lies in the nesting graph: the property it passes (`""` for none) and its element steps; `null` for
  * a path through two properties or more, which the graph does not follow by name and so never cuts.
