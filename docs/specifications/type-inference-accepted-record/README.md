@@ -250,3 +250,4 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | [r4-450](contract.md#r4-450) | contract | Read closed-object property descendants from holders and pay for indexing by saved folds. |
 | [r4-451](contract.md#r4-451) | contract | A `null` that reaches a use through an entry is the use's required check. |
 | [r4-452](contract.md#r4-452) | contract | Read a call of an identity function as its argument in parentheses. |
+| [r4-453](solver-and-work.md#r4-453) | solver-and-work | Cursors order only through their demands' logical names. |
