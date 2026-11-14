@@ -1,6 +1,7 @@
 import type { TypeAnnotation } from "../../../ast.js";
 import { VALUE_KIND_NAMES } from "../../../value-kinds.js";
 import type { PlaceId, PlaceKind, TypeTerm } from "../../graph.js";
+import type { WorkLedger } from "../budget.js";
 import type { ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
 import type { TypeAt } from "./model.js";
@@ -132,6 +133,61 @@ function typeAtStep(
 export function termAt(term: TypeTerm, path: StepRead): TypeTerm | null {
   const at = typeAtStep(term, path, 0);
   return at !== null && "term" in at ? at.term : null;
+}
+
+/** A written type node's openness (#1450): whether it admits every kind, and whether it does at or anywhere below it. */
+interface Openness {
+  readonly open: boolean;
+  readonly below: boolean;
+}
+
+const opennessByTerm = new WeakMap<TypeTerm, Openness>();
+
+/** A written type node's parts one level down: a collection's element, an object's properties, a union's members. */
+function partsOfTerm(term: TypeTerm): readonly TypeTerm[] {
+  if (term.kind === "list" || term.kind === "set" || term.kind === "dict") return [term.element];
+  if (term.kind === "object") return term.properties?.map((property) => property.type) ?? [];
+  return term.kind === "union" ? term.members : [];
+}
+
+/**
+ * A written type node's openness, made once per node from its parts' (#1487): `open` is admission's `unrestricted`
+ * (`typeTags`' `unknown`: a part the core leaves open; a union's where one of its members is), `below` also where any
+ * part is, or an `object`'s properties are unwritten.
+ */
+export function openness(work: WorkLedger, term: TypeTerm): Openness {
+  const known = opennessByTerm.get(term);
+  if (known !== undefined) return known;
+  const pending = [term];
+  while (pending.length > 0) {
+    const at = pending.at(-1)!;
+    if (opennessByTerm.has(at)) {
+      pending.pop();
+      continue;
+    }
+    const parts = partsOfTerm(at);
+    const unmade = parts.filter((part) => !opennessByTerm.has(part));
+    if (unmade.length > 0) {
+      for (const part of unmade) pending.push(part);
+      continue;
+    }
+    pending.pop();
+    work.charge("checks", 1 + parts.length);
+    const below = parts.map((part) => opennessByTerm.get(part)!);
+    // (a scalar restricts to its kind; a collection or an object restricts at its own level)
+    const open =
+      at.kind === "union"
+        ? below.some((part) => part.open)
+        : !["atom", "list", "set", "dict", "object"].includes(at.kind);
+    opennessByTerm.set(at, {
+      open,
+      below:
+        open ||
+        (at.kind === "object" && at.properties === null) ||
+        below.some((part) => part.below),
+    });
+  }
+  return opennessByTerm.get(term)!;
 }
 
 /** The written type of a place, when it has one. */
