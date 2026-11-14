@@ -1,4 +1,4 @@
-// The analysis's stop diagnostics (D4 a′): the warning at the heaviest place and the "not checked (budget)" marks.
+// The analysis's stop diagnostics: the warning at the heaviest place and the "not checked (budget)" marks.
 import type { SourceSite } from "../graph.js";
 import { type BudgetLimit } from "./budget.js";
 import type { FileRegion, FunctionRegion } from "./flow-graph.js";
@@ -6,7 +6,7 @@ import { CoreProgram } from "./program.js";
 import { type WorkPlace, type CoreDiagnostic, type BudgetStop, type NotChecked } from "./result.js";
 
 /**
- * The places work is counted to and the stop names (D4 a′): each file's top level and each function, by its region,
+ * The places work is counted to and the stop names: each file's top level and each function, by its region,
  * and the one a site stands in (functions stand at a file's top level, never nested: V30 §11).
  */
 function workPlaces(program: CoreProgram): {
@@ -61,7 +61,7 @@ function workPlaces(program: CoreProgram): {
 }
 
 /**
- * The stop's diagnostics (D4 a′): one warning at the heaviest place, the function or top level whose work
+ * The stop's diagnostics: one warning at the heaviest place, the function or top level whose work
  * was the most before the stop (the deepest nesting's for `nesting`), with the number of warnings it deferred; and
  * "not checked (budget)", once per function or top level one of those checks stands in, at its name or at its first.
  */
@@ -83,7 +83,6 @@ export function stopDiagnostics(
   let heaviest: FileRegion | FunctionRegion;
   if (limit === "nesting") heaviest = places.of(program.deep[0]!);
   else {
-    // the most work counted to one place, the earliest region on a tie; setup's (0) names none, nor a block's creator
     const spent = program.work.spent();
     let best = 0;
     for (let spender = 1; spender < spent.length; spender += 1)

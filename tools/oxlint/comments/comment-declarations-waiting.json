@@ -138,12 +138,6 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/check-result/otherwise.ts",
-    "kind": "reference",
-    "text": "fallbackUse",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
     "file": "src/type-inference/core/exact-path.ts",
     "kind": "docblock",
     "text": "The exact path's answer: D with the path below its key, or the first failing condition's word.",

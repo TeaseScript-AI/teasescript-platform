@@ -1,5 +1,4 @@
-// Whether the plan keeps an obligation's check at its store (#1526 decision 2): `keeps`, which the lost-check gate
-// (`runtime-plan.ts`) and the store contracts ask.
+// Whether an obligation's check is lost at its store (#1526 decision 2): `notLost`.
 import type { Expression } from "../../../ast.js";
 import { type PartCheckPlan, type TypeCheckPlan, type TypePlan } from "../../../plan/model.js";
 import type { RuntimeCheckSite, CoreRuntimeChecks } from "../../backend.js";
@@ -10,19 +9,11 @@ import type { ReceivingObligation, ReceivingResult } from "../admission/receivin
 import { SliceIndex, type Store, nodeOf, unwrap } from "./slice-index.js";
 
 /**
- * Whether the plan keeps an obligation's check at its store (`lostCheck`): a shape the analysis proved, or one a complete
- * store check carries; a contract proved open; a complete store check (settled or received, its whole type); or a
- * contract the completion completed that a published check carries at the obligation's path: a typed parse's or load's
- * reader of the value stored at least as strict as the contract there (F18), the stored literal's own structure, its typed
- * calls' readers and its scalar leaves, at least as strict (`elementsCarry`), or, where the natural plan does not check the
- * store whole, its part checks there equal to it (#1682). With no result, a completion past its allowance or a stop of the
- * analysis, only a complete store check keeps it, else it declines (#1832). A stricter reader is never a lost check: it
- * accepts no more values than the natural reader. A check against bare `unknown` where the contract owes a domain carries
- * nothing. A stopped decision's own mark is kept as NoCheck where the completion owes nothing at its store (#2080):
- * its result complete, this pass's completion ran its own C1 at the obligation's path, no completed check at the stored
- * value and no completion C1 warning at the store (`warned`).
+ * Whether an obligation's check is not lost at its store: the published plan carries it there, or the obligation owes
+ * none. A stricter reader is never a lost check: it accepts no more values than the natural reader. A check against
+ * bare `unknown` where the contract owes a domain carries nothing.
  */
-export function keeps(
+export function notLost(
   answers: Answers,
   index: SliceIndex,
   store: Store,
@@ -33,12 +24,9 @@ export function keeps(
   core: CoreRuntimeChecks,
   warned: ReadonlySet<Store>,
 ): boolean {
-  // (#2080, NoCheck: a stopped mark whose completion result is complete, where the completion's own C1 ran at its path
-  // on this pass's completion and left no completed check at the stored value and no C1 warning at the store, owes no
-  // check there. What stays declared (#2184): that this completion pass, on the settled pass's A6 inputs, covers what
-  // the natural final pass checks there, and the decider's own level, which C1 passes over. Whatever this cannot
-  // establish falls through: Required, kept only by a check that carries it, or Unresolved, a lost or absent result,
-  // declined)
+  // (a stopped mark the completion covered owes no check, #2080. Declared, not checked here (#2184): that this
+  // completion pass, on the settled pass's inputs, admission's rejected stores among them, covers what the natural final
+  // pass checks there, and the decider's own level, which the destination-type check passes over)
   if (
     obligation.slot.role === "stopped" &&
     result?.state === "complete" &&
@@ -82,11 +70,11 @@ export function keeps(
   // field the contract leaves open, still checks all the contract does)
   const carries = (type: TypePlan | null | undefined): boolean => {
     const at = type === null || type === undefined ? null : typeAt(type, below);
-    return at !== null && narrower(at, contract.ref);
+    return at !== null && provesAtLeastAsStrict(at, contract.ref);
   };
   if (
     carries(readerOf(value, checks, core)) ||
-    elementsCarry(value, below, contract.ref, checks, core)
+    literalCarries(value, below, contract.ref, checks, core)
   )
     return true;
   if (answers.completedCheck(index.site(value))) return false;
@@ -137,7 +125,7 @@ export function builtContainers(value: Expression, path: PartCheckPlan["path"]):
   return true;
 }
 
-/** The type a typed parse or load reads its value as (F18), `undefined` for any other value. */
+/** The type a typed parse or load reads its value as, `undefined` for any other value. */
 function readerOf(
   value: Expression,
   checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
@@ -153,11 +141,12 @@ function readerOf(
 /**
  * Whether a stored literal carries a contract at `below` (property names and `[]` for an element) by its own structure:
  * followed through its properties and elements to the contract's level, a list or set whose every element carries the
- * contract's element, an object whose property carries each property the contract lists, a typed parse's or load's whole
- * value whose reader is at least as strict as the contract there, or a scalar literal of a kind at least as strict. The
- * value itself is a literal holding them, never the call alone (`readerOf`'s).
+ * contract's element, an object whose property carries each property the contract lists, a typed parse's or load's
+ * whole value whose reader is at least as strict as the contract there, or a number, string, boolean or null literal of
+ * a kind at least as strict (no other scalar literal, a regex among them, carries anything here). The value itself is a
+ * literal holding them, never the call alone (`readerOf`'s).
  */
-function elementsCarry(
+function literalCarries(
   value: Expression,
   below: readonly string[],
   contract: TypePlan,
@@ -199,10 +188,10 @@ function elementsCarry(
       });
     }
     const leaf = leafKind(node);
-    if (leaf !== null) return steps.length === 0 && narrower(leaf, type);
+    if (leaf !== null) return steps.length === 0 && provesAtLeastAsStrict(leaf, type);
     const reader = readerOf(node, checks, core);
     const there = reader === undefined ? null : typeAt(reader, steps);
-    return there !== null && narrower(there, type);
+    return there !== null && provesAtLeastAsStrict(there, type);
   };
   const root = unwrap(value);
   return (
@@ -211,7 +200,7 @@ function elementsCarry(
   );
 }
 
-/** The type a scalar literal proves by its own syntax, `null` for any other expression. */
+/** The type a number, string, boolean or null literal proves by its own syntax, `null` for any other expression. */
 function leafKind(node: Expression): TypePlan | null {
   switch (node.kind) {
     case "numberLiteral":
@@ -228,26 +217,29 @@ function leafKind(node: Expression): TypePlan | null {
 }
 
 /**
- * Whether every value a check against `narrow` passes also passes one against `wide` (a check checks only the listed
- * properties an object has, and every element of a collection whose element type is not `null`): a reader that carries
- * a contract (`keeps`).
+ * Whether it is proved that every value a check against `narrow` passes also passes one against `wide` (a check checks
+ * only the listed properties an object has, and every element of a collection whose element type is not `null`).
+ * `false` proves nothing: an object whose property is a union is not split across the members of a union of objects.
  */
-export function narrower(narrow: TypePlan, wide: TypePlan): boolean {
-  if (narrow.kind === "union") return narrow.members.every((member) => narrower(member, wide));
-  if (wide.kind === "union") return wide.members.some((member) => narrower(narrow, member));
+export function provesAtLeastAsStrict(narrow: TypePlan, wide: TypePlan): boolean {
+  if (narrow.kind === "union")
+    return narrow.members.every((member) => provesAtLeastAsStrict(member, wide));
+  if (wide.kind === "union")
+    return wide.members.some((member) => provesAtLeastAsStrict(narrow, member));
   if (wide.kind === "object") {
     if (narrow.kind !== "object") return false;
     const own = new Map(narrow.properties.map((each) => [each.name, each.type]));
     return wide.properties.every((property) => {
       const type = own.get(property.name);
-      return type !== undefined && narrower(type, property.type);
+      return type !== undefined && provesAtLeastAsStrict(type, property.type);
     });
   }
   if (wide.kind === "list" || wide.kind === "set" || wide.kind === "dict") {
     if (narrow.kind !== "list" && narrow.kind !== "set" && narrow.kind !== "dict") return false;
     return (
       narrow.kind === wide.kind &&
-      (wide.element === null || (narrow.element !== null && narrower(narrow.element, wide.element)))
+      (wide.element === null ||
+        (narrow.element !== null && provesAtLeastAsStrict(narrow.element, wide.element)))
     );
   }
   // (a whole number is a number)

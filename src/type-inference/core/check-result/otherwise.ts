@@ -3,15 +3,14 @@ import { unwrap } from "../../../expression-children.js";
 import type { Item } from "../items.js";
 import type { StaticRule } from "../result.js";
 
-// V30 §18 (#1072, A59 + A68): whether an `otherwise`'s fallback can run, decided once per link from the core's answer at
-// its left read, for the warning that a fallback is never used (TSV062) and for the ways the plan's checks follow.
+// V30 §18 (#1072): whether an `otherwise`'s fallback can run.
 
 /**
- * Whether a left read's answer proves it never `null` (`fallbackUse`): it holds a kind, and none of its kinds is `null`
- * or unknown (external, opaque, a stopped read's: a value of unknown type gets no warning, V30 §18). A possible kind
- * proves as a definite one does: the question is whether `null` can be there, not whether every kind is certain (not
- * C13's all-definite test). `null` (no answer at the read) proves nothing. (A function is outside the candidate's slice,
- * so no left side here depends on a parameter.)
+ * Whether a left read's answer proves it never `null`. An unknown kind (external, opaque, a stopped read's) proves
+ * nothing, as a value of unknown type gets no warning (V30 §18). A possible kind proves as a
+ * definite one does: the question is whether `null` can be there, not whether every kind is certain. `null` (no answer
+ * at the read) proves nothing. (A function is outside the candidate's slice, so no left side here depends on a
+ * parameter.)
  */
 export function provesNonNull(items: readonly Item[] | null): boolean {
   if (items === null) return false;
