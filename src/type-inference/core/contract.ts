@@ -149,7 +149,7 @@ import type { Callable, FlowNode } from "./flow-graph.js";
 import type { ContextWord, IngressNode, Item, Writer } from "./items.js";
 import type { PlusIndex } from "./indexes/plus-index.js";
 import type { ValueConstraint } from "./program.js";
-import { pathPosition } from "./indexes/nesting.js";
+import { pathPosition, twoElementSteps } from "./indexes/nesting.js";
 import { everyRecordKept, type Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";
 export { choiceItems, choiceLabels, WIDE } from "./contract/choices.js";
@@ -722,6 +722,8 @@ export class Contract {
    */
   public cutAt(asked: Key): boolean {
     const key = this.canonicalKey(asked);
+    // (a cut depth is 1 or more: a path of fewer than two element steps is never below it, and asks for no index)
+    if (keyDepthIn(this, key) < 2 || (!isKeyId(key) && !twoElementSteps(key))) return false;
     const place = keyPlace(key);
     if (!this.pass.nesting.cuts(place)) return false;
     const at = pathPosition(
