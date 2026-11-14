@@ -227,6 +227,9 @@ assertions typed where possible; do not centralize exceptions in universal unche
 Comments must describe real evidence, not merely repeat that an assertion is safe. Their truth remains a review
 responsibility: the checker validates attachment and syntax, not the underlying invariant.
 
+`tools/repository-checks/comment-only.mjs` says whether two commits differ only in comments. It counts these comments,
+and the others a tool reads (its `READ_BY_TOOLS`), as code.
+
 ## Maintenance
 
 Oxlint and its plugin API package are development-only dependencies pinned together in `package.json` and the lockfile.
