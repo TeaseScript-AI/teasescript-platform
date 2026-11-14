@@ -85,6 +85,12 @@ const CASES: readonly [string, Files][] = [
     ),
   ],
   [
+    "a return from inside a `while` and a `switch`",
+    one(
+      'function f(x: integer): integer? {\n  while true {\n    switch x {\n      case 1 {\n        return hostValue\n      }\n      default {\n        break\n      }\n    }\n  }\n  say "left"\n  return null\n}\nsay f(1)\nsay f(2)\nexit\n',
+    ),
+  ],
+  [
     "a store into the file's variable from a function",
     one('let top = "a"\nfunction f(v: string) {\n  top = v\n}\nf(hostValue)\nsay top\nexit\n'),
   ],
