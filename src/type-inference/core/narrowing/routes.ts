@@ -157,17 +157,13 @@ export class NarrowingRoutes extends RouteEntries {
     const site = program.places[value]?.site ?? null;
     if (site === null) return null;
     const node = program.exprAt(site);
-    // (a program that holds an arm no run is proved to enter: its route queries pass only entered arms, #1938)
     if ((yield* this.defaultHolds()) && this.feasible === null)
       this.feasible = yield* this.feasibility();
     if (flagged && (node === null || !this.inBody(node))) {
-      // (a marked read outside a block's body: only a way into it, past the forward query)
       const path =
         node?.expression === undefined ? null : stablePath(program, node.file, node.expression);
       return node === null || path === null ? null : yield* this.#entered(node, path, tag);
     }
-    // (a value whose node reads no expression, a call's, a `get`'s, a `load`'s or an `otherwise`'s result, is its own
-    // producer; any other, a compound assignment's operand among them, keeps its warning)
     if (node === null || node.expression === undefined) {
       const c = program.opOf.get(value)?.kind;
       return (c === "call" || c === "get" || c === "load" || c === "fallback") &&
@@ -282,8 +278,7 @@ export class NarrowingRoutes extends RouteEntries {
    * compiler proves no such route (the consumer then warns with its check). The witness of a copy or an `otherwise`
    * asks this same query of its source, one memoised query per node and key, resolved without native recursion.
    * `others`: where `tag` is a member of the written union `key` declares, the union's other kinds the use does not
-   * take, which certify the route as `tag` does (#1073: the written domain proves itself). It asks the unrestricted
-   * query until `required` has met a program the default holds, and that program's own queries after.
+   * take, which certify the route as `tag` does (#1073: the written domain proves itself).
    */
   public *witness(
     key: Key,
@@ -292,7 +287,6 @@ export class NarrowingRoutes extends RouteEntries {
     others: readonly ItemTag[] = [],
   ): Work<Definition | null> {
     this.#work.charge("eventSteps");
-    // a chain of copies: each query waits on its source's, the last first
     const waiting: { readonly memo: string; readonly found: Candidate }[] = [];
     // (a program the default holds asks its own queries, apart from the unrestricted ones: `feasible`)
     let memo =
@@ -440,7 +434,7 @@ export class NarrowingRoutes extends RouteEntries {
     )
       return false;
     // a whole store of a prefix answers below it through its literal's properties, else through what its value holds
-    // there (`keyPath` walks the key's text)
+    // there
     const full = keyPath(key);
     program.work.charge("exactQueries", full.length);
     const rest: string[] = [];
@@ -518,7 +512,6 @@ export class NarrowingRoutes extends RouteEntries {
     const program = this.pass.program;
     if (path.length > 0)
       return produces(program.work, yield* this.pass.values.valueItems(value, node, path), tag);
-    // (the fallbacks from the outermost in, down to the first left side that is none)
     const rights: PlaceId[] = [];
     let left = value;
     for (const _ of steps(
@@ -541,7 +534,6 @@ export class NarrowingRoutes extends RouteEntries {
       if (literal !== null) return literal === kind;
       return produces(program.work, yield* routes.pass.values.valueItems(at, node, []), kind);
     };
-    // from the innermost out: whether the value so far can be null, and whether it produced the kind
     let nullable = yield* producesAt(left, "null", this);
     let produced = tag !== "null" && (yield* producesAt(left, tag, this));
     let index = rights.length;
@@ -856,7 +848,6 @@ export class NarrowingRoutes extends RouteEntries {
     const counts = new Map<number, number>();
     const arms = new Map<TreeStatement, number>();
     const counted = new Set<TreeBlock>();
-    // (the layers below, from the nearest)
     const below = (): Generator<Layer> => {
       work.charge("eventSteps");
       let at = parent;

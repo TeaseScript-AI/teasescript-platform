@@ -40,7 +40,6 @@ export function dominators(graph: FlowGraph): Dominators {
   const counts = (from: FlowNode, to: FlowNode): boolean =>
     !(from.dead && !to.dead) && !(graph.isDeadEdge(from, to) && !to.dead);
 
-  // The depth-first search: preorder numbers, the tree's parents, and the reverse postorder.
   const number = new Int32Array(count).fill(-1);
   const vertex: FlowNode[] = [];
   const parent: number[] = [];
@@ -72,7 +71,6 @@ export function dominators(graph: FlowGraph): Dominators {
   }
   const reached = vertex.length;
 
-  // Lengauer–Tarjan over preorder numbers: semidominators, then immediate dominators.
   const semi = new Int32Array(reached);
   const label = new Int32Array(reached);
   const ancestor = new Int32Array(reached).fill(-1);
@@ -123,7 +121,6 @@ export function dominators(graph: FlowGraph): Dominators {
   for (let w = 1; w < reached; w += 1) if (idom[w] !== semi[w]) idom[w] = idom[idom[w]!]!;
   idom[0] = 0;
 
-  // The dominator tree's children in flat arrays, then each node's interval in one walk of it.
   const firstChild = new Int32Array(reached + 1);
   for (let w = 1; w < reached; w += 1) firstChild[idom[w]! + 1]! += 1;
   for (let v = 0; v < reached; v += 1) firstChild[v + 1]! += firstChild[v]!;
@@ -162,7 +159,7 @@ export function dominators(graph: FlowGraph): Dominators {
     }
   }
 
-  // The nearest dominating boundary and block entry, in preorder, where a node's dominator comes first.
+  // (in preorder, so a node's dominator is decided before it)
   const boundary = (node: FlowNode): boolean => {
     if (node.kind === "function-entry") return true;
     if (node.kind === "file-entry")

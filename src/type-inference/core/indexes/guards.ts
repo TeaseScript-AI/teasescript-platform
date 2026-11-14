@@ -243,7 +243,6 @@ export class GuardIndex {
     if (operands !== undefined && node.span !== null)
       regions.push([operands, node.span.start.offset]);
     if (asked !== null && regions.every(([nest]) => nest.laminar)) {
-      // (the innermost region of each nest, found as `#holding` finds it: the group, then its chains)
       const innermost = regions.map(([nest, at]) =>
         this.#innermost(nest, at, this.#startsBy(nest, at)),
       );
@@ -648,7 +647,7 @@ export class GuardIndex {
 
   /**
    * Whether the program has no condition, no `switch` and no `and`/`or` (#1251): the only places a narrowing definition
-   * is made (`NarrowingIndex`'s conditions, switch subjects and operand regions), so its narrowing index lists none.
+   * is made, so its narrowing index lists none.
    */
   public get testless(): boolean {
     const flow = this.program.flow;
@@ -772,8 +771,8 @@ export class GuardIndex {
   }
 
   /**
-   * Every step of a tested key's path: a read at a path none of them is on is marked as one at any other such
-   * path, so a selection answers an absent property by one of these alike (`selectionPieces`, #1278).
+   * Every step of a tested key's path: a read at a path none of them is on is marked as one at any other such path
+   * (#1278).
    */
   public testedSteps(): ReadonlySet<string> {
     this.#relative();

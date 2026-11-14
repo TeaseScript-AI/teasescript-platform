@@ -39,7 +39,6 @@ export function resolveCalls(builder: FlowGraphBuilder): void {
  */
 export function resolveTransfers(builder: FlowGraphBuilder): void {
   const byPath = new Map(builder.fileRegions.map((region) => [region.path, region]));
-  // Computed targets share one list of every file and its entries.
   const everyFile: readonly FileRegion[] = builder.fileRegions;
   const entriesOf = new Map<readonly FileRegion[], readonly FlowNode[]>();
   for (const transfer of builder.pendingTransfers) {

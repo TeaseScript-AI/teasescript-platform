@@ -82,7 +82,6 @@ export function* expressionTask(
   ) {
     if (expression.operator !== "otherwise") builder.logicals.push({ file, expression });
     const left = yield* compileChild(expressionTask(builder, expression.left, context, current));
-    // A literal left operand decides whether the right one runs.
     let runs: "never" | "always" | "maybe" = "maybe";
     if (expression.operator === "otherwise") {
       const leftValue = unwrap(expression.left);

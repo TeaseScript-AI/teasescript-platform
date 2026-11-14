@@ -88,13 +88,10 @@ export interface PlusIndex {
   indexed: Indexed | null;
 }
 
-/**
- * The steps the index's queries took so far in this process (`visit`), each charged before it is taken: the work test
- * compares them with the charged `indexSteps` (the holder bound, #1562).
- */
+/** The steps the index's queries took so far in this process (`visit`), each charged before it is taken (#1562). */
 let visits = 0;
 
-/** The steps the index's queries took so far in this process (`visit`): the work test's count. */
+/** The steps the index's queries took so far in this process (`visit`). */
 export function plusIndexVisits(): number {
   return visits;
 }
@@ -166,10 +163,9 @@ function isRoot(program: CoreProgram, value: PlaceId): boolean {
 }
 
 /**
- * whether a run is one class along its left operands down to its terms on one side, the sharing on
- * (`plusRepeatOf`, which that side's walk asks next): its root answers below its elements as its third, whose walk
- * reads three `+` and four terms, so each property its root is asked at costs a few steps, and an index would only add
- * its own work.
+ * Whether a run is one class along its left operands down to its terms on one side, the sharing on: its root answers
+ * below its elements as its third, whose walk reads three `+` and four terms, so each property its root is asked at
+ * costs a few steps, and an index would only add its own work.
  */
 function collapsed(pass: CorePass, root: PlaceId, exact: boolean): boolean {
   if (!sharing()) return false;
@@ -180,7 +176,6 @@ function collapsed(pass: CorePass, root: PlaceId, exact: boolean): boolean {
   };
   const third = contract.plusRepeatOf(root, exact);
   if (third === root) return false;
-  // (the third, the second and the first `+` of its run, and the terms they join)
   const own = operands(third)!;
   const second = operands(own[0]!);
   const first = second === null ? null : operands(second[0]!);
@@ -200,7 +195,6 @@ function indexed(pass: CorePass, state: PlusIndex): Indexed {
     if (!key.endsWith("|")) below.add(keyPlace(key));
   }
   contract.keep(below.size);
-  // (the state made at an earlier ask, its index filled here)
   state.indexed = {
     below,
     shapes: Retained.map("PlusIndex.shapes"),
@@ -221,7 +215,6 @@ function runOf(pass: CorePass, ix: Indexed, root: PlaceId): Run | null {
   const work = program.work;
   const terms: PlaceId[] = [];
   const kinds: Term[] = [];
-  // (the terms in source order)
   const stack: PlaceId[] = [root];
   let closed = true;
   while (stack.length > 0) {
@@ -245,7 +238,6 @@ function runOf(pass: CorePass, ix: Indexed, root: PlaceId): Run | null {
     ix.runs.set(root, null);
     return null;
   }
-  // (a literal's names posted at its position, a literal standing once in one run; a binding's reads by its proof)
   const holders = Retained.map<string, number[]>("PlusIndex.run.holders");
   const groupOf = Retained.map<Proof, Reads>("PlusIndex.run.groupOf");
   const positionsOf = new Map<Proof, number[]>();
@@ -273,7 +265,6 @@ function runOf(pass: CorePass, ix: Indexed, root: PlaceId): Run | null {
       contract.keep(1);
     }
   }
-  // (the groups by their earliest objects, which no two bindings share)
   work.charge("indexSteps", sortCost(reads.length));
   contract.keep(reads.length);
   const byWriter = [...reads].sort((a, b) =>
@@ -394,7 +385,7 @@ function bindingProof(pass: CorePass, ix: Indexed, binding: PlaceId): Proof | nu
   ) {
     const shape = shapeOf(pass, ix, own[0]!.value);
     if (shape !== null) {
-      // (its names once per binding, whatever reads it, as a set and posted in the pass: `holdersOf`)
+      // (its names once per binding, whatever reads it: as a set, and posted in the pass)
       program.work.charge("indexSteps", 2 * shape.names.length);
       contract.keep(3 + 3 * shape.names.length);
       proof = {
@@ -512,8 +503,6 @@ export function* indexedPlus(
   const { program } = pass;
   visit(program);
   const length = run.terms.length;
-  // (each contribution where it first stands, the literals' and the bindings' each in order; `empty`: the terms giving
-  // no element)
   const literals: Part[] = [];
   const bindings: Part[] = [];
   let missingAt = length;
@@ -523,7 +512,6 @@ export function* indexedPlus(
     missingAt = Math.min(missingAt, at);
     missingWriter = firstWriter(missingWriter, writer);
   };
-  // the literals holding it, and those between them lacking it: a gap's first literal, its earliest object the gap's
   const holders = run.holders.get(step) ?? [];
   let at = 0;
   const gap = (to: number): void => {
@@ -541,7 +529,6 @@ export function* indexedPlus(
     at = holder + 1;
   }
   gap(length);
-  // the bindings holding it, by their first reads; the earliest object and the first read of those lacking it
   const holding = holdersOf(pass, pass.contract.plusIndex!.indexed!, run, step);
   for (const group of holding) {
     visit(program);

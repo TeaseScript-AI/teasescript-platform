@@ -163,7 +163,6 @@ export class RouteCandidates extends RouteTests {
       );
       let size = 1;
       for (const _ of steps(work, "indexSteps", () => size < list.length)) size *= 2;
-      // a tree of maxima over the reaches, its leaves from `size` on
       const reaches: number[] = [];
       for (const _ of steps(work, "indexSteps", () => reaches.length < 2 * size)) {
         const leaf = reaches.length - size;
@@ -190,7 +189,6 @@ export class RouteCandidates extends RouteTests {
     const work = this.#work;
     const before = lowerBound(work, candidates.starts, at);
     const { reaches, size } = candidates;
-    // the rightmost leaf below `before` whose reach is at least `at`
     const search = (node: number, low: number, high: number): number => {
       work.charge("eventSteps");
       if (low >= before || reaches[node]! < at) return -1;

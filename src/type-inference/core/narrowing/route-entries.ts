@@ -35,8 +35,8 @@ export interface EntryPoint {
 }
 
 /**
- * The writer of a route to a use without a check (`NarrowingRoutes.required`): its site, or `null` where the route
- * starts at a block's body with no store of its own; then `block`, the statement registering that block.
+ * The writer of a route to a use without a check: its site, or `null` where the route starts at a block's body with no
+ * store of its own; then `block`, the statement registering that block.
  */
 export interface RouteWriter {
   readonly writer: SourceSite | null;
@@ -67,7 +67,7 @@ interface Jumps {
   readonly begun: ReadonlyMap<Entry, readonly { readonly jump: Jump; readonly level: number }[]>;
 }
 
-/** The entry side of the route query: entries, jumps, the carried relation and the segment rule; `NarrowingRoutes` extends it. */
+/** The entry side of the route query: entries, jumps, the carried relation and the segment rule. */
 export abstract class RouteEntries extends RouteCandidates {
   /** Per loop statement, label statement and file body, its entry. */
   readonly #entries = new Map<TreeStatement | TreeBlock, Entry>();
@@ -168,7 +168,6 @@ export abstract class RouteEntries extends RouteCandidates {
     const site = { file: at.file, start: at.start, end: at.end };
     let answer = false;
     if (at.loop !== null) {
-      // (the node control reaches just before the loop, and the loop's own place)
       const before = program.flow.placeOf(site);
       answer =
         before !== null &&
@@ -429,7 +428,6 @@ export abstract class RouteEntries extends RouteCandidates {
   *#tries(key: Key, name: string, calls: boolean): Work<readonly Jump[]> {
     this.#work.charge("eventSteps");
     const { byBody } = this.#jumpIndex();
-    // (a program without jumps: no store's search, no stretch)
     if (byBody.size === 0) return [];
     if (this.feasible !== null) {
       // (under the program default, every jump a store's stretch holds, the same for each key of a list, `seedAt`
@@ -482,7 +480,6 @@ export abstract class RouteEntries extends RouteCandidates {
       sorted(this.#work, "eventSteps", known, (a, b) => a.from - b.from);
       let low = 0;
       for (const { from, to } of each(this.#work, "eventSteps", known)) {
-        // (the first jump past the stretch's start, and not before where the last stretch's scan stopped)
         low = this.#after(jumps, from, low);
         for (const _ of steps(
           this.#work,

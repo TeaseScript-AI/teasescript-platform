@@ -163,7 +163,6 @@ export function stablePath(
   root: PlaceId | null = null,
 ): StablePath | null {
   program.work.charge("eventSteps");
-  // (outermost first, each put in front: whether every step so far reads an element)
   const outermost: PathStep[] = [];
   let trailingOnly = true;
   const work = program.work;
@@ -194,7 +193,6 @@ export function stablePath(
   }
   const binding = root ?? bindingOf(program, file, current);
   if (binding === null) return null;
-  // (innermost first)
   let index = outermost.length;
   const ordered: PathStep[] = [];
   for (const _ of steps(work, "eventSteps", () => index > 0)) {
@@ -362,7 +360,7 @@ export function removes(form: NarrowingForm, tag: ItemTag, work: WorkLedger): bo
  */
 interface TestedType {
   readonly kinds: readonly ValueKind[];
-  /** The type as written, whose written order the kinds it narrows to keep (`Values`, #1398). */
+  /** The type as written, whose written order the kinds it narrows to keep (#1398). */
   readonly test: TypeAnnotation;
   readonly constrained: ReadonlySet<ValueKind>;
   readonly element: TypeAnnotation | null;
@@ -491,7 +489,6 @@ function testForm(expression: Expression, work: WorkLedger): Fact | null {
   if (shape.kind !== "type") return null;
   const type = testedType(shape.node.type, work);
   const outcome = shape.negated ? !holds : holds;
-  // `is null` and `is not null` are the null tests
   if (type.kinds.length === 1 && type.kinds[0] === "null")
     return { tested: shape.tested, end, type: null, holds: outcome };
   return { tested: shape.tested, end, type, holds: outcome };
@@ -645,7 +642,6 @@ export class NarrowingIndex {
       region: OperandSpan | null = null,
       window: OperandSpan | null = null,
     ): void => {
-      // (one unit per definition asked, `#operandRegions` among the askers)
       work.charge("indexSteps");
       if (!program.reached(node)) return;
       const operand = peel(tested, work);
@@ -657,7 +653,6 @@ export class NarrowingIndex {
       });
       if (path === null || input === null) return;
       keptArray(work, path.steps);
-      // the keys a G keeps, each charged as it is made
       const kept = (key: Key): Key => {
         work.charge("indexSteps");
         keepText(work, key.length);
@@ -688,7 +683,6 @@ export class NarrowingIndex {
       // element step's collection, the tested path's key and those below it, is one of its G's collections too
       let { form, element } = outcome;
       let key = kept(pathKey(path, work));
-      // the tested path in the trie of tested paths, its locations by the element steps they add
       let at: PathNode | undefined = this.#tested.get(path.root);
       if (at === undefined) {
         at = { children: new Map(), locations: new Map() };
@@ -907,7 +901,6 @@ export class NarrowingIndex {
       if (list === undefined) {
         keepText(work, key.length);
         found.set(key, [entry]);
-        // (its steps in the trie of invalidated keys, which a G's walk reads its collections from)
         let at = this.#invalidated.get(target.root);
         if (at === undefined)
           this.#invalidated.set(target.root, (at = { children: new Map(), key: null }));
@@ -933,7 +926,6 @@ export class NarrowingIndex {
       if (constraint.kind === "store" && ADDS.has(constraint.how)) {
         const projection = program.projOf.get(constraint.into);
         if (projection === undefined || projection.step === "index") continue;
-        // (the collection's path: the element's without its last step)
         const collection = copied(work, "indexSteps", program.targetRoot(constraint.into).path);
         collection.pop();
         // (an add takes effect at its call, as its definition does)
@@ -1044,7 +1036,6 @@ export class NarrowingIndex {
       }
       walk = longer;
     }
-    // the trailing element steps start at `first`
     let first = walk.length;
     for (const _ of steps(
       work,
@@ -1075,7 +1066,7 @@ export interface SelectionLink {
 }
 
 /**
- * The selections of a read's chain of projections down to its binding (#1073, `Values.#narrowedChain`), outermost
+ * The selections of a read's chain of projections down to its binding (#1073), outermost
  * first: each one's owner and the node the ordinary route reads it at (the link's own node, else the one the link above
  * passes down, from `node` at the read). One walk of the chain, a step charged per link.
  */

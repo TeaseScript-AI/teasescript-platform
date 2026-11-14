@@ -166,7 +166,7 @@ export interface Feasibility {
   /**
    * The statements whose own expressions, not their arms', hold a call of a function or a file or a handler's
    * declaration: a condition, a subject, a stored value, a statement's call. A route evaluates the own expressions of
-   * every statement of its chains before going on (`NarrowingRoutes.#plain`).
+   * every statement of its chains before going on.
    */
   readonly headed: ReadonlySet<TreeStatement>;
 }
@@ -302,7 +302,6 @@ export class RouteTests {
     for (const _ of steps(work, "indexSteps", () => pending.length > 0)) {
       const statement = pending.pop()!;
       if (done.has(statement)) continue;
-      // (an `if`: every live arm guarded, holding a passed statement, or ending, and one of them not ending)
       if (statement.statement.kind === "ifStatement") {
         let open = false;
         let through = false;
@@ -439,7 +438,6 @@ export class RouteTests {
       keepText(work, memo.length);
       per.set(memo, guards);
     }
-    // (the last guard that starts at or before the use)
     const at = lowerBound(work, guards.from, use + 1) - 1;
     return at >= 0 && guards.reach[at]! > use;
   }
@@ -501,7 +499,6 @@ export class RouteTests {
       const root = region.kind === "file" ? this.tree.root(region.id) : undefined;
       if (root !== undefined) files.add(root);
     }
-    // (the statements a promoting route may not pass, then every statement holding one at any depth)
     const marked: TreeStatement[] = [];
     const calls: TreeStatement[] = [];
     for (const block of each(work, "eventSteps", this.tree.blocks))
@@ -518,7 +515,6 @@ export class RouteTests {
       const statement = this.tree.statementAt(region.file, region.block.span.start.offset);
       if (statement !== null) calls.push(statement);
     }
-    // (a statement and each compound statement above it; for an entry route, not above an `infeasible` arm)
     const above = (pending: TreeStatement[], into: Set<TreeStatement>, entry: boolean): void => {
       work.charge("eventSteps");
       for (const _ of steps(work, "eventSteps", () => pending.length > 0)) {
@@ -531,7 +527,6 @@ export class RouteTests {
     };
     const headed = new Set<TreeStatement>();
     for (const statement of each(work, "eventSteps", calls)) headed.add(statement);
-    // (the marks above each statement a route may not pass, then the sorted indexes per block)
     const hazardsOf = (entry: boolean): Map<number, number[]> => {
       work.charge("eventSteps");
       const pending: TreeStatement[] = [];
@@ -635,7 +630,6 @@ export class RouteTests {
     const list: ConditionFact[] = [];
     const byText = new Map<string, ConditionFact[]>();
     const end = ast.condition.span.end.offset;
-    // (each node with how far its truth's and its falsity's facts guard, and whether to the arms)
     const pending: {
       readonly at: Expression;
       readonly holding: Guarding | null;
@@ -741,7 +735,6 @@ export class RouteTests {
       upward.push({ block: at!.block, index: at!.index });
       at = at!.block.owner;
     }
-    // (from the body down)
     let index = upward.length;
     const chain: Place[] = [];
     for (const _ of steps(this.#work, "eventSteps", () => index > 0)) {

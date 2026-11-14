@@ -79,7 +79,6 @@ export class HandlerIndex {
       facts.events.push(offsetOf(handler.creation));
       for (const loop of handler.creation.loops) facts.loops.add(loop);
     }
-    // the edges of the call graph and the file transfers: from a caller's node into the callable it enters
     const edges = new Map<Callable, [FlowNode, Callable][]>();
     const callers = new Map<Callable, [Callable, FlowNode][]>();
     const edge = (from: Callable, at: FlowNode, to: Callable): void => {
@@ -147,7 +146,6 @@ export class HandlerIndex {
   /** Whether the key, a prefix or a key below it has a store in block code: a lookup per step of its path. */
   public handlerTouches(key: Key): boolean {
     this.program.work.charge("eventSteps");
-    // (a handler store at a prefix, by one walk of the key's steps)
     return (
       this.#handlerKeys.has(key) || this.#handlerAbove.has(key) || this.#handled.any(key, false)
     );

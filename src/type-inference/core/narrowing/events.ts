@@ -352,8 +352,8 @@ export class NarrowingEvents {
 
   /**
    * G's prefixes' keys that hold a definition or a loop's add (the definitions' `stored` trie), the parent first: one
-   * walk of G's key's steps down that trie, once per key, as the trie's own texts (#1640, as `reachingDef`). A prefix
-   * with none has no event and no text, so it adds nothing to G's lists.
+   * walk of G's key's steps down that trie, once per key, as the trie's own texts (#1640). A prefix with none has no
+   * event and no text, so it adds nothing to G's lists.
    */
   #prefixes(g: Narrowing): readonly Key[] {
     this.#work.charge("eventSteps");
@@ -506,7 +506,6 @@ export class NarrowingEvents {
   ): StaticEvents {
     this.#work.charge("eventSteps");
     const work = this.#work;
-    // (by the first range's two ends, then the ranges compared: no text kept)
     let byStart = this.#statics.get(g);
     if (byStart === undefined) this.#statics.set(g, (byStart = new Map()));
     const [start, end] = ranges.length === 0 ? [-1, -1] : ranges[0]!;
@@ -528,7 +527,6 @@ export class NarrowingEvents {
         return entry;
     let at = Infinity;
     let word: ContextWord | null = null;
-    // the own list's ranges that hold candidates, which only the preserving test decides
     const owned: PositionRange[] = [];
     for (const list of each(work, "eventSteps", events))
       for (const [low, high] of each(work, "eventSteps", ranges)) {
@@ -542,7 +540,6 @@ export class NarrowingEvents {
           owned.push([low, high]);
           const base = lowerBound(work, stores, low);
           if (to - from <= countIn(work, stores, low, high + 1)) continue;
-          // the first rank j with more events than candidates up to its position
           let lo = from;
           let hi = to - 1;
           for (const _ of steps(work, "eventSteps", () => lo < hi)) {
@@ -583,7 +580,7 @@ export class NarrowingEvents {
   }
 
   /**
-   * Test-only (`answers.ts`'s `solveDemands`): a tree demand of `location`, its first narrowing standing for it: the
+   * Test-only: a tree demand of `location`, its first narrowing standing for it: the
    * node over the candidates [lo, hi) (`#union`), or with `head` the loop's union (`#inLoop`).
    */
   public *treeDemand(

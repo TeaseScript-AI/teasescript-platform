@@ -1,4 +1,3 @@
-// Intervals that nest or lie apart, for the innermost one holding a point (`Laminar`).
 import { type WorkLedger } from "../budget.js";
 import { mapped, sorted, each, steps } from "../charged-iteration.js";
 
