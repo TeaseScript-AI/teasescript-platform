@@ -268,7 +268,7 @@ export class NestingIndex {
           const { place, label } = positions[at]!;
           let byLabel = this.#cut.get(place);
           if (byLabel === undefined) {
-            byLabel = new Map();
+            byLabel = Retained.map<string, number>("NestingIndex.#cut.byLabel");
             this.#cut.set(place, byLabel);
           }
           byLabel.set(label, cut);
