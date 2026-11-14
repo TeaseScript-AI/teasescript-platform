@@ -213,7 +213,7 @@ test("the derived oracle refuses a check into an untyped parameter or result", (
   for (const source of [
     "function shown(v) {\n  say v\n}\nshown(1)\nshown(hostValue)\nexit\n",
     "function pick(b) {\n  if b == null {\n    return 1\n  }\n  return b\n}\nlet n = pick(hostValue)\nsay n\nexit\n",
-    "function f(o) {\n  o.a = hostValue\n  say o.a\n}\nf({a: 1})\nexit\n",
+    "function f(o) {\n  o.a = hostValue\n}\nf({a: 1})\nexit\n",
   ]) {
     const request = coreRequest(one(source));
     assert.ok(request !== null);
@@ -221,7 +221,9 @@ test("the derived oracle refuses a check into an untyped parameter or result", (
     const syntax = syntaxOf(source);
     assert.throws(
       () => derive(syntax, record, [syntax]),
-      (error) => error instanceof Underivable && /without a written type/u.test(error.message),
+      (error) =>
+        error instanceof Underivable &&
+        /a check into a parameter or result without a written type/u.test(error.message),
       source,
     );
   }
@@ -487,7 +489,7 @@ test("the derived oracle declines a name its scope declares twice, and a default
     ),
     [
       'function f(n) {\n  let x = load("x", default: n)\n  say x\n}\nf(1)\nexit\n',
-      /a parameter without a written type/u,
+      /a default that reads a parameter without a written type/u,
     ] as const,
   ]) {
     const request = coreRequest(one(source));
