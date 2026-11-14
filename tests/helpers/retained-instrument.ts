@@ -1,6 +1,6 @@
 /*
  * #1072 step 1b: the test-mode instrument of the type core's retained state (`src/type-inference/core/retained/retained.ts`;
- * the plan `o4-lead/plans/1072-retained-head0.md`, Amendment 3, rulings R19 to R25).
+ * built in #2417).
  *
  * What it guarantees, and nothing stronger: a write to retained state is refused where it happens, or is made by a
  * closed-list kind's own writer (a `Retained` collection's methods, `COLLECTION_METHODS`; a record's, an arena's or an
@@ -8,12 +8,13 @@
  * (`TYPED_ENTRIES`), which no freeze holds, is the exception: a write to its elements after its run ended is caught at
  * the process's exit (`changedTyped`), which fails the file, not at its line. Every refusal it throws is counted, so
  * one a `catch` swallows fails the file at its exit too; V8's own error at a write to frozen data is kept from any
- * handler in `src/type-inference/` by the lint's `catch` rule (R60). A write made through an intrinsic
- * (`Map.prototype.set` and its kind, called, bound or aliased) is outside what the instrument sees: the lint
- * (`check-retained-state`) refuses the `.prototype` that names one, and another native collection's
- * method applied to a made one is code written to get around it (R33). The instrument does
- * not see what a registered function (`Retained.closure`) captures; that rests on the comment at each registration,
- * read at review; the function's own properties are frozen at its registration. It changes no answer and no charge.
+ * handler in `src/type-inference/` by the lint's `catch` and `finally` rule (R60 and R67, recorded in #2417) while it
+ * leaves the core as the pending error, and a later error can replace it (docs/TESTING.md, "Frozen retained state"). A
+ * write made through an intrinsic (`Map.prototype.set` and its kind, called, bound or aliased) is outside what the
+ * instrument sees: the lint (`check-retained-state`) refuses the `.prototype` that names one, and another native
+ * collection's method applied to a made one is code written to get around it (R33). The instrument does not see what a
+ * registered function (`Retained.closure`) captures; that rests on the comment at each registration, read at review;
+ * the function's own properties are frozen at its registration. It changes no answer and no charge.
  *
  * How:
  * - What may be stored is a closed set of shapes, checked where it is stored (a collection's storing method, a map's

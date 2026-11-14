@@ -26,7 +26,9 @@ import { Project, ts } from "ts-morph";
  * written there or a static `#hidden` arrow of the class, whose object literal gives the field itself (`x: owner.#x`); or
  * it is listed in `OUTSIDE_FIELDS`. In the indexed program's own files (`PROGRAM_FILES`) each is `readonly` and named by
  * its class's `Retained.programPart(this, hidden)`, which the instrument's walk of the program reads. Any other private
- * field is refused, whatever its initializer: what an owner fills later goes in a record.
+ * field is refused, whatever its initializer: what an owner fills later goes in a record. The check trusts `readonly`:
+ * a private `readonly` field assigned again in its constructor after a run switch inside that constructor is not seen
+ * (docs/TESTING.md, "Frozen retained state").
  * Every file of the type core is checked, a new one too, unless `TOP_LEVEL` names it (its top level alone is checked)
  * or `OUTSIDE` does, each with its reason; the reasons match the instrument's domain.
  *
@@ -121,7 +123,11 @@ function levelOf(file) {
   return "file";
 }
 
-/** The private fields the check leaves out, each with why the instrument's domain does not hold it. */
+/**
+ * The private fields the check leaves out, each with why the instrument's domain does not hold it. A listed field
+ * passes whatever its modifiers, so nothing here checks its reason; "fixed when made" trusts `readonly`, which a
+ * reassignment in the constructor after a run switch there escapes (docs/TESTING.md, "Frozen retained state").
+ */
 const OUTSIDE_FIELDS = new Map([
   [
     "PathSteps.#contract",
@@ -359,8 +365,8 @@ function enclosingName(node) {
 }
 
 /**
- * The exits of `block` that leave it: a `return`, a `throw` (but of `binding`, unless `all`), a `yield` (with `all`),
- * and a `break` or `continue` whose target lies outside it; not inside a nested function or class.
+ * The exits of `block` that leave it: a `return`, a `yield`, a `throw` (but of `binding`, unless `all`), and a `break`
+ * or `continue` whose target lies outside it; not inside a nested function or class.
  */
 function abrupt(block, all, binding = null) {
   const exits = [];
