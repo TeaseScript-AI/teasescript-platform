@@ -145,6 +145,7 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "definitions.ts keyOf join": [1, "a helper itself"],
   "definitions.ts keyOfText composite": [1, "a helper itself"],
   "definitions.ts keyPath split": [1, "a helper itself"],
+  "definitions.ts keyStep step": [1, "a helper itself"],
   "exact-path.ts #defVal spread": [1, "items, no path"],
   "exact-path.ts #stopAt spread": [2, "the spans per prefix of a path, no path"],
   "items.ts union composite": [2, "two item ids"],
