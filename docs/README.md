@@ -19,6 +19,7 @@
 - `TEASESCRIPT.md`
 - `TEASESCRIPT-REFERENCE.md`: non-authoritative summary of every accepted construct, with status and V30 links.
 - `RUNTIME.md`
+- `runtime/ERRORS.md`: the runtime's error codes, each with what failed and its repair.
 - `DIAGNOSTICS.md`: the message rules, the codes of compiler diagnostics, and where runtime and checkpoint codes are
   listed.
 - `ENCRYPTION.md`: the locks of `encryptText`, `encryptFile`, `decryptText`, and `decryptFile`: scheme, format, drand
