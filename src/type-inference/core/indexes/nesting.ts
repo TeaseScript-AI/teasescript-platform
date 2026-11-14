@@ -1,5 +1,6 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { WorkLedger } from "../budget.js";
+import type { Operand } from "../carriers.js";
 import type { Definition, DefinitionIndex } from "../definitions.js";
 import { makeItem, REASON, type Item } from "../items.js";
 import type { CoreProgram } from "../program.js";
@@ -141,15 +142,19 @@ export class NestingIndex {
   /** The places with a position cut: only their paths are looked at (`cuts`). */
   readonly #places = Retained.set<PlaceId>("NestingIndex.#places");
 
-  /** `live` says which of the pass's definitions take effect (admission's rejections, A6). */
+  /**
+   * `live` says which of the pass's definitions take effect (admission's rejections, A6); `operands` is the carrier
+   * table (`operandsOf`), given so that this index does not depend on the contract the table reads.
+   */
   public constructor(
     program: CoreProgram,
     definitions: DefinitionIndex,
     live: (d: Definition) => boolean,
+    operands: (value: PlaceId) => readonly Operand[],
   ) {
     Retained.owner(this, "NestingIndex", (index) => ({ cut: index.#cut, places: index.#places }));
     const work = program.work;
-    const routes = routesOf(program, definitions, live);
+    const routes = routesOf(program, definitions, live, operands);
     const graph = new Map<PlaceId, Edge<PlaceId>[]>();
     for (const [receiver, list] of routes)
       graph.set(

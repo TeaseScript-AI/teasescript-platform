@@ -1,6 +1,6 @@
 import type { PlaceId, TypeTerm } from "../../../graph.js";
+import type { Operand } from "../../carriers.js";
 import type { Definition, DefinitionIndex } from "../../definitions.js";
-import { selectsElement } from "../../method-categories.js";
 import { propertyStep, type CoreProgram } from "../../program.js";
 
 // #2764 (B): the routes of the nesting graph, read from the program's constraints and the pass's definitions.
@@ -22,9 +22,6 @@ export type Route =
       readonly to: string;
     };
 
-/** The steps a projection takes into one element of its owner (`stepName`'s `element`). */
-const ELEMENT_STEPS: ReadonlySet<string> = new Set(["element", "index", "iteration", "entry"]);
-
 /** The type written at a place: a variable's, a parameter's or a result's; `null` where none is written. */
 export function writtenAt(program: CoreProgram, place: PlaceId): TypeTerm | null {
   const kind = program.places[place]?.kind;
@@ -35,16 +32,19 @@ export function writtenAt(program: CoreProgram, place: PlaceId): TypeTerm | null
 }
 
 /**
- * The graph's routes by receiver, each charged as it is read: 0 for a whole copy, an argument, a return, a read, a
- * call's result, a list `+`'s operand, either side of `otherwise`, a `get`'s default and a property's store or read;
- * +1 for a list literal's element and an `add`; −1 for an element, an index, a loop's element, a selection and a
- * `get`'s element; a store through a path, the path's element steps. A place with a written type takes no route: the
- * written type decides it. A form not named here makes no route, so a cycle through it is never cut.
+ * The graph's routes by receiver, each charged as it is read: 0 for a whole copy, an argument, a return, a read and a
+ * call's result; +1 for a list literal's element and an `add`; a store through a path, the path's element steps; a
+ * literal's property, 0 into that property. A projection and an operation take the carrier table's routes (`operands`:
+ * `carriers.ts`'s `operandsOf`, the one home of which operand an operation's value stands in, and where): the value
+ * stands at `below` inside its operand, so the route loses `below`'s element steps and reads out of its property. A
+ * place with a written type takes no route: the written type decides it. A form not named here makes no route, so a
+ * cycle through it is never cut.
  */
 export function routesOf(
   program: CoreProgram,
   definitions: DefinitionIndex,
   live: (d: Definition) => boolean,
+  operands: (value: PlaceId) => readonly Operand[],
 ): Map<PlaceId, Route[]> {
   const work = program.work;
   const into = new Map<PlaceId, Route[]>();
@@ -90,38 +90,28 @@ export function routesOf(
       case "read":
         plain(constraint.occurrence, constraint.binding, 0);
         break;
-      case "project": {
-        const step = constraint.step;
-        if (typeof step === "string" ? ELEMENT_STEPS.has(step) : selectsElement(step.property))
-          plain(constraint.into, constraint.owner, -1);
-        else if (typeof step !== "string")
-          add(constraint.into, {
-            kind: "property",
-            producer: constraint.owner,
-            weight: 0,
-            from: propertyStep(step.property),
-            to: "",
-          });
-        break;
-      }
       case "call":
         plain(constraint.result, program.functionOf(constraint.fn).result, 0);
-        break;
-      case "fallback":
-        plain(constraint.result, constraint.left, 0);
-        plain(constraint.result, constraint.right, 0);
-        break;
-      case "get":
-        plain(constraint.result, constraint.receiver, -1);
-        plain(constraint.result, constraint.fallback, 0);
-        break;
-      case "operation":
-        if (constraint.contract.family === "operator" && constraint.contract.name === "+")
-          for (const operand of constraint.arguments) plain(constraint.result, operand, 0);
         break;
       default:
         break;
     }
   }
+  for (const value of [...program.projOf.keys(), ...program.opOf.keys()])
+    for (const { operand, below } of operands(value)) {
+      work.charge("indexSteps");
+      const elements = below.filter((step) => step === "element").length;
+      const properties = below.filter((step) => step !== "element");
+      if (properties.length === 0) plain(value, operand, -elements);
+      else if (properties.length === 1)
+        add(value, {
+          kind: "property",
+          producer: operand,
+          weight: -elements,
+          from: properties[0]!,
+          to: "",
+        });
+      else add(value, { kind: "loose", producer: operand, weight: -elements });
+    }
   return into;
 }
