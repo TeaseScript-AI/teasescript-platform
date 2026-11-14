@@ -44,7 +44,6 @@ const UNIT = "this unit expression";
 const ANGLE = "this angle expression";
 const LITERAL = "this duration literal";
 
-/** The units after an amount. */
 const UNITS: readonly (readonly [string, string])[] = [
   ["s", UNIT],
   ["calendar days", UNIT],
@@ -53,7 +52,7 @@ const UNITS: readonly (readonly [string, string])[] = [
   ["rad", ANGLE],
 ];
 
-/** The amounts before a unit, as prelude and amount. */
+/** The amounts before a unit, as (prelude, amount). */
 const AMOUNTS: readonly (readonly [string, string])[] = [
   ["", "(2)"],
   ["", "(1.5)"],
@@ -86,7 +85,6 @@ const AMOUNTS: readonly (readonly [string, string])[] = [
   ['let o = {v: hostValue}\no.v = "a"\n', "o.v"],
 ];
 
-/** A unit or an angle after each amount, stored and then passed over. */
 const AMOUNT_CASES: readonly Case[] = AMOUNTS.flatMap(([prelude, amount]) =>
   UNITS.map(([unit, refusal]) => ({
     source: `${prelude}let d = ${amount} ${unit}\nsay "AFTER"`,
@@ -94,7 +92,6 @@ const AMOUNT_CASES: readonly Case[] = AMOUNTS.flatMap(([prelude, amount]) =>
   })),
 );
 
-/** Each literal form. */
 const LITERAL_CASES: readonly Case[] = [
   ...["ms", "s", "min", "h", "d", "w", "seconds", "minutes"].flatMap((unit) =>
     ["2", "1.5", "0"].map((amount) => `${amount} ${unit}`),
@@ -113,7 +110,6 @@ const LITERAL_CASES: readonly Case[] = [
   refusal: literal.endsWith("deg") || literal.endsWith("rad") ? ANGLE : LITERAL,
 }));
 
-/** An `integer?` read under each form of null test that leaves it a number, as the amount of a unit. */
 const NARROWED: readonly string[] = [
   "let n: integer? = hostValue\nif n != null {\n  let d = n s\n  wait d\n}",
   "let n: integer? = hostValue\nif null != n {\n  let d = n s\n  wait d\n}",
@@ -121,7 +117,6 @@ const NARROWED: readonly string[] = [
   'let n: integer? = hostValue\nif n == null {\n  say "none"\n} else {\n  let d = n s\n}',
 ];
 
-/** A duration or an angle where the slice uses one. */
 const PLACE_CASES: readonly Case[] = [
   "wait 2 s",
   "let n = 2\nwait n s",
@@ -146,13 +141,7 @@ const PLACE_CASES: readonly Case[] = [
   'let a = ("x".repeat(9999995))\nlet b = ["abcdefghij"].get(0, default: "").substring(50)',
 ].map((source) => ({ source: `${source}\nsay "AFTER"`, refusal: null }));
 
-/**
- * The sources today's checker plans and the route refuses (an under-offer), sampled by class: an amount whose item is
- * the outside value a typed ingress's check stands for, where only what carries it shows a number to today's checker
- * (an element read, `otherwise`), or only a narrowing does (an `integer?` or `number?` read under a null test); and an
- * amount the core knows may hold a value of no number where today's checker reads it as unknown (a `fromJson` with a
- * default of no number, a property stored such a value later).
- */
+/** The sources today's checker plans and the route refuses at the unit or the angle (under-offers). */
 const UNDER_OFFERS: ReadonlySet<string> = new Set([
   ...UNITS.flatMap(([unit]) =>
     [

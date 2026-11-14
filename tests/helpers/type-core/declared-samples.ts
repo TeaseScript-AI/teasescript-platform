@@ -33,8 +33,7 @@ const LITERALS: Readonly<Partial<Record<ValueKind, string>>> = {
 
 /**
  * The text each conversion the slice admits (`sliceCall`'s: a value's, not `toString`) converts: a sample's second
- * origin, `<conversion>(<text>, default: hostValue)`, a value of the conversion's result kind. The declared positions'
- * test requires one for each such conversion.
+ * origin, `<conversion>(<text>, default: hostValue)`, a value of the conversion's result kind.
  */
 export const CONVERSION_INPUTS: Readonly<Record<string, string>> = {
   toNumber: '"2.5"',
@@ -190,7 +189,7 @@ const SAY_REFUSED: ReadonlySet<string> = new Set([
   "angle",
 ]);
 
-/** A fitting value of each declared position: the command with it is a sample's fitting twin (the lead's R12). */
+/** A fitting value of each declared position: the command with it is a sample's fitting twin. */
 const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<string, string>>>>> = {
   showImageStatement: { image: '"a.png"' },
   openUrlStatement: { url: '"https://example.com"', buttonText: '"Go"', alwaysButton: "true" },

@@ -272,9 +272,9 @@ export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: 
 };
 
 /**
- * Whether the route admits a unit's or an angle's amount: one the core shows to be a number (`UNIT_AMOUNT`), or an
- * external value the evaluator checks as it runs. An amount that only a narrowing or an `otherwise` shows to be a
- * number is declined: a read of `n: integer?` under `n != null`, `(n otherwise 1) s`.
+ * Whether the route admits a unit's or an angle's amount: one the core shows to be a number (`UNIT_AMOUNT`), or external
+ * data, which the run checks. It deliberately declines an amount only a narrowing or an `otherwise` shows to be a number
+ * (`n: integer?` under `n != null`, `(n otherwise 1) s`).
  */
 function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression): boolean {
   const answer = answers.at(nodeOf(answers, index, amount));

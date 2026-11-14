@@ -176,10 +176,9 @@ interface Condition {
 }
 
 /**
- * The inventory of the open rows' own conditions, with those of the predicates they call (`annotationOutside`,
- * `nullTest`, `sliceCall`, `sliceMethod`): a source for each operand, comparison and unwrapping that, weakened, would
- * admit a refused source (`tools/slice-conditions.json` lists them with their mutants). Every other open row has none
- * (`UNCONDITIONAL`); the inventory test below keeps the two lists equal to the table's open rows.
+ * The open rows' own conditions, with those of the predicates they call (`annotationOutside`, `nullTest`, `sliceCall`,
+ * `sliceMethod`): a source for each operand, comparison and unwrapping that, weakened, would admit a refused source.
+ * Every other open row has none (`UNCONDITIONAL`).
  */
 const CONDITIONS: readonly Condition[] = [
   {

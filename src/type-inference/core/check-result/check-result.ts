@@ -195,7 +195,7 @@ export function coreCheckResult(
   };
 }
 
-/** The known values of a program (S3 §2, group V), shared by the checks and the answers. */
+/** The known values of a program (S3 §2, group V), shared with the answers. */
 function knownValues(
   answers: Answers,
   index: SliceIndex,
@@ -207,7 +207,7 @@ function knownValues(
   return known;
 }
 
-/** A program's known values, not handed to the answers. */
+/** A program's known values, not shared with the answers. */
 function knownValuesOf(
   answers: Answers,
   index: SliceIndex,
