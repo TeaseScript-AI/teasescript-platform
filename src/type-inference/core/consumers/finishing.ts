@@ -348,7 +348,7 @@ function keyDomain(walk: Consumers, key: Key): readonly Item[] {
     : [...new Set(tags)].map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
 }
 
-/** What decides a key in the finishing path; `null` where nothing does. */
+/** What decides a key in the finishing path. */
 function keyDecided(
   walk: Consumers,
   key: Key,
