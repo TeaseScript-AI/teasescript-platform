@@ -53,8 +53,7 @@ const LABELS = retainedModule<ValueConstraint, readonly (ValueKind | null | unde
  * (`SELECTED_VALUE`, `SELECTED_TEXT`, the literal's objects). Where a store goes below a property of that name after
  * a record is made (`stored`), that key is read by its key instead, as the literal's records no longer say what it
  * holds: the `value` as its key gives it, and every record's `text` where some record lacks the `value` (its
- * `missing`), possible where some has one. Only the `options` are read (`Contract.choiceOptions`: one of each class),
- * in order, those of the `part` asked (a wide choice's, `Values.choiceRange`, `Values.choiceElements`).
+ * `missing`), possible where some has one.
  */
 export function* choiceItems(
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
