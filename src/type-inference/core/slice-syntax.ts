@@ -204,7 +204,6 @@ const pass = <K extends Statement["kind"]>(
 const MEDIA = "src/runtime/instructions/media.ts";
 const INTERACTION = "src/runtime/instructions/interaction.ts";
 const TIMERS = "src/runtime/instructions/timers.ts";
-/** Shown text: `fieldText` takes a value that shows as text and refuses any other. */
 const SHOWN_TEXT: OperandCheck = {
   file: "src/runtime/values/value-text.ts",
   function: "fieldText",

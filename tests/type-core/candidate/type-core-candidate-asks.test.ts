@@ -29,7 +29,6 @@ const DOMAIN: readonly SerializableRuntimeValue[] = [2, "text", true, 2.5, null,
 /** A host value no field shows: a list. */
 const LIST = { kind: "list", items: [1] } satisfies SerializableRuntimeValue;
 
-/** The answer the player gives each field: valid text, a number, a date or time, a password's hash, the first button. */
 const TEMPORAL: Readonly<Record<string, string>> = {
   date: "2027-04-17",
   time: "14:30",
