@@ -183,11 +183,10 @@ function sliceExit(source: string): string | null {
 }
 
 test("lists that hold themselves compile under the nesting cut, warned and checked when the script runs (#1646, #2764)", () => {
-  // (found on main: each nests its lists without end, and the facts' walk threw past the slice's depth and failed the
-  // compile; until #2764 the walk left the slice at its depth cut. The nesting cut knows `l`, and `a.f`, two levels deep
-  // (`[[1]]`'s), so the store of `[l]` meets a level the compiler cannot know: the analysis's three warnings, as before,
-  // and a check at each store, of which the one at `[l]` fails whatever the host gives, as the warning says it may.
-  // Today's checker gives a TSV041 error at `[l]` instead: a compile error the new analysis does not give yet, #2720)
+  // (each nests its lists without end, #1646. The nesting cut (#2764) knows `l`, and `a.f`, two levels deep (`[[1]]`'s),
+  // so the store of `[l]` meets a level the compiler cannot know: the analysis's three warnings, and a check at each
+  // store, of which the one at `[l]` fails whatever the host gives, as the warning says it may. Today's checker gives a
+  // TSV041 error at `[l]` instead: a compile error the new analysis does not give, #2720)
   for (const [source, place, at] of [
     ['let l=[[1]]\nl=[l]\nl=hostValue\nsay "AFTER"\nexit\n', "'l'", 14],
     ["let a={f:[[1]]}\na.f=[a.f]\na.f=hostValue\nexit\n", "'a.f'", 20],
