@@ -1,8 +1,4 @@
-/*
- * For the tests: while `withoutSharing` runs, `sharing()` is false, and each of its readers answers a value by itself
- * instead of taking an equivalent value's answer (#1203). The published records and the lowered plan must be the same
- * either way.
- */
+// For the tests (#1203): the published records and the lowered plan must be the same with sharing on or off.
 
 let shared = true;
 

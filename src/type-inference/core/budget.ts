@@ -416,7 +416,6 @@ export class WorkLedger {
     return step.value;
   }
 
-  /** Opens a `sharedStructure` window. */
   #openStructure(): void {
     this.#sharing = true;
     this.#structural = true;

@@ -162,7 +162,6 @@ function measureSyntax(programs: readonly Program[]): {
     if (kinded) nodes += 1;
     const inner = fields["kind"] === "block" ? depth + 1 : depth;
     nesting = Math.max(nesting, inner);
-    // the outermost node past the limit (a block, or an `else if` counted past it)
     const outermost = kinded && !inside && inner > NESTING_LIMIT;
     if (outermost) {
       // EVIDENCE: invariant: a parsed node with a kind has its span.
