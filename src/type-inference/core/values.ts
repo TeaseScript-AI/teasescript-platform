@@ -199,9 +199,13 @@ export class Values {
     const key = this.pass.contract.canonicalKey(asked);
     const read = yield* this.#keyRead(key, node, before);
     // under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
-    return read.guardable && this.pass.guards.narrowed(key, node!)
-      ? marked(read.items)
-      : read.items;
+    const items =
+      read.guardable && this.pass.guards.narrowed(key, node!) ? marked(read.items) : read.items;
+    // (what a parameter without a written type holds depends on it: no unused-fallback warning, V30 §18)
+    const place = this.pass.program.places[keyPlace(key)]?.kind;
+    return place?.kind === "parameter" && place.written === null
+      ? items.map((item) => (item.tag === "empty" ? item : { ...item, untypedParameter: true }))
+      : items;
   }
 
   /**
