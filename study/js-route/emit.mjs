@@ -1417,7 +1417,9 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       `  const SAVE = (at) => rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: at, v: [${savedList}] });`,
       "  D: for (;;) switch (pc) {",
       ...out,
-      definition === null ? "  default: throw new Error(`study: no resume point ${pc}`);" : "  return null;",
+      ...(definition === null ? [] : ["  return null;"]),
+      // A save from another program (the Tease published again) can name a place this one does not have.
+      "  default: throw new Error(`study: no resume point ${pc} in ${fnName}`);",
       "  }",
       "}",
     ].join("\n");
