@@ -1,7 +1,7 @@
 // The repository demo on `/player/`, the gate's "demo and kept-session reload" in Firefox, WebKit and on the Pixel:
 // Start, three turns, a reload and Continue once the last state is kept, then turns until the demo's end, with no
-// console error, uncaught error or unhandled rejection. Coarse by design (docs/TESTING.md "Player browser and visual
-// verification").
+// console error, uncaught error or unhandled rejection. Coarse by design (docs/TESTING.md "Playroom browser and
+// visual verification").
 import { clearOrigin } from "../lib/cdp.mjs";
 import { cdpSession } from "../lib/engines.mjs";
 import { countedError, gateProbe, probeConfig } from "../lib/probe.mjs";

@@ -7,7 +7,7 @@ import { transferFileName, transferTextWithin, type StorageBundle } from "./stor
 import { base64urlSlices, gzipSupported, jsonFile } from "./transfer-encoding.js";
 
 /**
- * A session moved by hand to another browser, where Continue goes on with it as after a reload (PLAYER-UI "Player
+ * A session moved by hand to another browser, where Continue goes on with it as after a reload (PLAYER-UI "Playroom
  * Settings"): the script's storage scope and title, the session's canonical checkpoint and the events that led to it,
  * the script's saved values, and each photo, recording, or file the session or those values use, under the reference they
  * hold. One versioned JSON document, as a file or text encoded as exported saved data is (`storage-transfer.ts`).
