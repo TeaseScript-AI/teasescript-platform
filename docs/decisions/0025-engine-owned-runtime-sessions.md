@@ -8,7 +8,7 @@
 Every snapshot-taking runtime operation (`run`, `observeTime`, `completeAction`, and the other host operations) captures
 and completely validates the snapshot it receives, because a caller may have changed it, including a snapshot an
 earlier operation returned. That keeps external data safe, but each operation then costs time in proportion to the
-whole runtime state, also when the operation changes almost nothing: a Player observing time with a few megabytes of
+whole runtime state, also when the operation changes almost nothing: a Playroom observing time with a few megabytes of
 state, or a coverage explorer settling thousands of inputs, spends most of its time capturing state it already had.
 
 ## Decision
@@ -42,7 +42,7 @@ state, or a coverage explorer settling thousands of inputs, spends most of its t
 ## Consequences
 
 - An ordinary session step costs work in proportion to its input and output, not to the unchanged state.
-- Hosts that keep a session (the Player, the coverage explorer) read a small operational view instead of the
+- Hosts that keep a session (the Playroom, the coverage explorer) read a small operational view instead of the
   snapshot, and export complete state only at their own boundaries, such as a save, a debug export, or a frontier.
 - A host that must show or export the state from before a thrown operation, such as a crash report, keeps it itself:
   its last export or checkpoint, or a recording it can replay.
