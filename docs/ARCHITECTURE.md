@@ -97,7 +97,8 @@ snapshot for comparing two analyses of the same sources.
   `src/type-checker.ts`, which decides each place's type from the first value stored there, in checking order, and
   checks the project again with what it found until a check finds nothing new; the last check alone reports.
   `legacy-state.ts` holds what one check carries to the next, and `legacy-facts.ts` reads its facts. The compiler uses
-  no other backend.
+  no other backend. The constraint backend replaces it, so it gets no new work: a change touches it only where `main`
+  must stay green until the switch.
 - **Constraint backend (O4), being built:** it collects the whole project's constraints. It is built in stages behind
   the legacy backend and has no production caller until the switch. Tests
   reach it through the candidate compile route, `compileSourceWithBackend` and `compileProjectWithBackend`
