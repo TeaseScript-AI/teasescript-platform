@@ -3,12 +3,13 @@
 
 import type { Expression, Statement } from "../../../../src/ast.js";
 import { VALUE_KIND_NAMES } from "../../../../src/value-kinds.js";
+import { functionLandings } from "./derived-functions.js";
 import {
   Underivable,
+  declaredIn,
   type DerivedType,
   site,
   syntaxOf,
-  allStatements,
   storeOf,
   unwrap,
   selected,
@@ -111,9 +112,11 @@ function variableReads(expression: Expression, statements: readonly Statement[])
       for (const argument of node.arguments)
         if (argument.kind === "namedArgument") names.add(argument.name);
   }
-  const declared = declaredNames(statements);
   return nodes.some(
-    (node) => node.kind === "identifier" && !names.has(node) && declared.has(node.name),
+    (node) =>
+      node.kind === "identifier" &&
+      !names.has(node) &&
+      declaredIn(statements, node, node.name) !== undefined,
   );
 }
 
@@ -135,7 +138,16 @@ function readDefault(
   }
   if (root.kind !== "identifier")
     return refuseVariableRead(root, statements, "a read through an unmodelled value");
-  if (!declaredNames(statements).has(root.name)) return null;
+  const declared = declaredIn(statements, root, root.name);
+  if (declared === undefined) return null;
+  // (a parameter's value is its call's: its written type, as the rules check it there; without one, underivable)
+  if (declared?.kind === "functionParameter") {
+    if (declared.typeAnnotation === null || steps.length > 0)
+      throw new Underivable(
+        "a default that reads a parameter without a written type, or a part of one",
+      );
+    return writtenType(declared.typeAnnotation);
+  }
   if (resolve === null) throw new Underivable("a default that reads a variable");
   const snap = resolve(root.name);
   // (a bare read takes its written type where its syntax gives one, a read through a part the snapshot's)
@@ -148,29 +160,7 @@ function readsVariable(expression: Expression, statements: readonly Statement[])
   let root = selected(expression);
   while (root?.kind === "propertyAccessExpression" || root?.kind === "indexExpression")
     root = unwrap(root.object);
-  return root?.kind === "identifier" && declaredNames(statements).has(root.name);
-}
-
-/** Every name a `let` or a `for` loop declares, anywhere in the program. */
-const declared = new WeakMap<readonly Statement[], ReadonlySet<string>>();
-export function declaredNames(statements: readonly Statement[]): ReadonlySet<string> {
-  let names = declared.get(statements);
-  if (names === undefined) {
-    names = new Set(
-      allStatements(statements).flatMap((statement) =>
-        statement.kind === "letStatement"
-          ? [statement.name.name]
-          : statement.kind === "forStatement"
-            ? [
-                statement.variable.name,
-                ...(statement.valueVariable ? [statement.valueVariable.name] : []),
-              ]
-            : [],
-      ),
-    );
-    declared.set(statements, names);
-  }
-  return names;
+  return root?.kind === "identifier" && declaredIn(statements, root, root.name) !== undefined;
 }
 
 /**
@@ -481,13 +471,15 @@ export function writtenLanding(
     )
       continue;
     const declaration =
-      statement.kind === "letStatement"
-        ? statement
-        : statements.find(
-            (candidate) => candidate.kind === "letStatement" && candidate.name.name === store.name,
-          );
-    if (declaration?.kind !== "letStatement" || declaration.typeAnnotation === null) continue;
+      statement.kind === "letStatement" ? statement : declaredIn(statements, statement, store.name);
+    if (declaration === null || declaration === undefined || declaration.typeAnnotation === null)
+      continue;
     const found = landsIn(store.value, writtenType(declaration.typeAnnotation));
+    if (found !== undefined)
+      return path.reduce<DerivedType | null>((type, step) => partOf(type, step), found);
+  }
+  for (const { value, written } of functionLandings(statements)) {
+    const found = landsIn(value, writtenType(written));
     if (found !== undefined)
       return path.reduce<DerivedType | null>((type, step) => partOf(type, step), found);
   }

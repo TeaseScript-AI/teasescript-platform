@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { Expression, IfStatement, Statement } from "../../../../src/ast.js";
 import {
   Underivable,
+  declaredIn,
   type DerivedType,
   derivedText,
   allStatements,
@@ -19,7 +20,6 @@ import {
 } from "./type-core-derived.js";
 import {
   literalType,
-  declaredNames,
   type Snap,
   type Chain,
   type Resolve,
@@ -368,9 +368,14 @@ export function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expressi
         // (host data is open; a read through an unmodelled value is refused, never open)
         if (root.kind !== "identifier")
           return { t: "refused", why: "a read through an unmodelled value" };
-        return declaredNames(statements).has(root.name)
-          ? partAt(lookup(state)(root.name), steps)
-          : OPEN;
+        const declared = declaredIn(statements, root, root.name);
+        if (declared === undefined) return OPEN;
+        // (a parameter's value is its call's: its written type; without one, refused)
+        if (declared?.kind === "functionParameter")
+          return declared.typeAnnotation === null
+            ? { t: "refused", why: "a read of a parameter without a written type" }
+            : partAt({ t: "type", type: writtenType(declared.typeAnnotation) }, steps);
+        return partAt(lookup(state)(root.name), steps);
       }
       default:
         // (a literal or a typed call: a refused read inside it refuses the store)

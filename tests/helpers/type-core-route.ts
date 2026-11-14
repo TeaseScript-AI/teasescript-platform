@@ -1,4 +1,9 @@
-import type { ExpressionPlan, Instruction, InstructionPlan } from "../../src/plan/model.js";
+import type {
+  ExpressionPlan,
+  Instruction,
+  InstructionPlan,
+  TypeCheckPlan,
+} from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../src/runtime/host-data/script-storage.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
@@ -59,18 +64,62 @@ function targetName(target: ExpressionPlan, plan: InstructionPlan): string {
   throw new Error(`An unmapped plan store target: ${target.kind}`);
 }
 
-/** A plan's checked stores as `derive` gives them: target, statement span, value span, whole type. */
+/**
+ * A plan's checked stores as `derive` gives them, by their span: target, statement span, value span, whole type; a value
+ * stored into a function's place (an argument, a parameter's default, a returned value) by the place's words and its
+ * argument's, parameter's or `return`'s span.
+ */
 export function plannedStores(plan: InstructionPlan): string[] {
-  return plan.instructions.flatMap((instruction) =>
-    (instruction.kind === "declareBinding" || instruction.kind === "assign") &&
-    instruction.typeCheck !== undefined
-      ? [
-          `${instruction.kind === "declareBinding" ? instruction.name : targetName(instruction.target, plan)} ` +
-            `${instruction.span.so}:${instruction.span.eo} ${instruction.value.span.so}:${instruction.value.span.eo} ` +
-            planText(instruction.typeCheck.type),
-        ]
-      : [],
-  );
+  type Span = { readonly so: number; readonly eo: number };
+  const checked = (target: string, span: Span, value: Span, type: TypeCheckPlan["type"]) => ({
+    span,
+    line: `${target} ${span.so}:${span.eo} ${value.so}:${value.eo} ${planText(type)}`,
+  });
+  return plan.instructions
+    .flatMap((instruction) => {
+      if (
+        (instruction.kind === "declareBinding" || instruction.kind === "assign") &&
+        instruction.typeCheck !== undefined
+      )
+        return [
+          checked(
+            instruction.kind === "declareBinding"
+              ? instruction.name
+              : targetName(instruction.target, plan),
+            instruction.span,
+            instruction.value.span,
+            instruction.typeCheck.type,
+          ),
+        ];
+      if (instruction.kind === "callFunction")
+        return instruction.arguments.flatMap((argument) =>
+          argument.typeCheck === undefined
+            ? []
+            : [
+                checked(
+                  argument.typeCheck.place,
+                  argument.span,
+                  argument.value.span,
+                  argument.typeCheck.type,
+                ),
+              ],
+        );
+      if (
+        (instruction.kind === "bindDefaultParameter" || instruction.kind === "returnValue") &&
+        instruction.typeCheck !== undefined
+      )
+        return [
+          checked(
+            instruction.typeCheck.place,
+            instruction.span,
+            instruction.value.span,
+            instruction.typeCheck.type,
+          ),
+        ];
+      return [];
+    })
+    .sort((a, b) => a.span.so - b.span.so || a.span.eo - b.span.eo)
+    .map(({ line }) => line);
 }
 
 /** All S7 content, including lazy expression plans and instruction-lowered defaults. No expected content is read. */

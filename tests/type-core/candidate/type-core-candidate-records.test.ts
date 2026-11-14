@@ -268,7 +268,12 @@ test("every positive-list record the candidate route reaches plans and runs as i
     const derivedFiles = request.files.map((file) => {
       try {
         const fileSyntax = syntaxOf(file.source);
-        return [fileSyntax, derive(fileSyntax, recordOfFile(record.expected, file.path))] as const;
+        // (with every file's syntax, whose `global function`s its calls may name)
+        const project = request.files.map((each) => syntaxOf(each.source));
+        return [
+          fileSyntax,
+          derive(fileSyntax, recordOfFile(record.expected, file.path), project),
+        ] as const;
       } catch (error) {
         if (error instanceof Underivable)
           throw new Error(`${record.name}: ${file.path} underivable: ${error.message}`);

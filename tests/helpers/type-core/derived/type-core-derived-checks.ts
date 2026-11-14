@@ -15,6 +15,7 @@ import {
   repairsRecord,
   type Syntax,
   allStatements,
+  declaredIn,
   storeOf,
   targetName,
   unwrap,
@@ -29,6 +30,7 @@ import {
 import { expectedType, writtenLanding } from "./type-core-derived-defaults.js";
 import { sourceShape, typeOf } from "./type-core-derived-shapes.js";
 import { snapshotsOf } from "./type-core-derived-snapshots.js";
+import { storedPlaceName, transferStore } from "./derived-functions.js";
 
 /** Whether a type holds `null`. */
 function holdsNull(type: DerivedType): boolean {
@@ -173,16 +175,17 @@ function writtenAt(
   switch (at.kind) {
     case "identifier": {
       if (seen.has(at.name)) return false;
-      const declared = statements.some(
-        (statement) =>
-          statement.kind === "letStatement" &&
-          statement.name.name === at.name &&
-          statement.typeAnnotation !== null,
-      );
-      if (declared) return true;
+      // (the name's declaration in its scope, and only the stores into that one)
+      const declared = declaredIn(statements, at, at.name);
+      if (declared !== null && declared !== undefined && declared.typeAnnotation !== null)
+        return true;
+      if (declared?.kind === "functionParameter")
+        throw new Underivable(`a read of '${at.name}', a parameter without a written type`);
       const values = statements.flatMap((statement) => {
         const store = storeOf(statement);
-        return store?.name === at.name ? [store.value] : [];
+        return store?.name === at.name && declaredIn(statements, statement, at.name) === declared
+          ? [store.value]
+          : [];
       });
       const next = new Set([...seen, at.name]);
       return (
@@ -236,6 +239,8 @@ function writtenAt(
 export function derive(
   syntax: Syntax,
   record: CompactRecord,
+  /** The project's files, whose `global function`s the file's calls may name (`derived-functions.ts`). */
+  project: readonly Syntax[] = [],
 ): {
   readonly stores: readonly DerivedStore[];
   readonly discharges: readonly Discharge[];
@@ -274,7 +279,10 @@ export function derive(
     }
   }
   const owed = new Map<Statement, { path: readonly string[]; against: readonly string[] }[]>();
-  const discharges: ({ statement: Statement } | { native: Discharge & { by: "native" } })[] = [];
+  const discharges: (
+    { statement: Statement } | { transfer: DerivedStore } | { native: Discharge & { by: "native" } }
+  )[] = [];
+  const transfers: DerivedStore[] = [];
   const native = (what: (Discharge & { by: "native" })["what"], at: string): void => {
     discharges.push({ native: { by: "native", what, site: at } });
   };
@@ -300,6 +308,11 @@ export function derive(
       named.find((expression) => expression.span.start.offset === check.site.offset)
     );
   };
+  const checkedAt = (check: (typeof record.checks)[number]) => ({
+    start: check.site.offset,
+    end: check.site.end,
+    target: check.target,
+  });
   for (const check of record.checks) {
     const at = `${check.site.offset}:${check.site.end}`;
     const fallback = owners.find((owner) => {
@@ -329,20 +342,31 @@ export function derive(
       native("fallback", at);
     } else if (
       (check.kind === "copy-type" ||
-        // (C1's check of a copied integer that may be null, at its store's value: the store's own, as a copy type's)
+        // (C1's check of a copied integer that may be null, at its store's value: the store's own, as a copy type's; a
+        // value stored into a function's place is such a store too)
         (check.kind === "null-check" &&
           check.against.length > 0 &&
           check.against.every((kind) => kind === "integer") &&
-          statements.some((candidate) => {
+          (statements.some((candidate) => {
             const store = storeOf(candidate);
             return (
               store !== null &&
               site(unwrap(store.value)) === at &&
               (check.target === store.name || check.target.startsWith(`${store.name}.`))
             );
-          }))) &&
+          }) ||
+            transferStore(checkedAt(check), syntax, all, project) !== null))) &&
       !check.against.includes("unknown")
     ) {
+      const transfer = transferStore(checkedAt(check), syntax, all, project);
+      if (transfer !== null) {
+        // (one store per argument, default or `return`, however many obligations it holds)
+        const held =
+          transfers.find((each) => each.so === transfer.so && each.eo === transfer.eo) ?? transfer;
+        if (held === transfer) transfers.push(held);
+        discharges.push({ transfer: held });
+        continue;
+      }
       const statement = statements
         .filter(
           (candidate) =>
@@ -369,8 +393,9 @@ export function derive(
         continue;
       }
       const store = storeOf(statement)!;
-      const prefix = `${store.name}.`;
-      if (check.target !== store.name && !check.target.startsWith(prefix)) {
+      const placeName = storedPlaceName(statement, store.name, statements);
+      const prefix = `${placeName}.`;
+      if (check.target !== placeName && !check.target.startsWith(prefix)) {
         const ingress = owners.find(
           (owner) =>
             site(owner) === at &&
@@ -385,7 +410,7 @@ export function derive(
         }
         throw new Underivable(`${check.target} is not ${store.name}'s`);
       }
-      const path = check.target === store.name ? [] : check.target.slice(prefix.length).split(".");
+      const path = check.target === placeName ? [] : check.target.slice(prefix.length).split(".");
       owed.set(statement, [...(owed.get(statement) ?? []), { path, against: check.against }]);
       discharges.push({ statement });
     } else if (
@@ -483,10 +508,15 @@ export function derive(
     });
   }
   return {
-    stores: [...stores.values()].sort((a, b) => a.so - b.so),
+    stores: [...stores.values(), ...transfers].sort((a, b) => a.so - b.so || a.eo - b.eo),
     content,
     discharges: discharges.map((entry) =>
-      "native" in entry ? entry.native : { by: "store", store: stores.get(entry.statement)! },
+      "native" in entry
+        ? entry.native
+        : {
+            by: "store",
+            store: "transfer" in entry ? entry.transfer : stores.get(entry.statement)!,
+          },
     ),
   };
 }

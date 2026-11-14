@@ -5,6 +5,7 @@ import type { Expression, Statement } from "../../../../src/ast.js";
 import { VALUE_KIND_NAMES } from "../../../../src/value-kinds.js";
 import {
   Underivable,
+  declaredIn,
   type DerivedType,
   storeOf,
   unwrap,
@@ -52,23 +53,25 @@ export function sourceShape(
     case "identifier": {
       if (seen.has(at.name)) return null;
       const next = new Set([...seen, at.name]);
-      const written = statements.find(
-        (statement) =>
-          statement.kind === "letStatement" &&
-          statement.name.name === at.name &&
-          statement.typeAnnotation !== null,
-      );
-      if (written?.kind === "letStatement" && written.typeAnnotation !== null)
-        return writtenType(written.typeAnnotation);
+      // (the name's declaration in its scope, and only the stores into that one)
+      const declared = declaredIn(statements, at, at.name);
+      if (declared !== null && declared !== undefined && declared.typeAnnotation !== null)
+        return writtenType(declared.typeAnnotation);
+      if (declared?.kind === "functionParameter")
+        throw new Underivable(`a read of '${at.name}', a parameter without a written type`);
+      const same = (statement: Statement): boolean =>
+        declaredIn(statements, statement, at.name) === declared;
       let shape = admittedShape(
         statements.flatMap((statement) => {
           const store = storeOf(statement);
-          return store?.name === at.name ? [sourceShape(store.value, statements, next)] : [];
+          return store?.name === at.name && same(statement)
+            ? [sourceShape(store.value, statements, next)]
+            : [];
         }),
       );
       for (const statement of statements) {
         const store = storeOf(statement);
-        if (store?.name.startsWith(`${at.name}.`))
+        if (store?.name.startsWith(`${at.name}.`) && same(statement))
           shape = updatedShape(
             shape,
             store.name.slice(at.name.length + 1).split("."),

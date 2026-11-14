@@ -1,7 +1,14 @@
 // What the derivation's parts share: the record's checked types, stores and content, the source's syntax as the rules
 // read it, and the type helpers each part applies.
 
-import type { Expression, Statement, TypeAnnotation } from "../../../../src/ast.js";
+import type {
+  Expression,
+  FunctionDeclaration,
+  FunctionParameter,
+  LetStatement,
+  Statement,
+  TypeAnnotation,
+} from "../../../../src/ast.js";
 import { parse } from "../../../../src/parser.js";
 import { VALUE_KIND_NAMES } from "../../../../src/value-kinds.js";
 
@@ -129,6 +136,9 @@ export function allStatements(statements: readonly Statement[]): Statement[] {
         ...statement.cases.flatMap((switchCase) => allStatements(switchCase.body.statements)),
         ...allStatements(statement.defaultBlock?.statements ?? []),
       ];
+    // (a function's body, where it is declared: its stores are the plan's as any other, `derived-functions.ts`)
+    if (statement.kind === "functionDeclaration")
+      return [statement, ...allStatements(statement.body.statements)];
     if (statement.kind === "ifStatement") {
       return [
         statement,
@@ -159,6 +169,66 @@ export function storeOf(
   )
     return { name: targetName(statement.target), value: statement.value };
   return null;
+}
+
+/** What a name of a program refers to: its `let`, its function's parameter, or a `for` loop's variable (`null`). */
+export type Declared = LetStatement | FunctionParameter | null;
+
+/** A name its scope declares more than once: the oracle resolves no block scope (V30 §14 allows sibling blocks one each). */
+const TWICE = Symbol("declared more than once");
+
+const SCOPES = new WeakMap<
+  readonly Statement[],
+  (at: number, name: string) => Declared | typeof TWICE | undefined
+>();
+
+/**
+ * The one declaration a name read or stored at `at` refers to (V30 §14), the derived oracle's every by-name lookup: in the
+ * function whose span holds `at` (a function is declared only at a file's top level, so their spans do not overlap) its
+ * parameters, `let`s and loop variables at any block depth, else the file's, outside every function, likewise.
+ * `undefined` where no scope declares the name. A name its scope declares more than once is underivable: the oracle
+ * models no block scope, so it declines rather than pick one. `statements` are one file's (`allStatements`), the scopes
+ * built once for them.
+ */
+export function declaredIn(
+  statements: readonly Statement[],
+  at: { readonly span: Expression["span"] },
+  name: string,
+): Declared | undefined {
+  let resolve = SCOPES.get(statements);
+  if (resolve === undefined) {
+    const functions = statements.filter(
+      (statement): statement is FunctionDeclaration => statement.kind === "functionDeclaration",
+    );
+    const ownerAt = (offset: number): FunctionDeclaration | null =>
+      functions.find((fn) => fn.span.start.offset <= offset && offset < fn.span.end.offset) ?? null;
+    const scopes = new Map<FunctionDeclaration | null, Map<string, Declared | typeof TWICE>>();
+    const declare = (owner: FunctionDeclaration | null, declared: string, as: Declared): void => {
+      const scope = scopes.get(owner) ?? new Map<string, Declared | typeof TWICE>();
+      scopes.set(owner, scope);
+      scope.set(declared, scope.has(declared) ? TWICE : as);
+    };
+    for (const fn of functions)
+      for (const parameter of fn.parameters) declare(fn, parameter.name.name, parameter);
+    for (const statement of statements) {
+      const owner = ownerAt(statement.span.start.offset);
+      if (statement.kind === "letStatement") declare(owner, statement.name.name, statement);
+      else if (statement.kind === "forStatement") {
+        declare(owner, statement.variable.name, null);
+        if (statement.valueVariable !== null) declare(owner, statement.valueVariable.name, null);
+      }
+    }
+    resolve = (offset, declared) => {
+      const owner = ownerAt(offset);
+      const own = scopes.get(owner);
+      if (own?.has(declared)) return own.get(declared);
+      return owner === null ? undefined : scopes.get(null)?.get(declared);
+    };
+    SCOPES.set(statements, resolve);
+  }
+  const found = resolve(at.span.start.offset, name);
+  if (found === TWICE) throw new Underivable(`'${name}' declared more than once in its scope`);
+  return found;
 }
 
 export function targetName(expression: Expression): string {
@@ -382,6 +452,11 @@ export function expressions(statements: readonly Statement[]): Expression[] {
       for (const switchCase of statement.cases) switchCase.values.forEach(walk);
     } else if (statement.kind === "gotoStatement" && statement.target.kind === "scriptTarget")
       walk(statement.target.expression);
+    else if (statement.kind === "returnStatement" && statement.value !== null)
+      walk(statement.value);
+    else if (statement.kind === "functionDeclaration")
+      for (const parameter of statement.parameters)
+        if (parameter.defaultValue !== null) walk(parameter.defaultValue);
   }
   return out;
 }

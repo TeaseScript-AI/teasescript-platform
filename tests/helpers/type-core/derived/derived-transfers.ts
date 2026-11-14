@@ -42,7 +42,7 @@ export function evaluateProject(
   });
   for (let file = files[0]; file !== undefined;) {
     entered.add(file.path);
-    const ended = evaluate(file.syntax, file.stores, inputs, through, file.content);
+    const ended = evaluate(file.syntax, file.stores, inputs, through, file.content, files);
     said.push(...ended.run.said);
     events.push(...ended.events);
     if (ended.transfer === null || ended.run.failure !== null)
