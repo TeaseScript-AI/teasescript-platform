@@ -90,6 +90,52 @@ const CASES: readonly [string, Files][] = [
       'function f(x: integer): integer? {\n  while true {\n    switch x {\n      case 1 {\n        return hostValue\n      }\n      default {\n        break\n      }\n    }\n  }\n  say "left"\n  return null\n}\nsay f(1)\nsay f(2)\nexit\n',
     ),
   ],
+  // (a name's written type is its own scope's, V30 §14: another function's `let` of the name gives none)
+  [
+    "a parse into a local, beside another function's local of its name",
+    one(
+      "function unused {\n  let n: string? = null\n}\nfunction f {\n  let n: integer? = null\n  n = fromJson(hostValue, default: null)\n  say n\n}\nf()\nexit\n",
+    ),
+  ],
+  [
+    "a parse into a parameter, beside another function's local of its name",
+    one(
+      "function unused {\n  let n: string? = null\n}\nfunction f(n: integer?) {\n  n = fromJson(hostValue, default: null)\n  say n\n}\nf(1)\nexit\n",
+    ),
+  ],
+  [
+    "a load into a local, beside another function's local of its name",
+    one(
+      'function unused {\n  let n: string? = null\n}\nfunction f {\n  let n: integer? = null\n  n = load("n", default: hostValue)\n  say n\n}\nf()\nexit\n',
+    ),
+  ],
+  [
+    "a load into a parameter, beside another function's local of its name",
+    one(
+      'function unused {\n  let n: string? = null\n}\nfunction f(n: integer?) {\n  n = load("n", default: hostValue)\n  say n\n}\nf(1)\nexit\n',
+    ),
+  ],
+  // (the order of a call, V30 §10, §11: every argument evaluated before any is checked, the supplied ones checked before
+  // an omitted default is evaluated, and the defaults evaluated in parameter order; each source's runs differ under
+  // another order, by what they say or where they fail)
+  [
+    "an argument checked before an omitted default runs",
+    one(
+      "function f(a: integer = hostValue, b: integer = 1) {\n  say a\n  say b\n}\nf(b: hostValue)\nexit\n",
+    ),
+  ],
+  [
+    "every argument evaluated before the first is checked",
+    one(
+      'function later {\n  say "later"\n  return 1\n}\nfunction f(a: integer, b: integer) {\n  say a\n}\nf(hostValue, later())\nexit\n',
+    ),
+  ],
+  [
+    "omitted defaults evaluated in parameter order",
+    one(
+      "function mark(x: integer): integer {\n  say x\n  return x\n}\nfunction f(a: integer = mark(3), b: integer = mark(4), c: integer = mark(5)) {\n  say a\n  say b\n  say c\n}\nf()\nexit\n",
+    ),
+  ],
   [
     "a store into the file's variable from a function",
     one('let top = "a"\nfunction f(v: string) {\n  top = v\n}\nf(hostValue)\nsay top\nexit\n'),

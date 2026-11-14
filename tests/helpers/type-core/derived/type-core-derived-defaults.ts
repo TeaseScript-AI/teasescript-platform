@@ -6,6 +6,7 @@ import { VALUE_KIND_NAMES } from "../../../../src/value-kinds.js";
 import { functionLandings } from "./derived-functions.js";
 import {
   Underivable,
+  declaredIn,
   type DerivedType,
   site,
   syntaxOf,
@@ -482,17 +483,13 @@ export function writtenLanding(
     )
       continue;
     const declaration =
-      statement.kind === "letStatement"
-        ? statement
-        : statements.find(
-            (candidate) => candidate.kind === "letStatement" && candidate.name.name === store.name,
-          );
-    if (declaration?.kind !== "letStatement" || declaration.typeAnnotation === null) continue;
+      statement.kind === "letStatement" ? statement : declaredIn(statements, statement, store.name);
+    if (declaration === null || declaration === undefined || declaration.typeAnnotation === null)
+      continue;
     const found = landsIn(store.value, writtenType(declaration.typeAnnotation));
     if (found !== undefined)
       return path.reduce<DerivedType | null>((type, step) => partOf(type, step), found);
   }
-  // (a value stored into a function's parameter or result with a written type, `derived-functions.ts`)
   for (const { value, written } of functionLandings(statements)) {
     const found = landsIn(value, writtenType(written));
     if (found !== undefined)

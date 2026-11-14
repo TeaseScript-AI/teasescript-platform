@@ -15,6 +15,7 @@ import {
   repairsRecord,
   type Syntax,
   allStatements,
+  declaredIn,
   storeOf,
   targetName,
   unwrap,
@@ -174,16 +175,14 @@ function writtenAt(
   switch (at.kind) {
     case "identifier": {
       if (seen.has(at.name)) return false;
-      const declared = statements.some(
-        (statement) =>
-          statement.kind === "letStatement" &&
-          statement.name.name === at.name &&
-          statement.typeAnnotation !== null,
-      );
-      if (declared) return true;
+      // (the name's declaration in its scope, and only the stores into that one)
+      const declared = declaredIn(statements, at, at.name);
+      if (declared?.kind === "letStatement" && declared.typeAnnotation !== null) return true;
       const values = statements.flatMap((statement) => {
         const store = storeOf(statement);
-        return store?.name === at.name ? [store.value] : [];
+        return store?.name === at.name && declaredIn(statements, statement, at.name) === declared
+          ? [store.value]
+          : [];
       });
       const next = new Set([...seen, at.name]);
       return (
@@ -280,7 +279,6 @@ export function derive(
   const discharges: (
     { statement: Statement } | { transfer: DerivedStore } | { native: Discharge & { by: "native" } }
   )[] = [];
-  // (the values stored into a function's place with a written type, by their store's site: `derived-functions.ts`)
   const transfers: DerivedStore[] = [];
   const native = (what: (Discharge & { by: "native" })["what"], at: string): void => {
     discharges.push({ native: { by: "native", what, site: at } });
@@ -307,7 +305,6 @@ export function derive(
       named.find((expression) => expression.span.start.offset === check.site.offset)
     );
   };
-  // (a check as `transferStore` reads it: its site and its target)
   const checkedAt = (check: (typeof record.checks)[number]) => ({
     start: check.site.offset,
     end: check.site.end,
@@ -393,7 +390,6 @@ export function derive(
         continue;
       }
       const store = storeOf(statement)!;
-      // (a store into a parameter names its place by its function, `derived-functions.ts`)
       const placeName = storedPlaceName(statement, store.name, syntax);
       const prefix = `${placeName}.`;
       if (check.target !== placeName && !check.target.startsWith(prefix)) {
