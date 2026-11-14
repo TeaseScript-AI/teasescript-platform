@@ -560,10 +560,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     }
     /** A block that waits while this wait stands saves this frame outside its own: the closure pushes it. */
     function afterWait(resumeAt) {
-      return `rt.afterWait(() => rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: ${resumeAt}, v: [%SAVED%] }))`;
+      return `rt.afterWait(() => SAVE(${resumeAt}))`;
     }
     function suspendHere(resumeAt) {
-      return `{ pc = ${resumeAt}; rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: ${resumeAt}, v: [${"%SAVED%"}] }); throw rt.SUSPEND; }`;
+      return `{ pc = ${resumeAt}; SAVE(${resumeAt}); throw rt.SUSPEND; }`;
     }
 
     /** The end of an `if` at `pc` and its else's end (or null), as lowering lays them out. */
@@ -1095,7 +1095,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       if (resumable) line(`if (rt.resuming) { ${f} = rt.resumeFrames[0].file; ${a} = 0; ${r} = rt.resumeFrame(); } else { ${f} = rt.callFile(${konst(ins)}, ${pc}); ${a} = rt.fileEntries[${f}]; ${r} = null; }`);
       else line(`${f} = rt.callFile(${konst(ins)}, ${pc}); ${a} = rt.fileEntries[${f}]; ${r} = null;`);
       line(`rt.depth += 1;`);
-      const onSuspend = resumable ? ` if (signal === rt.SUSPEND) rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: ${pc}, v: [%SAVED%] });` : "";
+      const onSuspend = resumable ? ` if (signal === rt.SUSPEND) SAVE(${pc});` : "";
       line(`for (;;) { try { ${enter}FILES[${f}](${r}, ${a}, true); break; } catch (signal) { if (signal === rt.END) break; if (signal instanceof rt.Goto && !signal.label) { ${f} = signal.file; ${a} = signal.pc; ${r} = null; rt.depth = ${d} + 1; continue; }${onSuspend} throw signal; } }`);
       line(`rt.depth = ${d}; rt.file = ${fileIndex};`);
     }
@@ -1253,7 +1253,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
           line(`try {`);
           line(`  if (rt.resuming) { rt.depth += 1; ${temp(ins.destinationTemporary)} = f${ins.functionId}(rt.resumeFrame()); }`);
           line(`  else { rt.enter(${konst(ins.span)}); ${temp(ins.destinationTemporary)} = f${ins.functionId}(null${ordered.map((a) => `, ${a}`).join("")}); }`);
-          line(`} catch (signal) { if (signal === rt.SUSPEND) rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: ${pc}, v: [%SAVED%] }); throw signal; }`);
+          line(`} catch (signal) { if (signal === rt.SUSPEND) SAVE(${pc}); throw signal; }`);
           line(`rt.depth -= 1;`);
           return;
         }
@@ -1407,15 +1407,16 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     }
     // A resumable region: its argument evaluation before a call that waits runs only on a fresh entry of that call.
     const savedList = saved().join(", ");
-    const body = out.map((text) => text.replaceAll("%SAVED%", savedList));
     const signature = definition === null ? `function file${fileIndex}(resume, at) {` : `function f${definition.id}(resume${params.map((p) => `, ${p}`).join("")}) {`;
     return [
       signature,
       ...header,
       `  let pc = ${definition === null ? "at" : start};`,
       `  if (resume !== null) { pc = resume.pc; [${savedList}] = resume.v; }`,
+      // One list of the saved variables per region, not one per wait: it was most of a large program's text.
+      `  const SAVE = (at) => rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: at, v: [${savedList}] });`,
       "  D: for (;;) switch (pc) {",
-      ...body,
+      ...out,
       definition === null ? "  default: throw new Error(`study: no resume point ${pc}`);" : "  return null;",
       "  }",
       "}",
