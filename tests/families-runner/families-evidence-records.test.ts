@@ -242,7 +242,7 @@ test("the packages' runner compares each package's analysis and route per mode b
   const out = join(folder, "packages.jsonl");
   const ran = spawnSync(
     process.execPath,
-    [packagesTool, base, head, "--root", root, "--out", out, "--timeout", "5", "--memory", "256"],
+    [packagesTool, base!, head!, "--root", root, "--out", out, "--timeout", "5", "--memory", "256"],
     { encoding: "utf8" },
   );
   assert.equal(ran.status, 1, ran.stderr);
