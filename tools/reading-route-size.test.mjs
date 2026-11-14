@@ -80,7 +80,6 @@ const ROUTER = [
   "",
 ].join("\n");
 
-/** Small committed documents and a route with different builder/reviewer sections and a conditional child. */
 const allRouted = () => ({
   ...Object.fromEntries(
     [...ROUTE.everyTask, ...ROUTE.whenNeeded.map((document) => document.path)].map((p) => [p, "a"]),

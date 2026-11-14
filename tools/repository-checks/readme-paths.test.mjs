@@ -30,6 +30,12 @@ function checkout(files) {
   return root;
 }
 
+function runCheck(root) {
+  const run = spawnSync(process.execPath, [tool], { cwd: root, encoding: "utf8" });
+  const problems = run.stderr.split("\n").filter((line) => line.includes(": `"));
+  return { status: run.status, problems };
+}
+
 /** The check run over the Player README `player` and the component map `component`, with the tracked `files`. */
 function check({ player = "", component = "" }, files = {}) {
   const root = checkout({
@@ -42,9 +48,7 @@ function check({ player = "", component = "" }, files = {}) {
     ...files,
   });
   try {
-    const run = spawnSync(process.execPath, [tool], { cwd: root, encoding: "utf8" });
-    const problems = run.stderr.split("\n").filter((line) => line.includes(": `"));
-    return { status: run.status, problems };
+    return runCheck(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -92,18 +96,13 @@ test("area.sh in ownership and a stale name in each route document fail with the
   ]);
 });
 
-test("tracked globs and unique basenames resolve; qualified context resolves otherwise ambiguous names", () => {
+test("tracked globs, unique basenames and file fragments resolve", () => {
   const result = check(
     {},
     {
       "README-FIRST.md":
         "`tests/families/*`, `stalls.mjs`, `tests/`, `docs/agents/README.md#heading`\n",
-      "docs/ORCHESTRATION.md":
-        "## Repository ownership\n\n`src/plan/` owns `model.ts` and `validation/`.\n",
       "tests/families/stalls.mjs": "",
-      "src/plan/model.ts": "",
-      "src/other/model.ts": "",
-      "src/plan/validation/check.ts": "",
     },
   );
   assert.deepEqual(result, { status: 0, problems: [] });
@@ -128,39 +127,91 @@ test("stale bare filenames with fragments fail on every extended surface, retain
   ]);
 });
 
-test("file parts with fragments resolve as unique names, directory context and globs", () => {
+test("file parts with fragments resolve as unique names and globs", () => {
   const result = check(
     {},
     {
       "README-FIRST.md": "`stalls.mjs#runner`\n",
       "docs/agents/README.md": "`helper.mjs#notes`\n",
-      "docs/agents/DIRECT-REPOSITORY.md":
-        "`src/plan/#map` owns `model.ts#members` and `validation/#rules`.\n",
       "docs/ORCHESTRATION.md": "## Repository ownership\n\n`tests/families/*#helpers`\n",
       "tests/families/stalls.mjs": "",
       "tools/helper.mjs": "",
-      "src/plan/model.ts": "",
-      "src/other/model.ts": "",
-      "src/plan/validation/check.ts": "",
     },
   );
   assert.deepEqual(result, { status: 0, problems: [] });
 });
 
-test("an ambiguous bare basename fails and directory context does not leak into the next paragraph", () => {
-  const result = check(
-    {},
-    {
-      "docs/ORCHESTRATION.md":
-        "## Repository ownership\n\n`src/plan/` owns `model.ts`.\n\n`model.ts`\n",
-      "src/plan/model.ts": "",
-      "src/other/model.ts": "",
-    },
-  );
-  assert.equal(result.status, 1);
-  assert.deepEqual(result.problems, [
-    "docs/ORCHESTRATION.md:5: `model.ts` names no tracked file or folder",
-  ]);
+test("directory context covers depth, ./ and fragments, stays in its paragraph and preserves stale tokens", () => {
+  const directories = [
+    { span: "src/", folder: "src" },
+    { span: "./src/", folder: "src" },
+    { span: "src/plan/", folder: "src/plan" },
+    { span: "./src/plan/", folder: "src/plan" },
+    { span: "src/#map", folder: "src" },
+  ];
+  const surfaces = [
+    { path: "README-FIRST.md", prefix: "", offset: 0 },
+    { path: "docs/agents/README.md", prefix: "", offset: 0 },
+    { path: "docs/agents/DIRECT-REPOSITORY.md", prefix: "", offset: 0 },
+    { path: "docs/ORCHESTRATION.md", prefix: "## Repository ownership\n\n", offset: 2 },
+  ];
+  for (const { span, folder } of directories) {
+    const root = checkout({
+      "player/README.md": "",
+      "player/vue/src/README.md": "",
+      ...Object.fromEntries(surfaces.map(({ path, prefix }) => [path, prefix])),
+      [`${folder}/member.mjs`]: "",
+      "elsewhere/member.mjs": "",
+      [`${folder}/nested/one.ts`]: "",
+      "elsewhere/nested/two.ts": "",
+      "empty/keep.ts": "",
+    });
+    try {
+      const cases = [
+        {
+          name: "last directory resolves",
+          text: `\`empty/\` and \`${span}\` are directories; the latter owns \`member.mjs#member\` and \`nested/#members\`.`,
+          line: 1,
+        },
+        {
+          name: "ambiguous control",
+          text: "`member.mjs#member`",
+          token: "member.mjs#member",
+          line: 1,
+        },
+        {
+          name: "next paragraph",
+          text: `\`${span}\` owns \`member.mjs#member\`.\n\n\`member.mjs#member\``,
+          token: "member.mjs#member",
+          line: 3,
+        },
+        {
+          name: "stale token",
+          text: `\`${span}\` owns \`stale.mjs#missing\`.`,
+          token: "stale.mjs#missing",
+          line: 1,
+        },
+      ];
+      for (const scenario of cases) {
+        for (const { path, prefix } of surfaces)
+          writeFileSync(join(root, path), prefix + scenario.text + "\n");
+        const problems =
+          scenario.token === undefined
+            ? []
+            : surfaces.map(
+                ({ path, offset }) =>
+                  `${path}:${offset + scenario.line}: \`${scenario.token}\` names no tracked file or folder`,
+              );
+        assert.deepEqual(
+          runCheck(root),
+          { status: scenario.token === undefined ? 0 : 1, problems },
+          `${span}: ${scenario.name}`,
+        );
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
 });
 
 test("ownership checks stop at the next peer heading and exclude commands, URLs and external paths", () => {

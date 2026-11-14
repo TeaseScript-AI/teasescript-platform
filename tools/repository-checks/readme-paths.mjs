@@ -18,8 +18,11 @@ import remarkGfm from "remark-gfm";
 // `.json`, `.md` or `.css`. Its text, less one trailing `/`, must be a file Git tracks (`git ls-files --cached`) or a
 // folder holding one, read first from the README's folder and then from the repository's top folder.
 // The route and ownership surfaces additionally admit other file suffixes (area.sh included), tracked globs,
-// and bare names. A bare name can use the preceding inline directory in the same paragraph; otherwise the document's
-// folder and repository root are tried, then an exact basename only when unique among tracked files/folders.
+// and bare names. In an extended surface, every checked span whose name (after its fragment is removed) ends in `/`
+// is a directory context for the bare names after it in the same paragraph, whatever its depth and with or without
+// a leading `./`. The last directory wins, a new paragraph clears it, and diagnostics retain the original token
+// with its fragment. If context does not resolve a name, the document's folder and repository root are tried,
+// then an exact basename only when unique among tracked files/folders.
 // A glob must match a tracked path, or a tracked basename for a bare glob. An inline #fragment is removed before
 // classifying or resolving the path; its heading is not checked (doc-links checks Markdown link targets).
 //
@@ -108,8 +111,7 @@ function pathSpans(markdown, { extended, heading }) {
           line: node.position.start.line,
           directory: directories.at(-1),
         });
-        if (extended && name.endsWith("/") && name.slice(0, -1).includes("/"))
-          directories.push(name);
+        if (extended && name.endsWith("/")) directories.push(name);
       }
       return;
     }
