@@ -28,8 +28,7 @@ const SELECTORS: ReadonlySet<string> = new Set(["by", "x", "y", "weight"]);
 
 /**
  * What the source says about an ask beyond its operands' types (see `SyntaxEvidence`). `placeOf` gives the value place
- * of a node the walk visited, and throws for any other: call this after the ask's operands are walked
- * (`Collector.#interaction`).
+ * of a node the walk visited, and throws for any other: call this after the ask's operands are walked.
  */
 export function interactionEvidence(
   expression: InteractionExpression,

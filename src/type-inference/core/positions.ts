@@ -35,8 +35,7 @@ export function withoutPositions<T>(callback: () => T): T {
  * A read's position: what its answer stands at (an original read occurrence, a binding whose key is read, or a
  * literal), the path below it (a path id, `Contract.pathStep`), the read node on the value side, whether a wrapper was
  * crossed (`hopped`) and the writer of the outermost one crossed (`null` before the first), and whether every receiver
- * on the way holds no reference (`noRef`, decided step by step from each receiver's kinds, `Contract.receiverKinds`)
- * and a structure too (`clean`, the contract side's).
+ * on the way holds no reference (`noRef`) and a structure too (`clean`, the contract side's).
  */
 export class Position implements Proof {
   public constructor(

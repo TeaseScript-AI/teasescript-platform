@@ -13,10 +13,8 @@ import { stepName, type CoreProgram } from "./program.js";
 import { readNow, type Reads } from "./inherited/reads.js";
 
 /*
- * The carriers (S6): the values that are, or hold, another value, their operand. One table, read by every walk over
- * them: admission's stops and structures, its landing index, the written-copy index and the obligations they leave
- * (`admission.ts`, `admission/`), and the property names (`property-names.ts`). A literal is structure, no carrier: its
- * cells stand at its element or property step, read through the literal index.
+ * The carriers (S6): the values that are, or hold, another value, their operand. A literal is structure, no carrier:
+ * its cells stand at its element or property step, read through the literal index.
  */
 
 /** The carrier kinds, each a row of `operandsOf`. */
@@ -241,7 +239,7 @@ export interface Strip<S> {
   under(below: readonly string[]): S;
 }
 
-/** An array as a `Strip`: `rest` copies its steps after the first, `under` joins `below` before them (`keptSteps`). */
+/** An array as a `Strip`. */
 export interface StepsStrip extends Strip<StepsStrip> {
   readonly kind: "steps";
   readonly steps: readonly string[];

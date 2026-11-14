@@ -23,8 +23,7 @@ import { placeKey } from "../way-facts.js";
 
 // What the code of a project may change (ADR 0021 rule 5.5): the names that functions and timer, media, and button
 // blocks assign or change in place, what each loop may do before its next test, and which files enter main.tease
-// again. `TypeChecker` (`type-checker.ts`) and `legacy-rounds.ts` take narrowing (rule 5.5) and the facts of a loop
-// from these; the type core (`core/`) reads none of them. Code found never to run changes nothing.
+// again. Code found never to run changes nothing.
 
 /**
  * What one iteration of a loop may do before the next test: the variables it assigns or changes in place, and whether
@@ -34,9 +33,7 @@ export interface LoopEffects {
   readonly writes: ReadonlyMap<string, Sharing>;
   /**
    * Whether an iteration reaches a point where a block may run or variables that functions and blocks share may change
-   * (#2737): a statement of `OTHER_CODE_STATEMENTS`, an interaction, a `say`, a button, a popup, a timer, media or
-   * camera expression, a call that is no `isInertBuiltinCall`, or a store into a member or element, also inside an
-   * inner loop. Not whether the iteration waits.
+   * (#2737), also inside an inner loop. Not whether the iteration waits.
    */
   readonly suspends: boolean;
 }
