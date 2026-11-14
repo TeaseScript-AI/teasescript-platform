@@ -50,7 +50,7 @@ const DOCS = {
   values: "docs/DIAGNOSTICS.md#names-types-and-values-tsv",
   tags: "docs/DIAGNOSTICS.md#tags-tst",
   compiler: "docs/DIAGNOSTICS.md#compiler-tsc",
-  runtime: "docs/RUNTIME.md#runtime-errors",
+  runtime: "docs/runtime/ERRORS.md#runtime-error-codes",
   checkpoint: "docs/RUNTIME.md#checkpoint-boundary",
 } as const;
 
@@ -617,7 +617,12 @@ export const DIAGNOSTIC_CODES = {
     "Speaker shown by its identifier",
     "docs/RUNTIME.md#globals-global-functions-and-speakers",
   ),
-  TSW002: entry(["runtime"], "warning", "`remove(...)` found no matching value", DOCS.runtime),
+  TSW002: entry(
+    ["runtime"],
+    "warning",
+    "`remove(...)` found no matching value",
+    "docs/RUNTIME.md#runtime-errors",
+  ),
   TSW010: entry(
     ["runtime"],
     "warning",
