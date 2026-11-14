@@ -1,7 +1,7 @@
 // Part F: Debug's stop at every statement, and rewind to an earlier wait with another answer there. The waits stand
 // inside a call inside a loop, and a list outlives the call that changes it.
 let log = []
-function round(i: integer): integer {
+function playRound(i: integer): integer {
   let picked = askChoice 1, 2, 3
   let extra = randomInteger(1..=6)
   log.add("${i}:${picked}+${extra}")
@@ -10,7 +10,7 @@ function round(i: integer): integer {
 }
 let total = 0
 for i in 0..3 {
-  total += round(i)
+  total += playRound(i)
   if total > 40 {
     let bonus = askInteger "Bonus?"
     total += bonus
