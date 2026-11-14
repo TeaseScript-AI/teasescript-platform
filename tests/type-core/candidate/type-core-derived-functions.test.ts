@@ -18,7 +18,12 @@ import {
 } from "../../helpers/type-core-route.js";
 import { evaluateProject } from "../../helpers/type-core/derived/derived-transfers.js";
 import { derive } from "../../helpers/type-core/derived/type-core-derived-checks.js";
-import { syntaxOf, Underivable } from "../../helpers/type-core/derived/type-core-derived.js";
+import { transferStore } from "../../helpers/type-core/derived/derived-functions.js";
+import {
+  expressions,
+  syntaxOf,
+  Underivable,
+} from "../../helpers/type-core/derived/type-core-derived.js";
 import { OPTIONS } from "../../helpers/type-core/type-core-candidate-setup.js";
 
 type Files = readonly { readonly path: string; readonly source: string }[];
@@ -228,7 +233,10 @@ test("another file's function: each file's stores are its own, and a run that wo
         path: "main.tease",
         source: "let a = 1\nlet b = 222222\nlet m: integer = hostValue\nshow()\nexit\n",
       },
-      { path: "helpers.tease", source: 'global function show {\n  let n = "aaaaaaaaaaaaaaaa"\n  say n\n}\n' },
+      {
+        path: "helpers.tease",
+        source: 'global function show {\n  let n = "aaaaaaaaaaaaaaaa"\n  say n\n}\n',
+      },
     ],
   ]) {
     const name = files[1]!.source;
@@ -259,4 +267,19 @@ test("another file's function: each file's stores are its own, and a run that wo
       name,
     );
   }
+});
+
+test("another file's default is never the calling file's store, at whatever offsets it lies", () => {
+  // the calling file's argument `[1, hostValue]` and the other file's default `hostValue` hold the same offsets: a check
+  // there into `check.n` is the argument's, the calling file's own store
+  const main = syntaxOf(`say "${"x".repeat(20)}"\ncheck([1, hostValue])\nexit\n`);
+  const helpers = syntaxOf("global function check(n: integer[] = hostValue) {\n  say n\n}\n");
+  const start = 37;
+  const store = transferStore(
+    { start, end: start + "hostValue".length, target: "check.n" },
+    main,
+    expressions(main.statements),
+    [main, helpers],
+  );
+  assert.deepEqual(store === null ? null : [store.so, store.eo], [33, 47]);
 });
