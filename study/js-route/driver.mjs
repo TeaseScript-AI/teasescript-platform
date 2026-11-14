@@ -21,7 +21,8 @@ const programs = new Map();
 /** The emitted program of a validated plan: its source, constants and the function that instantiates it. */
 /**
  * `form`: false (replay), true (resumable), "chain" (resumable, every author call on the driver's chain),
- * "chain-structured" (the chain form keeping place-free constructs outlined: remedy (a)) or "generators".
+ * "chain-structured" (the chain form keeping place-free constructs outlined: remedy (a)), "resumable-structured" (the
+ * resumable form with remedy (a), native calls) or "generators".
  */
 export function compileProgram(plan, resumable = false, runawayCheck = false, facts = null, stops = false) {
   const key = `${resumable}/${runawayCheck}/${facts === null ? "" : "typed"}/${stops}`;
@@ -30,7 +31,7 @@ export function compileProgram(plan, resumable = false, runawayCheck = false, fa
   let program = cache.get(plan);
   if (program === undefined) {
     const t0 = performance.now();
-    const emitted = emitProgram(plan, { resumable: resumable === true || resumable === "chain" || resumable === "chain-structured", chain: resumable === "chain" || resumable === "chain-structured", keepStructure: resumable === "chain-structured", generators: resumable === "generators", runawayCheck, facts, stops });
+    const emitted = emitProgram(plan, { resumable: resumable === true || resumable === "chain" || resumable === "chain-structured" || resumable === "resumable-structured", chain: resumable === "chain" || resumable === "chain-structured", keepStructure: resumable === "chain-structured" || resumable === "resumable-structured", generators: resumable === "generators", runawayCheck, facts, stops });
     const t1 = performance.now();
     const instantiate = new Function("rt", "K", emitted.source);
     // Part G: the time to emit, and to turn the text into a function (V8 compiles function bodies lazily, at first run).
@@ -233,7 +234,7 @@ export class ResumableSession {
     const captured = captureOrReuseInstructionPlan(plan);
     if (!captured.validation.valid || captured.plan === null) throw new TypeError("Malformed instruction plan.");
     this.#plan = captured.plan;
-    this.#program = compileProgram(this.#plan, chain ? (keepStructure ? "chain-structured" : "chain") : true, runawayCheck);
+    this.#program = compileProgram(this.#plan, chain ? (keepStructure ? "chain-structured" : "chain") : keepStructure ? "resumable-structured" : true, runawayCheck);
     this.#state = withFrozenTemporalCaptures(createFreshRuntimeSnapshotWithValidatedPlan(this.#plan, fresh));
   }
   get state() {

@@ -97,5 +97,7 @@ export function sessions(api, driver) {
     chain: { create: (plan) => driver.createResumableSession(plan, FRESH, { chain: true }), state: (s) => s.state },
     // The chain form keeping place-free constructs outlined (remedy (a)).
     "chain-structured": { create: (plan) => driver.createResumableSession(plan, FRESH, { chain: true, keepStructure: true }), state: (s) => s.state },
+    // The resumable form with remedy (a) and native calls: the baseline for the chain form with (a).
+    "resumable-structured": { create: (plan) => driver.createResumableSession(plan, FRESH, { keepStructure: true }), state: (s) => s.state },
   };
 }
