@@ -423,7 +423,7 @@ const INTENDED: readonly Intended[] = [
             : diagnostic.kinds.includes("unknown")
               ? typeTest(named, "integer")
               : exact("Use a whole number here."),
-    // (four fewer since S10 part 2b: those records' stored values take `is integer`'s narrowing, a whole number)
+    // (those records' stored values take `is integer`'s narrowing, a whole number)
     count: 173,
   },
   {

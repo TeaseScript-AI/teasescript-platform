@@ -102,7 +102,6 @@ export function choiceValues(
         items.filter((found) => need.includes(found.tag)),
       );
   };
-  // (a written choice object's button returns its `value`, else its `text`)
   const selected = (object: ChoiceObjectEvidence): void =>
     check(object.value ?? object.text, CHOICE_VALUES, "value");
   // a choice object the options hold without writing it, below `at`, as `choiceItems` reads its buttons: per record

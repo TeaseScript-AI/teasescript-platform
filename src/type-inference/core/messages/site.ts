@@ -366,7 +366,7 @@ export function givenByCall(
   });
 }
 
-/** Each declaration's parameters by name, made on its first named argument (#1817: no search per one). */
+/** Each declaration's parameters by name (#1817: no search per one). */
 const PARAMETERS = retainedModule<FunctionDeclaration, ReadonlyMap<string, FunctionParameter>>(
   "site.PARAMETERS",
   "weakMap",

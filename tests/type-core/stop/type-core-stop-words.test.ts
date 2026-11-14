@@ -339,7 +339,6 @@ test("the sentence table and the derived record name every site that words or de
     // (a kept value's types, asked only where an analysis ran to its end, as `present`)
     "diagnostics.ts:withFacts:keeps",
     "diagnostics.ts:withFacts:present",
-    // (the messages read them; a record carries what they read)
     "messages.ts:coreMessage:besides",
     "messages.ts:coreMessage:fits",
     "messages.ts:coreMessage:keeps",

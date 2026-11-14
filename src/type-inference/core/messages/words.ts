@@ -87,10 +87,8 @@ export function variable(text: string): string | null {
 
 /**
  * Whether a text is a stable path as written, on one line: a variable followed by properties, fixed
- * indexes or keys, or indexes and keys held in plain variables; not `.random`, a call or a computed index. It is the
- * only subject a fix's example names, so code that reads it again reads the same value (#1195). Any other subject, a
- * literal or another expression, gets its fix's sentence alone; a name is never taken from another declaration or from
- * the place's facts.
+ * indexes or keys, or indexes and keys held in plain variables; not `.random`, a call or a computed index: code that
+ * reads it again reads the same value (#1195).
  */
 export function stablePath(text: string): boolean {
   const fixed = (index: Expression): boolean =>
