@@ -172,7 +172,7 @@ RERUN.rows(
       transport.bridge,
       `let nested = ${"[".repeat(150)}1${"]".repeat(150)}\nshowButton "Done"\nexit`,
     );
-    await transport.bridge.start(plan, { wallClockMs: 0 }, true);
+    const session = await transport.bridge.start(plan, { wallClockMs: 0 }, true);
     const recording = await transport.bridge.readRecording(null);
     assert.ok(recording !== null, "the deep recording arrived");
     assert.equal(transport.unanswered(), 0);
@@ -183,6 +183,7 @@ RERUN.rows(
     transport.release();
     assert.deepEqual(await held, recording, "the released recording arrived intact");
     assert.equal(transport.unanswered(), 0);
+    transport.bridge.release(session);
     return end();
   },
 );
