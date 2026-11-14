@@ -549,7 +549,8 @@ test("a decline the budget causes carries the limit marker, one the slice does n
     ],
   ] as const)
     assert.deepEqual([error.what, error.limit], [what, true]);
-  const outside = reasonOf(() => compiled(`function f {\n  say 1\n}\nf()${END}`, null));
+  // (a compound assignment is outside the slice's syntax: an author function is inside it since #2667's step 4a-1)
+  const outside = reasonOf(() => compiled(`let n = 1\nn += 1${END}`, null));
   assert.equal(outside.limit, false, outside.what);
   // (the slice's own error, which the route turns into `CandidateOutsideSlice`, carries the same marker)
   const request = coreRequest([{ path: "main.tease", source: `let n = 1${END}` }], GLOBALS);
