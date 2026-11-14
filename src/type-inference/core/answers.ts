@@ -109,11 +109,6 @@ import { stopDiagnostics } from "./stop-diagnostics.js";
 import { Retained, retainedModule } from "./retained/retained.js";
 import type { IdentityView } from "./identity-view.js";
 
-/*
- * The answers of the coarse core: the frozen surface (`Answers`) that `analyseCore` publishes once per compile, after
- * its last pass.
- */
-
 /** The parts of one pass of the analysis: each reads the others through it. */
 export interface CorePass {
   readonly program: CoreProgram;
@@ -165,7 +160,6 @@ function createPass(
   } = {
     program,
     definitions,
-    // admission's rejections take effect in the next pass
     lists: new DefinitionLists(
       definitions,
       // (#1072 R26: captures `rejected`, the pass's own, never written after it is given)
@@ -771,7 +765,6 @@ export function analyseCore(request: CoreAnalysisRequest): Answers {
       program.work.charge("rejectPasses");
       const repeated = sets.findIndex((set) => sameSet(set, now));
       if (repeated >= 0) {
-        // the stores every set of the cycle rejects stay rejected, the others are its possibilities
         const cycle = sets.slice(repeated);
         const every = new Map<number, ReadonlySet<Key>>();
         const some = new Set<number>();
@@ -788,7 +781,6 @@ export function analyseCore(request: CoreAnalysisRequest): Answers {
       sets.push(rejected);
     }
   } catch (error) {
-    // a stop in the setup or in a pass's own setup, outside the consumers' walk
     if (!(error instanceof BudgetExhausted)) throw error;
     program.work.stop(error.limit);
   }
@@ -898,10 +890,8 @@ function* asked(demand: ProofDemand<Proof>): Work<readonly Item[]> {
 }
 
 /**
- * Test-only: the computation a demand's key names, rebuilt from the key (`protoLayer|`, `c|`, `ob|`,
- * `obk|`, `a4|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`,
- * `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them). The analysis makes its demands directly; a kind
- * missing here fails only these replays.
+ * Test-only: the computation a demand's key names, rebuilt from the key. The analysis makes its demands directly; a
+ * kind missing here fails only these replays.
  */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
@@ -1272,9 +1262,6 @@ class CoreAnswers implements Answers {
       ]),
     );
     this.outcome = outcomeOf(this.diagnostics);
-    // each warning's obligation, one per warning, then the boundary checks no warning owes: in source order of their
-    // sites, at one site the warnings' obligations in the diagnostics' order (a stop's moved checks after the shown
-    // ones'), then the others (`checksBySite`)
     const owned: Obligation[] = [];
     for (const diagnostic of this.diagnostics)
       if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {
@@ -1405,7 +1392,6 @@ class CoreAnswers implements Answers {
       projection = program.projOf.get(base)
     )
       base = projection.owner;
-    // a bare read's place is its binding's, as a read below one is
     return program.occurrenceOf.has(base)
       ? program.targetRoot(program.occurrenceOf.get(value) ?? value)
       : null;
@@ -1884,7 +1870,6 @@ class CoreAnswers implements Answers {
     return {
       alternatives: alternatives.length > 0 ? alternatives : null,
       dynamic: unknown === undefined ? null : dynamicWhy(unknown.reasons),
-      // the constant service's value is the consumer's
       known: node.expression === undefined ? undefined : this.#known?.(node.expression),
       certain: items.length > 0 && items.every((item) => item.cert === "def"),
     };

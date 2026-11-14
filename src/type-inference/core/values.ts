@@ -107,8 +107,7 @@ import { Retained } from "./retained/retained.js";
  * exact path's value at its definition, or the contract, and under a test of its key its kinds are possible and
  * marked. A read inside a stored value takes its narrowing definition where that holds: so a copy, an operation or a
  * store check sees the tested kinds, and the test whether a loop's store preserves a narrowing, which reads the store's
- * own value, takes them too. The value of an expression at its node follows the read through projections, call
- * results, operations and literals.
+ * own value, takes them too.
  */
 
 const COLLECTIONS: ReadonlySet<string> = new Set(["list", "set", "dict", "object"]);
@@ -132,8 +131,8 @@ interface NarrowedRead {
 }
 
 /**
- * A narrowing definition's items' demand key (`Values.narrowingValue`): its entry, its input (whose stable path, with
- * the element steps, is its location), its form and its element steps.
+ * A narrowing definition's items' demand key (`Values.narrowingValue`); its input's stable path, with the element
+ * steps, is its location.
  */
 export function narrowingKey(g: Narrowing): string {
   return joinParts("gv", g.node.id, g.input.id, g.form.kind, g.elements);
@@ -603,11 +602,9 @@ export class Values {
 
   /** The value of a place at a node, read at the path `asked` below it (steps, or a cursor's path or span). */
   public valueItems(value: PlaceId, node: FlowNode | null, asked: Rest): Work<readonly Item[]> {
-    // (a cursor's span read by its path's id)
     if (!isSteps(asked) && asked.kind === "span")
       return this.#valueItemsAt(value, node, asked.id());
     const rest = isSteps(asked) ? asked : asked.steps();
-    // a read at a path of property steps stands one step below its parent's position
     if (
       rest.length > 0 &&
       positions() &&
@@ -865,8 +862,7 @@ export class Values {
 
   /**
    * A value read along a path through a member a built-in value answers by itself, from the step `from` on, where the
-   * path ends: at a literal or an operation (a projection passes its step to its owner, and a variable or a call its key
-   * to the key's reads, which the contract answers the same way). A dict's `values` is a new list of its values and its
+   * path ends: at a literal or an operation. A dict's `values` is a new list of its values and its
    * `keys` one of text, as certain as the dict, either may hold none (no count proof, no `null`); a
    * temporal field or a calendar duration's part gives its declared result (V30 §35); an object's own property of the
    * name is read as any property, and a receiver that may be a reference has the runtime's members.
@@ -878,7 +874,6 @@ export class Values {
     from: number,
   ): Work<readonly Item[]> {
     const { program } = this.pass;
-    // (a read, a projection or a call passes the path on whole: its member steps are scanned where it ends)
     if (
       program.occurrenceOf.has(value) ||
       program.projOf.has(value) ||
@@ -1123,7 +1118,6 @@ export class Values {
             ),
           );
       } else if (item.tag === "object" || REFERENCE.has(item.tag)) {
-        // an object's own `length`, a reference's member
         const own = yield* this.valueItems(owner, node, stepsAfter([step], rest));
         out.push(...(item.cert === "def" ? own : weaken(own)));
       } else if (item.tag === "unknown") out.push(item);
@@ -1521,9 +1515,7 @@ export class Values {
       heldReference(yield* contract.valueReceiver(c.receiver))
     )
       return [OPAQUE_MEMBER];
-    // `"${v}"` is always text
     if (family === "interpolation") return rest.length === 0 ? [makeItem("string")] : [];
-    // a message's handle, whose members are the runtime's
     if (family === "say") return rest.length > 0 ? [OPAQUE_MEMBER] : [makeItem("messageHandle")];
     // `2 s`, `1 calendar day`, `20 deg`
     if (family === "unit" || family === "angle")
@@ -1548,7 +1540,6 @@ export class Values {
       ];
     }
     const method = family === "method" && c.receiver !== null ? methodCategory(name) : undefined;
-    // a declared result, or what a removal gives
     if (method !== undefined && c.receiver !== null && method.gives.kind !== "copy") {
       const gives = method.gives;
       for (const item of withoutEmpty(yield* this.valueItems(c.receiver, at, []))) {
@@ -1583,7 +1574,6 @@ export class Values {
       }
       return out;
     }
-    // a copy of the elements (`#copied`)
     if (method !== undefined && c.receiver !== null && method.gives.kind === "copy")
       return yield* this.#copied(method.gives, c.receiver, at, rest);
     if (family === "operator" && name === "+" && rest.length > 0) {
@@ -1597,13 +1587,11 @@ export class Values {
       const repeated = contract.plusRepeatOf(c.result, true);
       if (repeated !== c.result) return [...(yield* this.valueItems(repeated, at, rest))];
       const operands: (readonly Item[])[] = [];
-      // (an operand admission rejected from the join gives it nothing: `joinElements`)
       for (const argument of c.arguments)
         if (this.pass.lists.joined(argument))
           operands.push(yield* this.valueItems(argument, at, rest));
       return [...plusElements(operands, rest, this.pass)];
     }
-    // an operator of the runtime's operator table (`operatorOf`): its result by the table
     const operator = operatorOf(c);
     if (operator !== null) {
       if (rest.length > 0) return [];
@@ -1612,10 +1600,8 @@ export class Values {
         operands.push(withoutEmpty(yield* this.valueItems(argument, at, [])));
       return operationItems(operator, operands, program.scope, c.site);
     }
-    // `and`, `or`, `not`, `==`, `!=`, `is`: a truth value (their consumers check the operands)
     if (family === "logic" || family === "comparison" || family === "typeTest")
       return rest.length > 0 ? [] : [makeItem("boolean")];
-    // a conversion: its result, or its default
     const conversion = family === "conversion" ? conversionCategory(name) : undefined;
     if (conversion?.kind === "converts") {
       if (rest.length > 0) return [];
@@ -1635,7 +1621,6 @@ export class Values {
         ? [unknownItem(REASON.external)]
         : [...(yield* this.defaultKinds(fallback, at, rest)), ...emptyAt(rest)];
     }
-    // an asking interaction: its declared result
     const interaction = family === "interaction" ? interactionCategory(name) : undefined;
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
@@ -1659,17 +1644,13 @@ export class Values {
     }
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));
-    // a handle's members are the runtime's
     if (family === "timer" || family === "media")
       return rest.length === 0 ? [makeItem(family)] : [OPAQUE_MEMBER];
-    // a button's, a popup's or a camera's fixed result; a handle's members are the runtime's
     const shown = shownResult(name);
     if (shown !== undefined)
       return rest.length === 0 ? [makeItem(shown)] : shown === "duration" ? [] : [OPAQUE_MEMBER];
     // a range: its elements are its kind's (`kindElement`), nothing stands below it by path
     if (family === "range") return rest.length === 0 ? [makeItem("range")] : [];
-    // a method without a category, per receiver alternative: its declared result per receiver kind, else the runtime's
-    // opaque answer on a known kind (its consumers keep their checks); what the core cannot know keeps its own reasons.
     // A receiver without items yet is a provisional bottom, no answer: the method's result stays the bottom, which the
     // solver completes (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44), never an
     // `unknown` with a reason of its own
