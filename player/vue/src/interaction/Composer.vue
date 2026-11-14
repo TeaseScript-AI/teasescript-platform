@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="Request">
-import { computed, nextTick, onUnmounted, ref, useId, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
 import { ArrowLeft, Eye, EyeOff, Paperclip } from "@lucide/vue";
 import { Textarea } from "@/components/ui/textarea";
@@ -119,28 +119,38 @@ const feedbackId = useId();
 const container = ref<HTMLElement | null>(null);
 const noticeSlot = ref<HTMLElement | null>(null);
 /**
- * How far above its place over the field the notice floats: to the top edge of the question's answer controls, so it
- * covers none of them, but never past the top of the session's area (the conversation and the Stage); with no room
- * there it stops at that top and may cover the upper controls. Placed each frame while it shows, as the conversation scrolls, resizes, or brings its controls back.
+ * The session's area (the Stage and the conversation), where the notice paints: outside the conversation panel, which
+ * clips its overflow, so it can float over the Stage.
  */
-const noticeLift = ref(0);
+const composition = ref<HTMLElement | null>(null);
+onMounted(() => {
+  composition.value = container.value?.closest<HTMLElement>(".player-composition") ?? null;
+});
+/**
+ * Where the notice floats, in its positioned ancestor (the session's area): over the composer's width, 8px above the
+ * field, or above the top edge of the question's answer controls when it shows some, so it covers none of them; never
+ * higher than 8px below the top of the session's area, where with no room it may cover the upper controls. Placed each
+ * frame while it shows, as the conversation scrolls, resizes, or brings its controls back.
+ */
+const noticePlace = ref<Record<string, string>>({});
 let noticeFrame = 0;
 function placeNotice() {
   const slot = noticeSlot.value;
-  const shell = container.value;
-  const anchor = props.noticeAnchor();
+  const shell = container.value?.getBoundingClientRect();
+  const base = (composition.value ?? container.value)?.getBoundingClientRect();
   noticeFrame = slot ? requestAnimationFrame(placeNotice) : 0;
-  if (!slot || !shell || !anchor) {
-    noticeLift.value = 0;
-    return;
-  }
-  const shellTop = shell.getBoundingClientRect().top;
-  const ceiling = Math.max(
-    0,
-    shell.closest(".player-composition")?.getBoundingClientRect().top ?? 0,
-  );
-  const room = shellTop - 8 - slot.offsetHeight - (ceiling + 8);
-  noticeLift.value = Math.max(0, Math.min(shellTop - anchor.getBoundingClientRect().top, room));
+  if (!slot || !shell || !base) return;
+  const width = `${shell.width}px`;
+  // Its height at its width, which its first frame has not been given yet.
+  slot.style.width = width;
+  const anchorTop = props.noticeAnchor()?.getBoundingClientRect().top ?? shell.top;
+  const ceiling = Math.max(0, base.top) + 8;
+  const edge = Math.max(Math.min(shell.top, anchorTop) - 8, ceiling + slot.offsetHeight);
+  noticePlace.value = {
+    left: `${shell.left - base.left}px`,
+    width,
+    bottom: `${base.bottom - Math.min(edge, shell.top - 8)}px`,
+  };
 }
 watch(
   () => props.feedback,
@@ -390,17 +400,14 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
   >
     <!-- Floats above the field, or above the question's controls, and takes no room: nothing moves when it shows or
     goes. A press passes through it. -->
-    <div
-      v-if="feedback"
-      ref="noticeSlot"
-      class="composer-notice-slot"
-      :style="{ bottom: `calc(100% + 8px + ${noticeLift}px)` }"
-    >
-      <p :id="feedbackId" class="composer-notice" role="status" aria-live="polite">
-        {{ feedback }}
-      </p>
-      <span class="composer-notice-arrow" aria-hidden="true" />
-    </div>
+    <Teleport :to="composition" :disabled="!composition">
+      <div v-if="feedback" ref="noticeSlot" class="composer-notice-slot" :style="noticePlace">
+        <p :id="feedbackId" class="composer-notice" role="status" aria-live="polite">
+          {{ feedback }}
+        </p>
+        <span class="composer-notice-arrow" aria-hidden="true" />
+      </div>
+    </Teleport>
     <div
       class="conversation-glass"
       data-composer-shell
@@ -575,14 +582,6 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
 .composer-container {
   position: relative;
   pointer-events: none;
-  --composer-notice-surface: #fff0ef;
-  --composer-notice-border: #c75452;
-  --composer-notice-text: #762421;
-}
-:global(:root[data-player-theme="dark"] .composer-container) {
-  --composer-notice-surface: #3a2323;
-  --composer-notice-border: #e98780;
-  --composer-notice-text: #ffd4d1;
 }
 .conversation-glass {
   position: relative;
@@ -716,11 +715,20 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
   font-weight: 700;
 }
 
+/* Above the conversation, the Stage and the top bar (z-index 20), below dialogs; a press passes through it. */
 .composer-notice-slot {
   position: absolute;
-  bottom: calc(100% + 8px);
-  inset-inline: 12px 0;
-  z-index: 1;
+  z-index: 25;
+  pointer-events: none;
+  padding-inline-start: 12px;
+  --composer-notice-surface: #fff0ef;
+  --composer-notice-border: #c75452;
+  --composer-notice-text: #762421;
+}
+:global(:root[data-player-theme="dark"] .composer-notice-slot) {
+  --composer-notice-surface: #3a2323;
+  --composer-notice-border: #e98780;
+  --composer-notice-text: #ffd4d1;
 }
 .composer-notice {
   inline-size: fit-content;
@@ -738,7 +746,7 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
   position: absolute;
   bottom: -6px;
   z-index: 1;
-  inset-inline-start: 40px;
+  inset-inline-start: 52px;
   inline-size: 12px;
   block-size: 12px;
   transform: rotate(45deg);

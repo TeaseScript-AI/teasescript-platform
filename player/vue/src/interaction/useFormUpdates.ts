@@ -19,7 +19,7 @@ import type { ComposerState, FormDraft } from "./useComposerState.js";
  * A form's updates (PLAYER-UI "Forms"): a field's step, toggle or cycle, a typed field's commit, Back,
  * Clear and the draft timer's store. They are no answers: no pending record, nothing consumed, never greyed, and a
  * refusal undoes nothing but a field's label typed in the chat, whose text comes back; each goes in click order through
- * the session's input sections, and a refusal shows the notice. A typed field's commit keeps its field read-only, not
+ * the session's input sections; a gone question settles silently. A typed field's commit keeps its field read-only, not
  * greyed, until the form answered it (took or refused it) or input closed. The updates sent and not yet
  * answered are counted per form action: the form's Submit and Cancel read that count (`useAnswerSubmission`'s
  * `submitForm`) and skip their local check while it is above zero.

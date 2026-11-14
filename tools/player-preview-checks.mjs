@@ -456,7 +456,9 @@ async function transcriptNativeWheelChecks(page) {
 }
 
 // A refused answer shows the composer's notice, which floats above the question's buttons and the field, covering
-// neither: they and the last messages stay where they are while it shows and once it went. A press or touch dismisses it.
+// neither, and paints whole: no ancestor clips it, and it is what a press at its corners and centre would reach. The
+// buttons, the field and the last messages stay where they are while it shows and once it went. A press or touch
+// dismisses it. 390x420 stands for a phone with its keyboard open.
 async function composerNoticeChecks(page) {
   const baseUrl = page.url().split("?")[0];
   // Read once the entrances and glides have ended.
@@ -485,7 +487,7 @@ async function composerNoticeChecks(page) {
     before = await layout();
     await input.press("Enter");
     // The composer's own feedback; the Player notice live regions are separate status regions.
-    await page.locator("[data-runtime-interaction] .composer-notice[role='status']").waitFor();
+    await page.locator(".composer-notice[role='status']").waitFor();
     if ((await layout()) !== before) throw new Error("The composer's notice moved the layout");
     const covers = await page.evaluate(() => {
       const notice = document.querySelector(".composer-notice").getBoundingClientRect();
@@ -503,6 +505,44 @@ async function composerNoticeChecks(page) {
       });
     });
     if (covers) throw new Error("The composer's notice covers an answer button or the field");
+    const unseen = await page.evaluate(() => {
+      const notice = document.querySelector(".composer-notice");
+      const box = notice.getBoundingClientRect();
+      const inside = (outer) =>
+        box.left >= outer.left - 0.5 &&
+        box.right <= outer.right + 0.5 &&
+        box.top >= outer.top - 0.5 &&
+        box.bottom <= outer.bottom + 0.5;
+      if (!inside({ left: 0, top: 0, right: innerWidth, bottom: innerHeight }))
+        return "outside the viewport";
+      for (let element = notice.parentElement; element; element = element.parentElement) {
+        const style = getComputedStyle(element);
+        const clips =
+          style.overflowX !== "visible" ||
+          style.overflowY !== "visible" ||
+          style.clipPath !== "none";
+        if (
+          clips &&
+          element !== document.documentElement &&
+          !inside(element.getBoundingClientRect())
+        )
+          return `clipped by ${element.tagName}.${element.className}`;
+      }
+      // Hit-tested with pointer events on for the probe only: whatever paints above it would be reached instead. The
+      // corners' points lie inside its 12px rounding.
+      notice.style.pointerEvents = "auto";
+      const points = [
+        [box.left + 6, box.top + 6],
+        [box.right - 6, box.top + 6],
+        [box.left + 6, box.bottom - 6],
+        [box.right - 6, box.bottom - 6],
+        [(box.left + box.right) / 2, (box.top + box.bottom) / 2],
+      ];
+      const hidden = points.find(([x, y]) => !notice.contains(document.elementFromPoint(x, y)));
+      notice.style.pointerEvents = "";
+      return hidden ? `covered at ${hidden.map(Math.round)}` : "";
+    });
+    if (unseen) throw new Error(`The composer's notice does not paint whole: ${unseen}`);
   };
   const unmoved = async () => {
     const after = await layout();
@@ -515,21 +555,23 @@ async function composerNoticeChecks(page) {
   await page.locator(".player-stage").click();
   await page.locator(".composer-notice").waitFor({ state: "hidden", timeout: 2000 });
   await unmoved();
-  await page.setViewportSize({ width: 390, height: 700 });
   // Touch first: a coarse pointer gives the composer wider edge gutters, which the notice must not be blamed for.
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
-  await page.goto(baseUrl);
-  await invalidAnswer();
-  const stage = await page.locator(".player-stage").boundingBox();
-  const touch = { x: stage.x + stage.width / 2, y: stage.y + stage.height / 2 };
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  // Well before the notice's own expiry, so only the touch can have dismissed it.
-  await page.locator(".composer-notice").waitFor({ state: "hidden", timeout: 2000 });
-  await unmoved();
+  for (const height of [700, 420]) {
+    await page.setViewportSize({ width: 390, height });
+    await page.goto(baseUrl);
+    await invalidAnswer();
+    const stage = await page.locator(".player-stage").boundingBox();
+    const touch = { x: stage.x + stage.width / 2, y: stage.y + stage.height / 2 };
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    // Well before the notice's own expiry, so only the touch can have dismissed it.
+    await page.locator(".composer-notice").waitFor({ state: "hidden", timeout: 2000 });
+    await unmoved();
+  }
   await page.setViewportSize({ width: 1440, height: 900 });
-  return "PASS a refused answer's composer notice moves nothing, and a press or touch dismisses it";
+  return "PASS a refused answer's composer notice paints whole, moves nothing, and a press or touch dismisses it";
 }
 
 async function composerMouseFocusChecks(page) {
