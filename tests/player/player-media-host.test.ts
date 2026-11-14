@@ -142,7 +142,7 @@ async function mount(context: TestContext, topology: Topology, delayMs: number) 
     await player.activate();
   };
   const reports = () => posted.filter((request) => request.op === "reportMediaLoad");
-  return { player, elements, start, reports, posted, queued };
+  return { player, elements, start, reports, posted, queued, unanswered: transport.unanswered };
 }
 
 const transcript = (player: MediaHost) =>
@@ -160,7 +160,33 @@ const RERUN = rerunRegistry({
   "scene time, 0 ms": ["in-process"],
   "scene time, 50 ms": TOPOLOGIES,
   "scene time, 250 ms": ["in-process"],
+  "deep recording replies": TOPOLOGIES,
 });
+
+RERUN.rows(
+  "deep recording replies",
+  "a deep recording reaches the client immediately and after a held reply is released",
+  async (context, topology, end) => {
+    const transport = await topologyBridge(context, topology);
+    const { plan } = await sourceStart(
+      transport.bridge,
+      `let nested = ${"[".repeat(150)}1${"]".repeat(150)}\nshowButton "Done"\nexit`,
+    );
+    const session = await transport.bridge.start(plan, { wallClockMs: 0 }, true);
+    const recording = await transport.bridge.readRecording(null);
+    assert.ok(recording !== null, "the deep recording arrived");
+    assert.equal(transport.unanswered(), 0);
+    transport.hold("readRecording");
+    const held = transport.bridge.readRecording(null);
+    await transport.held();
+    assert.equal(transport.unanswered(), 1, "a held reply is still unanswered");
+    transport.release();
+    assert.deepEqual(await held, recording, "the released recording arrived intact");
+    assert.equal(transport.unanswered(), 0);
+    transport.bridge.release(session);
+    return end();
+  },
+);
 
 for (const delayMs of [0, 50, 250] as const)
   RERUN.rows(
@@ -395,6 +421,15 @@ for (const delay of [0, 50, 250] as const)
       );
       const advance = async (ms: number) => {
         for (let i = 0; i < ms; i++) {
+          if (topology === "worker") {
+            // Real Worker latency must not advance scene time while requests or their queued sections are outstanding.
+            const within = withinHostTime();
+            await drainTasks();
+            while (player.unanswered() > 0 || player.queued.current > 0) {
+              assert.ok(within(), "the Worker answers before the mocked clock advances");
+              await drainTasks();
+            }
+          }
           now++;
           for (const audio of player.elements) if (!audio.paused) audio.currentTime += 0.001;
           context.mock.timers.tick(1);
