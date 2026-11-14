@@ -22,7 +22,7 @@ import { RuntimeFault } from "../errors.js";
 import { quotedText } from "../values/value-text.js";
 import { messageText } from "../values/text-length.js";
 import { listHasPosition } from "../values/collection-operations.js";
-import { loweredOperand } from "./lowered-operands.js";
+import { loweredOperand, planLabel } from "../../plan/operand-labels.js";
 import { durationPropertyMessage } from "../../duration.js";
 import { LIST_INDEX_RULE, negativeListIndexMessage } from "../../operand-rules.js";
 import { ROUND_COUNT_FIX } from "../../loop-rules.js";
@@ -64,7 +64,7 @@ import { numberFromText } from "../../conversions.js";
 import { describeValue, isDictKey } from "../../value-kinds.js";
 import { timerOf, mediaOf, cameraView, liveMessage, readHandleProperty } from "./handles.js";
 import { drawIndex, randomItem } from "./draws.js";
-import { type SourceSpan, fault, receiverLabel, planLabel } from "./support.js";
+import { type SourceSpan, fault, receiverLabel } from "./support.js";
 import type { Evaluator } from "../evaluator.js";
 import { speakerById } from "./speakers.js";
 

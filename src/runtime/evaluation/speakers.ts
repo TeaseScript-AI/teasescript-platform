@@ -52,7 +52,8 @@ import {
 import { VALUE_KINDS, valueKindOf } from "../../value-kinds.js";
 import { timerOf, mediaOf, cameraView } from "./handles.js";
 import { randomItem } from "./draws.js";
-import { type SourceSpan, fault, planLabel } from "./support.js";
+import { type SourceSpan, fault } from "./support.js";
+import { planLabel } from "../../plan/operand-labels.js";
 import type { Evaluator } from "../evaluator.js";
 import { copySpan } from "../../plan/source-location.js";
 
