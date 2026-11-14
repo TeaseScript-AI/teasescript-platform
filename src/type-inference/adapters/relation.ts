@@ -3,8 +3,6 @@ import type { KnownValue } from "../../static-evaluation.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { ContractRef, DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence } from "../graph.js";
 
-// An operation's result as a relation over what is known of its operands so far.
-
 /** A reference to one operand of an operation: its receiver, a positional argument, or a named one. */
 export type OperandRef =
   { readonly receiver: true } | { readonly argument: number } | { readonly named: string };
@@ -25,7 +23,7 @@ export interface OperationInputs {
   readonly receiver: OperandView | null;
   readonly arguments: readonly OperandView[];
   readonly named: ReadonlyMap<string, OperandView>;
-  /** What the source says beyond the operands' types (see `SyntaxEvidence`). */
+  /** What the source says beyond the operands' types. */
   readonly evidence: SyntaxEvidence | undefined;
   /** The view of a place the evidence names, such as a written choice object's `value`. */
   view(place: PlaceId): OperandView;
@@ -57,7 +55,7 @@ export type OperationResult =
   | { readonly kind: "dynamic"; readonly why: DynamicWhy }
   /** The contract says nothing yet (a numeric callback's `unknown`); no evidence is added or removed. */
   | { readonly kind: "unconstrained" }
-  /** The operands can never combine under the contract; the check reports it, the result has no value. */
+  /** The operands can never combine under the contract: the result has no value. */
   | { readonly kind: "invalid" }
   /** One of several results, as `fromBase64(text, default: box)` gives text or a copy of its default. */
   | { readonly kind: "alternatives"; readonly results: readonly OperationResult[] }
@@ -80,7 +78,6 @@ export interface OperationRelation {
   result(inputs: OperationInputs): OperationResult;
 }
 
-/** The relations of every contract family, by family and name. */
 export interface OperationRelations {
   relation(contract: ContractRef): OperationRelation | undefined;
 }

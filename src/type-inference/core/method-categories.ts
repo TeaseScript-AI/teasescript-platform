@@ -195,7 +195,7 @@ export function memberStep(
 }
 
 /**
- * F25, F19a: what the other interactions give, the adapters' fixed results: a button's or a popup's duration, a
+ * F25, F19a: what the other interactions give: a button's or a popup's duration, a
  * permanent button's or a camera's handle.
  */
 const SHOWN: Readonly<Record<string, ValueKind>> = {
@@ -224,7 +224,7 @@ export function memberResult(name: string): readonly ValueKind[] | undefined {
 export type InteractionCategory =
   { readonly kind: "asks"; readonly result: ValueKind } | { readonly kind: "options" };
 
-/** The interactions with a declared answer, by the collector's interaction kinds: the oracle's adapter rows. */
+/** The interactions with a declared answer, by the collector's interaction kinds. */
 const ASKS: Readonly<Record<string, ValueKind>> = {
   text: "string",
   password: "string",

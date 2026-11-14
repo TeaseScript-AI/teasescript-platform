@@ -4,11 +4,9 @@ import type { WorkLedger } from "./budget.js";
 import { Retained } from "./retained/retained.js";
 
 /*
- * The items of the core: what the analysis knows of a value at a read. A value is a
- * list of items, one per kind. An item is one kind with a certainty (`def`: every run that reaches the read has a value
- * of this kind; `pos`: some run may), the reasons of an `unknown`, one writer that explains it (F28) and one context
- * word (`CONTEXT_WORDS`). Some items also carry the ingress stores of external data (C9), the guard mark (`guarded`) or
- * the identity of the one unknown operand whose operator rows they stand for (`fan`).
+ * The items of the core: what the analysis knows of a value at a read. A value is a list of items, one per kind. An
+ * item is one kind with a certainty (`def`: every run that reaches the read has a value of this kind; `pos`: some run
+ * may), the reasons of an `unknown`, one writer that explains it (F28) and one context word (`CONTEXT_WORDS`).
  */
 
 /**
@@ -29,8 +27,7 @@ export const REASON = { external: 1, opaque: 2, deferred: 4, missing: 8, budget:
 /**
  * The context words in the order a warning names the first: the reasons' words (`unmodelled` to `unknown`), which are
  * decided first, then those of the exact path's conditions X1 to X7, then A7's `later`, and last `budget`, a value the
- * analysis stopped before deciding (B1, D4). `reasonContext` orders the first four, the reasons' own words,
- * differently (`external`'s `unknown` before `deferred-parameter`).
+ * analysis stopped before deciding (B1, D4).
  */
 export const CONTEXT_WORDS = [
   "unmodelled",
@@ -50,7 +47,7 @@ export const CONTEXT_WORDS = [
 
 export type ContextWord = (typeof CONTEXT_WORDS)[number];
 
-/** A store that explains an item (F28): its kind and its site; the record writes it `kind@file:offset`. */
+/** A store that explains an item (F28): its kind and its site. */
 export interface Writer extends SourceSite {
   readonly kind: string;
 }

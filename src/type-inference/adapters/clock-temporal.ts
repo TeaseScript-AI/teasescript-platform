@@ -15,12 +15,6 @@ import type { ValueKind } from "../../value-kinds.js";
 import type { OperationRelation, OperationResult } from "./relation.js";
 import { typeResult, type MemberAnswer, type MemberRules } from "./views.js";
 
-/**
- * The clock reads and the members of date and time values and calendar durations: a clock read gives a value of its
- * kind, a field or part is computed when it is read, with the field's few values kept (`weekday` is one of the seven
- * names), and a method gives a new value of its result. None of them takes arguments; a call with any still gives the
- * result. An exact duration has no members.
- */
 const scalar = (name: ScalarTypeName): StaticType => ({ kind: "scalar", name });
 
 function fieldType(field: TemporalField): StaticType {
@@ -39,6 +33,7 @@ function property(kind: ValueKind, name: string): MemberAnswer | undefined {
     : undefined;
 }
 
+/** None of these methods takes arguments; a call with any still gives the result. */
 function method(kind: ValueKind, name: string): OperationResult | undefined {
   return isTemporalKind(kind) && hasTemporalMethod(kind, name)
     ? typeResult(scalar(TEMPORAL_METHODS[name].result))

@@ -9,8 +9,7 @@ import type { Proof } from "./solver.js";
  * property (`a2 = {q: a1}`, `a3.q.q`), is answered from the read one step up, its position, advanced one step: never
  * from its root and the whole path below it, which asks every wrapper again at every suffix of the path. A position is
  * where the answer stands: an original read occurrence (its read node on the value side) at a path below it, and the
- * writer the wrappers crossed above it give its items (`Contract.wrapperHop`). Each is a proof of its read's demand, so
- * the solver holds it as it holds the items.
+ * writer the wrappers crossed above it give its items (`Contract.wrapperHop`).
  */
 
 let positioned = true;

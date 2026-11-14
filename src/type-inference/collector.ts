@@ -67,12 +67,11 @@ import type {
 import { conditionShape } from "./narrowing-shapes.js";
 import { interactionEvidence, selectorsEvidence } from "./syntax-evidence.js";
 
-// The collector of the constraint graph: one walk over the project's programs, which emits the places and constraints
-// of `graph.ts` and decides nothing; it reads no type and reports no diagnostic.
+// The collector decides nothing: it reads no type and reports no diagnostic.
 
 /**
- * Collects the constraint graph of the project of `request`. Names resolve, since the type analysis runs after name
- * checking succeeded; a name that resolves to nothing is a host global, of which the compiler knows nothing.
+ * Names resolve, since the type analysis runs after name checking succeeded; a name that resolves to nothing is a host
+ * global, of which the compiler knows nothing.
  */
 export function collectGraph(request: TypeAnalysisRequest): ConstraintGraph {
   return new Collector(request).collect();
@@ -266,8 +265,6 @@ class Collector {
     };
   }
 
-  // Places and constraints ------------------------------------------------------------------------------------------
-
   #site(node: Spanned): SourceSite {
     return { file: this.#file, start: node.span.start.offset, end: node.span.end.offset };
   }
@@ -314,7 +311,6 @@ class Collector {
     this.#add({ ...this.#origin(node, role), kind: "store", value, into, how });
   }
 
-  /** A `test` of the binding `subject` at the condition `node`. */
   #test(subject: PlaceId, shape: TestShape, node: Spanned): void {
     this.#add({
       ...this.#origin(node, "condition"),
@@ -375,8 +371,6 @@ class Collector {
     });
     return result;
   }
-
-  // Declarations ----------------------------------------------------------------------------------------------------
 
   #declareFunction(declaration: FunctionDeclaration, file: number, scope: Scope): FunctionId {
     const id = this.#functions.length;
@@ -485,8 +479,7 @@ class Collector {
     const name = declaration.name.name;
     this.#project.declare(name, { kind: "speaker", name });
     // A copy of the player profile anywhere gives the player each person field from the start, with its terms and name
-    // lists as text (V30 §37); the copy itself stores them again where it stands (see `#call`). The seeds are sited
-    // at the copy, in its own file.
+    // lists as text (V30 §37). The seeds are sited at the copy, in its own file.
     if (copy !== undefined && name === PLAYER) {
       const file = this.#file;
       this.#file = copy.file;
@@ -526,8 +519,6 @@ class Collector {
       });
     }
   }
-
-  // Statements ------------------------------------------------------------------------------------------------------
 
   *#statements(statements: readonly Statement[], scope: Scope): CompileTask<void> {
     for (const statement of statements) yield* compileChild(this.#statement(statement, scope));
@@ -827,8 +818,6 @@ class Collector {
     if (entry === undefined && node.name === "speaker") return this.#speakers.get(node) ?? null;
     return undefined;
   }
-
-  // Expressions -----------------------------------------------------------------------------------------------------
 
   /**
    * Walks an expression and returns its value place. `receiver` is the written type of the variable a load starts or
@@ -1156,10 +1145,6 @@ class Collector {
     return place;
   }
 
-  /**
-   * A read of a name: a variable's occurrence, a speaker, a function's name (no constraint), `debugMode` (a boolean),
-   * or a name the compiler knows nothing about.
-   */
   #read(expression: Identifier, scope: Scope): PlaceId {
     const place = this.#value(expression);
     const entry = scope.resolve(expression.name);
@@ -1354,7 +1339,7 @@ class Collector {
       positional.length === 1 &&
       expression.arguments.length === 2
     ) {
-      // The default runs last, only when the call needs it; the result joins the element with it.
+      // The default runs last, only when the call needs it.
       const key = yield* compileChild(this.#expression(positional[0]!.value, scope));
       const fallback = yield* compileChild(this.#expression(defaultArgument.value, scope));
       const result = this.#value(expression);
@@ -1387,7 +1372,7 @@ class Collector {
   ): CompileTask<{ readonly positional: PlaceId[]; readonly named: NamedPlace[] }> {
     const positional: PlaceId[] = [];
     const named: NamedPlace[] = [];
-    // Only a `default:` that runs when the call needs it comes last (see `lazy-defaults.ts`).
+    // Only a `default:` that runs when the call needs it comes last.
     const lazy = lazyDefaultArgument(expression)?.argument;
     const ordered = [
       ...expression.arguments.filter((argument) => argument !== lazy),
@@ -1466,8 +1451,7 @@ function label(expression: Expression): string {
 }
 
 /**
- * The term a written annotation names. A compile task, as the production conversion is (`annotationTask` in
- * `static-types/annotations.ts`): an annotation nests as deep as it is written.
+ * The term a written annotation names. A compile task: an annotation nests as deep as it is written.
  */
 function typeTerm(annotation: TypeAnnotation): TypeTerm {
   return runCompileTask(typeTermTask(annotation));

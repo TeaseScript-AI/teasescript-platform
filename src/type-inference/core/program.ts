@@ -27,9 +27,9 @@ import { selectsElement } from "./method-categories.js";
 import { Retained } from "./retained/retained.js";
 
 /**
- * The input of the core's analysis: the request's files with both fields the core reads beside
- * their programs. The name pass's picks are the files each glob target may start, which the flow graph takes as the
- * lowering does; the source text names the operands an obligation checks (`x` in `x / 4`).
+ * The input of the core's analysis: the request's files with both fields the core reads beside their programs. The
+ * name pass's picks are the files each glob target may start; the source text names the operands an obligation checks
+ * (`x` in `x / 4`).
  */
 export interface CoreFile extends TypeAnalysisFile {
   readonly source: string;
@@ -187,9 +187,8 @@ function measureSyntax(programs: readonly Program[]): {
 }
 
 /**
- * The index of one analysis's input, built once: the collector's places and constraints by the ways the analysis looks
- * them up, the flow graph and its dominators, the work ledger, and the positions the dominator order gives nodes. The
- * collector's `PlaceId` and a path are a key's identity; a place's label is only how it is shown.
+ * The index of one analysis's input, built once. The collector's `PlaceId` and a path are a key's identity; a place's
+ * label is only how it is shown.
  */
 export class CoreProgram {
   readonly graph: ConstraintGraph;
@@ -202,7 +201,7 @@ export class CoreProgram {
   readonly syntaxNodes: number;
   /** The analysis's view of the request: each call of an identity function read as its argument (#2493). */
   readonly identity: IdentityView;
-  /** The view's files and host values, as the candidate slice's syntax reads them (`slice-syntax.ts`). */
+  /** The view's files and host values. */
   readonly files: readonly CoreFile[];
   readonly globals: ReadonlySet<string>;
   /** The request's built-in names: none a fix may declare (`Answers.keptName`). */

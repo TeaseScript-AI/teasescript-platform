@@ -13,11 +13,7 @@ import {
 import type { BudgetLimit } from "./budget.js";
 import { propertyName } from "./program.js";
 
-/*
- * The core's result: its outcome, its diagnostics (each with its class, kind, site, code and rule, what its sentences
- * name, and a warning's writers, context word and obligation) and the runtime checks no diagnostic owns; and its record
- * (`coreRecord`), the result as JSON-safe data, which holds no sentence.
- */
+// The core's record of its result (`coreRecord`) is JSON-safe data and holds no sentence.
 
 /** An error, a warning with a runtime check, a warning the runtime owes nothing for (`StaticDiagnostic`), a stop's mark. */
 export type DiagnosticClass =

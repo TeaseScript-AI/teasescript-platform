@@ -1,5 +1,4 @@
-// The syntax evidence of an ask and of a list function's or `randomWeighted`'s selectors (`SyntaxEvidence` in
-// `graph.ts`), built from the source alone.
+// The syntax evidence of an ask and of a list function's or `randomWeighted`'s selectors, built from the source alone.
 
 import type { CallExpression, Expression, InteractionExpression } from "../ast.js";
 import { namedAskArguments, staticText, unwrap } from "../expression-children.js";
@@ -14,7 +13,7 @@ import type {
   WrittenLiteral,
 } from "./graph.js";
 
-/** The selectors of a list function or of `randomWeighted`, as text where they are written as text (see `SyntaxEvidence`). */
+/** The selectors of a list function or of `randomWeighted`, as text where they are written as text. */
 export function selectorsEvidence(expression: CallExpression): SyntaxEvidence {
   const written: { readonly name: string; readonly text: string | null }[] = [];
   for (const argument of expression.arguments)
@@ -26,8 +25,8 @@ export function selectorsEvidence(expression: CallExpression): SyntaxEvidence {
 const SELECTORS: ReadonlySet<string> = new Set(["by", "x", "y", "weight"]);
 
 /**
- * What the source says about an ask beyond its operands' types (see `SyntaxEvidence`). `placeOf` gives the value place
- * of a node the walk visited, and throws for any other: call this after the ask's operands are walked.
+ * What the source says about an ask beyond its operands' types. `placeOf` gives the value place of a node the walk
+ * visited, and throws for any other: call this after the ask's operands are walked.
  */
 export function interactionEvidence(
   expression: InteractionExpression,
