@@ -324,6 +324,8 @@ if (isMainThread && process.argv[2] === "summary") {
       answers: await imp("src/type-inference/core/answers.js"),
       trace: null,
       questions: null,
+      // (the limit a ledger of the compile going on stopped at, `WorkLedger.stop`, or null)
+      stopped: null,
       // (the largest ledger allowance of the source's last natural compile, a test allowance's run's floor)
       natural: 0,
     };
@@ -373,6 +375,13 @@ if (isMainThread && process.argv[2] === "summary") {
         return asked.apply(this, args);
       };
     }
+    // (a tree whose ledger has no `stop` records none)
+    const { stop } = tree.budget.WorkLedger.prototype;
+    if (typeof stop === "function")
+      tree.budget.WorkLedger.prototype.stop = function (limit) {
+        tree.stopped ??= limit;
+        return stop.call(this, limit);
+      };
     const { charge } = tree.budget.WorkLedger.prototype;
     tree.budget.WorkLedger.prototype.charge = function (counter, units = 1) {
       if (meter.run !== null) {
@@ -421,6 +430,7 @@ if (isMainThread && process.argv[2] === "summary") {
     );
     tree.trace = { n: 0, units: 0, a: 2166136261, b: 3266489917 };
     tree.questions = { n: 0, a: 2166136261, b: 3266489917 };
+    tree.stopped = null;
     const options = { globals: unit.globals };
     const make = () =>
       unit.single
@@ -432,6 +442,7 @@ if (isMainThread && process.argv[2] === "summary") {
         : tree.compiler.compileProjectWithBackend(unit.files, options, tree.backend.CORE_BACKEND);
     let result = null;
     let error = null;
+    let outside = null;
     try {
       result = mode.run(() =>
         allowance === undefined
@@ -442,6 +453,7 @@ if (isMainThread && process.argv[2] === "summary") {
       );
     } catch (e) {
       error = `${e?.name}: ${e?.message}`;
+      if (e?.name === "CandidateOutsideSlice") outside = e.limit === true ? "limit" : "slice";
     }
     if (allowance === undefined) tree.natural = meter.allowance;
     meter.run = null;
@@ -460,6 +472,10 @@ if (isMainThread && process.argv[2] === "summary") {
       trace: `${t.n}/${t.units}/${t.a.toString(16)}${t.b.toString(16)}`,
       questions: `${q.n}/${q.a.toString(16)}${q.b.toString(16)}`,
       units: t.units,
+      // (what an evidence report classifies the compile by: `tools/compiler-replay/evidence.mjs`'s `classOf`)
+      allowance: meter.allowance,
+      stopped: tree.stopped,
+      outside,
     };
   }
 
