@@ -1,8 +1,8 @@
 # Agent capability routes
 
 Use this router after the universal start route in [AGENTS.md](../../AGENTS.md) and
-[README-FIRST.md](../../README-FIRST.md). Select by actual technical capabilities and environment constraints,
-not by product, model, vendor, or assigned task role.
+[README-FIRST.md](../../README-FIRST.md). Select the capability route by actual technical capabilities and environment
+constraints, not by product, model, vendor, or assigned task role.
 
 ## Select the capability route
 
@@ -35,41 +35,41 @@ before the next write. Task changes follow `README-FIRST.md`.
 
 ## Workflow reading before starting
 
-Read the sections below of [Development workflow](../DEVELOPMENT-WORKFLOW.md) before starting in your role.
-**A** is a light/minimal builder, **B** a full-route builder, **R** a round reviewer, **F** an independent final
-reviewer, and **C** a coordinator. A section is its heading and text up to the next heading; child sections are
-listed separately. Read this capability router and the selected capability guide whole. The whole-file reads
-required by `AGENTS.md`, including implementation and review guidance, remain whole-file reads.
+Before starting, read the sections of [Development workflow](../DEVELOPMENT-WORKFLOW.md) that the table marks for
+your role: **A** a light- or minimal-route builder, **B** a full-route builder, **R** a round reviewer, **F** an
+independent final reviewer, **C** a coordinator. In two roles, read both roles' sections. A section is its heading and
+its text up to the next heading, so a child section has its own row. Only the workflow is read by section: this router
+and the selected capability guide are read whole, and the reading instructions of `AGENTS.md` apply as written.
 
-A section not read at startup still binds when its case arises; read it then, and read any section whose
-applicability you are unsure of. The last column names when roles outside the startup column read a section.
+Every section binds whether or not you read it at the start. Read a section when its case in the last column arises,
+and read any section you are unsure applies.
 
 | Workflow section | Startup roles | Otherwise read when |
 | --- | --- | --- |
 | [Development workflow](../DEVELOPMENT-WORKFLOW.md#development-workflow) | A B R F C | — |
 | [Guiding principle](../DEVELOPMENT-WORKFLOW.md#guiding-principle) | A B R F C | — |
-| [Issue sizing](../DEVELOPMENT-WORKFLOW.md#issue-sizing) | C | Filing or updating an issue. |
+| [Issue sizing](../DEVELOPMENT-WORKFLOW.md#issue-sizing) | C | Filing, updating or splitting an issue. |
 | [Requirement authority and review proportionality](../DEVELOPMENT-WORKFLOW.md#requirement-authority-and-review-proportionality) | A B R F C | — |
 | [KISS, pragmatic YAGNI, and DRY](../DEVELOPMENT-WORKFLOW.md#kiss-pragmatic-yagni-and-dry) | A B R F C | — |
 | [Review finding classes](../DEVELOPMENT-WORKFLOW.md#review-finding-classes) | A B R F C | — |
 | [Proportional review lenses](../DEVELOPMENT-WORKFLOW.md#proportional-review-lenses) | A B R F C | — |
 | [Blocking evidence](../DEVELOPMENT-WORKFLOW.md#blocking-evidence) | A B R F C | — |
-| [Review convergence](../DEVELOPMENT-WORKFLOW.md#review-convergence) | R F C | Repeated findings or uncertainty about convergence. |
-| [Proportional repair and owner escalation](../DEVELOPMENT-WORKFLOW.md#proportional-repair-and-owner-escalation) | — | Proposing a repair, broader scope, or an owner decision. |
+| [Review convergence](../DEVELOPMENT-WORKFLOW.md#review-convergence) | B R F C | A review or repair report from the second round on, or findings that recur. |
+| [Proportional repair and owner escalation](../DEVELOPMENT-WORKFLOW.md#proportional-repair-and-owner-escalation) | R F C | A defect outside the planned change, a resource limit, a type-core difference, a repair broader than its defect, or a question for the owner. |
 | [Execution discipline](../DEVELOPMENT-WORKFLOW.md#execution-discipline) | A B C | Executing or integrating assigned work. |
 | [Normal flow](../DEVELOPMENT-WORKFLOW.md#normal-flow) | A B C | Taking a task through issue, branch, pull request, or handoff. |
 | [Review routes](../DEVELOPMENT-WORKFLOW.md#review-routes) | A B R F C | — |
 | [Roles](../DEVELOPMENT-WORKFLOW.md#roles) | A B R F C | — |
 | [Choosing the route](../DEVELOPMENT-WORKFLOW.md#choosing-the-route) | A B R F C | — |
 | [The plan](../DEVELOPMENT-WORKFLOW.md#the-plan) | A B R F C | — |
-| [Design rounds](../DEVELOPMENT-WORKFLOW.md#design-rounds) | — | Review findings recur, an invariant changes between rounds, or a design round is proposed. |
+| [Design rounds](../DEVELOPMENT-WORKFLOW.md#design-rounds) | C | A design round or a scope cut is proposed or assigned. |
 | [Evidence](../DEVELOPMENT-WORKFLOW.md#evidence) | A B R F C | — |
 | [Review rounds](../DEVELOPMENT-WORKFLOW.md#review-rounds) | A B R F C | — |
-| [Builder messages and READY](../DEVELOPMENT-WORKFLOW.md#builder-messages-and-ready) | A B C | Sending or assessing a task report. |
-| [The final review](../DEVELOPMENT-WORKFLOW.md#the-final-review) | F C | Preparing for a final review or handling its findings. |
-| [Pull requests and rebases](../DEVELOPMENT-WORKFLOW.md#pull-requests-and-rebases) | — | Publishing a pull request or rebasing it. |
-| [Merge](../DEVELOPMENT-WORKFLOW.md#merge) | C | Deciding whether a change can land or performing an authorized merge. |
+| [Builder messages and READY](../DEVELOPMENT-WORKFLOW.md#builder-messages-and-ready) | A B R F C | — |
+| [The final review](../DEVELOPMENT-WORKFLOW.md#the-final-review) | B F C | A final review is due, or its findings are repaired or re-checked. |
+| [Pull requests and rebases](../DEVELOPMENT-WORKFLOW.md#pull-requests-and-rebases) | A B C | Opening, rebasing or retargeting a pull request. |
+| [Merge](../DEVELOPMENT-WORKFLOW.md#merge) | C | Approving a change or merging it. |
 | [Capability-specific execution](../DEVELOPMENT-WORKFLOW.md#capability-specific-execution) | A B R F C | — |
-| [Documentation ownership](../DEVELOPMENT-WORKFLOW.md#documentation-ownership) | — | Changing or reviewing documentation. |
-| [Test expectations by change type](../DEVELOPMENT-WORKFLOW.md#test-expectations-by-change-type) | — | Selecting or assessing tests. |
+| [Documentation ownership](../DEVELOPMENT-WORKFLOW.md#documentation-ownership) | A B R F C | — |
+| [Test expectations by change type](../DEVELOPMENT-WORKFLOW.md#test-expectations-by-change-type) | A B R F C | — |
 | [Verification](../DEVELOPMENT-WORKFLOW.md#verification) | A B R F C | — |
