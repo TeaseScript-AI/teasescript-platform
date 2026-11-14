@@ -421,15 +421,16 @@ test("a parse or a load whose default reads a written parameter takes the parame
 });
 
 // The order of a call, enumerated (V30 §10, §11; `src/runtime/instructions/functions.ts`): every argument is evaluated in
-// source order before any is checked, the supplied ones are checked before an omitted default runs, and the defaults
-// run in parameter order, each checked as it runs. `f` takes three written parameters, each defaulting to a marker that
-// says its own number; every subset of them is supplied, by name in every order, each argument a marker with its own
-// number; and each call runs as it is and with one chosen parameter's argument or default failing its check (`pick`
-// returns the host value, untyped). The oracle's whole run, what it says and where it fails, equals the plan's for
-// every case and host value, so a run in any other order differs.
+// source order before any is checked, the supplied ones are checked in source order and bound before an omitted default
+// runs, and the defaults run in parameter order, each checked and bound before the next. `f` takes three written
+// parameters, each defaulting to a marker that says its own number, `c`'s reading `a`; every subset of them is supplied,
+// by name in every order, by position, and by position then by name in every order, each argument a marker with its own
+// number; and each call runs with every set of parameters whose argument or default fails its check (`pick` returns the
+// host value, untyped), so where two checks compete the first failure shows which ran first. The oracle's whole run,
+// what it says and where it fails, equals the plan's for every case and host value, so a run in any other order differs.
 const ORDER_MARKERS =
-  "function mark(x: integer): integer {\n  say x\n  return x\n}\n" +
-  "function pick(x: integer) {\n  say x\n  return hostValue\n}\n";
+  "function mark(x: integer, also: integer = 0): integer {\n  say x\n  return x\n}\n" +
+  "function pick(x: integer, also: integer = 0) {\n  say x\n  return hostValue\n}\n";
 const PARAMETERS: readonly string[] = ["a", "b", "c"];
 const orders = (names: readonly string[]): string[][] =>
   names.length === 0
@@ -437,40 +438,62 @@ const orders = (names: readonly string[]): string[][] =>
     : names.flatMap((name, at) =>
         orders(names.filter((_, other) => other !== at)).map((rest) => [name, ...rest]),
       );
-for (let subset = 0; subset < 2 ** PARAMETERS.length; subset += 1) {
-  const supplied = PARAMETERS.filter((_, at) => (subset & (1 << at)) !== 0);
-  for (const order of orders(supplied))
-    test(`the derived oracle's call order: f(${order.join(", ")}), each argument or default failing in turn`, () => {
-      for (const failing of [null, ...PARAMETERS]) {
-        const marker = (parameter: string, number: number): string =>
-          `${parameter === failing ? "pick" : "mark"}(${number})`;
-        const defaults = PARAMETERS.map(
-          (parameter, at) =>
-            `${parameter}: integer = ${supplied.includes(parameter) ? `mark(${at + 1})` : marker(parameter, at + 1)}`,
+const subsets = <T>(items: readonly T[]): T[][] =>
+  Array.from({ length: 2 ** items.length }, (_, set) =>
+    items.filter((_, at) => (set & (1 << at)) !== 0),
+  );
+/** A call's arguments: each parameter it supplies, in source order, by position (`positional` leading ones) or by name. */
+type CallShape = { readonly order: readonly string[]; readonly positional: number };
+const CALL_SHAPES: readonly CallShape[] = [
+  ...subsets(PARAMETERS).flatMap((supplied) =>
+    orders(supplied).map((order) => ({ order, positional: 0 })),
+  ),
+  ...[1, 2, 3].map((count) => ({ order: PARAMETERS.slice(0, count), positional: count })),
+  ...[1, 2].flatMap((count) =>
+    subsets(PARAMETERS.slice(count))
+      .filter((named) => named.length > 0)
+      .flatMap((named) =>
+        orders(named).map((rest) => ({
+          order: [...PARAMETERS.slice(0, count), ...rest],
+          positional: count,
+        })),
+      ),
+  ),
+];
+for (const { order, positional } of CALL_SHAPES) {
+  const shown = order.map((name, at) => (at < positional ? name : `${name}:`)).join(", ");
+  test(`the derived oracle's call order: f(${shown}), with every set of failing arguments and defaults`, () => {
+    for (const failing of subsets(PARAMETERS)) {
+      const marker = (parameter: string, number: number, also = ""): string =>
+        `${failing.includes(parameter) ? "pick" : "mark"}(${number}${also})`;
+      const defaults = PARAMETERS.map((parameter, at) => {
+        const also = parameter === "c" ? ", a" : "";
+        return `${parameter}: integer = ${order.includes(parameter) ? `mark(${at + 1}${also})` : marker(parameter, at + 1, also)}`;
+      });
+      const call = order.map((parameter, at) => {
+        const given = marker(parameter, PARAMETERS.indexOf(parameter) + 4);
+        return at < positional ? given : `${parameter}: ${given}`;
+      });
+      const source = `${ORDER_MARKERS}function f(${defaults.join(", ")}) {\n  say "body"\n}\nf(${call.join(", ")})\nsay "after"\nexit\n`;
+      const files = one(source);
+      const today = compileProject(files, OPTIONS);
+      assert.ok(today.plan !== null, source);
+      const request = coreRequest(files);
+      assert.ok(request !== null, source);
+      const syntax = syntaxOf(source);
+      const derived = {
+        path: "main.tease",
+        syntax,
+        ...derive(syntax, compactAnalysis(request), [syntax]),
+      };
+      for (const inputs of assignments(["hostValue"]))
+        assert.deepEqual(
+          evaluateProject([derived], inputs).run,
+          runGlobals(today.plan, inputs),
+          `${source} with ${JSON.stringify(inputs)}`,
         );
-        const call = order.map(
-          (parameter) => `${parameter}: ${marker(parameter, PARAMETERS.indexOf(parameter) + 4)}`,
-        );
-        const source = `${ORDER_MARKERS}function f(${defaults.join(", ")}) {\n  say "body"\n}\nf(${call.join(", ")})\nsay "after"\nexit\n`;
-        const files = one(source);
-        const today = compileProject(files, OPTIONS);
-        assert.ok(today.plan !== null, source);
-        const request = coreRequest(files);
-        assert.ok(request !== null, source);
-        const syntax = syntaxOf(source);
-        const derived = {
-          path: "main.tease",
-          syntax,
-          ...derive(syntax, compactAnalysis(request), [syntax]),
-        };
-        for (const inputs of assignments(["hostValue"]))
-          assert.deepEqual(
-            evaluateProject([derived], inputs).run,
-            runGlobals(today.plan, inputs),
-            `${source} with ${JSON.stringify(inputs)}`,
-          );
-      }
-    });
+    }
+  });
 }
 
 test("the derived oracle declines a name its scope declares twice, and a default reading a parameter without a written type", () => {
