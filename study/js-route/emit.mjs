@@ -784,7 +784,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
      * chunk of a long sequence: neither) and returns its text and what its call site must carry out: 0 (go on), 1
      * (break of its own loop), -1 (a return, its value in RV) or a code for a break or continue of an outer loop.
      */
-    function outlineFunction(from, to, ownLoop, params, yields) {
+    function outlineFunction(from, to, ownLoop, params, yields, emitBody = null) {
       const key = `${ownLoop === null ? "k" : "b"}${from}_${bodyCount++}`;
       bodyParents.set(key, bodies.length === 0 ? "root" : bodies.at(-1).key);
       // A chunk's home: the function whose sequence it was cut from, which declares the chunk level's variables.
@@ -797,8 +797,9 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       scratchMax = 0;
       indent = 1;
       bodies.push(body);
-      // A loop body may itself be long and is cut; a chunk is already short pieces.
-      if (ownLoop === null) emitRange(from, to);
+      // A loop body may itself be long and is cut; a chunk emits its own short items.
+      if (emitBody !== null) emitBody();
+      else if (ownLoop === null) emitRange(from, to);
       else emitChunked(from, to);
       bodies.pop();
       const inner = out.splice(0);
@@ -880,43 +881,111 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
      */
     function emitChunked(from, to) {
       if (flat || to - from <= CHUNK_LENGTH) return emitRange(from, to);
-      const pieces = [];
+      emitItems(itemsOf(from, to));
+    }
+
+    /** The constructs of [from, to) as items: each with its plan range and how it is emitted. */
+    function itemsOf(from, to) {
+      const items = [];
       for (let at = from; at < to; ) {
         const next = Math.max(at + 1, constructEnd(at, to));
-        pieces.push([at, next]);
+        const a = at;
+        items.push({ from: a, to: next, emit: () => emitRange(a, next), long: () => emitLong(a, next) });
         at = next;
       }
-      /** A construct longer than a chunk: a block's contents are cut inside its scope; an `if` cuts its branches. */
-      const emitLong = ([a, b]) => {
-        const ins = plan.instructions[a];
-        if (ins.kind === "enterScope" && b - a > 2) {
-          statement(ins, a);
-          emitChunked(a + 1, b - 1);
-          statement(plan.instructions[b - 1], b - 1);
-        } else emitRange(a, b);
-      };
+      return items;
+    }
+
+    /**
+     * A construct longer than a chunk: a block's contents are cut inside its scope; an `if` whose else holds another
+     * `if` (an else-if chain, as a `switch` is lowered) becomes a labelled block of guarded cases at one level, so its
+     * cases can be cut into chunks; any other `if` cuts its branches.
+     */
+    function emitLong(a, b) {
+      const ins = plan.instructions[a];
+      if (ins.kind === "enterScope" && b - a > 2) {
+        statement(ins, a);
+        emitChunked(a + 1, b - 1);
+        statement(plan.instructions[b - 1], b - 1);
+        return;
+      }
+      if (ins.kind === "jumpIfFalse" && ifShape(a, b).elseEnd !== null) return emitChain(a, b);
+      emitRange(a, b);
+    }
+
+    let chainCount = 0;
+    function emitChain(a, b) {
+      const id = `chain${chainCount++}`;
+      const label = `C${a}`;
+      loops.set(id, { label, flat: false, depth: bodies.length });
+      const items = [];
+      let pc = a;
+      let end = b;
+      for (;;) {
+        const shape = ifShape(pc, end);
+        const condPc = pc;
+        // The case: its condition, then its body, then out of the chain.
+        items.push({
+          from: condPc,
+          to: shape.target,
+          size: shape.thenEnd - condPc,
+          emit: () => {
+            const ins = plan.instructions[condPc];
+            const c = x();
+            line(`${c} = ${expr(ins.condition)};`);
+            if (!isBool(ins.condition)) line(`if (${c} !== true && ${c} !== false) throw rt.notBool(${konst(ins.condition)}, ${c});`);
+            line(`if (${c}) {`);
+            indent += 1;
+            emitChunked(condPc + 1, shape.thenEnd);
+            loopControl("break", id);
+            indent -= 1;
+            line("}");
+          },
+        });
+        if (shape.elseEnd === null) break;
+        // The else: its constructs at this level; a last `if` continues the chain.
+        const rest = itemsOf(shape.target, shape.elseEnd);
+        const last = rest.at(-1);
+        const continues = last !== undefined && plan.instructions[last.from].kind === "jumpIfFalse" && last.to === shape.elseEnd;
+        items.push(...(continues ? rest.slice(0, -1) : rest));
+        if (!continues) break;
+        pc = last.from;
+        end = shape.elseEnd;
+      }
+      line(`${label}: {`);
+      indent += 1;
+      emitItems(items);
+      indent -= 1;
+      line("}");
+      loops.delete(id);
+    }
+
+    /** Items in order: short ones gathered into chunk functions of about CHUNK_LENGTH instructions, long ones cut. */
+    function emitItems(items) {
       let group = [];
       let size = 0;
       const flush = () => {
         if (group.length === 0) return;
-        const [a, b] = [group[0][0], group.at(-1)[1]];
-        if (b - a <= 2) emitRange(a, b);
+        const members = group;
+        const [a, b] = [members[0].from, members.at(-1).to];
+        if (size <= 2) members.forEach((item) => item.emit());
         else {
-          const outlined = outlineFunction(a, b, null, [], regionYields && containsWait(a, b));
+          const outlined = outlineFunction(a, b, null, [], regionYields && containsWait(a, b), () => members.forEach((item) => item.emit()));
           for (const text of outlined.fn) line(text);
           callOutlined(outlined, [], null);
         }
         group = [];
         size = 0;
       };
-      for (const piece of pieces) {
-        if (piece[1] - piece[0] > CHUNK_LENGTH) {
+      for (const item of items) {
+        const itemSize = item.size ?? item.to - item.from;
+        if (itemSize > CHUNK_LENGTH && item.long !== undefined) {
           flush();
-          emitLong(piece);
+          item.long();
           continue;
         }
-        group.push(piece);
-        size += piece[1] - piece[0];
+        group.push(item);
+        size += itemSize;
         if (size >= CHUNK_LENGTH) flush();
       }
       flush();
