@@ -500,10 +500,6 @@ export function* receiverKinds(
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const key = canonicalKey(contract, asked);
-  if (contract.cutAt(key)) {
-    flow?.opaque("cut");
-    return CUT;
-  }
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   // (#1668: included only by a reader whose answer holds its unknowns as they are; its run's answer is the key's)
   const slot = joinParts("rc", key);
