@@ -54,7 +54,6 @@ export function* entryAt(
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   contract.pass.program.work.charge("invSteps");
-  // (a cursor's span read one step at a time, its path's id where a key or a value takes it whole)
   const ref = restRef(contract, rest);
   if (entry.unk !== undefined) return [unknownItem(entry.unk, entry.w)];
   // a clear's or a removal's entry: the emptiness mark is open (the collection may hold none)
@@ -81,7 +80,6 @@ export function* entryAt(
       );
     return kept;
   }
-  // a copy read under a guard; a tested child's mark by the entry's holder at the path
   if (entry.key !== undefined) {
     // (#1668: the copied key below, the edge a copy makes, as its marks and writer annotate it)
     const below = flow?.child() ?? null;

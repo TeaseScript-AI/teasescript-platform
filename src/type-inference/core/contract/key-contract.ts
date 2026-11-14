@@ -145,7 +145,6 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
   // (a host's keys are text: its steps an array, no copy)
   if (program.isHost(place)) return hostAt(stepsArray(keyStepsIn(contract, key)));
   if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
-  // a key past a wrapper, one step below its parent's position (a cursor's from the arena, no text)
   const path = isKeyId(key) ? null : keyPath(key);
   if (positionable(contract, key, path)) {
     const demand = positioned(contract, key, path);
@@ -432,7 +431,6 @@ export function* contractRead(
 /** Whether a receiver on the key's path holds a reference kind in its contract (one object behind every alias). */
 export function* refReceiver(contract: Contract, asked: Key): Work<boolean> {
   const key = canonicalKey(contract, asked);
-  // a positioned key's parent's walk, one receiver more (`advance`); a cursor's parent the arena's
   const path = isKeyId(key) ? null : keyPath(key);
   const depth = path === null ? keyDepthIn(contract, key) : path.length;
   if (depth > 1 && positionable(contract, key, path)) {
@@ -557,14 +555,11 @@ function* contractAlong(
 ): Work<Item[]> {
   const { program, definitions, lists } = contract.pass;
   const out: Item[] = [];
-  // (a record's path read below each prefix as its view; an array sliced)
   const whole: Rest = stepsRest(path);
   for (let length = path.length; length >= from && length > floor; length -= 1) {
     const prefix = prefixOf(length);
     const rest = restFrom(whole, length);
     if (rest.length > 0) {
-      // a prefix's whole stores, shared by every property below it; its literals by level, each group of the
-      // same structure below the path once (with a selection step, every entry by itself)
       const stores = contract.prefixStores(prefix);
       // (a path below a property of a prefix of closed objects from its holders alone, #1456, #1948)
       const property = yield* propertyItems(contract, prefix, stores, rest, flow);
@@ -627,7 +622,6 @@ function* contractAlong(
         parameter.written === null &&
         !lists.singleSite(d.fn)
       )
-        // an unwritten parameter without one live non-recursive call site (`singleSite`)
         out.push(unknownItem(REASON.deferred, definitions.writerOf(d)));
       const whole = flow?.child() ?? null;
       // #1655: a chain of property reads of a binding in a copy cycle through a projection, read one step at a time

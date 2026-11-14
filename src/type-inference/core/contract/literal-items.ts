@@ -156,7 +156,6 @@ export function* indexItems(
     )
       out.push(EMPTY);
   }
-  // the route `literalRoute` reads: past an element step over a copy the contract answered
   if (exact && overCopy)
     contract.overCopy.add(contract.kept(joinParts(literal, restPart(asked), node?.id ?? "-")));
   // the exact path's word is the read's (`member` past an element step over a copy), shared by every known-kind
