@@ -178,7 +178,7 @@ const debug = usePlayerDebug(props.player, props.debug);
 const randomPicker = computed(() => {
   const random = debug.random.value;
   const draw = random?.draw.value ?? null;
-  if (random === null || draw === null) return null;
+  if (random === null || draw === null || inputRetired.value) return null;
   const site = random.sites.value.get(draw.site) ?? null;
   return {
     random,
@@ -268,6 +268,10 @@ watch(props.player.endings, () => {
 const onStartPage = computed(
   () => props.player.session.value === null || props.player.activation.value !== null,
 );
+// Once its session stopped, or a prepared Start or Continue owns the page, the shown session takes no input
+// (`inputEpoch`), and nothing of it that could keep the player from the page stays presented: the interaction gets no
+// session, so its dialogs close, and the random draw picker goes with its guard.
+const inputRetired = computed(() => props.player.stopped.value || onStartPage.value);
 const startPage = ref<InstanceType<typeof SessionActivation> | null>(null);
 // Turning Debug on in the normal room (DEBUGGER.md "Debug room") goes on in the debug room, with a copy of the normal
 // session that runs. Overwriting a debug session with it is confirmed first, the only confirmation; it stacks above
@@ -750,8 +754,14 @@ async function toggleFullscreen() {
 
         <!-- A session a Player error stopped takes no input; its transcript stays. -->
         <RuntimeInteraction
-          :session="player.stopped.value ? null : session"
+          :session="inputRetired ? null : session"
           :reset="player.interactionReset.value"
+          :chat="player.chat.value"
+          :terminal="player.terminal.value"
+          :epoch="player.epoch"
+          :input-epoch="player.inputEpoch"
+          :on-epoch="player.onEpoch"
+          :stopped-session="player.stopped.value ? session : null"
           :transcript-key="transcript.key"
           :entries="transcript.entries"
           :speakers="transcript.speakers"

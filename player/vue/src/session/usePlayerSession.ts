@@ -171,6 +171,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // A new session remounts the transcript and resets interaction-local state.
   const generation = ref(0);
   const interactionReset = ref(0);
+  // Changes when another chat shows: a session the player did not have on screen before (`showSession`).
+  const chat = ref(0);
+  // The epoch the shown session was shown under (`inputEpoch`).
+  let shownEpoch = 0;
   // The engine's host and this Player's hold on it (`session/useEngineConnection.ts`). Once it is ready, the Player's
   // random control takes its claim, its loss is observed (`bridgeLost`), and the tracing setting is sent before any
   // Start that waits for it.
@@ -211,6 +215,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     beginning,
     lastStart,
     supersede,
+    epoch,
+    onEpoch,
     prepare,
     prepareStart,
     prepareRestore,
@@ -229,6 +235,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     connection,
     inspecting: () => inspecting.value,
     isDisposed: () => disposed,
+    reportDiagnostic,
     showSession,
     camera: { open: (capability) => camera.open(capability), release: () => camera.release() },
     captures: { reset: () => captures.reset() },
@@ -769,7 +776,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function showSession(
     next: PlayerSession,
     origin: Origin,
-    { paused }: { readonly paused: boolean } = { paused: false },
+    {
+      paused = false,
+      sameChat = false,
+    }: { readonly paused?: boolean; readonly sameChat?: boolean } = {},
   ) {
     // A failed write concerns the run it happened in.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
@@ -780,6 +790,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pendingLoadCount.value = 0;
     generation.value++;
     interactionReset.value++;
+    if (!sameChat) chat.value++;
+    shownEpoch = epoch();
     jumpedRevision.value = -1;
     // An inspected state takes Debug's random control only once input adopts it (`adoptRewound` below).
     if (!paused) adoptRandom(next, origin);
@@ -1022,6 +1034,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation: computed(() => generation.value),
     interactionReset: computed(() => interactionReset.value),
     /**
+     * Changes when another chat shows: every shown session but the one the recovery from a lost connection continues,
+     * which is the chat shown before. The composer's text belongs to its chat.
+     */
+    chat: computed(() => chat.value),
+    /**
      * The transcript revision through which the transcript shows directly, like history, rather than entering as live
      * play: what development time jumps published (#615). -1 for none since the session started.
      */
@@ -1148,6 +1165,35 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     hostError: computed(() => hostError.value),
     /** Whether an exception of the Player itself stopped the session where it stands; until the next Start. */
     stopped,
+    /**
+     * How the shown session ended, for an answer still under way: `freezing` from an error stop until its final
+     * publication shows, `stopped` after it, `lost` with the engine's connection; `null` while it runs.
+     */
+    terminal: computed((): "freezing" | "stopped" | "lost" | null =>
+      lost.value
+        ? "lost"
+        : halting.value
+          ? "freezing"
+          : hostError.value !== null
+            ? "stopped"
+            : null,
+    ),
+    /**
+     * Moves before every change of `terminal` but the stop's own `freezing` → `stopped`, and with every preparation,
+     * activation or end: an answer accepted under another value belongs to a session that stopped or was replaced. A
+     * plain reader, read when an answer is admitted, so no render batching can hide a change that went back.
+     */
+    epoch,
+    /**
+     * Registers synchronous work for every move of `epoch`, run inside the move (useSessionActivation's `onEpoch`); the
+     * returned function removes it.
+     */
+    onEpoch,
+    /**
+     * The `epoch` the shown session was shown under. Input asked while it differs from `epoch` belongs to a session that
+     * stopped or was replaced, also once its level went back, and is refused.
+     */
+    inputEpoch: (): number => shownEpoch,
     /**
      * What the stop after a lost engine connection offers (PLAYER-UI "Session end and failure"): Continue from the last
      * kept point or Start again, over the stopped session (`line`) or on the start page (`page`); `null` without one.

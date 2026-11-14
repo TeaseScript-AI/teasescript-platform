@@ -25,6 +25,7 @@ const FINDINGS = {
       50: "the smoke's own wait, #2125",
       250: "the Player's scene clock, the stutter track, #2126: scene time advances 100 ms per bridge round trip (about 0.4× wall at 250 ms); affects waits, pacing and timers",
     })[row.delayMs] ?? "unexplained",
+  keys: () => "unexplained",
   demo: (row) =>
     row.engine === "firefox"
       ? "#2113, fixed on runtime-v2 in c8a1af3df after this R0"

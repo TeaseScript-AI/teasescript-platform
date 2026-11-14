@@ -1,0 +1,46 @@
+---
+title: "Composer area"
+---
+// The composer's area while an answer is in flight (#2430): each choice presents one kind of question, which the browser
+// kit's `keys` scenario answers and compares, in the answer's flight, with the area while nothing is asked ("Idle").
+// "Dated form" and "Lock" hold the focus rows: a date or time field's commit, and the lock's phases. "Lock dialog" is
+// the lock's own dialog, which the rows of a Start prepared over a question show besides the kinds above.
+let which = askChoice "Idle", "Text", "Number", "Date", "Time", "Date and time", "Choice", "Button", "Form", "Popup", "Export", "Image", "Link", "Password", "Dated form", "Lock", "Lock dialog"
+if which == "Idle" {
+    say "Nothing is asked.", instant
+    wait 600 s
+} else if which == "Text" {
+    let text = askText "Text?"
+} else if which == "Number" {
+    let amount = askNumber "Number?"
+} else if which == "Date" {
+    let day = askDate "Day?", prefill: toDate("2026-10-04")
+} else if which == "Time" {
+    let when = askTime "When?"
+} else if which == "Date and time" {
+    let moment = askDateTime "When exactly?"
+} else if which == "Choice" {
+    let pick = askChoice "Red", "Blue"
+} else if which == "Button" {
+    showButton "Go"
+} else if which == "Form" {
+    let form = askForm("The form", fields: { name: "Ada" }, submit: "Continue")
+} else if which == "Popup" {
+    showPopup "Hello"
+} else if which == "Export" {
+    exportText("Hello")
+} else if which == "Image" {
+    let picture = askImage("A picture?", allowSkip: true) otherwise "none"
+} else if which == "Link" {
+    openUrl("https://example.com", alwaysButton: true)
+} else if which == "Password" {
+    let secret = askPassword "Secret?"
+} else if which == "Dated form" {
+    let when = askForm "When?", fields: { day: toDate("2026-10-04"), at: toTime("18:30") }
+} else if which == "Lock" {
+    let note = encryptText("A note", password: askPassword("Choose a code"), publicKey: false, timeLock: false)
+} else if which == "Lock dialog" {
+    let sealed = encryptText("A note")
+}
+showButton "Done"
+exit

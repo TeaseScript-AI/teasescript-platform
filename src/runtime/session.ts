@@ -1,4 +1,8 @@
-import type { InstructionPlan } from "../plan/model.js";
+import { mainSourceSpan, type InstructionPlan } from "../plan/model.js";
+import { answerPresentation } from "./message-presentation.js";
+import type { MessagePresentation } from "../message-presentation.js";
+import { PLAYER } from "../speaker-terms.js";
+import { copySpan } from "../plan/source-location.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
 import { interruptFrame } from "./scopes/activations.js";
 import type {
@@ -497,6 +501,21 @@ export class RuntimeSession {
   /** The date and time presentation in force where execution stands. */
   public temporalPresentation(): PresentationSettings {
     return this.#read((state) => published(currentTemporalContext(state).presentation));
+  }
+
+  /**
+   * How the player's answer shows if it completes now: the presentation completion gives its line (`answerPresentation`),
+   * which the Player gives the answer it shows before the runtime settles it.
+   */
+  public answerPresentation(): MessagePresentation {
+    return this.#read((state) =>
+      published(
+        answerPresentation(
+          state.speakers.find((speaker) => speaker.identifier === PLAYER) ?? null,
+          copySpan(mainSourceSpan(this.#plan)),
+        ),
+      ),
+    );
   }
 
   /** The active calls, outermost first, in work proportional to the call depth. */

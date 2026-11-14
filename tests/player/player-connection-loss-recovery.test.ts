@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
-import { effectScope, type Ref } from "vue";
+import { effectScope, watch, type Ref } from "vue";
 
 import {
   memoryKeptSessionStore,
@@ -17,6 +17,11 @@ import {
   type ShownStatus,
 } from "../../player/vue/src/session/activation/recoveryKind.js";
 import type { SessionTransfer } from "../../player/persistence/session-transfer.js";
+import type {
+  ComposerDescriptor,
+  ComposerState,
+  FormDraft,
+} from "../../player/vue/src/interaction/useComposerState.js";
 import type { RewindOwner } from "../../player/vue/src/session/rewindOwner.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
 import { readForImport, type SessionRead } from "../helpers/player/transfer-read.js";
@@ -127,6 +132,9 @@ test("recoveryKind gives an undeclared status of the shown session nothing to re
 
 interface RecoveryHost {
   readonly session: Readonly<Ref<PlayerSession | null>>;
+  readonly stopped: Readonly<Ref<boolean>>;
+  /** The chat the shown session belongs to: the composer's text stays within one. */
+  readonly chat: Readonly<Ref<number>>;
   readonly hostError: Readonly<Ref<string | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   readonly recovery: Readonly<
@@ -174,11 +182,30 @@ let usePlayerSession: (options: {
   readonly scriptStorage?: ScriptStorageProvider;
   readonly keptSessions?: KeptSessionStore;
 }) => RecoveryHost;
+let composerModule: {
+  readonly useComposerState: (host: {
+    readonly draft: (draft: FormDraft) => Promise<boolean>;
+    readonly holdDrafts: () => boolean;
+  }) => ComposerState;
+  readonly composerDescriptor: (shown: {
+    readonly session: PlayerSession | null;
+    readonly reset: number;
+    readonly chat: number;
+    readonly foreground: ReturnType<typeof playerRuntimeForeground>;
+    readonly form: null;
+    readonly lock: null;
+    readonly consumed: null;
+  }) => ComposerDescriptor;
+  readonly descriptorKey: (next: ComposerDescriptor) => string;
+};
 
 before(async () => {
   const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
+  const composer = await loadPlayerModule("player/vue/src/interaction/useComposerState.ts");
+  // EVIDENCE: validation: Vite loaded the real source module; these are its exports.
+  composerModule = composer as typeof composerModule;
   await loadTopology();
 });
 
@@ -345,6 +372,7 @@ async function onTheFreshConnection(player: RecoveryHost, connections: TopologyC
 const RERUN = rerunRegistry({
   "running, nothing kept": TOPOLOGIES,
   "waiting at a kept point": TOPOLOGIES,
+  "a deleted prefill after the recovery": TOPOLOGIES,
   "a Start lost before its session showed": TOPOLOGIES,
   "a start page lost before its click": TOPOLOGIES,
   "a fresh connection that cannot open": TOPOLOGIES,
@@ -405,6 +433,7 @@ RERUN.rows(
     connections.first.hold("captureKeep");
     await player.activate();
     await connections.first.held();
+    const chat = player.chat.value;
     await connections.first.lose();
     connections.first.release();
     await until(() => player.recovery.value !== null, "the offer", "step");
@@ -421,6 +450,7 @@ RERUN.rows(
     );
     assert.equal(connections.calls(), 1);
     await onTheFreshConnection(player, connections);
+    assert.notEqual(player.chat.value, chat, "Start begins another chat, with an empty composer");
     assert.equal(player.recovery.value, null);
     assert.equal(player.hostError.value, null);
     assert.equal(hostErrors(), 1, "the loss alone is logged, for the developer");
@@ -436,6 +466,7 @@ RERUN.rows(
     await player.activate();
     const stored = await keptAtTheQuestion(player, kept);
     const transcript = player.session.value!.transcriptEntries.length;
+    const chat = player.chat.value;
     await connections.first.lose();
     await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
@@ -454,12 +485,72 @@ RERUN.rows(
     // The fresh host is asked for the plan's JSON, which its kept session's next save stores.
     assert.ok(connections.current().posts.some((post) => post.op === "preparePlanText"));
     assert.equal(player.session.value!.transcriptEntries.length, transcript);
+    assert.equal(
+      player.chat.value,
+      chat,
+      "Continue goes on in the same chat, the composer's text kept",
+    );
     assert.equal(player.recovery.value, null);
     assert.deepEqual(
       (await kept.session(SCOPE))?.events,
       stored.events,
       "the kept point is the one continued",
     );
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a deleted prefill after the recovery",
+  "a prefill the player deleted stays deleted after the recovery's Continue in the same chat; typed text stays",
+  async (context, topology, end) => {
+    for (const edited of ["", "OWN"]) {
+      const { player, kept, connections, scope } = await page(context, topology, {
+        script: 'let name = askText "Name?", prefill: "Ada"\nexit',
+      });
+      await player.activate();
+      await keptAtTheQuestion(player, kept);
+      // The composer's controller as `RuntimeInteraction` wires it: a stopped session shows no question.
+      const composer = scope.run(() => {
+        const state = composerModule.useComposerState({
+          draft: async () => false,
+          holdDrafts: () => false,
+        });
+        const descriptor = () => {
+          const session = player.stopped.value ? null : player.session.value;
+          return composerModule.composerDescriptor({
+            session,
+            reset: 0,
+            chat: player.chat.value,
+            foreground: session ? playerRuntimeForeground(session) : null,
+            form: null,
+            lock: null,
+            consumed: null,
+          });
+        };
+        watch(
+          () => composerModule.descriptorKey(descriptor()),
+          () => state.select(descriptor()),
+          { immediate: true },
+        );
+        return state;
+      })!;
+      context.after(() => composer.dispose());
+      assert.equal(composer.displayed.value, "Ada", "the suggestion");
+      composer.edit(composer.token.value, edited);
+      const chat = player.chat.value;
+      await connections.first.lose();
+      await until(() => player.recovery.value !== null, "the offer", "step");
+      await player.activate();
+      await until(
+        () => !player.stopped.value && player.session.value?.state.foregroundAction != null,
+        "the question again",
+        "step",
+      );
+      await turns(2);
+      assert.equal(player.chat.value, chat, "the same chat");
+      assert.equal(composer.displayed.value, edited, "deleted stays deleted; typed text stays");
+    }
     return end();
   },
 );

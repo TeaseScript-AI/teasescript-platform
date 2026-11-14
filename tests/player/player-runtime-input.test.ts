@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import test, { before, type TestContext } from "node:test";
-import { fileURLToPath } from "node:url";
 import { effectScope, watch, type Ref } from "vue";
 
 import type * as CompileProject from "../../player/runtime/compile-project.js";
@@ -290,7 +287,7 @@ test("every control answers with its op and how the player answered, which the r
     { actionId: presentedAction(host.session.value!)!, fieldId: "first" },
     "Bo",
   );
-  assert.ok(drafted, "the draft updated the form");
+  assert.ok(drafted.taken && drafted.session, "the draft updated the form");
   for (const [name, intent] of [
     ["submit", input.intents.formSubmit("Bo", "button")],
     ["skip", input.intents.imageSkip("button")],
@@ -849,9 +846,6 @@ test("a permanent button is pressed at the observed time, and a replaced session
   assert.equal(posted.ops().filter((op) => op === "pressPermanentButton").length, 1);
 });
 
-// The composer's text and repeat have one owner, `useComposerFields`: the component that renders the composer reads
-// them with `text` and writes them only with `writeField`, which ends a composition under way first. Only the composer
-// takes the writable model (`useComposerModel`); a component cannot inject what it provides itself.
 test("an input section names the clock's row it runs under (#1983)", () => {
   // Typed, never called: the type check decides that a sender names a row, and which rows input may name.
   const typed = (section: InputSectionHost) => {
@@ -862,24 +856,4 @@ test("an input section names the clock's row it runs under (#1983)", () => {
     void section("inputDraft", async () => null);
   };
   assert.equal(typeof typed, "function");
-});
-
-test("only the composer takes the composer's writable model", () => {
-  const sources = fileURLToPath(new URL("../../../player/vue/src/", import.meta.url));
-  const files = readdirSync(sources, { recursive: true, encoding: "utf8" }).filter((file) =>
-    /\.(?:ts|vue)$/.test(file),
-  );
-  const takers = files.filter((file) => {
-    const source = readFileSync(join(sources, file), "utf8");
-    return (
-      file !== "interaction/useComposerFields.ts" &&
-      (/\buseComposerModel\b/.test(source) ||
-        /import\s*\*\s*as\s+\w+\s+from\s*["'][^"']*useComposerFields["']/.test(source))
-    );
-  });
-  assert.ok(
-    files.includes("interaction/Composer.vue") &&
-      files.includes("interaction/RuntimeInteraction.vue"),
-  );
-  assert.deepEqual(takers, ["interaction/Composer.vue"]);
 });

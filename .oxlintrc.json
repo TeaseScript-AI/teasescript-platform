@@ -172,8 +172,8 @@
       }
     },
     {
-      "files": ["tools/player-gate/bridge/page.mjs", "tools/player-gate/bridge/worker-entry.mjs", "tools/player-gate/drive.mjs", "tools/player-gate/lib/player.mjs", "tools/player-gate/lib/probe.mjs", "tools/player-gate/scenarios/bridge.mjs", "tools/player-gate/scenarios/demo.mjs", "tools/player-gate/scenarios/keep.mjs", "tools/player-gate/scenarios/taps.mjs", "tools/player-gate/tapes/browser.mjs"],
-      "globals": {"document": "readonly", "Document": "readonly", "getComputedStyle": "readonly", "IDBDatabase": "readonly", "IDBObjectStore": "readonly", "indexedDB": "readonly", "innerHeight": "readonly", "innerWidth": "readonly", "location": "readonly", "requestAnimationFrame": "readonly", "self": "readonly", "window": "readonly", "Worker": "readonly"}
+      "files": ["tools/player-gate/bridge/page.mjs", "tools/player-gate/bridge/worker-entry.mjs", "tools/player-gate/drive.mjs", "tools/player-gate/lib/player.mjs", "tools/player-gate/lib/probe.mjs", "tools/player-gate/scenarios/bridge.mjs", "tools/player-gate/scenarios/demo.mjs", "tools/player-gate/scenarios/keep.mjs", "tools/player-gate/scenarios/keys.mjs", "tools/player-gate/scenarios/taps.mjs", "tools/player-gate/tapes/browser.mjs"],
+      "globals": {"document": "readonly", "Document": "readonly", "getComputedStyle": "readonly", "IDBDatabase": "readonly", "IDBObjectStore": "readonly", "indexedDB": "readonly", "innerHeight": "readonly", "innerWidth": "readonly", "location": "readonly", "MutationObserver": "readonly", "Node": "readonly", "requestAnimationFrame": "readonly", "self": "readonly", "window": "readonly", "Worker": "readonly"}
     },
     {
       "files": ["tools/player-gate/variants/delayed-client.mjs", "tools/player-gate/variants/delayed-in-process.mjs"],

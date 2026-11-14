@@ -52,6 +52,11 @@ type Activation = {
   readonly restored?: PlayerSession;
   /** Why Start shows instead of Continue: the kept session is of a format this Player no longer reads. */
   readonly outdated?: Problem;
+  /**
+   * Whether its session is the chat the Player showed before (`showSession`'s `sameChat`): only the Continue that
+   * recovers from a lost connection.
+   */
+  readonly sameChat?: true;
 };
 
 /** What the activation needs from the Player's session composable. */
@@ -81,8 +86,17 @@ interface SessionActivationHost {
   /** Whether a state Debug's rewind restored is shown for inspection. */
   readonly inspecting: () => boolean;
   readonly isDisposed: () => boolean;
-  /** Shows `next` as the Player's, for `origin`, the activation that began it. */
-  readonly showSession: (next: PlayerSession, origin: Origin) => void;
+  /** The Player's developer diagnostics (`usePlayerSession`'s `diagnostics`). */
+  readonly reportDiagnostic: (diagnostic: {
+    readonly code: string;
+    readonly message: string;
+  }) => void;
+  /** Shows `next` as the Player's, for `origin`, the activation that began it; `sameChat`: the chat shown before. */
+  readonly showSession: (
+    next: PlayerSession,
+    origin: Origin,
+    options: { readonly sameChat: boolean },
+  ) => void;
   // The owners made after this one, as the activation reaches them: forwarders and getters.
   readonly camera: { open(capability: boolean): Promise<boolean>; release(): void };
   readonly captures: { reset(): void };
@@ -114,6 +128,7 @@ export function useSessionActivation({
   connection,
   inspecting,
   isDisposed,
+  reportDiagnostic,
   showSession,
   camera,
   captures,
@@ -187,9 +202,8 @@ export function useSessionActivation({
         : null;
     const name = waiting?.name ?? (error instanceof Error ? error.name : "Error");
     continuing = null;
-    activationToken += 1;
+    const stop = nextEpoch();
     beginning.value = false;
-    const stop = activationToken;
     const shown = session.value ?? restoring;
     // A Continue still beginning beside a shown session runs nothing more either: plain-halted, resource-bound cleanup.
     if (restoring !== null && restoring !== shown) void bridgeOf(restoring).halt(restoring);
@@ -257,7 +271,7 @@ export function useSessionActivation({
       clicking: beginning.value ? clickKind : null,
       prepared: activation.value?.kind ?? null,
     });
-    activationToken += 1;
+    nextEpoch();
     continuing = null;
     beginning.value = false;
     const target = session.value;
@@ -329,6 +343,28 @@ export function useSessionActivation({
   }
   const activation = shallowRef<Activation | null>(null);
   let activationToken = 0;
+  /**
+   * The token's one writer: an error stop, a lost connection and a supersession (a preparation, an activation, an end)
+   * each take a new one before they change `halting`, `hostError` or `lost`, so an answer accepted under the previous
+   * token sees that its session stopped or was replaced even when the terminal level went back before it looked.
+   */
+  function nextEpoch(): number {
+    activationToken += 1;
+    // The work that must happen as the token moves (`onEpoch`) runs now, not when the level is next read: a stop that a
+    // replacement retires before anything looked still ends it. Each piece runs alone; a failure goes to the
+    // diagnostics, never to an error stop, which would take another token.
+    for (const work of epochWork)
+      try {
+        work();
+      } catch (error) {
+        reportDiagnostic({
+          code: "epoch-work-failed",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    return activationToken;
+  }
+  const epochWork = new Set<() => void>();
   // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
   let continuing: PlayerSession | null = null;
   // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
@@ -348,7 +384,7 @@ export function useSessionActivation({
    * so its queued requests, such as starting the recording of an obsolete session, are refused without effect.
    */
   function supersede() {
-    activationToken++;
+    nextEpoch();
     nextPreparation();
     // A pending error stop is retired with the activation it stopped; the replacement's input runs.
     halting.value = false;
@@ -605,7 +641,8 @@ export function useSessionActivation({
           prepareStart(create, found?.outdated);
           return;
         }
-        recipe = continueRecipe(found.session);
+        // The session the loss stopped goes on: its chat is the one shown before.
+        recipe = { ...continueRecipe(found.session), sameChat: true };
       } else recipe = startRecipe(create);
       endRecovery();
       // Until its session shows, a begin the fresh host refuses offers the same choice again (`startFrom`).
@@ -706,7 +743,7 @@ export function useSessionActivation({
   function started(pending: Activation, next: PlayerSession, origin: RunOrigin) {
     recoveryBegin = null;
     if (continuing?.id === next.id) continuing = null;
-    showSession(next, origin);
+    showSession(next, origin, { sameChat: pending.sameChat === true });
     // A new session replaces the one kept before.
     if (pending.kind === "start") {
       keptOwner().forgetKeptPoint();
@@ -728,6 +765,16 @@ export function useSessionActivation({
     beginning,
     lastStart,
     supersede,
+    /** The current activation token (`nextEpoch`): an answer's session ended or was replaced when it moved. */
+    epoch: (): number => activationToken,
+    /**
+     * Registers synchronous work for every move of the token (an error stop, a lost connection, a supersession), run
+     * inside the move, before the level changes; the returned function removes it. The work calls no session API.
+     */
+    onEpoch(work: () => void): () => void {
+      epochWork.add(work);
+      return () => void epochWork.delete(work);
+    },
     prepare,
     prepareStart,
     prepareRestore,

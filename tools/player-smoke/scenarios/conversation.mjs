@@ -1,5 +1,6 @@
 // The Player browser smoke's conversation and layout scenarios on `/player/`, each taking the driver's `cdp`.
 import {
+  addInitScript,
   assertEqual,
   click,
   delay,
@@ -10,6 +11,7 @@ import {
   physicalClickOn,
   pressPoint,
   pressSpace,
+  removeInitScript,
   setViewport,
   typeInto,
   value,
@@ -38,10 +40,9 @@ export async function insecureOriginScenario(cdp, origin) {
 }
 
 export async function demoScenario(cdp, origin) {
-  const {
-    result: { identifier },
-  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: `window.__played = [];
+  const identifier = await addInitScript(
+    cdp,
+    `window.__played = [];
       const play = HTMLMediaElement.prototype.play;
       HTMLMediaElement.prototype.play = function () {
         if (!window.__played.includes(this)) window.__played.push(this);
@@ -59,7 +60,7 @@ export async function demoScenario(cdp, origin) {
         if (!String(event.message).startsWith('ResizeObserver loop')) window.__errors.push(String(event.message));
       });
       addEventListener('unhandledrejection', (event) => window.__errors.push(String(event.reason)));`,
-  });
+  );
   await setViewport(cdp, 1440, 900);
   await navigate(cdp, `${origin}/player/`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -92,10 +93,12 @@ export async function demoScenario(cdp, origin) {
           stage: rendered(document.querySelector('.stage-media')) ? document.querySelector('.stage-media').getAttribute('src') : null,
           audio: window.__played.map((element) => ({ time: element.currentTime, audible: !element.muted && element.volume > 0 })),
           texts: entries.map((element) => element.textContent),
-          // A control is actionable only while it is neither disabled nor read-only: the Player makes the composer
-          // read-only and the buttons disabled while an input is submitting (#2125).
+          // A control is actionable only while it is neither disabled nor read-only.
           buttons: [...document.querySelectorAll('[data-foreground-controls] button')].filter((button) => !button.disabled).map((button) => button.textContent.trim()),
           placeholder: input && !input.disabled && !input.readOnly ? input.placeholder : null,
+          // A skippable pacing gate shows: Space in the empty composer settles it. The composer is enabled also while
+          // nothing is asked, so being enabled says nothing about a gate.
+          pacing: !!document.querySelector('[data-composer-pacing]'),
         };
       })()`,
     );
@@ -109,7 +112,7 @@ export async function demoScenario(cdp, origin) {
       await physicalClick(cdp, "[data-foreground-controls] button:last-of-type");
     } else if (
       !inputOwnershipChecked &&
-      state.placeholder !== null &&
+      state.pacing &&
       state.texts.some((text) => text.includes("Some of her messages make you wait."))
     ) {
       // The first skippable message: its pacing is still pending while the composer is enabled.
@@ -117,7 +120,7 @@ export async function demoScenario(cdp, origin) {
       await pacingInputOwnershipCheck(cdp);
     } else if (
       !spaceSkipChecked &&
-      state.placeholder !== null &&
+      state.pacing &&
       state.texts.some((text) => text.includes("Twenty seconds less. Don't thank me yet."))
     ) {
       spaceSkipChecked = true;
@@ -140,8 +143,8 @@ export async function demoScenario(cdp, origin) {
       await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
       await cdp.call("Input.insertText", { text: "Mistress" });
       await physicalClick(cdp, ".composer-send");
-    } else if (state.placeholder !== null) {
-      // A skippable pacing gate: Space in the empty composer hurries the message along.
+    } else if (state.pacing) {
+      // A skippable pacing gate shows: Space in the empty composer hurries the message along.
       await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
       await pressSpace(cdp);
     }
@@ -181,7 +184,7 @@ export async function demoScenario(cdp, origin) {
     "[]",
     "The demo reported errors in the console",
   );
-  await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  await removeInitScript(cdp, identifier);
 }
 
 /** The latest message in the conversation. */
@@ -332,16 +335,15 @@ async function smartFollowCheck(cdp) {
  */
 export async function packageScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
-  const {
-    result: { identifier },
-  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: `window.__played = [];
+  const identifier = await addInitScript(
+    cdp,
+    `window.__played = [];
       const play = HTMLMediaElement.prototype.play;
       HTMLMediaElement.prototype.play = function () {
         if (!window.__played.includes(this)) window.__played.push(this);
         return play.call(this);
       };`,
-  });
+  );
   try {
     await navigate(cdp, `${origin}/player/?package=house`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -367,7 +369,7 @@ export async function packageScenario(cdp, origin) {
       "The house package did not play its own sound",
     );
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 
   // A package that does not compile says so in plain words, with its errors under Technical details, collapsed.

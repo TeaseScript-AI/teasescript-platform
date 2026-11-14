@@ -8,13 +8,18 @@ import {
   x25519Identity,
 } from "../../../dist/tests/helpers/player/age-keyholder.js";
 import {
+  addInitScript,
   assertEqual,
   clickLabelled,
   delay,
+  evaluate,
   key,
   navigate,
   physicalClick,
+  pressEnter,
+  pressEscape,
   reloadKept,
+  removeInitScript,
   setViewport,
   typeInto,
   value,
@@ -32,8 +37,9 @@ async function standInRelays(cdp) {
     signature:
       "b55e7cb2d5c613ee0b2e28d6750aabbb78c39dcc96bd9d38c2c2e12198df95571de8e8e402a0cc48871c7089a2b3af4b",
   };
-  const { identifier } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: `(() => {
+  return addInitScript(
+    cdp,
+    `(() => {
       const beacon = ${JSON.stringify(round1)};
       const original = window.fetch.bind(window);
       window.__drandRequests = [];
@@ -48,8 +54,7 @@ async function standInRelays(cdp) {
         );
       };
     })();`,
-  });
-  return identifier;
+  );
 }
 
 /**
@@ -162,25 +167,60 @@ export async function lockScenario(cdp, origin) {
       "A typed password was kept",
     );
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 }
 
-/** A real Enter key in the focused field. */
-async function pressEnter(cdp) {
-  for (const type of ["keyDown", "keyUp"])
-    await cdp.call("Input.dispatchKeyEvent", {
-      type,
-      key: "Enter",
-      code: "Enter",
-      windowsVirtualKeyCode: 13,
-      ...(type === "keyDown" ? { text: "\r" } : {}),
-    });
+/**
+ * Whether the composer's placeholder shows whole beside its buttons, at the layout's width and at 360 px on a touch
+ * screen (narrow phones, whose buttons are larger): the placeholder's text, measured in the field's own font, against
+ * the field's content width.
+ */
+async function assertPlaceholderWhole(cdp, expected) {
+  const measure = `(() => {
+    const field = document.querySelector('[data-composer-input]');
+    const style = getComputedStyle(field);
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+    for (const name of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing']) probe.style[name] = style[name];
+    probe.textContent = field.placeholder;
+    document.body.append(probe);
+    const text = probe.getBoundingClientRect().width;
+    probe.remove();
+    return {
+      placeholder: field.placeholder,
+      text: Math.ceil(text),
+      room: Math.floor(field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)),
+      eye: !!document.querySelector('[data-composer-password-toggle]'),
+      send: !!document.querySelector('.composer-send'),
+    };
+  })()`;
+  try {
+    for (const width of [1280, 360]) {
+      await setViewport(cdp, width, 800);
+      await cdp.call("Emulation.setTouchEmulationEnabled", {
+        enabled: width < 600,
+        maxTouchPoints: 1,
+      });
+      await delay(200);
+      const shown = await value(cdp, measure);
+      assertEqual(shown.placeholder, expected, `The placeholder at ${width} px`);
+      assertEqual(
+        shown.eye && shown.send && shown.text <= shown.room,
+        true,
+        `"${expected}" does not show whole at ${width} px: ${JSON.stringify(shown)}`,
+      );
+    }
+  } finally {
+    await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await setViewport(cdp, 1280, 800);
+  }
 }
 
 /**
  * askPassword (V30 §20) in the composer, coarsely: its answer is the hash of what was typed; written directly in
- * `password:` its field asks twice for an encrypt call and once for a decrypt call; and with an opener written `true`,
+ * `password:` its field asks twice on one line for an encrypt call, with its placeholders whole, its focus and Caps Lock
+ * warning kept, and Escape in the repeat asking again; and once for a decrypt call; and with an opener written `true`,
  * the lock dialog follows the field. No typed password is shown or kept.
  */
 export async function passwordScenario(cdp, origin) {
@@ -195,7 +235,7 @@ export async function passwordScenario(cdp, origin) {
     const field = `document.querySelector('[data-composer-input]')`;
     const fieldOpen = (question) =>
       `${said(question)} && ${noLoginField(field)} && !${field}.disabled`;
-    const repeat = `!!document.querySelector('[data-composer-repeat]')`;
+    const repeatPhase = `${field}.getAttribute('aria-label') === 'Repeat password' && ${field}.value === ''`;
 
     // A password has one line: one pasted with a line break answers without it.
     await waitFor(cdp, fieldOpen("Your code?"), 8_000, "askPassword did not open a password field");
@@ -208,18 +248,50 @@ export async function passwordScenario(cdp, origin) {
     await pressEnter(cdp);
     await waitFor(cdp, said("Same: true"), 8_000, "askPassword did not give the typed text's hash");
 
-    // In `password:` of an encrypt call the field asks twice, of a decrypt call once.
-    await waitFor(cdp, fieldOpen("Choose a code") + ` && ${repeat}`, 8_000, "No repeat field");
+    // In `password:` of an encrypt call the field asks twice on one line, of a decrypt call once.
+    await waitFor(cdp, fieldOpen("Choose a code"), 8_000, "No password field to lock");
+    await assertPlaceholderWhole(cdp, "Password");
+    // The two entries are one field, so its focus and its Caps Lock warning stay from one to the other. CDP cannot turn
+    // Caps Lock on: a key event the page dispatches reports it, and Send, a click, ends the first entry.
+    await typeInto(cdp, "[data-composer-input]", "field pass");
+    const capsLock = `document.querySelector('[data-composer-caps-lock]')?.textContent.trim()`;
+    await evaluate(
+      cdp,
+      `${field}.smokeFirstEntry = true; ${field}.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', modifierCapsLock: true, bubbles: true })); return true;`,
+    );
+    await waitFor(cdp, `${capsLock} === 'Caps Lock is on'`, 2_000, "No Caps Lock warning");
+    await physicalClick(cdp, ".composer-container button[type=submit]");
+    await waitFor(
+      cdp,
+      `${repeatPhase} && ${noLoginField(field)} && !!document.querySelector('[data-composer-back]')`,
+      8_000,
+      "The field did not ask again on its line",
+    );
     assertEqual(
-      await value(cdp, noLoginField(`document.querySelector('[data-composer-repeat]')`)),
-      true,
-      "The repeat field is a login field",
+      await value(
+        cdp,
+        `[${field}.smokeFirstEntry === true, document.activeElement === ${field}, ${capsLock}].join()`,
+      ),
+      "true,true,Caps Lock is on",
+      "The repeat is not the first entry's field, focused, with its Caps Lock warning",
+    );
+    await assertPlaceholderWhole(cdp, "Repeat it");
+    // Escape in the repeat asks for the password again: both entries go, and the lock still waits.
+    await typeInto(cdp, "[data-composer-input]", "field pass");
+    await pressEscape(cdp);
+    await waitFor(
+      cdp,
+      `${field}?.getAttribute('aria-label') === 'Password' && ${field}.value === '' && !document.querySelector('[data-composer-back]')`,
+      4_000,
+      "Escape in the repeat did not ask for the password again",
     );
     await typeInto(cdp, "[data-composer-input]", "field pass");
-    await typeInto(cdp, "[data-composer-repeat]", "field pass");
+    await pressEnter(cdp);
+    await waitFor(cdp, repeatPhase, 8_000, "The field did not ask again after Escape");
+    await typeInto(cdp, "[data-composer-input]", "field pass");
     await pressEnter(cdp);
     await waitFor(cdp, said("Locked."), 15_000, "The password field did not lock");
-    await waitFor(cdp, fieldOpen("Type it again") + ` && !(${repeat})`, 8_000, "No field to open");
+    await waitFor(cdp, fieldOpen("Type it again"), 8_000, "No field to open");
     await typeInto(cdp, "[data-composer-input]", "field pass");
     await pressEnter(cdp);
     await waitFor(cdp, said("Opened: Field note"), 15_000, "The password field did not open it");
@@ -227,7 +299,9 @@ export async function passwordScenario(cdp, origin) {
     // With `timeLock: true` the lock dialog follows the field and asks for the time lock alone.
     await waitFor(cdp, fieldOpen("Choose another code"), 8_000, "No field before the dialog");
     await typeInto(cdp, "[data-composer-input]", "timed pass");
-    await typeInto(cdp, "[data-composer-repeat]", "timed pass");
+    await pressEnter(cdp);
+    await waitFor(cdp, repeatPhase, 8_000, "The field did not ask again on its line");
+    await typeInto(cdp, "[data-composer-input]", "timed pass");
     await pressEnter(cdp);
     await waitFor(
       cdp,
@@ -246,7 +320,7 @@ export async function passwordScenario(cdp, origin) {
       "A typed password was shown or kept",
     );
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 }
 
@@ -311,6 +385,138 @@ export async function passwordCompositionScenario(cdp, origin) {
 }
 
 /**
+ * The composer's edit path (#2430): an input method's composition under way belongs to the field it
+ * is typed in. A switch to another field ends it there first, so a timer's password field over the chat, or a lock's over
+ * a form field, starts empty and the composed text waits in its own field; nothing is written after the switch. A send
+ * while composing, by Send or by the Enter of a keyboard that does not commit with Enter, sends the whole text shown,
+ * in the chat and in the lock's first entry, and nothing is written after it.
+ */
+export async function composerEditPathScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=composer-edit-path`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const said = (text) =>
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
+  const input = `document.querySelector('[data-composer-input]')`;
+  const masked = `getComputedStyle(${input}).webkitTextSecurity !== 'none'`;
+  const ready = `!!${input} && !${input}.disabled && !${input}.readOnly`;
+  const compose = (text) =>
+    cdp.call("Input.imeSetComposition", {
+      text,
+      selectionStart: text.length,
+      selectionEnd: text.length,
+    });
+  // The Enter of a keyboard that does not commit with Enter: not marked as composing while the composition is open.
+  const uncommittedEnter = () =>
+    evaluate(
+      cdp,
+      `${input}.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))`,
+    );
+  // Every value an input event leaves in a composer field, from now.
+  const watchEdits = () =>
+    evaluate(
+      cdp,
+      `window.__edits = []; window.__editWatch ??= document.addEventListener('input', (event) => event.target.matches?.('[data-composer-input]') && window.__edits.push(event.target.value), true) ?? true`,
+    );
+  const nothingWrittenAfter = async (allowed, what) => {
+    await delay(400);
+    assertEqual(await value(cdp, `${input}.value`), "", `${what}: the field is not empty`);
+    const edits = await value(cdp, "window.__edits");
+    assertEqual(
+      edits.every((edit) => allowed.includes(edit)),
+      true,
+      `${what}: written after it: ${JSON.stringify(edits)}`,
+    );
+  };
+
+  // A timer's password over a chat composition: the chat keeps the composed text, the password field starts empty.
+  await waitFor(cdp, `${said("Chat?")} && ${ready}`, 8_000, "No chat question");
+  await physicalClick(cdp, "[data-composer-input]");
+  await cdp.call("Input.insertText", { text: "CHAT " });
+  await compose("かな");
+  await watchEdits();
+  await waitFor(cdp, `${said("Timer password")} && ${masked}`, 8_000, "No timer password");
+  await nothingWrittenAfter(["CHAT かな"], "The switch to the password");
+  await cdp.call("Input.insertText", { text: "pw" });
+  await pressEnter(cdp);
+  await waitFor(
+    cdp,
+    `${said("Timer password given")} && !(${masked}) && ${input}.value === "CHAT かな"`,
+    8_000,
+    "The chat lost its composed text",
+  );
+  await physicalClick(cdp, "[data-composer-input]");
+  await pressEnter(cdp);
+  await waitFor(cdp, said("Chat: CHAT かな"), 8_000, "The chat did not answer its text");
+
+  // A lock's password over a form field's composition: the form keeps it for its return.
+  await waitFor(cdp, `!!document.querySelector('[data-form-field="name"]')`, 8_000, "No form");
+  await physicalClick(cdp, '[data-form-field="name"]');
+  await waitFor(cdp, `${input}.value === "Ada" && document.activeElement === ${input}`);
+  await compose("かな");
+  await watchEdits();
+  await waitFor(cdp, `${said("Timer lock")} && ${masked}`, 8_000, "No timer lock");
+  await nothingWrittenAfter(["かな"], "The switch to the lock");
+  await cdp.call("Input.insertText", { text: "pw" });
+  await pressEnter(cdp);
+  await waitFor(cdp, `${input}.getAttribute('aria-label') === "Repeat password"`);
+  await cdp.call("Input.insertText", { text: "pw" });
+  await pressEnter(cdp);
+  await waitFor(
+    cdp,
+    `${said("Timer locked")} && !(${masked}) && ${input}.value === "かな"`,
+    15_000,
+    "The form lost its composed text",
+  );
+  await physicalClick(cdp, "[data-composer-input]");
+  await pressEnter(cdp);
+  await clickLabelled(cdp, "Continue", "[data-form-actions] button");
+  await waitFor(cdp, said("Name: かな"), 8_000, "The form did not answer its text");
+
+  // Sends while composing, in the chat.
+  await waitFor(cdp, `${said("Send?")} && ${ready}`, 8_000, "No Send question");
+  await physicalClick(cdp, "[data-composer-input]");
+  await cdp.call("Input.insertText", { text: "SEND " });
+  await compose("かな");
+  await watchEdits();
+  await physicalClick(cdp, ".composer-send");
+  await waitFor(cdp, said("Sent: SEND かな"), 8_000, "Send did not send the whole text");
+  await nothingWrittenAfter(["SEND かな"], "Send while composing");
+  await waitFor(cdp, `${said("Enter?")} && ${ready}`, 8_000, "No Enter question");
+  await physicalClick(cdp, "[data-composer-input]");
+  await cdp.call("Input.insertText", { text: "ENTER " });
+  await compose("かな");
+  await watchEdits();
+  await uncommittedEnter();
+  await waitFor(cdp, said("Entered: ENTER かな"), 8_000, "Enter did not send the whole text");
+  await nothingWrittenAfter(["ENTER かな"], "Enter while composing");
+
+  // And in the lock's first entry: the repeat starts empty.
+  const repeatPhase = `${input}.getAttribute('aria-label') === "Repeat password"`;
+  await waitFor(cdp, `${said("Lock by Send")} && ${masked} && ${ready}`, 8_000, "No lock");
+  await physicalClick(cdp, "[data-composer-input]");
+  await compose("かな");
+  await watchEdits();
+  await physicalClick(cdp, ".composer-send");
+  await waitFor(cdp, repeatPhase, 4_000, "Send did not ask the password again");
+  await nothingWrittenAfter(["かな"], "Send while composing the lock's password");
+  await cdp.call("Input.insertText", { text: "かな" });
+  await pressEnter(cdp);
+  await waitFor(cdp, said("Locked by Send"), 15_000, "The lock by Send did not lock");
+  await waitFor(cdp, `${said("Lock by Enter")} && ${masked} && ${ready}`, 8_000, "No second lock");
+  await physicalClick(cdp, "[data-composer-input]");
+  await compose("かな");
+  await watchEdits();
+  await uncommittedEnter();
+  await waitFor(cdp, repeatPhase, 4_000, "Enter did not ask the password again");
+  await nothingWrittenAfter(["かな"], "Enter while composing the lock's password");
+  await compose("かな");
+  await uncommittedEnter();
+  await waitFor(cdp, said("Locked by Enter"), 15_000, "The lock by Enter did not lock");
+}
+
+/**
  * askPassword's fields and blocks, a focused input check: a block that returns at once leaves askPassword's field empty
  * again, and a lock's password field that a block asks over a form leaves the form's text being typed as it was.
  */
@@ -322,7 +528,6 @@ export async function passwordInterruptionScenario(cdp, origin) {
   const said = (text) =>
     `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
   const input = `document.querySelector('[data-composer-input]')`;
-  const repeat = `document.querySelector('[data-composer-repeat]')`;
   const field = (id) => `document.querySelector('[data-form-field="${id}"]')`;
   await waitFor(
     cdp,
@@ -357,17 +562,19 @@ export async function passwordInterruptionScenario(cdp, origin) {
   await clickLabelled(cdp, "Lock it", "[data-permanent-button]");
   await waitFor(
     cdp,
-    `${said("Interrupting password")} && !!${repeat} && !${input}.disabled && ${noLoginField(input)}`,
+    `${said("Interrupting password")} && ${input}.getAttribute('aria-label') === 'Password' && !${input}.disabled && ${noLoginField(input)}`,
     8_000,
     "The lock's password field did not open",
   );
   assertEqual(await value(cdp, `${input}.value`), "", "The password field took the form's text");
   await typeInto(cdp, "[data-composer-input]", "p");
-  await typeInto(cdp, "[data-composer-repeat]", "p");
+  await pressEnter(cdp);
+  await waitFor(cdp, `${input}.getAttribute('aria-label') === 'Repeat password'`);
+  await typeInto(cdp, "[data-composer-input]", "p");
   await pressEnter(cdp);
   await waitFor(
     cdp,
-    `!${repeat} && !!${field("name")} && ${input}.value === "Bea" && !(${masked})`,
+    `!!${field("name")} && ${input}.value === "Bea" && !(${masked})`,
     15_000,
     "The form's text being typed was lost after a lock's password field",
   );
@@ -398,7 +605,7 @@ export async function lockKeptScenario(cdp, origin) {
     await waitFor(cdp, `!!${dialog}`, 8_000, "Continue did not return to the lock dialog");
     assertEqual(await value(cdp, resume), false, "Continue returned to the block's button");
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 }
 
@@ -467,6 +674,6 @@ export async function publicKeyScenario(cdp, origin, profile) {
       "The unlock key did not open it",
     );
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 }

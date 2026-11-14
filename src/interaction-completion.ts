@@ -54,7 +54,7 @@ export type ResolvedInteraction =
 export function resolveAnswer(
   action: RuntimeInteractionActionSnapshot,
   payload: Readonly<Record<string, unknown>>,
-  context: TemporalContext,
+  context: Pick<TemporalContext, "presentation">,
   capturedMedia: CapturedMediaAdmission | undefined,
 ): ResolvedInteraction {
   // A form is submitted with the answers its edits gave it; the payload carries none.
