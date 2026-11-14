@@ -349,7 +349,6 @@ export class CoreProgram {
     for (const constraint of this.constraints)
       if (constraint.kind === "speakerRead" && !this.placeBySite.has(siteKey(constraint.site)))
         this.placeBySite.set(siteKey(constraint.site), constraint.occurrence);
-    // the flow graph's uses of an operand, by its place
     const uses = [
       ["index", this.flow.indexUses],
       ["count", this.flow.countUses],

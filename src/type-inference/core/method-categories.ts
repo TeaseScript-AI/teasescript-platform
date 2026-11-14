@@ -79,7 +79,7 @@ const REMOVES: Readonly<Record<"element" | "null", MethodCategory>> = {
 /**
  * A method's category, or `undefined` for one the core does not model (its result is the runtime's): a method that
  * removes or clears its receiver's elements has its category from its contracts; one that adds them is a store into
- * them (`collector.ts`).
+ * them.
  */
 export function methodCategory(name: string): MethodCategory | undefined {
   const list = listMethod(name);

@@ -110,7 +110,6 @@ function levelOf(position: TypeAnnotation): Level {
  * The same type written twice is one type, so `integer[] | integer[]` and `integer[]? | integer[]` hold one collection.
  */
 function unionError(file: number, type: TypeAnnotation): WrittenTypeError | null {
-  // the positions of the type, each before its parts: the whole type, and the element type of each collection in it
   const levels: Level[] = [];
   const pending: TypeAnnotation[] = [type];
   for (let position = pending.pop(); position !== undefined; position = pending.pop()) {
