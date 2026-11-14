@@ -16,12 +16,9 @@ import {
   type Writer,
 } from "./items.js";
 
-/**
- * The runtime's operator table (checkpoint 9, F16 and C4): for each operator, the operand kinds the runtime accepts and
- * the kind of the result. The runtime is the authority: `type-core-operator-table.test.ts` evaluates every
- * operator on every pair of value kinds and fails where a row exists that the runtime rejects or a row is missing that
- * it accepts. For the core this table replaces the legacy checker's `arithmeticType`
- * (`src/static-types/arithmetic.ts`).
+/*
+ * The runtime's operator table (F16, C4): for each operator, the operand kinds the runtime accepts and the kind of the
+ * result. The runtime is the authority.
  */
 
 export type Operator = "+" | "-" | "*" | "/" | "%" | "neg" | "<" | "<=" | ">" | ">=";
@@ -149,15 +146,15 @@ export function operatorRow(
  * The items of an operation's result, from the items of its operands, one combination of operand items at a time (F16):
  * - a combination the table has no row for fails at runtime and gives nothing (C4 reports it);
  * - an `unknown` operand gives, as possibilities, the results of every row the other operands' kinds allow (`x / 4`
- *   with `x` unknown: number, duration, calendar duration, angle), and these items stand for that one operand (`fan`,
- *   §4), explained by its writer and reason; a combination of unknowns only stays unknown, and an unknown operand with
- *   the reason `deferred` (a parameter with several call sites) gives an unknown too, beside the rows where it has
+ *   with `x` unknown: number, duration, calendar duration, angle), and these items stand for that one operand
+ *   (`fan`), explained by its writer and reason; a combination of unknowns only stays unknown, and an unknown operand
+ *   with the reason `deferred` (a parameter with several call sites) gives an unknown too, beside the rows where it has
  *   another reason as well, so the result only grows as the operand's reasons do;
  * - a result kind is definite when no operand is unknown, every operand item is definite, and every combination that
  *   succeeds gives that kind by a row that needs no check by value.
  * The reasons and the first context word of a combination's items go to its result, an unknown bringing its reason's
  * word (`ownContext`), an unknown result its reasons' word through the merge (`mergeItems`); a guarded operand marks it
- * (§3.2).
+ * (`computedMarks`).
  * `operation` is the operation's site, the identity of an unknown operand without a writer; `writer` explains a result
  * whose operands have no writer.
  */
@@ -182,15 +179,13 @@ export function operationItems(
   for (const combination of combinations) {
     scope.work.charge("operatorSteps", rows.length + 1);
     const reasons = combination.reduce((all, item) => all | item.reasons, 0);
-    // an unknown operand's reason word comes before any condition's word (`hostValue / divisor()`: `unknown`, not `call`)
+    // an unknown operand brings its reasons' word (`ownContext`): `hostValue / divisor()` says `unknown`, not `call`
     const context = combination.reduce<ContextWord | null>(
       (first, item) => firstContext(first, ownContext(item)),
       null,
     );
     // (a computed row: never external data a test refined, `computedMarks`)
     const shared = { reasons, context, cert: "pos" as const, ...computedMarks(combination) };
-    // A2, A3: a result kind of a combination holding external data (an external unknown, or an operand item that is
-    // itself possible solely through external data)
     const external = combination.some(
       (item) =>
         item.extOnly === true || (item.tag === "unknown" && (item.reasons & REASON.external) !== 0),

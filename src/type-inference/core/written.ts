@@ -17,14 +17,12 @@ import type { SourceSite } from "../graph.js";
 import type { WrittenTypeError } from "./result.js";
 
 /*
- * The core's check of written types (V30 §13, ADR 0021 3.4): a union never holds a whole list, set or dict beside another
- * type, wherever a type is written (a variable, a parameter, a result, and a type test, whose type is one that can follow
- * `let x:`, ADR 0021 4.1), also inside another type (a list or set element, a dict value). `null` beside a collection is
- * its optional form (`integer[] | null` is `integer[]?`) and stays allowed. The collector reads the same types into kinds
- * (`typeTerm`) and reports nothing; this check reads the written types alone, independent of the flow, so a written
- * type in code that never runs or in a function no call reaches errs too. A place keeps its written type as the collector
- * reads it, which decides the place as any written type does (A4): its stores and reads are checked against it
- * as before, and the error adds nothing there.
+ * The core's check of written types (V30 §13, ADR 0021 3.4): a union never holds a whole list, set or dict beside
+ * another type, wherever a type is written (a variable, a parameter, a result, and a type test, whose type is one that
+ * can follow `let x:`, ADR 0021 4.1), also inside another type (a list or set element, a dict value). `null` beside a
+ * collection is its optional form (`integer[] | null` is `integer[]?`) and stays allowed. This check reads the written
+ * types alone, independent of the flow, so a written type in code that never runs or in a function no call reaches errs
+ * too.
  */
 
 /** The type names that stand for any list, set or dict (V30 §13). */
@@ -111,7 +109,6 @@ function levelOf(position: TypeAnnotation): Level {
  * The same type written twice is one type, so `integer[] | integer[]` and `integer[]? | integer[]` hold one collection.
  */
 function unionError(file: number, type: TypeAnnotation): WrittenTypeError | null {
-  // the positions of the type, each before its parts: the whole type, and the element type of each collection in it
   const levels: Level[] = [];
   const pending: TypeAnnotation[] = [type];
   for (let position = pending.pop(); position !== undefined; position = pending.pop()) {
@@ -120,9 +117,7 @@ function unionError(file: number, type: TypeAnnotation): WrittenTypeError | null
     for (const member of level.members)
       if (member.kind !== "namedType") pending.push(member.element);
   }
-  // each position's type as a number, its parts' first: one per distinct text of its members' sorted keys and `null`,
-  // where a collection's key holds its element's number, so a key stays as short as its level (the work: the walk, and
-  // a sort of each level's distinct keys)
+  // a collection's key holds its element's number, so a key stays as short as its level
   const types = new Map<string, number>();
   const typeOf = new Map<TypeAnnotation, number>();
   let first: UnionType | null = null;
@@ -172,7 +167,6 @@ function suggestionFor(union: UnionType): string | null {
     if (next.kind === "unionType")
       for (let at = next.members.length - 1; at >= 0; at -= 1) pending.push(next.members[at]!);
     else members.push(next);
-  // a type name that is no collection and not `null`, also as `T?`: its name and its written text
   const scalar = (
     type: TypeAnnotation,
   ): { readonly name: string; readonly text: string } | null => {

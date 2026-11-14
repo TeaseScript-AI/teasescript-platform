@@ -24,13 +24,14 @@ import type { CoreAnalysisRequest, CoreFile } from "./program.js";
  * declaration is an identity function visible from the call's file (global, or the file's own), no parameter or
  * variable of the enclosing function has that name, the call has one positional argument, and it stands in no place
  * slot; every other call stays a call. A place slot is where a write through parentheses reaches the place they hold
- * (`placeSlots`): there the call's result is a copy of its argument, so the call stays one.
+ * (`placeSlots`): there the call stays one. A write through its result reaches a copy of its argument, or, for a value
+ * with an identity (a speaker or a handle, `hasIdentity`), which a call shares, that value itself; the view keeps the
+ * call in both cases.
  *
- * The view keeps every node of the source that holds no such call and copies the others, a call becoming a
- * parenthesized expression with the call's span. The analysis reads the view; the front end and the plan read the
- * source, so every syntax node that crosses between them is translated: the request's into the view (`identityView`)
- * and the result's back onto the source (`checkedOnSource`). Each member of those types has its translation in a table
- * below, so a member added to one of them does not compile until it has one.
+ * The analysis reads the view; the front end and the plan read the source, so every syntax node that crosses between
+ * them is translated: the request's into the view (`identityView`) and the result's back onto the source
+ * (`checkedOnSource`). Each member of those types has its translation in a table below, so a member added to one of
+ * them does not compile until it has one.
  */
 
 /** A node of the syntax: what the translation maps. */
@@ -47,7 +48,7 @@ export interface IdentityView {
   readonly request: CoreAnalysisRequest;
   /** How many calls the view reads as their argument. */
   readonly calls: number;
-  /** The units of work the view took (`identitySteps`, `viewProgram`'s list): none without an identity function. */
+  /** The units of work the view took (`identitySteps`): none without an identity function. */
   readonly steps: number;
   /** The node of the source that a node of the view stands for: a call for the parentheses that read it. */
   sourceOf<T extends SyntaxNode>(node: T): T;
@@ -152,7 +153,6 @@ export function identityView(request: CoreAnalysisRequest): IdentityView {
       { files: request.files, options: request.options },
       { calls: 0, steps: 0, sourceOf: kept, viewOf: kept },
     );
-  // (the declarations' scan; then a unit per file, each file's walk, and a unit per node translated into the view)
   let steps = names.steps;
   const back = new Map<SyntaxNode, SyntaxNode>();
   const forth = new Map<SyntaxNode, SyntaxNode>();
@@ -198,7 +198,6 @@ export function checkedOnSource(
   };
   const result = translated<Omit<TypeCheckResult, "known">>(checked, RESULT_ON_SOURCE, onSource);
   if (steps > 0) work.charge("identitySteps", steps);
-  // (`known` asks one node per question, a lookup)
   return { ...result, known: (expression) => checked.known(view.viewOf(expression)) };
 }
 
@@ -232,7 +231,6 @@ function identityNames(
       }
     }
   });
-  // each name decided once: declared exactly once, as an identity function
   const identities = new Map<string, { declaration: FunctionDeclaration; file: number }>();
   for (const [name, same] of declared) {
     steps += 1;
@@ -292,17 +290,8 @@ interface Visit {
  * one, each such call a parenthesized expression. Iterative, so a deep program does not deepen the native stack.
  *
  * Its units of work (`identitySteps`), one for each turn of each loop, so the allowance bounds all the work the view
- * does. Together with `identityView`'s (a unit per file and per node translated into the view, and `identityNames`' a
- * unit per file, per top-level statement and per function name) and `checkedOnSource`'s (a unit per node translated
- * back), these are every loop of the view:
- * - the walk: a unit per value met (a node, a list, a member's value, `null`);
- * - at a function, `ownNames`: a unit per parameter and per value of its body met; and the copy of the names it inherits with its own
- *   added, a unit per name copied. (Functions do not nest, V30 refusing a nested one, so the inherited set is empty;
- *   the copy is charged all the same);
- * - at a call, the parentheses `unwrap` strips from its callee (the collector reads the callee so): a unit each;
- * - the marking of the ancestors of each call read: a unit per ancestor marked;
- * - the rebuild: a unit per container walked, from the last met to the first, and a unit per member a changed container
- *   maps.
+ * does. Functions do not nest (V30 refuses a nested one), so the names a function inherits are none; their copy is
+ * charged all the same.
  */
 function viewProgram(
   program: Program,
@@ -310,8 +299,6 @@ function viewProgram(
   back: Map<SyntaxNode, SyntaxNode>,
   forth: Map<SyntaxNode, SyntaxNode>,
 ): { readonly program: Program; readonly calls: number; readonly steps: number } {
-  // every container once, before its contents (a tree: each has one holder), the place slots below each, and the calls
-  // the view reads
   const order: unknown[] = [];
   const holders = new Map<unknown, unknown>();
   const places = new Set<unknown>();
@@ -345,14 +332,12 @@ function viewProgram(
       if (key !== "span") stack.push({ value: child, holder: value, shadowed });
   }
   if (reads.size === 0) return { program, calls: 0, steps };
-  // the containers on the way to a call the view reads, each rebuilt after its contents
   const changed = new Set<unknown>();
   for (const call of reads)
     for (let at: unknown = call; at !== null && !changed.has(at); at = holders.get(at) ?? null) {
       steps += 1;
       changed.add(at);
     }
-  // (each changed container's copy; any other value is kept)
   const rebuilt = new Map<unknown, object>();
   for (let at = order.length - 1; at >= 0; at -= 1) {
     const value = order[at];
@@ -393,9 +378,7 @@ function viewProgram(
  * The place slots directly below `node`, `held` where `node` stands in one (#2493, r4-452): the slots through which a
  * write reaches, a store's target's receiver and the receiver of a method that changes it, its callee read through
  * parentheses, and below a slot, what parentheses hold and a property's or an element's receiver; with the parentheses
- * stripped from a callee, a unit each. The analysis's readers that take a parenthesized
- * expression for its place read these slots only, as a write's; a test reads its subject's value, which a call's result
- * shares with its argument when it runs (the inventory in type-core-identity.test.ts).
+ * stripped from a callee, a unit each.
  */
 function placeSlots(
   node: SyntaxNode,
@@ -411,7 +394,6 @@ function placeSlots(
     case "assignmentStatement":
       return { slots: value.target.kind === "identifier" ? [] : [value.target.object], steps: 0 };
     case "callExpression": {
-      // (the collector reads a method through the parentheses around its callee: `(xs.add)(1)` changes `xs`)
       const callee = unwrap(value.callee);
       let steps = 0;
       for (

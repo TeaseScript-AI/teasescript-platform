@@ -61,20 +61,17 @@ import type {
   SourceSite,
   StoreKind,
   SyntaxEvidence,
+  TestShape,
   TypeTerm,
 } from "./graph.js";
 import { conditionShape } from "./narrowing-shapes.js";
 import { interactionEvidence, selectorsEvidence } from "./syntax-evidence.js";
 
-// The collector of the constraint graph (O4 stage 2): one walk over the project's programs, which emits the places
-// and constraints of `graph.ts` and decides nothing. Its order is the legacy check's, except that it walks every
-// function body after its file's top level instead of at the first call. It mirrors the visitor's scoping rules to
-// resolve names (the legacy facts' `reads` prove it on every source the repository holds); it reads no type and
-// reports no diagnostic. The solver (stage 3) decides every type from the graph it makes.
+// The collector decides nothing: it reads no type and reports no diagnostic.
 
 /**
- * Collects the constraint graph of the project of `request`. Names resolve, since the type analysis runs after name
- * checking succeeded; a name that resolves to nothing is a host global, of which the compiler knows nothing.
+ * Names resolve, since the type analysis runs after name checking succeeded; a name that resolves to nothing is a host
+ * global, of which the compiler knows nothing.
  */
 export function collectGraph(request: TypeAnalysisRequest): ConstraintGraph {
   return new Collector(request).collect();
@@ -86,7 +83,7 @@ type Entry =
       readonly place: PlaceId;
       /** The code the binding belongs to, `null` for a global, for the known-value links of its reads. */
       readonly body: object | null;
-      /** The initializer a read may count as the variable's value (see `Variable.keeps` of the visitor). */
+      /** The initializer a read may count as the variable's value. */
       readonly keeps: SourceSite | null;
     }
   | { readonly kind: "speaker"; readonly name: string }
@@ -109,7 +106,7 @@ class Scope {
     this.#entries.set(name, entry);
   }
 
-  /** The names visible here down to `boundary`, in a new scope under `boundary` (as the visitor's `visibleAbove`). */
+  /** The names visible here down to `boundary`, in a new scope under `boundary`. */
   public visibleAbove(boundary: Scope): Scope {
     const copy = new Scope(boundary);
     for (let scope: Scope | null = this; scope !== null && scope !== boundary; scope = scope.parent)
@@ -151,13 +148,17 @@ class Collector {
   readonly #speakers: ReadonlyMap<Identifier, string>;
   readonly #builtins: ReadonlySet<string>;
   readonly #handlers: Handler[] = [];
+  /** The code the walk is in, which every constraint names. */
   #region: RegionRef = { kind: "start" };
   /** The name of the `let` whose value is being walked, which a media block binds to its own handle. */
   #selfHandle: string | null = null;
+  /** The file of the node the walk is at, which every site names. */
   #file = 0;
+  /** The scope a block's handlers see names down to. */
   #outer: Scope = this.#project;
+  /** The function whose body is walked, whose `return`s are recorded; `null` outside a body. */
   #function: FunctionId | null = null;
-  /** The code being walked, in which a `let` counts as kept (see `Variable.keeps` of the visitor). */
+  /** The code being walked, in which a `let` counts as kept. */
   #body: object = this.#project;
 
   public constructor(request: TypeAnalysisRequest) {
@@ -264,8 +265,6 @@ class Collector {
     };
   }
 
-  // Places and constraints ------------------------------------------------------------------------------------------
-
   #site(node: Spanned): SourceSite {
     return { file: this.#file, start: node.span.start.offset, end: node.span.end.offset };
   }
@@ -310,6 +309,16 @@ class Collector {
 
   #store(value: PlaceId, into: PlaceId, how: StoreKind, node: Spanned, role: Role): void {
     this.#add({ ...this.#origin(node, role), kind: "store", value, into, how });
+  }
+
+  #test(subject: PlaceId, shape: TestShape, node: Spanned): void {
+    this.#add({
+      ...this.#origin(node, "condition"),
+      kind: "test",
+      subject,
+      shape,
+      point: { site: this.#site(node) },
+    });
   }
 
   #projection(
@@ -362,8 +371,6 @@ class Collector {
     });
     return result;
   }
-
-  // Declarations ----------------------------------------------------------------------------------------------------
 
   #declareFunction(declaration: FunctionDeclaration, file: number, scope: Scope): FunctionId {
     const id = this.#functions.length;
@@ -430,7 +437,7 @@ class Collector {
     }
     this.#function = id;
     yield* compileChild(this.#statements(declaration.body.statements, scope));
-    // The end of the body: whether it is reached, so that the function completes without a value, is the solver's.
+    // (whether the end of the body is reached is not decided here)
     this.#add({ ...this.#origin(declaration.body, "return"), kind: "exit", fn: id });
     this.#function = outerFunction;
     this.#body = outerBody;
@@ -472,8 +479,7 @@ class Collector {
     const name = declaration.name.name;
     this.#project.declare(name, { kind: "speaker", name });
     // A copy of the player profile anywhere gives the player each person field from the start, with its terms and name
-    // lists as text (V30 §37); the copy itself stores them again where it stands (see `#call`). The seeds are sited
-    // at the copy, in its own file.
+    // lists as text (V30 §37). The seeds are sited at the copy, in its own file.
     if (copy !== undefined && name === PLAYER) {
       const file = this.#file;
       this.#file = copy.file;
@@ -513,8 +519,6 @@ class Collector {
       });
     }
   }
-
-  // Statements ------------------------------------------------------------------------------------------------------
 
   *#statements(statements: readonly Statement[], scope: Scope): CompileTask<void> {
     for (const statement of statements) yield* compileChild(this.#statement(statement, scope));
@@ -573,17 +577,15 @@ class Collector {
         const tested = this.#plainVariable(statement.subject, scope);
         for (const switchCase of statement.cases) {
           if (switchCase.typeTest !== null && tested !== undefined)
-            this.#add({
-              ...this.#origin(switchCase.typeTest, "condition"),
-              kind: "test",
-              subject: tested,
-              shape: {
+            this.#test(
+              tested,
+              {
                 kind: "type",
                 type: typeTerm(switchCase.typeTest.type),
                 negated: switchCase.typeTest.negated,
               },
-              point: { site: this.#site(switchCase.typeTest) },
-            });
+              switchCase.typeTest,
+            );
           for (const value of switchCase.values) {
             const place = yield* compileChild(this.#expression(value, scope));
             // The case's comparison has a result of its own; the case value stays an operand.
@@ -780,7 +782,7 @@ class Collector {
     this.#mutate(target.object, scope, statement);
   }
 
-  /** The root variable that a store through `expression` changes in place, if it is one. */
+  /** Records the `mutate` of the root variable a store through `expression` changes in place, if it is one. */
   #mutate(expression: Expression, scope: Scope, at: Spanned): void {
     let node = unwrap(expression);
     while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression")
@@ -796,7 +798,7 @@ class Collector {
     });
   }
 
-  /** The binding of a plain variable, for a test that narrows (only a plain variable narrows). */
+  /** The binding of a plain variable: the subject of a `test` constraint, which the graph records for no other. */
   #plainVariable(expression: Expression, scope: Scope): PlaceId | undefined {
     const node = unwrap(expression);
     if (node.kind !== "identifier") return undefined;
@@ -816,8 +818,6 @@ class Collector {
     if (entry === undefined && node.name === "speaker") return this.#speakers.get(node) ?? null;
     return undefined;
   }
-
-  // Expressions -----------------------------------------------------------------------------------------------------
 
   /**
    * Walks an expression and returns its value place. `receiver` is the written type of the variable a load starts or
@@ -976,17 +976,14 @@ class Collector {
         return yield* compileChild(this.#binary(expression, scope));
       case "typeTestExpression": {
         const value = yield* compileChild(this.#expression(expression.value, scope));
-        // A type test is always the `type` shape; the shape names what it tests, as the visitor reads it.
         const shape = conditionShape(expression);
         const tested = shape.kind === "type" ? this.#plainVariable(shape.tested, scope) : undefined;
         if (tested !== undefined)
-          this.#add({
-            ...this.#origin(expression, "condition"),
-            kind: "test",
-            subject: tested,
-            shape: { kind: "type", type: typeTerm(expression.type), negated: expression.negated },
-            point: { site: this.#site(expression) },
-          });
+          this.#test(
+            tested,
+            { kind: "type", type: typeTerm(expression.type), negated: expression.negated },
+            expression,
+          );
         return this.#operation(
           { family: "typeTest", name: expression.negated ? "is not" : "is" },
           null,
@@ -1148,7 +1145,6 @@ class Collector {
     return place;
   }
 
-  /** A read of a name: a variable's occurrence, a speaker, or a name the compiler knows nothing about. */
   #read(expression: Identifier, scope: Scope): PlaceId {
     const place = this.#value(expression);
     const entry = scope.resolve(expression.name);
@@ -1199,16 +1195,9 @@ class Collector {
     const comparison = ["==", "!=", "<", "<=", ">", ">="].includes(expression.operator);
     const shape = conditionShape(expression);
     if (shape.kind === "null") {
-      // `x == null` and `x != null` narrow a plain variable.
       const tested = this.#plainVariable(shape.tested, scope);
       if (tested !== undefined)
-        this.#add({
-          ...this.#origin(expression, "condition"),
-          kind: "test",
-          subject: tested,
-          shape: { kind: "null", negated: shape.negated },
-          point: { site: this.#site(expression) },
-        });
+        this.#test(tested, { kind: "null", negated: shape.negated }, expression);
     }
     return this.#operation(
       {
@@ -1312,8 +1301,6 @@ class Collector {
     const method = callee.property.name;
     const speaker = this.#speakerName(callee.object, scope);
     if (method === "copyFrom" && speaker === PLAYER) {
-      // `player.copyFrom(playerProfile)` stores each person field into the player, as `#speaker` seeds them
-      // at the start.
       yield* compileChild(this.#expression(callee.object, scope));
       yield* compileChild(this.#arguments(expression, scope));
       const result = this.#value(expression);
@@ -1333,7 +1320,6 @@ class Collector {
       positional.length === 1 &&
       expression.arguments.length === 1
     ) {
-      // The element, or each element of the list, is stored into the receiver's elements, in place.
       const value = yield* compileChild(this.#expression(positional[0]!.value, scope));
       const target = this.#place(expression, `${label(callee.object)}[]`, {
         kind: "target",
@@ -1353,7 +1339,7 @@ class Collector {
       positional.length === 1 &&
       expression.arguments.length === 2
     ) {
-      // The default runs last, only when the call needs it; the result joins the element with it (Q2).
+      // The default runs last, only when the call needs it.
       const key = yield* compileChild(this.#expression(positional[0]!.value, scope));
       const fallback = yield* compileChild(this.#expression(defaultArgument.value, scope));
       const result = this.#value(expression);
@@ -1386,7 +1372,7 @@ class Collector {
   ): CompileTask<{ readonly positional: PlaceId[]; readonly named: NamedPlace[] }> {
     const positional: PlaceId[] = [];
     const named: NamedPlace[] = [];
-    // Only a `default:` that runs when the call needs it comes last (see `lazy-defaults.ts`).
+    // Only a `default:` that runs when the call needs it comes last.
     const lazy = lazyDefaultArgument(expression)?.argument;
     const ordered = [
       ...expression.arguments.filter((argument) => argument !== lazy),
@@ -1465,8 +1451,7 @@ function label(expression: Expression): string {
 }
 
 /**
- * The term a written annotation names. A compile task, as the production conversion is (`annotationTask` in
- * `static-types/annotations.ts`): an annotation nests as deep as it is written.
+ * The term a written annotation names. A compile task: an annotation nests as deep as it is written.
  */
 function typeTerm(annotation: TypeAnnotation): TypeTerm {
   return runCompileTask(typeTermTask(annotation));
