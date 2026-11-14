@@ -410,6 +410,32 @@ test("a failure that is not the instruction budget is compared, also one with a 
   assert.equal(different.kind, "differs");
 });
 
+test("only plain data is compared: hidden, accessor and symbol-keyed properties and other prototypes are no match", () => {
+  const hiddenElement: unknown[] = [1];
+  Object.defineProperty(hiddenElement, 0, { enumerable: false });
+  const hiddenField = Object.defineProperty({}, "unlisted", { value: 901 });
+  const accessor = Object.defineProperty({}, "kind", { get: () => "say", enumerable: true });
+  const symbolKeyed = { [Symbol("extra")]: 1 };
+  // The shape of a class instance whose chain ends one step above it, like a class extending `null`.
+  const rooted: unknown = Object.create(Object.create(null));
+  for (const event of [hiddenElement, hiddenField, accessor, symbolKeyed, rooted])
+    assert.throws(
+      () =>
+        compare("exit", {
+          result: (kind, _input, result) =>
+            kind === "run" ? { ...result, events: [...result.events, event] } : result,
+        }),
+      TypeError,
+    );
+  // An object without a prototype is plain data, compared like any other.
+  const bare = Object.assign(Object.create(null), { kind: "extra" });
+  const verdict = compare("exit", {
+    result: (kind, _input, result) =>
+      kind === "run" ? { ...result, events: [...result.events, bare] } : result,
+  });
+  assert.equal(verdict.kind, "differs");
+});
+
 test("a record outside plain data is no match: holes, extra array keys, class instances, maps, dates", () => {
   class Event {
     public readonly kind = "say";

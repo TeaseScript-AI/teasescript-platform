@@ -125,36 +125,38 @@ function shell(
 }
 
 /**
- * Whether `value` is a dense array with no other own keys, or an object with no symbol keys whose prototype is an
- * `Object.prototype` or `null`. An object's prototype is judged by the depth of its chain, not by identity: a
- * snapshot's arrays and objects need not have this realm's prototypes.
+ * Whether `value` is a container of plain data: an array (of any prototype, as the engine's own capture admits its
+ * arrays) whose own keys are exactly its indices and `length`, or an object whose prototype is `Object.prototype` or
+ * `null` and whose own keys are all text. Every element and property must be an enumerable data property, so that the
+ * copy, which reads them all, holds everything the container holds.
  */
 function isPlainContainer(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
+  const keys = Reflect.ownKeys(value);
   if (Array.isArray(value)) {
-    if (Reflect.ownKeys(value).length !== value.length + 1) return false;
+    if (keys.length !== value.length + 1) return false;
     for (let index = 0; index < value.length; index += 1)
-      if (!Object.hasOwn(value, index)) return false;
+      if (!isPlainProperty(Reflect.getOwnPropertyDescriptor(value, String(index)))) return false;
     return true;
   }
-  return prototypeDepth(value) <= 1 && Object.getOwnPropertySymbols(value).length === 0;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  return keys.every(
+    (key) =>
+      typeof key === "string" && isPlainProperty(Reflect.getOwnPropertyDescriptor(value, key)),
+  );
 }
 
-/** How many prototypes stand between `value` and the end of its chain: 1 for a plain object, more for a class's. */
-function prototypeDepth(value: unknown): number {
-  let depth = 0;
-  for (
-    let at: object | null = Object.getPrototypeOf(value);
-    at !== null;
-    at = Object.getPrototypeOf(at)
-  )
-    depth += 1;
-  return depth;
+function isPlainProperty(descriptor: PropertyDescriptor | undefined): boolean {
+  return descriptor !== undefined && descriptor.enumerable === true && "value" in descriptor;
 }
 
 function describe(value: unknown): string {
   if (typeof value !== "object" || value === null) return typeof value;
-  return Array.isArray(value)
-    ? "an array with holes or other keys"
-    : (value.constructor?.name ?? "an object");
+  if (Array.isArray(value))
+    return "an array with holes, other keys, or hidden or accessor elements";
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null
+    ? "an object with symbol keys, or hidden or accessor properties"
+    : "an object of another prototype";
 }
