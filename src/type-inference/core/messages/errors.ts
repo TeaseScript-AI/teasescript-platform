@@ -1018,10 +1018,7 @@ export function joinFix(
     : `Put the value in the text as '\${${join.operand!}}' instead.`;
 }
 
-/**
- * The kinds other than text that `${...}` shows as text, not in a notation (as a script reference or a regex is): those
- * a text join's fix puts in `${...}`.
- */
+/** The kinds other than text that `${...}` shows as text, not in a notation (as a script reference or a regex is). */
 const TEXT_JOIN_KINDS: ReadonlySet<ItemTag> = new Set([
   "integer",
   "number",

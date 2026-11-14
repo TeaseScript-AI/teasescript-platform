@@ -76,7 +76,7 @@ export function withRetainedRecorder<T>(instrument: RetainedRecorder, callback: 
   }
 }
 
-/** The installed instrument, `null` in production: the solver takes it once, when made. */
+/** The installed instrument, `null` in production. */
 export function retainedRecorder(): RetainedRecorder | null {
   return active;
 }

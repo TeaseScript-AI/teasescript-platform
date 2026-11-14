@@ -413,7 +413,6 @@ const INTENDED: readonly Intended[] = [
         ((diagnostic.rule.rule === "store" || diagnostic.rule.rule === "fallback") &&
           diagnostic.rule.type.includes("integer") &&
           diagnostic.kinds.includes("number"))),
-    // (the new checker's sentences: rounding, a whole number, a fallback of the type, an unknown's test)
     replacement: ({ diagnostic, named }) =>
       diagnostic.kind === "written-type" || diagnostic.kind === "static"
         ? exact("Use a whole number here.")

@@ -13,8 +13,6 @@ import { REASON, type Item, type ItemTag } from "../items.js";
 import type { ValueConstraint } from "../program.js";
 import { offendingKinds, type DiagnosticRule } from "../result.js";
 
-// The check of what a choice's buttons return (TSV029).
-
 /** V30 §19: the kinds a button returns, a choice value, as the runtime's check of a choice takes them (TSR052). */
 const CHOICE_VALUES: readonly ValueKind[] = VALUE_KIND_NAMES.filter(
   (kind) => VALUE_KINDS[kind].choice,
@@ -45,7 +43,6 @@ export function choiceValues(
 ): void {
   const options = c.evidence?.kind === "choice" ? c.evidence.options : [];
   const { program } = walk.pass;
-  // the value's kinds against what the part takes, a button's value the script cannot know a possible misfit
   const check = (
     value: PlaceId | null,
     need: readonly ItemTag[],
@@ -62,8 +59,6 @@ export function choiceValues(
     }
     program.work.charge("checks");
     const items = domainItems(walk, value, node, rest);
-    // (a value a button returns that the script cannot know warns; beside a known misfit,
-    // the known one alone, one warning a site; an option or an element the runtime checks as it opens the choice)
     const misfits = items.filter((item) =>
       item.tag === "unknown"
         ? part === "value" && (isOpaque(item) || isExternal(item))
@@ -163,7 +158,6 @@ export function choiceValues(
     // a computed option: a value, a choice object, or a list or set of them (an unknown one owes its option's check,
     // which the runtime makes of its buttons too)
     check(argument, OPTIONS, "option");
-    // (its kinds, or what its type admits where they are unknown, `domainItems`)
     const kinds = domainItems(walk, argument, node, []);
     if (kinds.some((item) => item.tag === "object")) held(argument, []);
     if (kinds.some((item) => item.tag === "list" || item.tag === "set")) {

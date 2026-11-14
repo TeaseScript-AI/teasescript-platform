@@ -21,7 +21,6 @@ import type { Proof, ProofDemand } from "../solver.js";
  * (docs/specifications/type-inference-accepted-record/admission.md#r4-375): its state, one per pass, made with the
  * pass's parts and asking nothing when made. Each key's inherited type is a proof of the pass's solver
  * (`inheritedProof`); what its runs found, the keys that wait on each other and the own-level bits, is the pass's too.
- * It also holds admission's memos of landings, scans, listings and prefix holders.
  */
 export class ReceivingDomain {
   /**
@@ -138,7 +137,7 @@ export class ReceivingDomain {
    * (#1428, #1547): each a pair of ranges of that call's tape, which charged emits and reports made.
    */
   listings = new Map<PlaceId, ListingNode>();
-  /** Per place, the calls' results asked of it not yet kept in `listings` (`trieOf` keeps them at the first look). */
+  /** Per place, the calls' results asked of it not yet kept in `listings`. */
   pendingListings = new Map<PlaceId, Listing[]>();
   /** The copies places answer through (`passThrough`), once per pass. */
   forest: CopyForest | null = null;

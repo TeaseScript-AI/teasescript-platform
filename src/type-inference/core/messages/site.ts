@@ -29,12 +29,9 @@ import { Retained, retainedModule } from "../retained/retained.js";
 // How a message names the source, and the syntax around a site it reads: checks that hold, parts, acts, landings.
 
 /**
- * What a message reads of the source and of the analysis: the text at a site, the line it starts on (1-based), its
- * column (0-based), the statement a check may hold, whether a site is a store's target, where a value lands, a
- * declaration's written type, the expression that owns a property, whether an author's text lies clear of the
- * analysis's other diagnostics (the fact `codeAt` reads of every form that holds it), and a free name for a kept value.
- * Its one implementation is `messageSource` (`messages.ts`), which imports the sentence modules that take this
- * interface; so it is declared here, beside the syntax its members read.
+ * What a message reads of the source and of the analysis. Its one implementation is `messageSource` (`messages.ts`),
+ * which imports the sentence modules that take this interface; so it is declared here, beside the syntax its members
+ * read.
  */
 export interface MessageSource {
   readonly text: (site: SourceSite) => string;
@@ -314,7 +311,6 @@ export interface Given extends Landing {
 function targetSteps(target: Expression): Landing | null {
   const steps: LandingStep[] = [];
   let at = target;
-  // (through parentheses too, #1817: `(a)[0] = …`)
   for (;;) {
     if (at.kind === "parenthesizedExpression") at = at.expression;
     else if (at.kind === "propertyAccessExpression" || at.kind === "indexExpression") {

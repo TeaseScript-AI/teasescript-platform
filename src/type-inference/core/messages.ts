@@ -619,7 +619,6 @@ export function keptVariableName(
   base: string,
   work: WorkLedger | null,
 ): string {
-  // (each reserved name and each file's root, as each node below it, one unit: #1715)
   const taken = new Set<string>();
   for (const name of reserved) {
     work?.charge("indexSteps");
