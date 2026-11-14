@@ -6,7 +6,7 @@ import type { ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
 import type { TypeAt } from "./model.js";
 
-// Written types as terms: their kinds, their term at a path, a value's written type and its default.
+// Written types as terms: their kinds, their term at a path, their openness, a value's written type and its default.
 
 /** The kinds a written type gives: each V30 type its own tag, `unknown` for a type the core does not model. */
 export function typeTags(term: TypeTerm): ItemTag[] {

@@ -251,3 +251,4 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | [r4-451](contract.md#r4-451) | contract | A `null` that reaches a use through an entry is the use's required check. |
 | [r4-452](contract.md#r4-452) | contract | Read a call of an identity function as its argument in parentheses. |
 | [r4-455](contract.md#r4-455) | contract | Cut a cycle that nests a list, set or dict deeper on each turn one level below what enters it. |
+| [r4-457](contract.md#r4-457) | contract | A place whose written type leaves a level open takes its routes in the nesting cut. |

@@ -341,3 +341,19 @@ slice refusal. The cut depends on the graph alone, never on the order anything i
 
 **Source.** The owner's decisions of 2026-11-14 on rule 1.1, and the lead's rulings on #2764's plan (rule B, the cut at
 `M + 1`, property routes by name, the carrier table's routes), applied by #2764's pull request.
+
+### r4-457
+
+**A place whose written type leaves a level open takes its routes in the nesting cut.**
+
+**Rule.** This changes [r4.455](#r4-455)'s "a place with a written type takes no route": only a place whose written type
+is closed takes none. One whose written type leaves a level open (an unwritten element, an `object`'s properties:
+`openness(...).below`) takes its routes, with its written levels as its own depth, so a cut never lands inside them.
+
+**Reason.** `keyContract` lets a written type decide a path only as far as the type spells it and reads the stores below
+an open level, so a recursive function that fills a written `dict` with its own result nests without end there. With no
+route the index saw no cycle, and a consumer that reads a level deeper on each turn ran to the allowance (#2771,
+ToyExpanded).
+
+**Source.** The lead's acceptance of #2771's plan 0 (construction C1 and C2), 2026-11-14; ADR 0021 rule 1.1's clause
+for written places is the owner's to accept.
