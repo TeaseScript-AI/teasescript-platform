@@ -37,32 +37,10 @@ import {
  * reached only through the test-only candidate compile route (`compileSourceWithBackend` in `src/compiler.ts`), never
  * by a production compile. A program outside the slice throws `CandidateOutsideSlice` at the first refusal the route
  * establishes, before, during or after the analysis (its syntax's first construct outside the slice, the capture's
- * depth exit, then the answers' first, below): a test-time signal, never a diagnostic, since no author can reach the
+ * depth exit, then the answers' first): a test-time signal, never a diagnostic, since no author can reach the
  * route; the slice grows step by step until the consumer is complete (S9b).
  *
- * The slice: `let` with or without a written type (a named type, `T?` and `T[]` of them; no written union, whose
- * required checks come with narrowing, S10), assignment of a variable or of a property, `if` and `else`, `repeat` with
- * a count, `for` with one or two variables, `while`, `switch` (a case's type test of such a written type), `break` and
- * `continue`, `say` of plain text or of a value, also `as` a speaker, a speaker's
- * declaration (never a speaker's name as a value), a call as a statement, and `exit`; the asks `SLICE_ASKS` holds,
- * also `as` a speaker, with no prefill or a literal one the request takes (`askPrefillAdmitted`);
- * number, boolean, null, regex and plain text literals, variables, host values, list and object literals, index and
- * property reads, ranges, `otherwise`, a list's `get` with its `default:`, a method of text, a list, a set or a dict that
- * changes nothing in its receiver and a list's `sort`, `toJson` of a value, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
- * `decryptText` and `decryptFile`, a `load` with a default that is no `null` of a key written as text once in the project
- * or of a computed key (external data, F19), and parentheses (S7: the constructs of the discharge map's new rows). Its consumers are C1 (a store into a
- * place with a written or decided type, A1–A9, with A6's rejections and a literal's elements of one type), C2 (a repeat
- * count, an index), C5 (a member of a receiver at a read or a store), C10 (a fallback or a default) and C13 (a `for`
- * loop's iterable, a method's arguments and the elements `join` and `sort` read); its ingresses are a host value, a load
- * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
- * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
- * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an
- * `askChoice` whose buttons may return more than one type, a `case` value the core's types show may never match
- * (`neverMatching`; where they are wider, #2728), an argument
- * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested
- * `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a route to the use has no
- * check, else a warning whose use the runtime checks.
- * Refused during it: a value whose structure the slice does not follow, at the store whose capture established it
+ * Refused during the analysis: a value whose structure the slice does not follow, at the store whose capture established it
  * (`leftSlice`), the analysis ended there. A stop compiles with its warning and its checks at runtime (D4 a′), but a
  * store whose check the stop leaves uncarried or undecided declines the program (#1526 decision 2, condition 1,
  * `check-result/runtime-plan.ts` `lostCheck`): where admission settled, "a store whose check was lost at the budget";
@@ -554,16 +532,10 @@ function operandAdmitted(
 
 /**
  * The first `case` value the core's types show may never match its `switch`'s subject: a mistake in the source (V30
- * §32), for which the core has no rule. It reads the subject twice: its type, for the predicate, and the reasons of the
- * unknown items its answer holds, for the admitted set. The predicate is `impossibleCaseMessage` (`src/switch-cases.ts`)
- * on the subject's and the value's types: a literal's own kind (`caseLiteral`), else the facts' (`expressionTypes`).
- * Admitted, closed: a value the predicate finds a member of the subject's type that may equal, where the subject's type
- * holds no unknown, or the subject's answer has items and each unknown one is of the external reason alone
- * (`REASON.external`: host data, a typeless load or `fromJson`). Every other case value is refused: so every value of a
- * subject whose type holds an unknown, where its answer has no items or holds an unknown of another reason (a stop's
- * among them). The types are the core's, which can be wider than today's checker's (a read of a written place that
- * today's narrowing has narrowed, an external value carried through a typed place): there a case today's checker
- * refuses is admitted, and never matches when it runs (#2728).
+ * §32), for which the core has no rule. A subject whose type holds an unknown is judged only where each unknown item of
+ * its answer is external data; any other case value of it is refused. The core's types can be wider than today's
+ * checker's (a read of a written place that today's narrowing has narrowed, an external value carried through a typed
+ * place): there a case today's checker refuses is admitted, and never matches when it runs (#2728).
  */
 function neverMatching(answers: Answers, index: SliceIndex): Outside | null {
   const switches = index.statements.filter((statement) => statement.kind === "switchStatement");

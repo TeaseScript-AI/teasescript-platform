@@ -613,9 +613,7 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   ifStatement: modelled((node) => [node.condition, node.thenBlock, node.elseBlock]),
   switchStatement: {
     row: "modelled",
-    // (its subject, then each case's values or type test and its body, then the default, in source order; a type test's
-    // written type judged as a `let`'s, refused where it stands; a case value the core's types show may never match is
-    // refused after the analysis, `backend.ts`; where they are wider, #2728)
+    // (a type test's written type is judged as a `let`'s, refused where it stands in source order)
     visit: (node) =>
       walk([
         node.subject,
@@ -1002,10 +1000,7 @@ function describe(kind: string): string {
   return kind.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`);
 }
 
-/**
- * The names a file's `let` statements and `for` loops declare, at any depth of the blocks that run as part of a
- * statement (`nestedStatements`: branches, loop bodies, cases).
- */
+/** The names a file's `let` statements and `for` loops declare, at any depth. */
 function letNames(program: Program): Set<string> {
   const names = new Set<string>();
   const pending: Statement[] = [...program.statements];
