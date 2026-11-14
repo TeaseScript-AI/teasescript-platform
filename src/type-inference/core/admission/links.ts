@@ -20,8 +20,6 @@ export function* chooses(
   const { program, values } = admission.pass;
   const c = program.opOf.get(level.value);
   const at = c === undefined ? level.node : (program.exprAt(c.site) ?? level.node);
-  // (`otherwise` gives its own operand only where that may be a value, and its fallback only where the operand may
-  // be null, an unknown either)
   if (c?.kind === "fallback") {
     const left = withoutEmpty(yield* admission.runRead(() => values.valueItems(c.left, at, [])));
     const value = left.some((item) => item.tag !== "null");

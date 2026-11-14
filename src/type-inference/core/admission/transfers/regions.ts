@@ -22,10 +22,6 @@ import type { Expansion, Part } from "../model.js";
 import type { Reads } from "../../inherited/reads.js";
 import { partOfRead, TYPED_ROLES } from "../walk.js";
 
-// The carriers' transfers: what a stored value's walk answers, over its tasks' recipes (`expand`): each
-// carrier's operands answer once per pass, whatever value walks to them, a literal's cells with their literal, by path,
-// as a walk lists its stops.
-
 /**
  * A task as the decider enters it (`transferredDecider`): its lanes (`Stop.deep`, `Stop.single`) and what the
  * operations above it give it, each link's own answer (`chooses`, `TYPED_ROLES`) folded in: whether one is a typed

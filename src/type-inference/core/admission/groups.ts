@@ -107,8 +107,6 @@ export function groups(admission: Admission): readonly DecidedAt[] {
       work.charge("indexSteps");
       storeCounts.set(key, (storeCounts.get(key) ?? 0) + 1);
     }
-  // a stored value's structure where another store or add reaches the place or below it: its literals', and below a
-  // copy or a call its source's elements, the deepest once per path it lands at (its prefixes follow below)
   const deepest = new Map<Key, number>();
   for (const d of reaching)
     if ((storeCounts.get(d.key) ?? 0) > 1) {
@@ -182,8 +180,8 @@ export function groups(admission: Admission): readonly DecidedAt[] {
     tracked.add(key);
     admission.atCopies.add(key);
   }
-  // where each ingress store's external data stands below its destination, decided with the store whether a consumer
-  // reads the place or not, for its boundary check: its landings' contribution paths (`landingIndex`)
+  // each ingress store's external data is decided with the store, whether a consumer reads the place or not, for its
+  // boundary check
   for (const [d, stops] of landingIndex(admission).byStore)
     for (const stop of stops) {
       work.charge("indexSteps");
@@ -230,7 +228,6 @@ export function groups(admission: Admission): readonly DecidedAt[] {
       ? cursorEntry(admission, keyIdPath(keyIdOf(contract, place, path)))
       : keptText(admission.work, path);
   };
-  // a written collection's elements at every depth
   for (const place of program.places) {
     const written = writtenOf(place.kind);
     const paths = roots.get(place.id);
@@ -244,7 +241,6 @@ export function groups(admission: Admission): readonly DecidedAt[] {
     if (paths === undefined) roots.set(place, (paths = new Set()));
     return paths;
   };
-  // a copied written type's paths, where the copy lands and below (its elements too)
   const { seeds, into, order } = inheritance(admission);
   for (const [place, paths] of seeds) {
     const own = at(place);
@@ -407,7 +403,6 @@ export function hotSets(
             work.charge("indexSteps");
             put(keptSteps(admission.work, copy.path, path.slice(copy.strip.length)));
           }
-        // (its contributions meet as its touch tries find, one per group of members its live copies join)
         if (inheritance(admission).wholes.has(component[0]!)) {
           const met = new Set<object>();
           for (const member of component) {
@@ -428,8 +423,6 @@ export function hotSets(
         }
         continue;
       }
-      // (a cycle whose copies add or take steps: every landed path of each member tested, and each store taken
-      // again kept)
       for (const member of component) {
         const hot: (readonly string[])[] = [];
         for (const text of cycles.get(member)!) {

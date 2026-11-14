@@ -511,7 +511,6 @@ export class Admission {
     }
     for (const d of definitions.transferDefs)
       if (d.how === "parameter default") this.#defaulted.add(d.place);
-    // (a multi-site argument decides nothing)
     copyGraph(this);
     for (const d of [...definitions.storeDefs, ...definitions.transferDefs])
       if (

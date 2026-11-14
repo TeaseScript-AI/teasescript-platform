@@ -547,7 +547,7 @@ export interface Decision {
   readonly tags: readonly ItemTag[];
   /** By a written type, at the place or of a copied binding: no number of an integer fits there. */
   readonly written: boolean;
-  /** Whether the place's own written type decides, and whether it is a parameter's or a result's. */
+  /** Whether the place's own written type decides. */
   readonly own: boolean;
   readonly nullable: boolean;
   /** The store that decided, `null` for a written type. */
