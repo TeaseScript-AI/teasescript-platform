@@ -7,12 +7,8 @@ import { Underivable, unwrap, writtenType } from "./type-core-derived.js";
 import { fitsType } from "./type-core-derived-values.js";
 
 /*
- * The derived oracle's loops and switches (#2488's step 2b), as `evaluate` runs a block: a `while` tests its condition
- * before each round and ends when it is `false`; a `switch` runs the first case whose type test its subject passes, or
- * one of whose values it equals (`==`, structural) or lies in (a range, `in`: a number from its start up to its end,
- * the end too when inclusive), else its `default`; `break` ends the innermost loop, `continue` its round. Like
- * `evaluate`, it reads the sources, never the plan. A condition that is not a boolean, and a `while` still running after
- * `ROUNDS` rounds, are underivable.
+ * The derived oracle's loops and switches (#2488's step 2b), read from the sources, never the plan. A condition that is
+ * not a boolean, and a `while` still running after `ROUNDS` rounds, are underivable.
  */
 
 /** `break`, thrown from the statement to the innermost loop's round (`round`). */
@@ -24,9 +20,9 @@ export class Continue {}
 /** The rounds a `while` may run before the oracle calls it one it does not see end. */
 const ROUNDS = 10_000;
 
-/** Runs a block, as `evaluate` does. */
+/** Runs a block. */
 type Run = (statements: readonly Statement[]) => void;
-/** An expression's value, as `evaluate` reads it. */
+/** An expression's value. */
 type Read = (expression: Expression) => SerializableRuntimeValue;
 
 /** One round of a loop's body: whether the loop goes on (`false` after a `break`). */
