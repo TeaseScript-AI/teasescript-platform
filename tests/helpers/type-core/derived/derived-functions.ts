@@ -30,7 +30,7 @@ import { fitsType } from "./type-core-derived-values.js";
  * its parameters, its own variables and its file's (V30 §14), which the oracle keeps in one map: a call binds its own
  * names for the call and gives back the caller's after it. Like `evaluate`, it reads the sources and the derived stores,
  * never the plan. The calling file's run reads its own stores and content by offset, so a call of another file's
- * function is underivable where the body holds an entry of either file's (its checks are the other file's).
+ * function is underivable where an entry of either file starts inside the function's span.
  *
  * Only a value stored into a place with a written type is a store here (`transferStore`): an obligation into an untyped
  * parameter or result, at an argument, a default, a returned value or a store in the function's body
@@ -311,28 +311,20 @@ export function functionCalls(context: CallContext): FunctionCalls {
           ...content.loads.map((entry) => entry.owner),
         ]),
   ];
-  // (whether a run of another file's function would read an entry by offset: one of its own file inside it, which the
-  // calling file's run does not hold, or one of the calling file at the site of a node of it)
+  // (whether a run of another file's function may read an entry by offset in a table that is not its file's: every read
+  // in its run, of its defaults, body and returns, is keyed by a node inside its span, so an entry of either file that
+  // starts there may be read, whatever the key's form and whichever child holds it; the calling file's tables are the
+  // only ones the run holds)
   const misread = (fn: FunctionDeclaration, declaring: ProjectFile): boolean => {
     const [start, end] = [fn.span.start.offset, fn.span.end.offset];
-    if (
-      entries(declaring.stores, declaring.content).some((at) => {
-        const [so, eo] = at.split(":").map(Number);
-        return start <= so! && eo! <= end;
-      })
-    )
-      return true;
-    const nodes = new Set(
-      [
-        ...fn.parameters,
-        ...bodyOf(fn),
-        ...expressions([fn]).flatMap((expression) => [
-          expression,
-          ...(expression.kind === "callExpression" ? expression.arguments : []),
-        ]),
-      ].map((node) => `${node.span.start.offset}:${node.span.end.offset}`),
+    const inside = (at: string): boolean => {
+      const so = Number(at.split(":")[0]);
+      return start <= so && so <= end;
+    };
+    return (
+      entries(declaring.stores, declaring.content).some(inside) ||
+      entries(stores, context.content).some(inside)
     );
-    return entries(stores, context.content).some((at) => nodes.has(at));
   };
   // (a store's check at its value, where the derived stores hold one for the node at `node`)
   const checked = (node: { readonly span: Expression["span"] }, stored: EvaluatedValue): void => {
