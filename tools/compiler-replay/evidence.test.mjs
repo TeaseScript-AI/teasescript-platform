@@ -79,8 +79,13 @@ const setMode = (mode, base = compile(), head = base) => ({
 });
 const MODE_NAMES = ["forward", "reversed", "forward, unshared", "reversed, unshared"];
 /** A compile that threw a `TypeError` at `at`, as `plans.mjs` records one. */
-const threw = (at) =>
-  compile({ error: "TypeError: m", plan: null, diagnostics: null, thrown: `TypeError at ${at}` });
+const threw = (at, message = "m") =>
+  compile({
+    error: `TypeError: ${message}`,
+    plan: null,
+    diagnostics: null,
+    thrown: `TypeError at ${at}`,
+  });
 /** A compile whose errors before the checker gave the core no request, as `plans.mjs` records one. */
 const unparsed = (fields = {}) =>
   compile({ plan: null, trace: "0/0/0", units: 0, allowance: 0, analysed: false, ...fields });
@@ -104,7 +109,13 @@ test("evidence: the set's sources by class on each tree, a class move apart from
       ],
     },
     { name: "stalled", stalled: "units", run: null },
-    { name: "crashes", modes: MODE_NAMES.map((m) => setMode(m, threw("f (a.js)"))) },
+    // (the same class and place, another message and other work before it: alike, never a difference)
+    {
+      name: "crashes",
+      modes: MODE_NAMES.map((m) =>
+        setMode(m, threw("f (a.js)", "before"), { ...threw("f (a.js)", "after"), trace: "u" }),
+      ),
+    },
     { name: "crashes now", modes: MODE_NAMES.map((m) => setMode(m, compile(), threw("f (a.js)"))) },
     {
       name: "crashes elsewhere",
@@ -155,7 +166,10 @@ test("evidence: the set's sources by class on each tree, a class move apart from
       ],
     ],
   );
-  assert.deepEqual(summary.threwAlike, ["crashes: TypeError at f (a.js)"]);
+  assert.deepEqual(
+    [summary.threwAlike, summary.apartElsewhere],
+    [["crashes: TypeError at f (a.js)"], []],
+  );
   // (no analysis on both trees: never among the completed, compared on its diagnostics and that no plan comes out)
   assert.deepEqual(
     [summary.unanalysed, summary.unanalysedDifferences],
@@ -178,12 +192,13 @@ test("evidence: the set's sources by class on each tree, a class move apart from
 });
 
 test("evidence: an area's sources by their own counts and each tree's stops, its first difference by its place", () => {
-  const run = (stopped, work = [300, 300]) => ({
+  const run = (stopped, work = [300, 300], unparsed = [false, false]) => ({
     mode: "src-on",
     check: "publication",
     work,
     allowance: [1000, 1000],
     stopped,
+    unparsed,
   });
   const work = [
     { work: { area: "x" } },
@@ -195,7 +210,28 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
       counts: { runs: 1 },
     },
     { generator: "g", source: "stall", runs: [], counts: { stalled: 1 } },
-    { generator: "g", source: "unparsed", runs: [], counts: { unparsed: 1 } },
+    {
+      generator: "g",
+      source: "unparsed",
+      runs: [run([null, null], [0, 0], [true, true])],
+      counts: { unparsed: 1 },
+    },
+    // (the head alone has no request: a class move, never no analysis on both)
+    {
+      generator: "g",
+      source: "unparsed now",
+      runs: [run([null, null], [300, 0], [false, true])],
+      counts: { unparsed: 1 },
+    },
+    // (both trees leave a question unanswered alike: a partial publication, never completed)
+    {
+      generator: "g",
+      source: "partial",
+      runs: [run([null, null])],
+      counts: { unansweredAlike: 1 },
+    },
+    // (the same publication for other charged work: a difference)
+    { generator: "g", source: "heavier", runs: [run([null, null], [1, 2])], counts: { runs: 1 } },
     {
       generator: "g",
       source: "old",
@@ -205,7 +241,7 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
     { generator: "g", source: "apart", runs: [run([null, null])], counts: { differences: 1 } },
     { generator: "g", source: "throws", runs: [run([null, null])], counts: { exceptions: 1 } },
     { generator: "g", source: "runner", runs: [], counts: { exceptions: 1 } },
-    { area: "x", sources: 8 },
+    { area: "x", sources: 11 },
   ];
   const differences = [
     {
@@ -230,28 +266,33 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
   ];
   const summary = partSummary(areaSources(work, differences));
   assert.deepEqual(summary.counts.base, {
-    completed: 4,
+    completed: 6,
     unanalysed: 1,
     limit: 0,
     slice: 0,
     threw: 0,
-    incomplete: 2,
+    incomplete: 3,
     uncompared: 1,
   });
   assert.deepEqual(summary.counts.head, {
-    completed: 2,
-    unanalysed: 1,
+    completed: 3,
+    unanalysed: 2,
     limit: 1,
     slice: 0,
     threw: 1,
-    incomplete: 2,
+    incomplete: 3,
     uncompared: 1,
   });
   assert.deepEqual(summary.moved, [
     "g regressed: completed → refused at the limit",
+    "g unparsed now: completed → no analysis (compile errors before the checker)",
     "g throws: completed → threw",
   ]);
-  assert.deepEqual(summary.differences, ["g apart: rev-on: part 1 of 3/3"]);
+  assert.deepEqual(summary.differences, [
+    "g heavier: src-on: publication charged work 1/2",
+    "g apart: rev-on: part 1 of 3/3",
+  ]);
+  assert.deepEqual(summary.unanalysed, ["g unparsed"]);
   assert.deepEqual(summary.shares[1].heaviest.name, "g regressed");
   assert.deepEqual(summary.shares[1].aboveHalf, []);
 });
@@ -356,6 +397,8 @@ test("evidence: a package's class is its analysis's, its first difference by par
   );
   assert.equal(summary.shares[0].heaviest.name, "stops");
   assert.equal(sources.find((s) => s.name === "hang").bound, "safety net 3600 s");
+  // (a research-route compile that threw alike is listed by its place)
+  assert.equal(summary.routeThrewAlike[0], "a: CandidateOutsideSlice");
 });
 
 /** A results folder of campaign `p`: `set` shards (`setRecords(i)`), the packages' one shard and the checks' job. */
@@ -435,11 +478,30 @@ test("evidence-report: equal only where every part asked ran and completed somet
     assert.deepEqual([missing.status, missing.notRun], [3, ["set: 15 of 16"]]);
     const fewer = report({ setRecords: fine, packages: [] });
     assert.deepEqual([fewer.status, fewer.notRun], [3, ["packages: 0 of 1 packages"]]);
+    // (a shard whose records fall short of the sources its summary counts did not run whole)
+    const lost = report({ setRecords: (i) => (i === 0 ? [] : fine(i)), packages: [pkg] });
+    assert.deepEqual([lost.status, lost.notRun], [3, ["set: 15 of 16 sources read"]]);
+    // (a part asked that holds nothing, as an empty package folder, completed nothing: never equal)
+    const empty = report(
+      { setRecords: fine, packages: [] },
+      manifest({ packages: [{ folder: "/k", count: 0 }] }),
+    );
+    assert.deepEqual(
+      [empty.status, empty.notRun, empty.reasons],
+      [1, [], ["packages: nothing completed on both trees"]],
+    );
     // (nothing completed is never equal, though nothing differs)
     // (a source that threw alike on both trees is equal, and listed; a new throw on the head is a class move)
     const crash = (i) =>
       i === 2
-        ? [{ ...fine(i)[0], modes: MODE_NAMES.map((m) => setMode(m, threw("f (a.js)"))) }]
+        ? [
+            {
+              ...fine(i)[0],
+              modes: MODE_NAMES.map((m) =>
+                setMode(m, threw("f (a.js)", "before"), threw("f (a.js)", "after")),
+              ),
+            },
+          ]
         : fine(i);
     const alike = report({ setRecords: crash, packages: [pkg] });
     assert.deepEqual(

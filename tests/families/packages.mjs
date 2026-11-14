@@ -220,15 +220,6 @@ function observed(tree, make) {
 /** An error by its class and the function and file it is thrown from (`throwPlace`): a message can quote the text. */
 const errorText = (error) => (error === null ? null : throwPlace(error));
 
-/** A part of a result as its hash, or as the error that kept it from being made. */
-function part(make) {
-  try {
-    return sha(make());
-  } catch (error) {
-    return errorText(error);
-  }
-}
-
 function codesOf(diagnostics) {
   const codes = {};
   for (const d of diagnostics ?? []) codes[d.code ?? "?"] = (codes[d.code ?? "?"] ?? 0) + 1;
@@ -237,8 +228,8 @@ function codesOf(diagnostics) {
 
 /**
  * The core's own analysis of the package in `mode`, past the syntax gate, every digest made inside the mode as the
- * analysis was (an answer can be computed lazily, when it is first asked); `units` the analysis's own, before its
- * digests' questions, which its trace and questions do count.
+ * analysis was (an answer can be computed lazily, when it is first asked), so that a throw while one is made is the
+ * analysis's throw; `units` the analysis's own, before its digests' questions, which its trace and questions do count.
  */
 function analysed(tree, mode, files) {
   const request = tree.analysis.coreRequest(files, GLOBALS);
@@ -252,12 +243,12 @@ function analysed(tree, mode, files) {
       const a = tree.answers.analyseCore(request);
       units = tree.run.trace.units;
       Object.assign(made, {
-        answers: part(() => tree.oracles.everyAnswer(a)),
-        diagnostics: part(() => encode(a.diagnostics)),
+        answers: sha(tree.oracles.everyAnswer(a)),
+        diagnostics: sha(encode(a.diagnostics)),
         codes: codesOf(a.diagnostics),
-        checks: part(() => encode(a.checks)),
-        counts: part(() => encode([...a.budget.counts].sort())),
-        checked: part(() => encode(tree.checkResult.checkedResult(a, request))),
+        checks: sha(encode(a.checks)),
+        counts: sha(encode([...a.budget.counts].sort())),
+        checked: sha(encode(tree.checkResult.checkedResult(a, request))),
       });
     }),
   );
@@ -280,8 +271,8 @@ function routed(tree, mode, files) {
     name: "core",
     analyze(request) {
       const outcome = tree.backend.coreOutcome(request, "past");
-      made.checked = part(() => encode(outcome.checked));
-      made.facts = part(() => encode(outcome.facts()));
+      made.checked = sha(encode(outcome.checked));
+      made.facts = sha(encode(outcome.facts()));
       return outcome;
     },
   };
