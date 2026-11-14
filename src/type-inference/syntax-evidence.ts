@@ -1,6 +1,5 @@
 // The syntax evidence of an ask and of a list function's or `randomWeighted`'s selectors (`SyntaxEvidence` in
-// `graph.ts`), which the collector (`collector.ts`) attaches to their operations: built from the source alone. The
-// small evidence records of images, tag queries, timers and media calls are built inline where the walk meets them.
+// `graph.ts`), built from the source alone.
 
 import type { CallExpression, Expression, InteractionExpression } from "../ast.js";
 import { namedAskArguments, staticText, unwrap } from "../expression-children.js";

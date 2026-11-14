@@ -102,7 +102,7 @@ export type CountUse = "repeat" | "range" | "index" | "get" | "removeAt" | "take
 
 /**
  * The rule a diagnostic's consumer applies, with what its sentence names, in the source's own text (D2: the
- * target names stay in the obligation): `messages.ts` gives each its code and its sentences (D1, D3).
+ * target names stay in the obligation).
  */
 export type DiagnosticRule =
   /** C1, C7, A8, A9: a store, an argument or a return into `into`, of a written or a decided type. */
@@ -344,7 +344,7 @@ export interface WrittenTypeError {
 /**
  * A check that owes the runtime nothing (#1072): a known value outside the domain its use
  * takes, which the runtime would reject as it does, or a fact no run can change. An error, or a warning with no runtime
- * check (`warning`); never an obligation. Its rule names what its sentence says (`messages.ts`).
+ * check (`warning`); never an obligation. Its rule names what its sentence says.
  */
 export interface StaticDiagnostic {
   readonly class: "compile-error" | "warning";
@@ -430,7 +430,7 @@ export interface WorkPlace {
  * The analysis stopped proving (D4): past the work allowance, at a read chain past its
  * depth (`read-depth`), or at statements nested past the nesting limit (`nesting`). One warning, at the heaviest place
  * (the deepest nesting for `nesting`): the warnings of the checks it moved to the runtime, `deferred` in number,
- * several of which one check at a store may carry (its message counts the plan's checks, `budgetMessage`).
+ * several of which one check at a store may carry.
  */
 export interface BudgetStop {
   readonly class: "warning-runtime-check";

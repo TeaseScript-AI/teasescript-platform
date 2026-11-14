@@ -76,7 +76,7 @@ export interface Operand {
   readonly when: "list or set" | "object" | "dict" | "elements" | null;
 }
 
-/** The table: a value's carrier operands by its syntax alone, before any decision (the landing index reads it so). */
+/** The table: a value's carrier operands by its syntax alone, before any decision. */
 export function operandsOf(program: CoreProgram, value: PlaceId): readonly Operand[] {
   const operand = (
     role: CarrierRole,

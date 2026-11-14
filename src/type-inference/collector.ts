@@ -1211,7 +1211,6 @@ class Collector {
     const comparison = ["==", "!=", "<", "<=", ">", ">="].includes(expression.operator);
     const shape = conditionShape(expression);
     if (shape.kind === "null") {
-      // `x == null` and `x != null` of a plain variable are recorded as a test.
       const tested = this.#plainVariable(shape.tested, scope);
       if (tested !== undefined)
         this.#test(tested, { kind: "null", negated: shape.negated }, expression);
@@ -1318,8 +1317,7 @@ class Collector {
     const method = callee.property.name;
     const speaker = this.#speakerName(callee.object, scope);
     if (method === "copyFrom" && speaker === PLAYER) {
-      // `player.copyFrom(playerProfile)` stores each person field into the player, as `#speaker` seeds them
-      // at the start.
+      // `player.copyFrom(playerProfile)` stores each person field into the player.
       yield* compileChild(this.#expression(callee.object, scope));
       yield* compileChild(this.#arguments(expression, scope));
       const result = this.#value(expression);

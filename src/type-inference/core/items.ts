@@ -145,7 +145,7 @@ export function joinSpelling(
 /**
  * A spelling's part of an identity (docs/specifications/type-inference-accepted-record/contract.md#r4-277): empty for
  * none, `*` for `MIXED`, else its kinds by value. Every key or snapshot that identifies items or a type test's form
- * includes it (`itemsSignature`, `Values.narrowingMark`), so differently marked lists are different values.
+ * includes it, so differently marked lists are different values.
  */
 export function spellingIdentity(spelling: Spelling | undefined): string {
   return spelling === undefined ? "" : spelling.length === 0 ? "*" : spelling.join("+");
@@ -440,15 +440,13 @@ const TAG_RANK: ReadonlyMap<ItemTag, number> = new Map(
 );
 
 /**
- * The one order of a list of a value's kinds (#1398): a written spelling's where exactly one spelling
- * covers every kind of the list but `null`, `unknown` and `empty` (an inferred kind it spells adds nothing to it, as
- * G5 rules), then the others in the table's; else the table's (`TAG_RANK`), never the order the analysis met them,
- * which the consumers' and the solver's orders and the sharing change. It reads the kinds and the spellings alone, so it
- * is the same in whatever order the entries come; entries of one kind keep their order. A list is made in it (a merge, a
- * stopped answer, a finishing read) and reaches its publication through steps that keep it, and a list composed with
- * another passes here again where it is completed. A fixed table's order and a tuple by position keep their own. One
- * pass over the entries and one over the ranks, so it costs no more than the entries it is given, each already charged
- * where it was made, and it charges nothing of its own. The result is made at its length: a flattened
+ * The one order of a list of a value's kinds (#1398): a written spelling's where exactly one spelling covers every kind
+ * of the list but `null`, `unknown` and `empty` (an inferred kind it spells adds nothing to it, as G5 rules), then the
+ * others in the table's; else the table's (`TAG_RANK`), never the order the analysis met them, which the consumers' and
+ * the solver's orders and the sharing change. It reads the kinds and the spellings alone, so it is the same in whatever
+ * order the entries come; entries of one kind keep their order. A fixed table's order and a tuple by position keep
+ * their own. One pass over the entries and one over the ranks, so it costs no more than the entries it is given, each
+ * already charged where it was made, and it charges nothing of its own. The result is made at its length: a flattened
  * one keeps spare capacity, which the many answers kept multiply (#1625).
  */
 function inOrderOf<T>(
