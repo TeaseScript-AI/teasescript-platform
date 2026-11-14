@@ -15,7 +15,9 @@ import type {
   RuntimeFormStateSnapshot,
   RuntimeFormValue,
 } from "../model.js";
-import { refused, hasExactKeys, isPlainRecord } from "./shared-helpers.js";
+import { hasExactKeys } from "../../../plan/validation-support.js";
+import { isPlainRecord } from "../../values/plain-data.js";
+import { refused } from "./shared-helpers.js";
 import { commitEditor } from "./editing.js";
 import { validFieldValue } from "./ui-state.js";
 

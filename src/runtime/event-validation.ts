@@ -74,7 +74,7 @@ const EVENT_FIELDS: {
   actionCompleted: {
     settlement: [
       validSettlement,
-      "a settlement with an action kind and ID, and for an answer its kind, text, and form answers",
+      "a settlement with an action kind and ID, and for an answer its kind, text, and a form's UI and answers",
     ],
     span: SPAN,
   },
@@ -118,8 +118,10 @@ function isSpeaker(value: unknown): boolean {
 }
 
 /**
- * A settlement's kind and identity, and an answer's sequence, text, and UI, with a form's answers, shown options, and
- * presentation checked against it.
+ * A settlement's kind and identity, and an answer's sequence and text. A UI whose kind is `form` is checked by
+ * `isFormUi`, with the answers, shown options and presentation; not its texts' byte limit, which only the Worker-side
+ * `validInteractionUiShape` measures. A UI of another kind is checked only as a record, whatever the answer's kind
+ * (#2736).
  */
 function validSettlement(settlement: unknown): boolean {
   if (

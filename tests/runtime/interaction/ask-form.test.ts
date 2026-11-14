@@ -7,9 +7,12 @@ import type { InstructionPlan } from "../../../src/plan/model.js";
 import {
   deserializeCheckpoint,
   createCheckpoint,
+  restoreCheckpoint,
   serializeCheckpoint,
 } from "../../../src/runtime/snapshot/checkpoint.js";
+import { validateRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-validation.js";
 import { run } from "../../../src/runtime/engine.js";
+import { interpreterEventProblem } from "../../../src/runtime/event-validation.js";
 import type { InterpreterEvent } from "../../../src/runtime/events.js";
 import { completeAction } from "../../../src/runtime/operations/complete-action.js";
 import { updateInteraction } from "../../../src/runtime/operations/update-interaction.js";
@@ -834,4 +837,71 @@ test("a form's answers are the script's own copy, which the kept settlement and 
         ],
       }),
     );
+});
+
+test("a form that submits at its time limit restores only with a value in every required field", () => {
+  const plan = compileValidPlan(
+    'let answers = askForm fields: { level: { value: 5, min: 1, max: 10 }, note: { type: "text", value: "Soft", optional: true } }, timeout: 30 s, onTimeout: "submit"\nexit',
+  );
+  const { snapshot } = opened(plan);
+  // An optional field may be cleared before the form submits by itself.
+  const cleared = updateInteraction(plan, snapshot, {
+    actionId: snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "form",
+    update: { kind: "clear", fieldId: "note" },
+  });
+  assert.equal(cleared.outcome.kind, "updated");
+  assert.equal(validateRuntimeSnapshot(cleared.snapshot, plan).valid, true);
+  // A required field has had a value since the form opened, and no edit takes it away.
+  const emptied = structuredClone(cleared.snapshot);
+  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: the test edits a persisted record to an invalid state.
+  (emptied.foregroundAction as any).form.values[0] = null;
+  // A restore refuses a state without one, which would time out into an answer its settlement check refuses.
+  assert.equal(validateRuntimeSnapshot(emptied, plan).valid, false);
+  assert.throws(() =>
+    restoreCheckpoint({ ...createCheckpoint(plan, cleared.snapshot), snapshot: emptied }),
+  );
+  // A form without a time limit, or one that cancels at it, restores with a required field still empty.
+  for (const limit of ["", ', timeout: 30 s, onTimeout: "cancel"']) {
+    const open = compileValidPlan(
+      `let answers = askForm fields: { n: { type: "integer" } }${limit}\nexit`,
+    );
+    const unanswered = opened(open).snapshot;
+    assert.deepEqual(
+      unanswered.foregroundAction?.kind === "interaction" &&
+        unanswered.foregroundAction.form?.values,
+      [null],
+      limit,
+    );
+    assert.equal(validateRuntimeSnapshot(unanswered, open).valid, true, limit);
+    restoreCheckpoint(createCheckpoint(open, unanswered));
+  }
+});
+
+test("a stored answer event refuses a form UI whose accessible name is not a form's", () => {
+  const plan = compileValidPlan(
+    'let a = askForm "Settings", fields: { enabled: false }, submit: "Go"\nexit',
+  );
+  const { snapshot } = opened(plan);
+  const { events } = submitted(plan, snapshot);
+  const completion = events.find((event) => event.kind === "actionCompleted");
+  assert.ok(completion?.kind === "actionCompleted");
+  assert.equal(interpreterEventProblem(JSON.parse(JSON.stringify(completion))), null);
+  for (const [name, change] of [
+    ["a blank accessible name", { accessibleName: { kind: "text", text: " " } }],
+    [
+      "another kind's default name",
+      { accessibleName: { kind: "localizedDefault", key: "password" } },
+    ],
+    ["a name without its text", { accessibleName: { kind: "text" } }],
+  ] as const) {
+    const stored = JSON.parse(JSON.stringify(completion));
+    Object.assign(stored.settlement.ui, change);
+    assert.equal(
+      interpreterEventProblem(stored),
+      "The settlement of the 'actionCompleted' event must be a settlement with an action kind and ID, and for an answer its kind, text, and a form's UI and answers.",
+      name,
+    );
+  }
 });

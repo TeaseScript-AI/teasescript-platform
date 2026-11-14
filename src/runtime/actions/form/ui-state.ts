@@ -5,8 +5,9 @@ import { isNormalizedOpaqueColor } from "../../../color.js";
 import { isInteractionChoiceValue } from "../../../choice-values.js";
 import { isBlankTextAnswer } from "../../../interaction-answers.js";
 import {
-  interactionStringFits,
   MAX_INTERACTION_OPTION_ENTRIES,
+  interactionStringFits,
+  interactionStringHasNonWhitespace,
 } from "../../../interaction-limits.js";
 import type {
   FormField,
@@ -20,7 +21,9 @@ import {
 } from "../../values/serializable-values.js";
 import { isFormFieldKind } from "../../../form-fields.js";
 import type { RuntimeFormStateSnapshot } from "../model.js";
-import { cycleValueKind, withinBounds, hasExactKeys, isPlainRecord } from "./shared-helpers.js";
+import { hasExactKeys } from "../../../plan/validation-support.js";
+import { isPlainRecord } from "../../values/plain-data.js";
+import { cycleValueKind, withinBounds } from "./shared-helpers.js";
 
 /**
  * The canonical runtime value of a form's definition. The request temporary holds it while the form is open, so a
@@ -125,6 +128,7 @@ export function cloneFormState(state: RuntimeFormStateSnapshot): RuntimeFormStat
   };
 }
 
+/** A copy of `ui` with `accessibleName` as its accessible name. */
 export function cloneFormUi(ui: FormUi, accessibleName: InteractionAccessibleName): FormUi {
   const options = (items: readonly InteractionChoiceOption[]) =>
     items.map((option) => ({
@@ -197,18 +201,41 @@ export function formUiTexts(ui: FormUi): string[] {
   return texts;
 }
 
-/** Whether `value` is a well-formed form definition, without measuring its texts. */
+/**
+ * Narrows a form UI: every field of `FormUi` has its type, its fields, buttons, hint and timeout are well formed, and its
+ * accessible name is a form's. It does not measure the texts against the interaction's byte limit, which
+ * `validInteractionUiShape` does.
+ */
 export function isFormUi(value: unknown): value is FormUi {
   return (
     isPlainRecord(value) &&
     value.kind === "form" &&
+    isFormAccessibleName(value.accessibleName) &&
     validFormUi(value, (text): text is string => typeof text === "string")
   );
 }
 
+/** A form's accessible name: a text that is not blank, or the form's default (`answer`). */
+function isFormAccessibleName(value: unknown): value is InteractionAccessibleName {
+  if (!isPlainRecord(value)) return false;
+  if (value.kind === "text")
+    return (
+      hasExactKeys(value, ["kind", "text"]) &&
+      typeof value.text === "string" &&
+      interactionStringHasNonWhitespace(value.text)
+    );
+  return (
+    value.kind === "localizedDefault" &&
+    hasExactKeys(value, ["kind", "key"]) &&
+    value.key === "answer"
+  );
+}
+
 /**
- * Whether `value` is a well-formed form definition. `count` measures each retained text against the interaction's
- * aggregate byte limit and returns `false` when it does not fit.
+ * A form UI's shape, fields, hint, buttons and timeout; of the accessible name, only that the key is there. Its two
+ * callers check the name themselves: `validInteractionUiShape`, whose `count` measures each retained text against the
+ * interaction's aggregate byte limit and returns `false` when it does not fit, and `isFormUi`, whose `count` checks only
+ * that each text is a string.
  */
 export function validFormUi(
   value: Record<string, unknown>,
@@ -345,14 +372,19 @@ function validOptions(
   );
 }
 
-/** Whether `value` is a well-formed state of an open form with this valid definition. */
+/**
+ * Whether `value` is a well-formed state of an open form with this valid definition. A form that submits at its time
+ * limit holds a value in every required field, as it has since it opened.
+ */
 export function validFormState(ui: FormUi, value: unknown): boolean {
   if (!isPlainRecord(value) || !hasExactKeys(value, ["values", "editor"])) return false;
   const values = value.values;
+  // Only a form without a time limit, or one that cancels at it, may hold a required field without a value.
+  const requiredMayBeUnset = ui.timeout === null || ui.timeout.onTimeout === "cancel";
   if (
     !Array.isArray(values) ||
     values.length !== ui.fields.length ||
-    !ui.fields.every((field, index) => validFieldValue(field, values[index], true))
+    !ui.fields.every((field, index) => validFieldValue(field, values[index], requiredMayBeUnset))
   )
     return false;
   const editor = value.editor;

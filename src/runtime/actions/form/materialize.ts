@@ -19,9 +19,11 @@ import type {
   FormScalarField,
   FormUi,
   InteractionAccessibleName,
+  PlanSourceLocation,
   PreparedFormShape,
   TypePlan,
 } from "../../../plan/model.js";
+import type { SourceSpan as RichSourceSpan } from "../../../source.js";
 import { type TemporalContext } from "../../../temporal.js";
 import { expandChoiceOptions } from "../choice-options.js";
 import { internalFault, RuntimeFault } from "../../errors.js";
@@ -54,15 +56,15 @@ import {
 import type { RuntimeFormStateSnapshot, RuntimeFormValue } from "../model.js";
 import { describeValue } from "../../../value-kinds.js";
 import { copySpan } from "../../../plan/source-location.js";
-import {
-  type SourceSpan,
-  cycleValueKind,
-  withinBounds,
-  boundsText,
-  fault,
-} from "./shared-helpers.js";
+import { cycleValueKind, withinBounds, boundsText } from "./shared-helpers.js";
+
+type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 const DEFAULT_SUBMIT_TEXT = "OK";
+
+function fault(message: string, span: SourceSpan): RuntimeFault {
+  return new RuntimeFault("TSR052", message, copySpan(span));
+}
 
 /**
  * A form as it opens: its definition, the starting answers, and the prose the asking speaker says as it opens: a line

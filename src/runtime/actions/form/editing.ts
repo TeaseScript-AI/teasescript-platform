@@ -13,7 +13,8 @@ import { interactionStringFits } from "../../../interaction-limits.js";
 import type { FormScalarField, FormUi } from "../../../plan/model.js";
 import { messageText } from "../../values/text-length.js";
 import type { RuntimeFormStateSnapshot, RuntimeFormValue } from "../model.js";
-import { withinBounds, boundsText, refused, isPlainRecord } from "./shared-helpers.js";
+import { isPlainRecord } from "../../values/plain-data.js";
+import { withinBounds, boundsText, refused } from "./shared-helpers.js";
 
 /** The text that the composer opens with for a typed field: its value as an answer would be typed, or nothing. */
 function formEditorText(value: RuntimeFormValue): string {

@@ -17,6 +17,7 @@ import { updateInteraction } from "../../../src/runtime/operations/update-intera
 import type { RuntimeSnapshot } from "../../../src/runtime/snapshot/state.js";
 import type { RuntimeFormStateSnapshot } from "../../../src/runtime/actions/model.js";
 import { formSummaryOf } from "../../../src/runtime/actions/form/submission.js";
+import { isFormUi } from "../../../src/runtime/actions/form/ui-state.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../../src/temporal.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 import { runUntilExit } from "../../helpers/run-until-exit.js";
@@ -601,6 +602,27 @@ test("a form that cannot be built fails when it opens, with a message that names
   assert.equal(
     run(empty, createFreshRuntimeSnapshot(empty)).snapshot.failure?.message,
     "A form needs at least one field.",
+  );
+});
+
+test("isFormUi narrows only a form UI whose accessible name is a form's", () => {
+  const plan = formPlan(SETTINGS, OBJECT);
+  const action = started(plan).foregroundAction;
+  assert.ok(action?.kind === "interaction" && action.ui.kind === "form");
+  assert.equal(isFormUi(action.ui), true);
+  for (const accessibleName of [
+    null,
+    42,
+    { kind: "text" },
+    { kind: "text", text: 1 },
+    { kind: "text", text: " " },
+    { kind: "localizedDefault", key: "password" },
+    { kind: "other", text: "Form" },
+  ])
+    assert.equal(isFormUi({ ...action.ui, accessibleName }), false, JSON.stringify(accessibleName));
+  assert.equal(
+    isFormUi({ ...action.ui, accessibleName: { kind: "text", text: "Settings" } }),
+    true,
   );
 });
 
