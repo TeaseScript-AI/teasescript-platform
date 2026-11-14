@@ -2048,8 +2048,8 @@ function unstartedFileSentence(path: string): string {
  */
 export function unusedUnreadableMessage(entry: UnreadablePackageFile): string {
   return entry.folder === true
-    ? `No code that can run uses a file in the folder '${entry.path}'. Remove the folder, or use the files of '${entry.path}' once the Player can read the folder. ${entry.reason}`
-    : `${unstartedFileSentence(entry.path)} Remove the file, or start the file with a 'goto' or 'call' once the Player can read the file. ${entry.reason}`;
+    ? `No code that can run uses a file in the folder '${entry.path}'. Remove the folder, or use the files of '${entry.path}' once the Playroom can read the folder. ${entry.reason}`
+    : `${unstartedFileSentence(entry.path)} Remove the file, or start the file with a 'goto' or 'call' once the Playroom can read the file. ${entry.reason}`;
 }
 
 /**

@@ -840,7 +840,7 @@ export class InstructionCompiler {
       return yield* compileChild(lowerAskImageTask(this, expression));
     }
     if (isTakePhotoCall(expression)) {
-      // `takePhoto(tags: …)`: the tags are evaluated first; the capture reads them before it asks the Player.
+      // `takePhoto(tags: …)`: the tags are evaluated first; the capture reads them before it asks the Playroom.
       const tagsArgument =
         expression.kind === "callExpression" ? expression.arguments[0] : undefined;
       const tags =

@@ -28,9 +28,9 @@ export function isTemporalKind(name: string): name is TemporalKind {
 
 /**
  * A clock read (V30 §35). It takes no arguments and gives the player's current value of the kind `result`. It reads the
- * session clock: the wall clock and zone that the Player gave when the session started or continued, which the session
- * records, advanced by scene time. So it is not pure, since its value depends on when it runs, but it changes no value
- * and does not wait, and a session restored from a checkpoint reads the same values at the same scene times.
+ * session clock: the wall clock and zone that the Playroom gave when the session started or continued, which the
+ * session records, advanced by scene time. So it is not pure, since its value depends on when it runs, but it changes
+ * no value and does not wait, and a session restored from a checkpoint reads the same values at the same scene times.
  */
 export interface ClockFunction {
   readonly result: TemporalKind;

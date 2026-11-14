@@ -1,7 +1,7 @@
 /**
  * The rules of an `askImage(...)` request (V30 §20) that the compiler, the plan and snapshot validators, the engine, and
- * the Player share: which file extensions and MIME types it may restrict to, and what the transcript shows for an answer
- * or a skip.
+ * the Playroom share: which file extensions and MIME types it may restrict to, and what the transcript shows for an
+ * answer or a skip.
  */
 
 /** The named arguments of `askImage` besides the message, its question. */
@@ -18,7 +18,7 @@ export const IMAGE_REQUEST_OPTIONS: ReadonlySet<string> = new Set([
 export const IMAGE_ANSWER_TRANSCRIPT_TEXT = "Image";
 
 /**
- * The text of the Player's control that skips a request written with `allowSkip: true`, and the player's transcript
+ * The text of the Playroom's control that skips a request written with `allowSkip: true`, and the player's transcript
  * entry for the skip, as a button's label is for its answer.
  */
 export const IMAGE_SKIP_TEXT = "Skip";

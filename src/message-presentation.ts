@@ -2,10 +2,10 @@ import { isNormalizedColor } from "./color.js";
 
 export interface MessagePresentation {
   readonly kind: "bubble" | "prose";
-  /** Bubble placement is Player-owned; prose nulls select Player defaults after inheritance. */
+  /** Bubble placement is Playroom-owned; prose nulls select Playroom defaults after inheritance. */
   readonly position: "left" | "center" | "right" | null;
   readonly align: "left" | "center" | "right" | null;
-  /** Null selects the Player theme role, rather than an authored colour. */
+  /** Null selects the Playroom theme role, rather than an authored colour. */
   readonly color: string | null;
   readonly background: string | null;
   readonly font: string | null;

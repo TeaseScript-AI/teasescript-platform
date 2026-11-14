@@ -4594,7 +4594,7 @@ and `weeks`, also in a range or a sum, as in `timer (1..3) days` and `wait 1 day
 read from a list or object, or returned by a call is not checked:
 
 ```text
-wait 2 days     // TSV061: 'wait 2 days' counts only time while the Player is open, so closing the Player pauses it.
+wait 2 days     // TSV061: 'wait 2 days' counts only time while the Playroom is open, so closing the Playroom pauses it.
 ```
 
 Scene time is measured in milliseconds, including fractional milliseconds, up to 2^53 − 1, about 285,000 years. A `wait`, timer, or `showButton` timeout

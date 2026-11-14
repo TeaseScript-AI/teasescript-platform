@@ -684,7 +684,7 @@ export type InteractionUiPayload =
     }
   | {
       /**
-       * `askPassword` (V30 §20): a masked field. The Player answers with the SHA-256 of the typed text, as `hashText`
+       * `askPassword` (V30 §20): a masked field. The Playroom answers with the SHA-256 of the typed text, as `hashText`
        * gives it, never the text, and adds nothing to the transcript.
        */
       readonly kind: "password";
@@ -713,9 +713,9 @@ export type InteractionUiPayload =
     }
   | {
       /**
-       * `openUrl` (V30 §33): the Player opens the canonical web address `url` in a new tab, at once after the player's
-       * recent click, otherwise, and always with `alwaysButton`, from its button with `buttonText` where `showButton`
-       * shows its button.
+       * `openUrl` (V30 §33): the Playroom opens the canonical web address `url` in a new tab, at once after the
+       * player's recent click, otherwise, and always with `alwaysButton`, from its button with `buttonText` where
+       * `showButton` shows its button.
        */
       readonly kind: "url";
       readonly url: string;
@@ -985,7 +985,7 @@ export interface PreparedInteractionInstruction extends InstructionBase {
 export type InteractionInstruction = StaticInteractionInstruction | PreparedInteractionInstruction;
 
 /**
- * `takePhoto()`: waits until the Player answers with a still from the session camera or reports it unavailable. The
+ * `takePhoto()`: waits until the Playroom answers with a still from the session camera or reports it unavailable. The
  * result is the captured image reference, or `null`; it is always handed off through `destinationTemporary`.
  */
 export interface CaptureInstruction extends InstructionBase {
@@ -999,12 +999,12 @@ export interface CaptureInstruction extends InstructionBase {
   readonly destinationTemporary: number;
 }
 
-/** The calls that may use the Player's file store, which `fileStore` instructions run. */
+/** The calls that may use the Playroom's file store, which `fileStore` instructions run. */
 export type FileStoreCall = "fileFromBase64" | "fileToBase64" | "hashFile" | FileConversion;
 
 /**
  * `fileFromBase64(text, default:)`, `fileToBase64(file)`, `hashFile(file)`, or a conversion that takes `files:`,
- * `toJson` or `fromJson`, without a written `files: false` (V30 §13 and §33). It runs twice when files are involved: first it asks the Player to store,
+ * `toJson` or `fromJson`, without a written `files: false` (V30 §13 and §33). It runs twice when files are involved: first it asks the Playroom to store,
  * read, or hash them and waits, with the instruction itself as the continuation, and once the answer is handed off it
  * runs again and gives the result. Without files it gives the result at once. Its operands are temporaries or literals,
  * so both runs read the same values.
@@ -1032,10 +1032,10 @@ export type LockCall = "encryptText" | "encryptFile" | "decryptText" | "decryptF
 
 /**
  * `encryptText(text, ...)`, `encryptFile(file, ...)`, `decryptText(text, ..., default:)`, or
- * `decryptFile(file, ..., default:)` (V30 §13). It asks the Player to lock or open and waits, with the instruction itself
- * as the continuation; each answer is handed off and the instruction runs again with it, either to give the result or
- * to wait again, as while the Player's dialog asks the player. Its operands are temporaries or literals, so every run
- * reads the same values.
+ * `decryptFile(file, ..., default:)` (V30 §13). It asks the Playroom to lock or open and waits, with the instruction
+ * itself as the continuation; each answer is handed off and the instruction runs again with it, either to give the
+ * result or to wait again, as while the Playroom's dialog asks the player. Its operands are temporaries or literals, so
+ * every run reads the same values.
  */
 export interface LockInstruction extends InstructionBase {
   readonly kind: "lock";
@@ -1048,8 +1048,8 @@ export interface LockInstruction extends InstructionBase {
    */
   readonly password: ExpressionPlan | null;
   /**
-   * `password: askPassword(...)` written directly: the Player's password field asks for the password, with this `hint:`
-   * or none, after the question was said in the evaluation order of the arguments. `null` otherwise.
+   * `password: askPassword(...)` written directly: the Playroom's password field asks for the password, with this
+   * `hint:` or none, after the question was said in the evaluation order of the arguments. `null` otherwise.
    */
   readonly passwordField: { readonly hint: ExpressionPlan | null } | null;
   /** The written `publicKey:` of an encrypt call, a public key, a list of them, `true`, or `false`; `null` without one. */

@@ -40,7 +40,7 @@ test("a wait or timer written in days or weeks gets TSV061 on its length, which 
       [
         "warning",
         "TSV061",
-        `'${quoted}' counts only time while the Player is open, so closing the Player pauses it.`,
+        `'${quoted}' counts only time while the Playroom is open, so closing the Playroom pauses it.`,
       ],
       source,
     );

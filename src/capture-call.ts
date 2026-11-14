@@ -3,7 +3,7 @@ import { conversionWaitsForFiles, isConversion } from "./conversions.js";
 
 /**
  * Whether an expression is the accepted `takePhoto()` call. It looks like an ordinary call, but it waits for the
- * Player and therefore lowers to a capture instruction rather than a synchronous builtin call.
+ * Playroom and therefore lowers to a capture instruction rather than a synchronous builtin call.
  */
 export function isTakePhotoCall(expression: Expression): boolean {
   return (
@@ -26,9 +26,9 @@ export function isAskImageCall(expression: Expression): boolean {
 }
 
 /**
- * Whether an expression is a call that may use the Player's file store (V30 §13 and §33): `fileFromBase64(...)`,
+ * Whether an expression is a call that may use the Playroom's file store (V30 §13 and §33): `fileFromBase64(...)`,
  * `fileToBase64(...)`, `hashFile(...)`, or a conversion that takes `files:` without a literal `files: false`. Like
- * `takePhoto()` it may wait for the Player, so it lowers to a file store instruction.
+ * `takePhoto()` it may wait for the Playroom, so it lowers to a file store instruction.
  */
 export function isFileStoreCall(expression: Expression): boolean {
   if (expression.kind !== "callExpression" || expression.callee.kind !== "identifier") return false;
@@ -58,7 +58,7 @@ export const LOCK_CALLS: ReadonlySet<string> = new Set([
 
 /**
  * Whether an expression is `encryptText(...)`, `encryptFile(...)`, `decryptText(...)`, or `decryptFile(...)` (V30 §13).
- * Like `takePhoto()` it waits for the Player, which may ask the player first, so it lowers to a lock instruction.
+ * Like `takePhoto()` it waits for the Playroom, which may ask the player first, so it lowers to a lock instruction.
  */
 export function isLockCall(expression: Expression): boolean {
   return (
@@ -70,7 +70,7 @@ export function isLockCall(expression: Expression): boolean {
 
 /**
  * The `askPassword(...)` written directly as the `password:` of a lock call, also in parentheses, or `null` (V30 §13). It
- * asks in the Player's own password field, so the typed text is the password and never becomes a script value.
+ * asks in the Playroom's own password field, so the typed text is the password and never becomes a script value.
  */
 export function directPasswordField(expression: Expression): InteractionExpression | null {
   let node = expression;

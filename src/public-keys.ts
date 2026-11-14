@@ -1,6 +1,6 @@
 // A public key as a lock takes it (V30 §13): an age X25519 recipient, `age1…` in Bech32, or an OpenSSH
 // Ed25519 key, `ssh-ed25519 AAAA… comment`. Pure and synchronous, so the compiler checks a written key and the engine a
-// key the script computes; the Player reads the same bytes to lock with them.
+// key the script computes; the Playroom reads the same bytes to lock with them.
 
 /**
  * The most public keys a lock holds: their age file is one opener, whose body has at most 65,535 bytes, and each

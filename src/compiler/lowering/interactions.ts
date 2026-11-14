@@ -185,7 +185,7 @@ export function* lowerShowPopupTask(
 }
 
 /**
- * Lowers an `openUrl` (V30 §33), which waits until the Player opened its web address. A written address, button text,
+ * Lowers an `openUrl` (V30 §33), which waits until the Playroom opened its web address. A written address, button text,
  * and `alwaysButton:` embed the request; the address is checked and made canonical here. Otherwise the arguments are
  * evaluated once, in written order, into temporaries that the request checks when it opens.
  */

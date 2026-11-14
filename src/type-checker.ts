@@ -6235,7 +6235,7 @@ export class TypeChecker {
   /**
    * The arguments of a call of a built-in function or a method, each as it was evaluated, before later arguments run; a
    * `default:` that runs only when the call needs it comes last (owner decision, 2026-10-16). A call that `waits` for the
-   * Player waits after its other arguments, so a block may run before its result or its default.
+   * Playroom waits after its other arguments, so a block may run before its result or its default.
    */
   *#callArgumentsTask(
     expression: CallExpression,
@@ -6283,7 +6283,7 @@ export class TypeChecker {
         );
         this.#checkLiteralCaptureTags(tags);
       }
-      // A capture waits for the Player like an interaction, and gives a photo reference, or null without a camera.
+      // A capture waits for the Playroom like an interaction, and gives a photo reference, or null without a camera.
       this.#suspend();
       return optional(STRING_TYPE);
     }
@@ -6297,7 +6297,7 @@ export class TypeChecker {
       const entry = scope.resolve(callee.name);
       if (entry?.kind === "function")
         return yield* compileChild(this.#functionCallTask(expression, entry.fn, scope));
-      // A file store or lock call may wait for the Player.
+      // A file store or lock call may wait for the Playroom.
       const values = yield* compileChild(
         this.#callArgumentsTask(
           expression,
