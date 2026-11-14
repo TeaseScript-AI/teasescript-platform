@@ -123,6 +123,32 @@ test("a `get` with a default takes its receiver's element and its default at its
   assert.equal(indexOf("let a = [1]\nlet b = [[2]]\na = [b.get(0, default: a)]\n").cut("a"), 2);
 });
 
+test("a copying method passes its receiver on at its own level", () => {
+  assert.equal(indexOf("let a = [1]\na = [a.toList()]\n").cut("a"), 2);
+  assert.equal(indexOf("let a = [1]\na = [a.take(1)]\n").cut("a"), 2);
+});
+
+test("a removing method gives its receiver's element", () => {
+  // the element taken out of the list it was wrapped in: +1 and -1
+  assert.equal(indexOf("let xs = [[1]]\nlet p = xs.removeAt(0)\nxs = [p]\n").cut("xs"), null);
+  // wrapped twice: +2 and -1
+  assert.equal(indexOf("let xs = [[1]]\nxs = [[xs.removeFirst()]]\n").cut("xs"), 3);
+});
+
+test("a dict's `values` passes its values on at their own level", () => {
+  // the carrier table reads `d.values` as the dict's values (0) and as an object's property `values`: that
+  // property's own cycle is cut first, at 3, and enters the dict's as an upstream component, so the dict is cut at 4
+  assert.equal(indexOf('let d = dict{}\nd["k"] = [1]\nd["k"] = d.values\n').cut("d"), 4);
+  assert.equal(indexOf('let d = dict{}\nd["k"] = [1]\nd["k"] = d.values\n').cut("d", "values"), 3);
+});
+
+test("a choice's answer passes no level on: its options never close a cycle", () => {
+  assert.equal(
+    indexOf('let opts = ["a"]\nlet c = askChoice opts\nopts = [[c]]\n').cut("opts"),
+    null,
+  );
+});
+
 test("a cycle that nests nothing deeper is never cut", () => {
   // whole copies around a ring: weight 0
   const ring = indexOf("let a = [1]\nlet b = a\na = b\n");
