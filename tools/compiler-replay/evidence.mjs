@@ -19,13 +19,15 @@
 // or unanswered records fall short of its sources' counts; the modes, the package folders with their packages' counts,
 // the bound and how many packages reached it), then, per part (the set, each area, the packages):
 //   - each tree's count of sources in seven classes (`classOf`, `sourceClass`): completed (the core analysed it in
-//     every mode; a set or package record without all four held modes is uncompared), no analysis (compile errors,
+//     every mode; a set or package record without each of the four held modes once, or an area source without each
+//     run its generator's checks owe in each of the four area modes once, is uncompared), no analysis (compile errors,
 //     parse or names, before the checker), refused at the syntax gate, refused at the limit, threw (the checker's own
 //     outcome, by the error's class and the function and file it is thrown from, `throwPlace`), incomplete (what the
 //     infrastructure did: stalled, killed, past the safety net, a run an oracle's bound left unanswered on either tree,
 //     a runner's own exception) and uncompared (no record a class can be read from);
 //   - the moves, by name: a source whose class differs between the trees, or whose outcome in one paired mode does
-//     (`outcomeOf`: a throw at another place or in another mode, a refusal of another kind, a stop at another limit);
+//     (`outcomeOf`: a throw at another place or in another mode, a refusal of another kind or at another limit, a stop
+//     at another limit);
 //   - the differences over sources completed on both trees, each with its first differing part (an area's charged
 //     work among them);
 //   - every source that threw alike on both trees (in each mode), by name, each time; what came before a throw is not
@@ -36,8 +38,10 @@
 //   - the sources with no analysis on both trees, by name with their count, and the differences over them (the set's
 //     and the packages' diagnostics and a plan where none may come out; an area's publication only, its runner
 //     recording no diagnostics);
+//   - the sources refused at the limit on both trees, by name;
 //   - the heaviest share of the limit per tree, with every source above half of it, each as a share of the allowance
-//     the code gives it and of the fixed limit (`FIXED_LIMIT`);
+//     the code gives it and of the fixed limit (`FIXED_LIMIT`), and whose it is: generated (the set's and the areas')
+//     or a creator's script (the packages');
 //   - the checks, each step asked (`check-changed`, `pin-suites`, the `--tests` files) by its status.
 // Exit 0 when every part asked ran whole, at least one part was asked, each completed something and nothing differs,
 // moves, is incomplete or uncompared, and every check step asked ran and passed (a throw alike on both trees is listed,
@@ -113,8 +117,13 @@ const modeMove = (pairs) => {
   return moved === undefined ? null : `${moved[0]}: ${moved[1]} → ${moved[2]}`;
 };
 
-/** The held modes a set or package record compares: a record with another count was not compared in every mode. */
-const HELD = 4;
+/** The held modes (`HELD_MODES`' names) a set or package record compares, each once, or it was not compared whole. */
+const HELD_NAMES = ["forward", "reversed", "forward, unshared", "reversed, unshared"];
+const heldWhole = (modes) =>
+  modes.length === HELD_NAMES.length && HELD_NAMES.every((n) => modes.some((m) => m.mode === n));
+
+/** The modes an area runs each check of a source in (`run-child.mjs`'s labels). */
+const AREA_MODES = ["src-on", "src-off", "rev-on", "rev-off"];
 
 /** The places a tree's runs threw at, sorted and joined, or `null` where none threw. */
 const threwAt = (runs) => {
@@ -157,7 +166,7 @@ export function setSources(records) {
       };
     const modes = r.modes ?? [];
     const side = (tree) =>
-      modes.length === HELD ? sourceClass(modes.map((m) => classOf(m[tree]))) : "uncompared";
+      heldWhole(modes) ? sourceClass(modes.map((m) => classOf(m[tree]))) : "uncompared";
     const threw = ["base", "head"].map((tree) => threwAt(modes.map((m) => m[tree])));
     const apart = modes.map((m) => setDifference(m)).find((what) => what !== null) ?? null;
     const move = modeMove(modes.map((m) => [m.mode, outcomeOf(m.base), outcomeOf(m.head)]));
@@ -191,6 +200,19 @@ export function setSources(records) {
  * (`apartText`), else the first run whose trees charged other work.
  */
 export function areaSources(work, differences) {
+  // (the runs each source owes: each of its generator's checks, a stops check at each allowance, in every mode, as the
+  // area's header names them; none known without it)
+  const configuration = work.find((w) => w.work?.configuration !== undefined)?.work.configuration;
+  const owed = (generator) => {
+    const checks = configuration?.checks?.[generator];
+    if (!Array.isArray(checks)) return null;
+    const labels = checks.flatMap((check) =>
+      check === "stops"
+        ? (configuration.allowances ?? []).map((a) => `stops ${a ?? "natural"}`)
+        : [check],
+    );
+    return labels.flatMap((check) => AREA_MODES.map((mode) => `${mode} ${check}`));
+  };
   const apartOf = new Map();
   const thrownOf = new Map();
   // (each run's throw on each tree, by its mode and check: compared in its own run, never across runs)
@@ -216,6 +238,17 @@ export function areaSources(work, differences) {
     .filter((w) => w.generator !== undefined && w.source !== undefined)
     .map((w) => {
       const name = `${w.generator} ${w.source}`;
+      // (every run the source owes ran, each once: else it was not compared in every mode)
+      const whole = ({ generator, runs = [] }) => {
+        const labels = runs.map((run) => `${run.mode} ${run.check}`);
+        const due = owed(generator);
+        return (
+          due !== null &&
+          new Set(labels).size === labels.length &&
+          labels.length === due.length &&
+          due.every((label) => labels.includes(label))
+        );
+      };
       const worked = (w.runs ?? []).find(
         (run) => Array.isArray(run.work) && run.work[0] !== run.work[1],
       );
@@ -233,7 +266,7 @@ export function areaSources(work, differences) {
         thrown?.runner === true ||
         (counts.exceptions > 0 && thrown === undefined)
           ? "incomplete"
-          : counts.uncompared > 0
+          : counts.uncompared > 0 || !whole(w)
             ? "uncompared"
             : null;
       const runs = w.runs ?? [];
@@ -338,7 +371,7 @@ function packageApart(m, runs = Object.keys(PACKAGE_PARTS)) {
  */
 function routeOutcome(route) {
   if (route.outside != null)
-    return `refused ${route.outside === "limit" ? "at the limit" : "at the syntax gate"} ${route.error}`;
+    return `refused ${route.outside === "limit" ? "at the limit" : "at the syntax gate"}${route.stopped == null ? "" : ` (${route.stopped})`} ${route.error}`;
   if (route.stopped != null) return `refused at the limit (${route.stopped})`;
   return route.error == null ? "completed" : `threw ${route.error}`;
 }
@@ -366,9 +399,7 @@ export function packageSources(records) {
       };
     const modes = r.modes ?? [];
     const side = (tree) =>
-      modes.length === HELD
-        ? sourceClass(modes.map((m) => classOf(m[tree].analysis)))
-        : "uncompared";
+      heldWhole(modes) ? sourceClass(modes.map((m) => classOf(m[tree].analysis))) : "uncompared";
     const threw = ["base", "head"].map((tree) => threwAt(modes.map((m) => m[tree].analysis)));
     const move = modeMove(
       modes.map((m) => [m.mode, outcomeOf(m.base.analysis), outcomeOf(m.head.analysis)]),
@@ -430,6 +461,10 @@ export function partSummary(sources) {
   // (the sources the checker saw on neither tree, and what differs over them: never counted completed)
   const unanalysed = [];
   const unanalysedDifferences = [];
+  // (the sources refused at the limit on both trees, by name)
+  const limitBoth = sources
+    .filter((s) => s.base === "limit" && s.head === "limit")
+    .map((s) => s.name);
   // (of the packages completed on both trees, those whose research-route compile threw or refused alike: their
   // route's result is not compared, by kind, and listed by name and place)
   const routeNotCompared = { threw: 0, refused: 0 };
@@ -489,6 +524,7 @@ export function partSummary(sources) {
     unanalysedDifferences,
     routeNotCompared,
     routeNotComparedList,
+    limitBoth,
     shares,
   };
 }
@@ -783,6 +819,10 @@ export function evidenceReportStep({ positional: [prefix], options }) {
     );
     for (const t of p.threwAlike) out(`${name} threw alike on both trees: ${t}`);
     for (const t of p.routeNotComparedList) out(`${name} route result not compared: ${t}`);
+    if (p.limitBoth.length > 0)
+      out(
+        `${name} refused at the limit on both trees (${p.limitBoth.length}): ${p.limitBoth.join(", ")}`,
+      );
     if (p.unanalysed.length > 0) {
       out(
         `${name}: ${p.unanalysedDifferences.length} differences over ${p.unanalysed.length} with no analysis on both trees (${name === "set" || name === "packages" ? "their diagnostics, and no plan" : "their publication only: the area runner records no diagnostics"})`,
@@ -791,8 +831,12 @@ export function evidenceReportStep({ positional: [prefix], options }) {
     }
     p.shares.forEach((share, at) => {
       const tree = at === 0 ? "base" : "head";
-      if (share.heaviest !== null) out(`${name} ${tree} heaviest: ${shareText(share.heaviest)}`);
-      for (const s of share.aboveHalf) out(`${name} ${tree} above half: ${shareText(s)}`);
+      // (whose a source is: the set's and the areas' are generated, the packages' creators' scripts)
+      const origin = name === "packages" ? "creator's script" : "generated";
+      if (share.heaviest !== null)
+        out(`${name} ${tree} heaviest (${origin}): ${shareText(share.heaviest)}`);
+      for (const s of share.aboveHalf)
+        out(`${name} ${tree} above half (${origin}): ${shareText(s)}`);
     });
   }
   out(

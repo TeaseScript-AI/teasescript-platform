@@ -140,6 +140,7 @@ test("evidence: the set's sources by class on each tree, a class move apart from
     },
     // (a record without all four modes was not compared in every mode)
     { name: "three modes", modes: MODE_NAMES.slice(1).map((m) => setMode(m)) },
+    { name: "one mode four times", modes: MODE_NAMES.map(() => setMode("forward")) },
     { name: "unparsed", modes: MODE_NAMES.map((m) => setMode(m, unparsed())) },
     {
       name: "unparsed apart",
@@ -156,7 +157,7 @@ test("evidence: the set's sources by class on each tree, a class move apart from
     slice: 1,
     threw: 3,
     incomplete: 1,
-    uncompared: 1,
+    uncompared: 2,
   });
   assert.deepEqual(summary.counts.head, {
     completed: 3,
@@ -165,8 +166,10 @@ test("evidence: the set's sources by class on each tree, a class move apart from
     slice: 1,
     threw: 4,
     incomplete: 1,
-    uncompared: 1,
+    uncompared: 2,
   });
+  // (the sources refused at the limit on both trees, by name)
+  assert.deepEqual(summary.limitBoth, ["stops elsewhere"]);
   // (a move is never one of the differences: a new throw is one, completed → threw; so is, within one class, another
   // outcome in a paired mode; the differences are over sources completed on both trees; a throw alike is listed apart)
   assert.deepEqual(summary.moved, [
@@ -215,65 +218,67 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
     stopped,
     unparsed,
   });
+  // (a source's runs in each of the area's four modes)
+  const four = (...given) =>
+    ["src-on", "src-off", "rev-on", "rev-off"].map((mode) => ({ ...run(...given), mode }));
   const work = [
-    { work: { area: "x" } },
-    { generator: "g", source: "fine", runs: [run([null, null])], counts: { runs: 1 } },
+    // (the header names each generator's checks: a source owes each in every mode)
+    { work: { area: "x", configuration: { checks: { g: ["publication"] }, allowances: [null] } } },
+    { generator: "g", source: "fine", runs: four([null, null]), counts: { runs: 1 } },
     {
       generator: "g",
       source: "regressed",
-      runs: [run([null, "work"], [300, 1200])],
+      runs: four([null, "work"], [300, 1200]),
       counts: { runs: 1 },
     },
     { generator: "g", source: "stall", runs: [], counts: { stalled: 1 } },
     {
       generator: "g",
       source: "unparsed",
-      runs: [run([null, null], [0, 0], [true, true])],
+      runs: four([null, null], [0, 0], [true, true]),
       counts: { unparsed: 1 },
     },
     // (the head alone has no request: a class move, never no analysis on both)
     {
       generator: "g",
       source: "unparsed now",
-      runs: [run([null, null], [300, 0], [false, true])],
+      runs: four([null, null], [300, 0], [false, true]),
       counts: { unparsed: 1 },
     },
     // (both trees leave a question unanswered alike: a partial publication, never completed)
-    {
-      generator: "g",
-      source: "partial",
-      runs: [run([null, null])],
-      counts: { unansweredAlike: 1 },
-    },
+    { generator: "g", source: "partial", runs: four([null, null]), counts: { unansweredAlike: 1 } },
     // (the same publication for other charged work: a difference)
-    { generator: "g", source: "heavier", runs: [run([null, null], [1, 2])], counts: { runs: 1 } },
+    { generator: "g", source: "heavier", runs: four([null, null], [1, 2]), counts: { runs: 1 } },
     {
       generator: "g",
       source: "old",
       runs: [{ mode: "src-on", check: "publication", work: [1, 1], allowance: [1000, 1000] }],
       counts: {},
     },
-    { generator: "g", source: "apart", runs: [run([null, null])], counts: { differences: 1 } },
-    { generator: "g", source: "throws", runs: [run([null, null])], counts: { exceptions: 1 } },
+    { generator: "g", source: "apart", runs: four([null, null]), counts: { differences: 1 } },
+    { generator: "g", source: "throws", runs: four([null, null]), counts: { exceptions: 1 } },
     { generator: "g", source: "runner", runs: [], counts: { exceptions: 1 } },
     // (the base throws in one mode, the head at the same place in another: each tree threw, a mode moved)
-    {
-      generator: "g",
-      source: "swapped",
-      runs: [run([null, null]), { ...run([null, null]), mode: "rev-on" }],
-      counts: { exceptions: 2 },
-    },
+    { generator: "g", source: "swapped", runs: four([null, null]), counts: { exceptions: 2 } },
     // (both trees leave a run unanswered, their answered parts differing: a partial publication, never completed)
     {
       generator: "g",
       source: "partial apart",
-      runs: [run([null, null])],
+      runs: four([null, null]),
       counts: { differences: 1 },
       unanswered: [
         { mode: "src-on", check: "publication", differs: true, by: { reason: "memory" } },
       ],
     },
-    { area: "x", sources: 13 },
+    // (a source run in one mode only, and one run four times in the same mode: neither compared in every mode)
+    { generator: "g", source: "one mode", runs: [run([null, null])], counts: { runs: 1 } },
+    {
+      generator: "g",
+      source: "one mode four times",
+      runs: [0, 1, 2, 3].map(() => run([null, null])),
+      counts: { runs: 4 },
+    },
+    { area: "x", sources: 15 },
   ];
   const differences = [
     {
@@ -314,7 +319,7 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
     slice: 0,
     threw: 1,
     incomplete: 4,
-    uncompared: 1,
+    uncompared: 3,
   });
   assert.deepEqual(summary.counts.head, {
     completed: 3,
@@ -323,7 +328,7 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
     slice: 0,
     threw: 2,
     incomplete: 4,
-    uncompared: 1,
+    uncompared: 3,
   });
   assert.deepEqual(summary.moved, [
     "g regressed: completed → refused at the limit",
@@ -427,6 +432,14 @@ test("evidence: a package's class is its analysis's, its first difference by par
         }),
       ),
     },
+    // (the same mode four times: not compared in every mode)
+    {
+      name: "one mode four times",
+      root: 0,
+      files: 1,
+      differing: 0,
+      modes: MODE_NAMES.map(() => packageMode("forward")),
+    },
     { name: "hang", root: 0, incomplete: "safety net 3600 s" },
   ]);
   const summary = partSummary(sources);
@@ -439,14 +452,14 @@ test("evidence: a package's class is its analysis's, its first difference by par
     slice: 0,
     threw: 1,
     incomplete: 1,
-    uncompared: 0,
+    uncompared: 1,
   });
   assert.deepEqual(summary.threwAlike, ["thrown: TypeError at f (src/a.js)"]);
   // (a package of the same name in another folder is named by its folder; the answers before the trace)
   assert.deepEqual(summary.differences, ["a (folder 2): forward: analysis answers"]);
   assert.deepEqual(
     summary.shares[0].aboveHalf.map((s) => s.name),
-    ["a", "a (folder 2)", "thrown"],
+    ["a", "a (folder 2)", "thrown", "one mode four times"],
   );
   assert.equal(summary.shares[0].heaviest.name, "stops");
   assert.equal(sources.find((s) => s.name === "hang").bound, "safety net 3600 s");
@@ -477,6 +490,12 @@ test("evidence: a package's research route compared where it completed on both t
     pkg("throws elsewhere", thrownAt("g (src/b.js)"), thrownAt("h (src/c.js)")),
     // (refused at the same place, at the gate on the base and at the limit on the head)
     pkg("refused otherwise", packageRun(), route({ outside: "limit" })),
+    // (refused at the limit on both trees, a ledger stopping at another limit on the head)
+    pkg(
+      "refused at another limit",
+      route({ outside: "limit", stopped: "work" }),
+      route({ outside: "limit", stopped: "read-depth" }),
+    ),
     // (the base's route throws in one mode, the head's at the same place in another)
     {
       name: "throws swapped",
@@ -504,7 +523,7 @@ test("evidence: a package's research route compared where it completed on both t
     },
   ]);
   const summary = partSummary(sources);
-  assert.equal(summary.completed, 7);
+  assert.equal(summary.completed, 8);
   assert.deepEqual(summary.differences, ["compared: forward: route diagnostics"]);
   assert.deepEqual(summary.routeNotCompared, { threw: 1, refused: 1 });
   assert.deepEqual(summary.routeNotComparedList, [
@@ -517,6 +536,7 @@ test("evidence: a package's research route compared where it completed on both t
     "throws now: route forward: completed → threw TypeError at g (src/b.js)",
     "throws elsewhere: route forward: threw TypeError at g (src/b.js) → threw TypeError at h (src/c.js)",
     "refused otherwise: route forward: refused at the syntax gate CandidateOutsideSlice → refused at the limit CandidateOutsideSlice",
+    "refused at another limit: route forward: refused at the limit (work) CandidateOutsideSlice → refused at the limit (read-depth) CandidateOutsideSlice",
     "throws swapped: route forward: threw TypeError at g (src/b.js) → completed",
     "analysis swapped: forward: threw TypeError at f (src/a.js) → completed",
   ]);
@@ -798,4 +818,235 @@ test("evidence queues only the areas asked, each package folder as data, and the
     rmSync(bin, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("evidence: in each record form, any two outcomes of one paired mode are a move where they differ and the same outcome where they agree", () => {
+  // (each outcome a run of that form can hold, the other three modes completed)
+  const forms = {
+    set: {
+      outcomes: {
+        completed: compile(),
+        unanalysed: unparsed(),
+        slice: compile({ error: "CandidateOutsideSlice: x", outside: "slice", plan: null }),
+        "limit refusal": compile({
+          error: "CandidateOutsideSlice: x",
+          outside: "limit",
+          plan: null,
+        }),
+        "limit work": compile({ stopped: "work" }),
+        "limit depth": compile({ stopped: "read-depth" }),
+        "threw f": threw("f (a.js)"),
+        "threw g": threw("g (b.js)"),
+      },
+      summary: (b, h) =>
+        partSummary(
+          setSources([
+            {
+              name: "s",
+              modes: MODE_NAMES.map((m, i) => (i === 0 ? setMode(m, b, h) : setMode(m))),
+            },
+          ]),
+        ),
+    },
+    analysis: {
+      outcomes: {
+        completed: packageRun(),
+        unanalysed: {
+          ...packageRun(),
+          analysis: { analysed: false, error: null, stopped: null, units: 0, allowance: 0 },
+        },
+        "limit work": packageRun({ stopped: "work" }),
+        "limit depth": packageRun({ stopped: "read-depth" }),
+        "threw f": packageRun({ error: "TypeError at f (src/a.js)" }),
+        "threw g": packageRun({ error: "TypeError at g (src/b.js)" }),
+      },
+      summary: (b, h) =>
+        partSummary(
+          packageSources([
+            {
+              name: "s",
+              root: 0,
+              files: 1,
+              differing: 0,
+              modes: MODE_NAMES.map((m, i) => (i === 0 ? packageMode(m, b, h) : packageMode(m))),
+            },
+          ]),
+        ),
+    },
+    route: {
+      outcomes: Object.fromEntries(
+        [
+          ["completed", { error: null, outside: null }],
+          ["slice", { error: "CandidateOutsideSlice", outside: "slice" }],
+          ["limit refusal", { error: "CandidateOutsideSlice", outside: "limit" }],
+          [
+            "limit work refusal",
+            { error: "CandidateOutsideSlice", outside: "limit", stopped: "work" },
+          ],
+          ["limit work", { error: null, outside: null, stopped: "work" }],
+          ["threw f", { error: "TypeError at f (src/a.js)", outside: null }],
+          ["threw g", { error: "TypeError at g (src/b.js)", outside: null }],
+        ].map(([name, fields]) => [
+          name,
+          { ...packageRun(), route: { ...packageRun().route, ...fields } },
+        ]),
+      ),
+      summary: (b, h) => {
+        const done = {
+          ...packageRun(),
+          route: { ...packageRun().route, error: null, outside: null },
+        };
+        return partSummary(
+          packageSources([
+            {
+              name: "s",
+              root: 0,
+              files: 1,
+              differing: 0,
+              modes: MODE_NAMES.map((m, i) =>
+                i === 0 ? packageMode(m, b, h) : packageMode(m, done),
+              ),
+            },
+          ]),
+        );
+      },
+    },
+    area: {
+      outcomes: {
+        completed: { stopped: null },
+        unanalysed: { stopped: null, unparsed: true },
+        "limit work": { stopped: "work" },
+        "limit depth": { stopped: "read-depth" },
+        "threw f": { stopped: null, thrown: "f" },
+        "threw g": { stopped: null, thrown: "g" },
+      },
+      summary: (b, h) => {
+        const runs = ["src-on", "src-off", "rev-on", "rev-off"].map((mode, i) => ({
+          mode,
+          check: "publication",
+          work: [300, 300],
+          allowance: [1000, 1000],
+          stopped: i === 0 ? [b.stopped, h.stopped] : [null, null],
+          unparsed: i === 0 ? [b.unparsed === true, h.unparsed === true] : [false, false],
+        }));
+        const thrown = Object.fromEntries(
+          [
+            ["base", b],
+            ["head", h],
+          ]
+            .filter(([, o]) => o.thrown !== undefined)
+            .map(([tree, o]) => [
+              tree,
+              `TypeError: m\n    at ${o.thrown} (file:///t/${tree}/dist/src/x.js:3:9)`,
+            ]),
+        );
+        const exceptions = Object.keys(thrown).length;
+        return partSummary(
+          areaSources(
+            [
+              {
+                work: {
+                  area: "x",
+                  configuration: { checks: { g: ["publication"] }, allowances: [null] },
+                },
+              },
+              {
+                generator: "g",
+                source: "s",
+                runs,
+                counts: exceptions > 0 ? { exceptions: 1 } : {},
+              },
+            ],
+            exceptions > 0
+              ? [{ generator: "g", source: "s", mode: "src-on", check: "publication", thrown }]
+              : [],
+          ),
+        );
+      },
+    },
+  };
+  for (const [form, { outcomes, summary }] of Object.entries(forms))
+    for (const [b, base] of Object.entries(outcomes))
+      for (const [h, head] of Object.entries(outcomes)) {
+        const s = summary(base, head);
+        const at = `${form}: ${b} against ${h}`;
+        if (b === h) {
+          assert.deepEqual([s.moved, s.differences], [[], []], at);
+          // (the route's form: the analysis completed in every case, its route result compared or counted apart)
+          assert.equal(s.completed, form === "route" || b === "completed" ? 1 : 0, at);
+        } else {
+          assert.equal(s.moved.length, 1, at);
+          assert.equal(s.completed, form === "route" ? 1 : 0, at);
+        }
+      }
+});
+
+test("evidence: in each record form, a source not run once in each mode it owes is uncompared, never completed", () => {
+  const AREA = ["src-on", "src-off", "rev-on", "rev-off"];
+  // (the mode lists a record can hold: whole, one missing, one twice in a mode's place, one foreign)
+  const lists = (names) => ({
+    whole: names,
+    missing: names.slice(1),
+    repeated: [names[0], ...names.slice(0, -1)],
+    foreign: [...names.slice(0, -1), "sideways"],
+  });
+  const area = (labels, checks = ["publication"]) =>
+    areaSources(
+      [
+        { work: { area: "x", configuration: { checks: { g: checks }, allowances: [null, 64] } } },
+        {
+          generator: "g",
+          source: "s",
+          runs: labels.map(([mode, check]) => ({
+            mode,
+            check,
+            work: [1, 1],
+            allowance: [1000, 1000],
+            stopped: [null, null],
+            unparsed: [false, false],
+          })),
+          counts: {},
+        },
+      ],
+      [],
+    )[0];
+  for (const [kind, names] of Object.entries(lists(MODE_NAMES))) {
+    const expected = kind === "whole" ? "completed" : "uncompared";
+    const set = setSources([{ name: "s", modes: names.map((m) => setMode(m)) }])[0];
+    const pkg = packageSources([
+      { name: "s", root: 0, files: 1, differing: 0, modes: names.map((m) => packageMode(m)) },
+    ])[0];
+    assert.deepEqual([set.base, set.head, pkg.base, pkg.head], Array(4).fill(expected), kind);
+  }
+  for (const [kind, modes] of Object.entries(lists(AREA))) {
+    const s = area(modes.map((mode) => [mode, "publication"]));
+    assert.deepEqual(
+      [s.base, s.head],
+      Array(2).fill(kind === "whole" ? "completed" : "uncompared"),
+      kind,
+    );
+  }
+  // (a stops check owes a run at each allowance in each mode; a check the header does not name is not owed)
+  const stops = AREA.flatMap((mode) => [
+    [mode, "publication"],
+    [mode, "stops natural"],
+    [mode, "stops 64"],
+  ]);
+  assert.equal(area(stops, ["publication", "stops"]).base, "completed");
+  assert.equal(
+    area(
+      stops.filter(([, check]) => check !== "stops 64"),
+      ["publication", "stops"],
+    ).base,
+    "uncompared",
+  );
+  assert.equal(area(stops, ["publication"]).base, "uncompared");
+  // (a header that names no checks for the generator owes nothing knowable: uncompared)
+  assert.equal(
+    area(
+      AREA.map((mode) => [mode, "publication"]),
+      undefined,
+    ).base,
+    "uncompared",
+  );
 });
