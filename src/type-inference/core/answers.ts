@@ -63,6 +63,8 @@ import {
 import type { Dominators } from "./flow-graph/dominators.js";
 import { ExactPath, withoutEmpty } from "./exact-path.js";
 import type { Callable, FlowGraph, FlowNode } from "./flow-graph.js";
+import { operandsOf } from "./carriers.js";
+import { NestingIndex } from "./indexes/nesting.js";
 import { GuardIndex } from "./indexes/guards.js";
 import { HandlerIndex } from "./indexes/handlers.js";
 import {
@@ -130,6 +132,8 @@ export interface CorePass {
   readonly lists: DefinitionLists;
   readonly handlers: HandlerIndex;
   readonly guards: GuardIndex;
+  /** #2764 (B): the cut depths of the pass's element-step-adding cycles. */
+  readonly nesting: NestingIndex;
   readonly exact: ExactPath;
   readonly contract: Contract;
   readonly values: Values;
@@ -164,6 +168,7 @@ function createPass(
     lists: DefinitionLists;
     handlers: HandlerIndex;
     guards: GuardIndex;
+    nesting: NestingIndex;
     solver: Solver;
     receivingDomain: ReceivingDomain;
     writtenDefaults: WrittenDefaults;
@@ -184,6 +189,13 @@ function createPass(
     ),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
+    // (the pass's own definitions: admission's rejections take effect here, as in `lists`)
+    nesting: new NestingIndex(
+      program,
+      definitions,
+      (d) => !rejected.has(d.uid),
+      (value) => operandsOf(program, value),
+    ),
     solver: new Solver(program.scope),
     receivingDomain: new ReceivingDomain(),
     writtenDefaults: new WrittenDefaults(program, definitions),
