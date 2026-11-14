@@ -232,7 +232,6 @@ function laterSources(
   if (typed !== null && typed.some(isExternal)) return typed;
   const typedTags =
     typed === null ? null : [...new Set(withoutEmpty(typed).map((item) => item.tag))];
-  // from here on a domain, what the key may hold over all its stores: its finished contract
   const held = typedTags === null ? settled(() => contract.contractOfValueAt(value, rest)) : null;
   // (a domain that admits every kind, one whose nearest written prefix does, directly, through copies or a dictionary's
   // values list, holds the host data its key's stores hold, as an admitted or a syntax domain does below, #1450; a
@@ -254,8 +253,6 @@ function laterSources(
       ? [...domain, ...heldIngress(walk, value, rest)]
       : domain;
   }
-  // the admitted type as admission retained it: a written type by its syntax in any finishing pass; a decision or a
-  // copy's only where admission settled
   const read = typedTags === null ? writtenRead(walk, value) : null;
   const written = read === null ? null : termAt(read, rest);
   const retained =

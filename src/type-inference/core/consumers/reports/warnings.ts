@@ -272,7 +272,6 @@ function detail(
     case "missing":
     case "unmodelled": {
       if (receiver !== null) return { ...detail, receiver };
-      // a speaker's field read by its name
       const speaker = value === undefined ? undefined : program.places[value]?.kind;
       if (speaker?.kind === "speakerProperty")
         return {

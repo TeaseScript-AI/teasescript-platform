@@ -133,7 +133,6 @@ export function methodArguments(
       domain,
       takes: taken!,
     };
-    // (a whole number's argument: the rule for a place written `number`, as at every whole-number use)
     if (
       taking.every(([, each]) => each === "integer") &&
       writtenNumberUse(walk, argument, node, c.site, "operator", rule)

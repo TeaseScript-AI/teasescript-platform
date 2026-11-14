@@ -225,8 +225,6 @@ export function admittedStores(
     const fitting = (item: Item): boolean =>
       item.tag === "unknown" ||
       (concrete(item) && tags.some((tag) => fits(item.tag, tag, written)));
-    // the sentence's rule, the place in its own text, its type (optional where it holds null too, ADR 0021 rule
-    // 1.2) and the store that decided it
     const named = (): readonly ItemTag[] =>
       written || !admission.admitted(root, path()).includes("null")
         ? nullableTags
@@ -284,14 +282,11 @@ export function admittedStores(
         }
       continue;
     }
-    // each candidate store's check; an equivalent copy (`Candidate.members`) only where its representative leaves an
-    // obligation
     const visit = (d: Definition, at: Steps): void => {
       // (#2289: a strict literal cell's undeclared host element leaves through its decider's own store, which is
       // checked)
       if (d === decider && at.length === 0 && decision.deciderHost !== true) return;
       walk.reading = d.node;
-      // the quiet path: a candidate the admitted type accepts whatever its value
       if (at.length === 0) {
         const quiet = quietKinds(walk, d.value);
         if (
@@ -318,7 +313,6 @@ export function admittedStores(
         (item) => !tags.some((tag) => fits(item.tag, tag, written)),
       );
       const nulls = items.filter((item) => item.tag === "null");
-      // a store of a rejection cycle is a possibility: a warning
       if (bad.length > 0 && d !== decider && admission.cycling.has(d.uid)) {
         storeWarning(
           walk,
@@ -331,8 +325,6 @@ export function admittedStores(
         );
         return;
       }
-      // a collection literal stored into a written element type admits each element by the scalar rule: a definite
-      // element none of whose kinds fits is an error at that element, the store rejected
       const wrong =
         written &&
         stepIndex(at, "element") >= 0 &&
@@ -359,8 +351,6 @@ export function admittedStores(
         admission.reject(d, root, path());
         return;
       }
-      // a definite contribution that does not fit, where no kind of the value fits (a fitting kind beside it
-      // makes it a warning), is rejected, its error at the innermost offending expression
       if (bad.length > 0 && d !== decider && !items.some(fitting)) {
         const reach = !written && d.place === root ? storeReach(walk, d, path()) : null;
         const { site, brought } = copiedErrorSite(
@@ -412,7 +402,6 @@ export function admittedStores(
         admission.reject(d, root, path());
         return;
       }
-      // a copy made before the decider is checked against it with context `later`
       const later = (item: Item): Item => (before ? { ...item, context: "later" } : item);
       // the whole-store exception: below a value the store holds whole from an external ingress, external data is
       // that record's, which its boundary check validates, so only an opaque value warns there; a whole copy of
@@ -454,8 +443,6 @@ export function admittedStores(
       const undecided =
         writtenOnly &&
         offending.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
-      // one copy-type diagnostic per offending kind, its earliest writer; against the destination's required kinds, a
-      // written optional type's null among them (not a decided type's admitted null)
       for (const { item } of offendingKinds(offending))
         storeWarning(
           walk,

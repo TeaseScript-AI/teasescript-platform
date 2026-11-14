@@ -106,7 +106,6 @@ export function operations(walk: Consumers): void {
       if (c.kind === "load") continue;
     }
     if (c.kind === "operation" && c.contract.family === "conversion") {
-      // a conversion's default against its result
       const category = conversionCategory(c.contract.name);
       const fallback = defaultOf(c);
       if (category?.kind === "converts" && fallback !== undefined)
@@ -205,14 +204,12 @@ function operation(
     if (name === "removeFirst" || name === "removeLast")
       selection(walk, c.receiver, node, c.site, `.${name}()`);
     methodReceiver(walk, c.site, node, c.receiver, name);
-    // what the method's signature takes of its arguments and its elements
     if (family === "method") {
       methodArguments(walk, c, node);
       methodElements(walk, c, node);
     }
     return;
   }
-  // a logical operator's operands are booleans
   if (family === "logic") {
     for (const argument of c.arguments)
       consume(walk, argument, node, c.site, BOOLEAN, name, { rule: "boolean", operator: name }, [
@@ -221,7 +218,6 @@ function operation(
     return;
   }
   if (family === "interpolation") {
-    // the value and every element of a list must be showable; a list is an element selection
     const value = c.arguments[0];
     if (value === undefined) return;
     const kinds = kindsOf(walk, value, node);
@@ -277,7 +273,6 @@ function operation(
       selection(walk, value, node, c.site, "${...}");
     return;
   }
-  // what `toJson` writes
   if (family === "conversion") jsonArgument(walk, c, node);
   const operator = operatorOf(c);
   if (operator !== null) operatorUse(walk, c, operator, node);
@@ -296,7 +291,6 @@ function operatorUse(
     const row = operatorRow(operator, kinds);
     return row === undefined ? "none" : row.byValue ? "value" : "row";
   };
-  // the quiet path
   const quiet = c.arguments.map((argument) => quietKinds(walk, argument));
   if (quiet.every((kinds) => kinds !== null)) {
     let combinations: ItemTag[][] = [[]];

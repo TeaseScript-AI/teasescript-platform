@@ -39,8 +39,6 @@ export function fallbackFits(
   written = false,
   domainAt: ((rest: readonly string[], unknown: boolean) => Domain | null) | null = null,
 ): void {
-  // nested list, set and dict literals by their elements, one depth after another; the target: the fallback's own
-  // key path at the depth, a dict's value its `entry`
   const { contract, program } = walk.pass;
   // the label's recipe: the fallback's own, then one step below it per depth, its text made where a check or a
   // warning there shows it (a label stepped at every depth made k nested `otherwise` k² code units, uncharged, #1433)
@@ -118,9 +116,6 @@ function fallbackFitsAt(
   const site = program.places[value]?.site;
   if (site === null || site === undefined || !("result" in c)) return false;
   const read = directAt(rest);
-  // the direct value's domain stands for the whole value, definite (its ingress is checked against it),
-  // where its own kinds are unknown, or where a written type gives it; never for a stopped read nor one proved
-  // only `null`
   const domain =
     domainAt === null ||
     read.length === 0 ||
@@ -192,9 +187,6 @@ function fallbackFitsAt(
     tag === "null"
       ? !(rest.length > 0 && into !== null && !intoTags.includes("null"))
       : admits(tag, directTags) || (unionHolds && admits(tag, intoTags));
-  // the family the fallback is checked against: the direct value's (whole numbers with numbers), a load's or
-  // `fromJson`'s written type itself (its `null` never listed: a fallback may be `null`), and the receiving union's
-  // kinds
   const own: ItemTag[] = written
     ? direct.filter(concrete).map((item) => item.tag)
     : [...directFamilies].flatMap((found): ItemTag[] =>
@@ -207,7 +199,6 @@ function fallbackFitsAt(
   // repeating it included; a family, or a kind the union adds, the table's)
   const joined: ItemTag[] = [...new Set([...own, ...added])];
   const against = kindsInItsOrder(joined, written ? own : undefined);
-  // the quiet path: a fallback whose contract every kind of fits asks nothing more at this path
   const quiet = quietKinds(walk, value, rest);
   const fallback =
     quiet !== null && quiet.every(fitsKind) ? [] : withoutEmpty(walk.valueItems(value, node, rest));
@@ -251,9 +242,6 @@ function fallbackFitsAt(
     );
   }
   if (union !== null && union.has("unknown")) return false;
-  // below the fallback, a definite element of its literals none of whose kinds fits: an error at that element;
-  // else both definite and incompatible, no kind of the fallback fitting: an error at the fallback;
-  // possible: one warning and check per offending kind
   const element = offendingElement(walk, value, node, rest, fitsKind);
   if (element !== null) error(walk, "written-target", element.site, rule, element.kinds);
   else if (

@@ -54,7 +54,6 @@ export function consume(
   const bad = items.filter((item) =>
     item.tag === "unknown" ? isOpaque(item) || isExternal(item) : !need.has(item.tag),
   );
-  // (an unmodelled unknown warns)
   if (bad.length === 0 && owedBy === null) return;
   const at = ownSpan(walk, value, site);
   if (
@@ -179,7 +178,6 @@ export function integerOnly(
   const rule: DiagnosticRule = { rule: "count", use };
   const owedBy = typeof soft === "object" ? soft : null;
   if (soft === false && writtenNumberUse(walk, value, node, site, "integer-use", rule)) return;
-  // the quiet path: a whole number on every run
   if (owedBy === null) {
     const quiet = quietKinds(walk, value);
     if (quiet !== null && quiet.every((tag) => INTEGER.has(tag))) {
@@ -194,7 +192,6 @@ export function integerOnly(
     item.tag === "unknown" ? isOpaque(item) || isExternal(item) : item.tag !== "integer",
   );
   if (offending.length === 0 && owedBy === null) return;
-  // the count or index expression's node, inside its parentheses
   const at = ownSpan(walk, value, site);
   const target = shownLabel(walk, keyLabel(walk, value));
   if (
@@ -211,7 +208,6 @@ export function integerOnly(
     );
     return;
   }
-  // the null owes its null-check, every other offending kind its integer check
   const owe = (item: Item, obliged: ObligationKind, on: string): boolean =>
     warning(
       walk,

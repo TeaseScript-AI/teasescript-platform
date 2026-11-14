@@ -92,7 +92,6 @@ export function keyLabel(walk: Consumers, value: PlaceId): Label {
     else if ((derived(walk, at) || anonymous(walk, at)) && site !== null)
       label = ownLabel(walk, site);
     else {
-      // a selection, index or `get` is `element` (an object's own `first` too), a dict's value `entry`
       below.push([
         at,
         stepName(projection.step) === "element" && projection.step !== "element"

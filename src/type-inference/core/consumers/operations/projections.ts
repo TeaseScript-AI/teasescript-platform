@@ -63,7 +63,6 @@ export function projection(
   const receiverText = walk.pass.program.textAt(ownSpan(walk, c.owner, c.site));
   const member = indexStep ? "[i]" : `.${propertyName(property)}`;
   if (typeof c.step === "object") defaultNull(walk, c.owner, node, c.site, member, "read");
-  // the quiet path: every receiver kind has the member, and every source the property
   {
     const quiet = quietKinds(walk, c.owner);
     const own = typeof c.step === "object" ? walk.run(contract.contractOfValueAt(c.into, [])) : [];
@@ -93,7 +92,6 @@ export function projection(
   }
   const owners = receiverKinds(walk, c.owner, node);
   const label = shownLabel(walk, keyLabel(walk, c.owner));
-  // an element selection on a collection, or on an unknown receiver that may be one
   if (
     selectsElement(property) &&
     owners.some(
@@ -113,13 +111,9 @@ export function projection(
       `check that ${text} is not null and has .${property}`,
     );
   });
-  // the receiver's member checks (`memberChecks`); a property some source lacks, its own obligation (an error where no
-  // known source has it)
   const objects = owners.some((item) => item.tag === "object");
   const extra: Offending[] = [];
-  if (objects && selectsElement(property))
-    // an object's own `first`, `last` or `random`: opaque, the member obligation, never an error
-    extra.push([OWN_SELECTION, `has its own .${property}`]);
+  if (objects && selectsElement(property)) extra.push([OWN_SELECTION, `has its own .${property}`]);
   else if (objects && typeof c.step === "object") {
     const value = walk.valueItems(c.into, node, []);
     const missing = value.filter(
@@ -127,7 +121,6 @@ export function projection(
     );
     const sources = withoutEmpty(walk.run(contract.contractOfValueAt(c.into, [])));
     const quietOwner = quietKinds(walk, c.owner) ?? [];
-    // no source has the property: an error; never under a guard of the receiver
     if (
       missing.length > 0 &&
       sources.length > 0 &&

@@ -50,7 +50,6 @@ export function methodReceiver(
   receiver: PlaceId,
   name: string,
 ): void {
-  // the quiet path: a receiver that is never null and has the method (a reference's method is the runtime's)
   const quiet = quietKinds(walk, receiver);
   if (
     quiet !== null &&
@@ -156,7 +155,6 @@ export function memberChecks(
   const offending: Offending[] = [
     ...nulls.slice(0, 1).map((item): Offending => [item, `is not null before the ${use}`]),
     ...offendingKinds(lacking).map(({ item }): Offending => [item, has]),
-    // a reference's member is the runtime's, `unmodelled` first
     ...offendingKinds(others.filter((item) => REFERENCE.has(item.tag))).map(
       ({ item }): Offending => [{ ...item, context: "unmodelled" }, has],
     ),
@@ -269,7 +267,6 @@ export function receivers(walk: Consumers): void {
           ),
     );
     const owner = d.into === undefined ? undefined : program.projOf.get(d.into)?.owner;
-    // the whole member or element access, including a mutator's call
     const at = d.into !== undefined ? ownSpan(walk, d.into, d.site) : d.site;
     const recvPath = keyPath(d.recv!);
     const label = shownLabel(
@@ -293,8 +290,6 @@ export function receivers(walk: Consumers): void {
           `check that ${text} accepts the store`,
         );
       });
-    // what the store needs of its receiver: a property store an object, an element store a list or a dict, an add
-    // its method (`x.missing = 2` with x a whole number fails at runtime)
     const property = d.kind === "whole" ? (d.path.at(-1) ?? null) : null;
     const method =
       d.kind === "add"
@@ -316,7 +311,6 @@ export function receivers(walk: Consumers): void {
         : property === "element"
           ? "an element store"
           : `a store of .${property === null ? property : propertyName(property)}`;
-    // the receiver in its own text, and the member as the access writes it
     const receiverText =
       owner !== undefined ? () => program.textAt(ownSpan(walk, owner, d.site)) : label;
     const member =
@@ -335,7 +329,6 @@ export function receivers(walk: Consumers): void {
     ) {
       const presence = propertyPresence(walk, d.recv!, property);
       const alone = receiver.every((item) => item.tag === "object");
-      // never an error under a guard of the receiver
       if (presence.state === "none" && alone && !receiver.some((item) => item.guarded === true)) {
         error(
           walk,
