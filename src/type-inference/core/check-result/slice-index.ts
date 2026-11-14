@@ -56,7 +56,6 @@ type Entry =
   | {
       readonly expression: Expression;
       readonly store: Store | null;
-      readonly whole: boolean;
       readonly parent?: Expression | null;
     };
 
@@ -101,9 +100,6 @@ export class SliceIndex {
   readonly #bySite = new Map<string, Expression>();
   readonly #statementsBySite = new Map<string, Statement>();
   readonly #store = new Map<Expression, Store>();
-  /** The expressions a store brings whole into its place: its value, and the elements of a list literal there. */
-  readonly #whole = new Set<Expression>();
-  readonly #role = new Map<Expression, "count" | "index">();
   /** The iterables of the `for` loops. */
   readonly #iterables = new Set<Expression>();
   /** The presentations of the `say` statements, whose option names are not written property names. */
@@ -124,14 +120,13 @@ export class SliceIndex {
           this.#statement(statement, pending);
           continue;
         }
-        const { expression, store, whole } = entry;
+        const { expression, store } = entry;
         if ("parent" in entry && entry.parent !== null) this.#parent.set(expression, entry.parent);
         this.#file.set(expression, file);
         this.expressions.push(expression);
         const key = siteKey(file, expression.span);
         if (!this.#bySite.has(key)) this.#bySite.set(key, expression);
         if (store !== null) this.#store.set(expression, store);
-        if (whole) this.#whole.add(expression);
         switch (expression.kind) {
           case "identifier":
             this.reads.push(expression);
@@ -139,28 +134,14 @@ export class SliceIndex {
           case "listLiteral":
             this.lists.push(expression);
             for (let at = expression.elements.length - 1; at >= 0; at -= 1)
-              pending.push({
-                expression: expression.elements[at]!,
-                store,
-                whole,
-                parent: expression,
-              });
+              pending.push({ expression: expression.elements[at]!, store, parent: expression });
             break;
           case "indexExpression":
-            this.#role.set(expression.index, "index");
-            pending.push({ expression: expression.index, store, whole: false, parent: expression });
-            pending.push({
-              expression: expression.object,
-              store,
-              whole: false,
-              parent: expression,
-            });
+            pending.push({ expression: expression.index, store, parent: expression });
+            pending.push({ expression: expression.object, store, parent: expression });
             break;
           case "parenthesizedExpression": {
-            // a count or an index in parentheses: its content is where the core's diagnostic stands (§3.4)
-            const role = this.#role.get(expression);
-            if (role !== undefined) this.#role.set(expression.expression, role);
-            pending.push({ expression: expression.expression, store, whole, parent: expression });
+            pending.push({ expression: expression.expression, store, parent: expression });
             break;
           }
           case "objectLiteral":
@@ -170,24 +151,19 @@ export class SliceIndex {
               // (a presentation's options are no properties of the script's values)
               if (!this.#presentations.has(expression))
                 this.#write(property.name.name, file, property.name.span);
-              pending.push({ expression: property.value, store, whole, parent: expression });
+              pending.push({ expression: property.value, store, parent: expression });
             }
             break;
           case "propertyAccessExpression":
             this.properties.push(expression);
-            pending.push({
-              expression: expression.object,
-              store,
-              whole: false,
-              parent: expression,
-            });
+            pending.push({ expression: expression.object, store, parent: expression });
             break;
           case "binaryExpression":
             // `otherwise`, the slice's one operator with a fallback
             if (expression.operator === "otherwise")
               for (const held of operands(expression.right)) this.#fallbackOf.set(held, expression);
-            pending.push({ expression: expression.right, store, whole: false, parent: expression });
-            pending.push({ expression: expression.left, store, whole: false, parent: expression });
+            pending.push({ expression: expression.right, store, parent: expression });
+            pending.push({ expression: expression.left, store, parent: expression });
             break;
           case "callExpression": {
             this.calls.push(expression);
@@ -198,29 +174,22 @@ export class SliceIndex {
               expression.callee.kind === "propertyAccessExpression" ? expression.callee : null;
             const index = expression.arguments[0];
             if (method?.property.name === "get" && index?.kind === "positionalArgument") {
-              this.#role.set(index.value, "index");
               for (const held of operands(index.value)) this.#getOfIndex.set(held, expression);
             }
             for (let at = expression.arguments.length - 1; at >= 0; at -= 1)
               pending.push({
                 expression: expression.arguments[at]!.value,
                 store,
-                whole: false,
                 parent: expression,
               });
             if (method !== null)
-              pending.push({ expression: method.object, store, whole: false, parent: expression });
+              pending.push({ expression: method.object, store, parent: expression });
             break;
           }
           case "unitExpression":
           case "angleExpression":
             this.units.push(expression);
-            pending.push({
-              expression: expression.operand,
-              store,
-              whole: false,
-              parent: expression,
-            });
+            pending.push({ expression: expression.operand, store, parent: expression });
             break;
           case "interactionExpression": {
             this.asks.push(expression);
@@ -228,7 +197,7 @@ export class SliceIndex {
             if (expression.presentation !== null) this.#presentations.add(expression.presentation);
             const parts = askParts(expression);
             for (let at = parts.length - 1; at >= 0; at -= 1)
-              pending.push({ expression: parts[at]!, store, whole: false, parent: expression });
+              pending.push({ expression: parts[at]!, store, parent: expression });
             break;
           }
           default: {
@@ -237,7 +206,7 @@ export class SliceIndex {
               pushStatements(pending, block.statements);
             const parts = expressionParts(expression);
             for (let at = parts.length - 1; at >= 0; at -= 1)
-              pending.push({ expression: parts[at]!, store, whole: false, parent: expression });
+              pending.push({ expression: parts[at]!, store, parent: expression });
             break;
           }
           case "loadExpression":
@@ -245,14 +214,9 @@ export class SliceIndex {
             if (expression.defaultValue !== null) {
               for (const held of operands(expression.defaultValue))
                 this.#fallbackOf.set(held, expression);
-              pending.push({
-                expression: expression.defaultValue,
-                store,
-                whole: false,
-                parent: expression,
-              });
+              pending.push({ expression: expression.defaultValue, store, parent: expression });
             }
-            pending.push({ expression: expression.key, store, whole: false, parent: expression });
+            pending.push({ expression: expression.key, store, parent: expression });
             break;
         }
       }
@@ -266,10 +230,10 @@ export class SliceIndex {
     switch (statement.kind) {
       case "letStatement":
         this.lets.push(statement);
-        pending.push({ expression: statement.initializer, store: statement, whole: true });
+        pending.push({ expression: statement.initializer, store: statement });
         break;
       case "assignmentStatement":
-        pending.push({ expression: statement.value, store: statement, whole: true });
+        pending.push({ expression: statement.value, store: statement });
         // a property store reads its receiver, which a member check at the store reads (C5c)
         if (statement.target.kind === "propertyAccessExpression") {
           // C5 diagnostics name the whole target (§3.4); it is a store, so do not visit it as a read.
@@ -279,23 +243,22 @@ export class SliceIndex {
           this.#write(statement.target.property.name, file, statement.target.property.span);
           for (const held of operands(statement.target.object))
             this.#storeOfReceiver.set(held, statement);
-          pending.push({ expression: statement.target.object, store: null, whole: false });
+          pending.push({ expression: statement.target.object, store: null });
         } else if (statement.target.kind === "indexExpression") {
           // an element store reads its receiver and its index
-          pending.push({ expression: statement.target.index, store: null, whole: false });
-          pending.push({ expression: statement.target.object, store: null, whole: false });
+          pending.push({ expression: statement.target.index, store: null });
+          pending.push({ expression: statement.target.object, store: null });
         }
         break;
       case "ifStatement":
         if (statement.elseBlock?.kind === "block") statements(statement.elseBlock.statements);
         else if (statement.elseBlock !== null) pending.push({ statement: statement.elseBlock });
         statements(statement.thenBlock.statements);
-        pending.push({ expression: statement.condition, store: null, whole: false });
+        pending.push({ expression: statement.condition, store: null });
         break;
       case "repeatStatement":
         statements(statement.body.statements);
-        this.#role.set(statement.count, "count");
-        pending.push({ expression: statement.count, store: null, whole: false });
+        pending.push({ expression: statement.count, store: null });
         break;
       case "sayStatement": {
         // every operand in evaluation order, with what it holds (B1 of #2488's design round): its presentation, its
@@ -304,13 +267,13 @@ export class SliceIndex {
         if (statement.presentation !== null) this.#presentations.add(statement.presentation);
         const operands = sayOperands(statement);
         for (let at = operands.length - 1; at >= 0; at -= 1)
-          pending.push({ expression: operands[at]!, store: null, whole: false });
+          pending.push({ expression: operands[at]!, store: null });
         break;
       }
       case "forStatement":
         this.#iterables.add(statement.iterable);
         statements(statement.body.statements);
-        pending.push({ expression: statement.iterable, store: null, whole: false });
+        pending.push({ expression: statement.iterable, store: null });
         break;
       default: {
         // any other statement (outside the candidate's slice, `backend.ts`): its blocks and its own expressions
@@ -333,7 +296,7 @@ export class SliceIndex {
           ...statementExpressions(statement),
         ];
         for (let at = own.length - 1; at >= 0; at -= 1)
-          pending.push({ expression: own[at]!, store: null, whole: false });
+          pending.push({ expression: own[at]!, store: null });
       }
     }
   }
@@ -381,19 +344,9 @@ export class SliceIndex {
     return found.span;
   }
 
-  /** Whether a store brings `expression` whole into its place (not as an operand of an index read). */
-  public storedWhole(expression: Expression): boolean {
-    return this.#whole.has(expression);
-  }
-
   /** Whether `expression` is a `for` loop's iterable. */
   public iterates(expression: Expression): boolean {
     return this.#iterables.has(expression);
-  }
-
-  /** Whether `expression` is a `repeat` count or an index. */
-  public roleOf(expression: Expression): "count" | "index" | undefined {
-    return this.#role.get(expression);
   }
 
   /** The `otherwise` whose fallback, or the call or load whose `default:`, `expression` is or holds in parentheses. */

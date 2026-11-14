@@ -332,7 +332,7 @@ export function heldMeetings(
   const distinct = new Map<number, Touch>();
   for (const [index, { d, at }] of list.entries()) {
     if (d.value === undefined) continue;
-    const own = heldInput(admission, expand(admission, d.value, d.node, []), false);
+    const own = heldInput(admission, expand(admission, d.value, d.node), false);
     const parts: Touch[] = [];
     for (const { at: where, source } of own.reads.values()) {
       const held = heldRead(admission, source, rest(keptSteps(admission.work, at, where)));

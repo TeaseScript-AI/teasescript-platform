@@ -155,15 +155,13 @@ export function operatorRow(
  * The reasons and the first context word of a combination's items go to its result, an unknown bringing its reason's
  * word (`ownContext`), an unknown result its reasons' word through the merge (`mergeItems`); a guarded operand marks it
  * (`computedMarks`).
- * `operation` is the operation's site, the identity of an unknown operand without a writer; `writer` explains a result
- * whose operands have no writer.
+ * `operation` is the operation's site, the identity of an unknown operand without a writer.
  */
 export function operationItems(
   operator: Operator,
   operands: readonly (readonly Item[])[],
   scope: ItemScope,
   operation: SourceSite,
-  writer: Writer | null = null,
 ): Item[] {
   const rows = ROWS.get(operator) ?? [];
   const results: Item[] = [];
@@ -191,7 +189,10 @@ export function operationItems(
         item.extOnly === true || (item.tag === "unknown" && (item.reasons & REASON.external) !== 0),
     );
     const known = external ? { ...shared, extOnly: true as const } : shared;
-    const explained = combination.reduce((first, item) => firstWriter(first, item.writer), writer);
+    const explained = combination.reduce<Writer | null>(
+      (first, item) => firstWriter(first, item.writer),
+      null,
+    );
     const unknowns = combination.filter((item) => item.tag === "unknown");
     if (unknowns.length === combination.length) {
       results.push(makeItem("unknown", explained, shared));

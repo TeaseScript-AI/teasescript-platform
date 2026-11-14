@@ -36,7 +36,7 @@ test("each charged helper charges every item it takes, a repeated one too, and n
     ["each", (work) => [...each(work, C, [3, 1, 2])], [3, 1, 2], 3],
     ["each, repeated items", (work) => [...each(work, C, [3, 3, 3])], [3, 3, 3], 3],
     ["copied", (work) => copied(work, C, [3, 1, 2]), [3, 1, 2], 3],
-    ["indexed", (work) => [...indexed(work, C, [3, 1, 2], 1)], [1, 2], 2],
+    ["indexed", (work) => [...indexed(work, C, [3, 1, 2])], [3, 1, 2], 3],
     ["sliced", (work) => sliced(work, C, [3, 1, 2], 1), [1, 2], 2],
     ["concatenated", (work) => concatenated(work, C, [[3, 1], [2]]), [3, 1, 2], 5],
     ["joined", (work) => joined(work, C, ["a", "b", "c"], "."), "a.b.c", 3],

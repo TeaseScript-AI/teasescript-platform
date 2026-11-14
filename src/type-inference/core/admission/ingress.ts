@@ -199,7 +199,7 @@ function keyStops(admission: Admission, d: Definition, key: string): KeyStops {
           !definitions.ingress.has(base) &&
           sourceOf(admission, stop.value) !== null &&
           stop.via?.own !== true &&
-          !perLink(admission, inlineLinks, stop.via, false, (level) => inline.has(level.value))
+          !perLink(admission, inlineLinks, stop.via, (level) => inline.has(level.value))
         )
           out.push(stop);
       }

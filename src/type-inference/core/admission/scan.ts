@@ -842,27 +842,26 @@ function* through(
   });
 }
 
-/**
- * A chain's answer kept per link in `memo` (#1230): `every` operation passes `test`, else some does, each link's
- * answer from the chain outside it and its own operation, asked outermost first and only where the answer outside it
- * leaves it open, as `every` and `some` ask them; each link once, so the chains of a walk's k stops cost their links
- * once, never a chain per stop.
- */
+/** Whether some operation of a chain passes `test`, a test that makes no reads (`perLinkRead`). */
 export function perLink(
   admission: Admission,
   memo: WeakMap<ViaChain, boolean>,
   via: ViaChain | null,
-  every: boolean,
   test: (level: Via) => boolean,
 ): boolean {
   return readNow(
-    perLinkRead(admission, memo, via, every, function* (level) {
+    perLinkRead(admission, memo, via, false, function* (level) {
       return test(level);
     }),
   );
 }
 
-/** `perLink` of a test that makes reads (`Read`, #1072). */
+/**
+ * A chain's answer kept per link in `memo` (#1230): `every` operation passes `test`, else some does, each link's
+ * answer from the chain outside it and its own operation, asked outermost first and only where the answer outside it
+ * leaves it open, as `every` and `some` ask them; each link once, so the chains of a walk's k stops cost their links
+ * once, never a chain per stop. `test` makes reads (`Read`, #1072).
+ */
 function* perLinkRead(
   admission: Admission,
   memo: WeakMap<ViaChain, boolean>,
@@ -889,8 +888,8 @@ function* perLinkRead(
  * its default only where that is reached; `otherwise` its own operand only where that may be a value, and its
  * fallback only where the operand may be null; the other carriers give every operand that runs.
  */
-export function selects(admission: Admission, stop: Stop, surely = false): boolean {
-  return readNow(selectsRead(admission, stop, surely));
+export function selects(admission: Admission, stop: Stop): boolean {
+  return readNow(selectsRead(admission, stop));
 }
 
 /** `selects` as reads (#1072). */
