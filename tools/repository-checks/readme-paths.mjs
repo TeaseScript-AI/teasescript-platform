@@ -188,7 +188,7 @@ function main() {
   }
   for (const problem of problems) console.error(problem);
   console.error(
-    `readme-paths: ${problems.length} names name no tracked file or folder: write each as its current path from the document's folder or the top folder`,
+    `readme-paths: ${problems.length} checked names resolve to no tracked file or folder: write each as its current path from the document's folder or the top folder`,
   );
   return 1;
 }
