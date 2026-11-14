@@ -1,0 +1,13 @@
+--- a/scripts/Domme/sleep.groovy
++++ b/scripts/Domme/sleep.groovy
+@@ -464,7 +464,9 @@
+ 							case "clock-edge":
+ 								reward(5)
+ 								def hourNow = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+-								hourNow = (hourNow + 24 - loadInteger("jewell.latehours")) % 24
++								// Legacy bug: jewell.latehours is the jewell tease's setting, which this package never saves; a missing
++								// setting counts as 0, jewell's own default (patch late-hours).
++								hourNow = (hourNow + 24 - (loadInteger("jewell.latehours") ?: 0)) % 24
+ 								def hourAlarm = (hourNow+getRandom(5)+1)%24
+ 								show("You will set your alarm for "+hourAlarm+":00 o'clock.\n"+
+ 											"You'll have to wake up, edge "+(getRandom(2)+2)+" times, then back to sleep !\n\n You earn 5 reward points!")

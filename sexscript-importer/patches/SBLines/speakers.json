@@ -1,0 +1,22 @@
+{
+  "reason": "One named character, Mistress Daniella (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Daniella"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/SBLines.groovy:224",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SBLines.groovy:229",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

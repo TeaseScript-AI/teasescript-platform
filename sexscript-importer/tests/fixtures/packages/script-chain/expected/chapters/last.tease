@@ -1,0 +1,2 @@
+say prose "The end.", instant
+exit

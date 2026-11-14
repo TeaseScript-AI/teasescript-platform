@@ -1,0 +1,52 @@
+// Conditional expressions inside larger expressions compute into a temporary first, in Groovy's evaluation order.
+def likes = { kink -> return kink == "rope" }
+def level = { -> return 3 }
+if (getRandom(100) >= level() * (likes("rope") ? 40 : 20)) show("Tie up")
+def missed = 3
+show("Wrong${missed > 1 ? " again" : ""}!")
+def total = 1 + (likes("tape") ? 2 : 3)
+// An input on the right of && asks only when the left side allows it.
+if (missed > 1 && getBoolean("Continue?")) show("Continuing")
+// Groovy's & on booleans evaluates both sides, so a right side with effects runs first.
+def asked = { -> show("Asked"); return true }
+def both = likes("tape") & asked()
+// A stored flag of unknown type and a comparison are both tested as conditions.
+def helpmode = loadBoolean("help")
+if (helpmode | missed < 0) show("Help")
+// A list method with a closure becomes a loop before the statement.
+def toys = ["rope", "tape", "gag"]
+show("Liked: " + toys.findAll { t -> likes(t) }.join(", "))
+if (toys.any { t -> t == "gag" } && total > 2) show("Gagged")
+// isEmpty() on text, a list, or a dict tests the length.
+def empty = { items -> return items.isEmpty() }
+if (!empty(toys)) show("Total ${total}, both ${both}")
+// A menu built inside a larger expression asks first; a return in times() continues with the next round.
+def opts = []
+opts.add([lbl: "Stop", ID: 1])
+opts.add([lbl: "Back", ID: 0])
+def picked = opts[getSelectedValue(null, opts.collect { it.lbl })].ID
+def rounds = getRandom(3) + 1
+rounds.times { if (it == 1) return; show("Round ${it}") }
+def order = [3, 1, 2]
+order = order.sort()
+show("Picked ${picked}, first ${order[0]}")
+// A typed closure parameter is a number, so intdiv() divides it; ** is a power; asBoolean() is Groovy truth.
+def weeks = { int punishment -> punishment.intdiv(20) }
+def squared = 3 ** 2
+def named = "Ann".asBoolean()
+show("Weeks " + weeks(45) + ", " + squared + ", " + named)
+// An Elvis fallback for a value of unknown type starts the variable with the fallback, so it never holds null.
+def describe = { given ->
+	def mood = given ?: "calm"
+	show("Mood " + mood.length())
+}
+describe(null)
+// A collected value with a ternary inside its text computes the ternary first, in the loop.
+def amounts = [1, 3]
+def labels = amounts.collect { "${it} stroke${it > 1 ? "s" : ""}" }
+show(labels.join(", "))
+// An Elvis assignment of a value that may be null to a text variable keeps it text: the fallback goes first.
+def pick = { -> return loadString("x.pick") }
+def word = "none"
+word = pick() ?: ""
+show("Word " + word.length())

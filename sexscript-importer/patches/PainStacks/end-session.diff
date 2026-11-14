@@ -1,0 +1,19 @@
+--- a/scripts/PainStacks.groovy
++++ b/scripts/PainStacks.groovy
+@@ -1633,7 +1633,7 @@
+             "\n\nIn Classic you play till a set number of stacks are full." +
+             "\n\nIn Retro you play till you got a set number of shocks."
+ 
+-    int menu = getSelectedValue(show(txt), ["Classic", "Retro", "Test eStim"])
++    int menu = getSelectedValue(show(txt), ["Classic", "Retro", "Test eStim", "End session"])
+     if (menu == 0) {
+         while (showGameModeClassicIntro()) {
+         }
+@@ -1641,6 +1641,7 @@
+         while (showGameModeRetroIntro()) {
+         }
+     } else if (menu == 2) testEstim()
++    else if (menu == 3) exit()
+ 
+ }
+ 

@@ -1,0 +1,21 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/DiceGames/hundredpoints.groovy:231",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DiceGames/hundredpoints.groovy:250",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "cooldown-kneeling-minutes",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report), uncertain patch: in ashleyweeklyspank's corner time, the cooldown tone with attitude <= 30 sets cornertime = \"kneeling\" without setting cornertimeMins, so the corner message read cornertimeMins as the stored value, which a reset (save(\"Banjo.ashley.cornertimeMins\", null)) clears, and Groovy failed at cornertimeMins * 60 (V2 explorer: TSR027). Every other position sets its minutes, so the intent of some duration is evident; its amount is not: the patch uses the cooldown's other duration (getRandom(4)+2 + cornertimeBonus), which may deviate from what the author meant for this harsher case.",
+      "diff": "cooldown-kneeling-minutes.diff"
+    }
+  ]
+}

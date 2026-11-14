@@ -1,0 +1,31 @@
+--- a/scripts/ShockJack.groovy
++++ b/scripts/ShockJack.groovy
+@@ -713,11 +713,13 @@
+         } else break
+     }
+ 
+-    painLevelRange.clear()
+-    shockTimeRange.clear()
++    def levels = []
++    def times = []
+     for (int i = 0; i <= 1; i++) {
+-        painLevelRange.add(loadInteger("ShockJack.painLevelRange." + i))
+-        shockTimeRange.add(loadInteger("ShockJack.shockTimeRange." + i))
++        def level = loadInteger("ShockJack.painLevelRange." + i)
++        if (level != null) levels.add(level)
++        def time = loadInteger("ShockJack.shockTimeRange." + i)
++        if (time != null) times.add(time)
+     }
+ 
+     List<String> estimNames = getEstimFileNames()
+@@ -744,8 +746,8 @@
+     if (bustedPenalties.any { e -> e == null }) bustedPenalties = [BUSTED_PENALTIES.keySet()[0]]
+     if (bustedPenalties.size() == 0) bustedPenalties = [BUSTED_PENALTIES.keySet()[0]]
+ 
+-    if (painLevelRange.any { e -> e == null }) painLevelRange = PAINLEVELRANGE
+-    if (shockTimeRange.any { e -> e == null }) shockTimeRange = SHOCKTIMERANGE
++    painLevelRange = levels.size() == 2 ? levels : PAINLEVELRANGE
++    shockTimeRange = times.size() == 2 ? times : SHOCKTIMERANGE
+     if (estimFileNames.isEmpty()) estimFileNames = estimNames
+ }
+ 

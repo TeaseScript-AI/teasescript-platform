@@ -1,0 +1,94 @@
+{
+  "reason": "Four course scripts. Denise Milani, the course director, speaks the application, the pre-class and the first class, where her three teachers Masha, Francesca and Shawnee each introduce themselves with one message, and a quoted interview fragment gives lines to \"Giovanna:\" and \"Other girls:\". The sissy test's quiz prompts and score are system text; the homework script captions an mp3 voice in the third person (\"Follow her orders\") and is narration.",
+  "speakers": {
+    "denise": {
+      "firstName": "Denise",
+      "lastName": "Milani"
+    },
+    "masha": {
+      "firstName": "Masha"
+    },
+    "francesca": {
+      "firstName": "Francesca"
+    },
+    "shawnee": {
+      "firstName": "Shawnee"
+    },
+    "giovanna": {
+      "firstName": "Giovanna"
+    },
+    "othergirls": {
+      "displayName": "Other girls"
+    }
+  },
+  "default": "denise",
+  "prefixes": [
+    {
+      "text": "Giovanna",
+      "speaker": "giovanna"
+    },
+    {
+      "text": "Other girls",
+      "speaker": "othergirls"
+    }
+  ],
+  "switches": [
+    {
+      "entry": "scripts/sissycourse1.groovy",
+      "speaker": "denise"
+    },
+    {
+      "entry": "scripts/sissycourse2.groovy",
+      "speaker": "denise"
+    },
+    {
+      "entry": "scripts/sissycourse3.groovy",
+      "speaker": "denise"
+    },
+    {
+      "at": "scripts/sissycourse3.groovy:90",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/sissycourse3.groovy:105",
+      "speaker": "denise"
+    },
+    {
+      "at": "scripts/sissycourse3.groovy:111",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/sissycourse3.groovy:113",
+      "speaker": "denise"
+    },
+    {
+      "at": "scripts/sissycourse3.groovy:119",
+      "speaker": "masha"
+    },
+    {
+      "at": "scripts/sissycourse3.groovy:122",
+      "speaker": "francesca"
+    },
+    {
+      "at": "scripts/sissycourse3.groovy:125",
+      "speaker": "shawnee"
+    },
+    {
+      "at": "scripts/sissycourse3.groovy:128",
+      "speaker": "denise"
+    },
+    {
+      "at": "scripts/sissycourse3.groovy:332",
+      "speaker": "othergirls"
+    },
+    {
+      "after": "scripts/sissycourse3.groovy:332",
+      "speaker": "denise"
+    },
+    {
+      "entry": "scripts/sissycourse4.groovy",
+      "speaker": "narrator"
+    }
+  ],
+  "names": []
+}

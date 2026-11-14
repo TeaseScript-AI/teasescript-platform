@@ -1,0 +1,14 @@
+--- a/scripts/interrogation.groovy
++++ b/scripts/interrogation.groovy
+@@ -290,8 +290,9 @@
+ 			// Display player
+ 			def text1 = summaries[menu]
+ 			def facepic = "interrogation/m_anon.jpg"
+-			if (summaries[menu].toLowerCase().contains("her ") || summaries[menu].toLowerCase().contains("she ") || summaries[menu].toLowerCase().contains("she'") 
+-				|| summaries[menu].toLowerCase().contains("her."))
++			// text1 is the summary read above; the check for null lets the conversion read it as text.
++			if (text1 != null && (text1.toLowerCase().contains("her ") || text1.toLowerCase().contains("she ") || text1.toLowerCase().contains("she'") 
++				|| text1.toLowerCase().contains("her.")))
+ 				facepic = "interrogation/f_anon.jpg"
+ 			if (faces[menu] != null) facepic = faces[menu]
+ 			setImage(facepic)

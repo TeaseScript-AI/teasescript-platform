@@ -1,0 +1,13 @@
+--- a/scripts/log.groovy
++++ b/scripts/log.groovy
+@@ -9,8 +9,9 @@
+ // - Tags (any number of tags, see samples on website)
+ setInfos(1, "Orgasm Log", "Use it to log the moments you orgasm", "Wiliam", "version 1", 0xFFFFFF, "en", ["forfemale", "formale"]);
+ 
+-show("Hello, "+loadString("intro.name")+".\nWhat are you here for?\n\n1:Register my orgasm\n2:View my last 10 orgasms");
++show("Hello, "+loadString("intro.name")+".\nWhat are you here for?\n\n1:Register my orgasm\n2:View my last 10 orgasms\n3:End session");
+ def task=getInteger(null,0);
++if (task == 3) return null;
+ def log= new File('Log')
+ if (task == 1) {
+ def text=""

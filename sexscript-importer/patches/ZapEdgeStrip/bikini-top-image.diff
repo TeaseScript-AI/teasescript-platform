@@ -1,0 +1,11 @@
+--- a/scripts/ZapEdgeStrip.groovy
++++ b/scripts/ZapEdgeStrip.groovy
+@@ -42,7 +42,7 @@
+ 	if(name.count("belt")>0)return "beltM.png"
+ 	if(loadBoolean("intro.female")&&(name.count("bikini")>0&&name.count("bottom")>0))
+ 		return "bikinibottomF.png"
+-	if(loadBoolean("intro.female")&&(name.count("bikini")>0&&name.count("top")==0))
++	if(loadBoolean("intro.female")&&(name.count("bikini")>0&&name.count("top")>0))
+ 		return "bikinitopF.png"
+ 	if(loadBoolean("intro.female")&&name.count("bikini")>0)return "bikinibottomF.png"
+ 	if(!loadBoolean("intro.female")&&name.count("bikini")>0)return "bikiniM.png"

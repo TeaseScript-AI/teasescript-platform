@@ -1,0 +1,20 @@
+--- a/scripts/Domme3/assignments.groovy
++++ b/scripts/Domme3/assignments.groovy
+@@ -355,7 +355,7 @@
+ 				{
+ 					show("Hm... How should I dress you today?")
+ 					wait(5)
+-					save("domme3.spank", fun)
++					save("domme3.spank", "fun")
+ 					show("I want you to dress like a schoolgirl today. You are also going to get a spanking.")
+ 					wait(3)
+ 					show("When you are dressed, ask me for a spanking.")
+@@ -366,7 +366,7 @@
+ 			{
+ 				show("Hm... How should I dress you today?")
+ 				wait(5)
+-				save("domme3.spank", fun)
++				save("domme3.spank", "fun")
+ 				show("I want you to dress like in your schoolboy attire today. You are also going to get a spanking.")
+ 				wait(3)
+ 				show("When you are dressed, ask me for a spanking.")

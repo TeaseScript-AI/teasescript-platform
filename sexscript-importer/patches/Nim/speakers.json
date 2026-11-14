@@ -1,0 +1,33 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/Nim.groovy:133",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Nim.groovy:138",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Nim.groovy:190",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Nim.groovy:341",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Nim.groovy:358",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

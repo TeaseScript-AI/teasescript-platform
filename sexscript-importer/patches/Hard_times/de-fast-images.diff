@@ -1,0 +1,51 @@
+--- a/scripts/hard_times_de.groovy
++++ b/scripts/hard_times_de.groovy
+@@ -526,7 +526,7 @@
+ 
+ 	else {
+ 
+-		setImage("hard_times/fast.jpg");
++		setImage("hard_times/kathia_nobili/fast.jpg");
+ 
+ 		show("Spuck auf deinen Schwanz und streichle ihn in deiner eigenen Geschwindigkeit!");
+ 
+@@ -534,21 +534,21 @@
+ 
+ 		show("Halte einfach für 5 Sekunden an, wenn du kurz vorm Höhepunkt bist.");
+ 
+-		setImage("hard_times/fast1.jpg");
++		setImage("hard_times/kathia_nobili/fast1.jpg");
+ 
+ 		playSound("hard_times/bottle_100bpm_4-4time_50beats_stereo.mp3");
+ 
+-		setImage("hard_times/fast2.jpg");
++		setImage("hard_times/kathia_nobili/fast2.jpg");
+ 
+ 		playSound("hard_times/bottle_150bpm_4-4time_80beats_stereo.mp3");
+ 
+ 		show("Noch nicht abspritzen! Stoppe für 5 Sekunden, wenn du kurz vorm Höhepunkt bist.");
+ 
+-		setImage("hard_times/fast3.jpg");
++		setImage("hard_times/kathia_nobili/fast3.jpg");
+ 
+ 		playSound("hard_times/bottle_250bpm_4-4time_200beats_stereo.mp3");
+ 
+-		setImage("hard_times/fast4.jpg");
++		setImage("hard_times/kathia_nobili/fast4.jpg");
+ 
+ 		show("Wichs dich in deiner eigenen Geschwindigkeit bis kurz vor deinen Höhepunkt, BEEILE DICH!");
+ 		showButton("Ich bin direkt am Höhepunkt");
+@@ -557,11 +557,11 @@
+ 
+ 		playSound("hard_times/bottle_250bpm_4-4time_200beats_stereo.mp3");
+ 
+-		setImage("hard_times/fast5.jpg");
++		setImage("hard_times/kathia_nobili/fast5.jpg");
+ 
+ 		playSound("hard_times/bottle_60bpm_4-4time_30beats_stereo.mp3");
+ 
+-		setImage("hard_times/fast6.jpg");
++		setImage("hard_times/kathia_nobili/fast6.jpg");
+ 
+ 		show("Danke für dein Sperma :) bis bald. Tschüss");
+ 		showButton("Danke Herrin, Tschüss");

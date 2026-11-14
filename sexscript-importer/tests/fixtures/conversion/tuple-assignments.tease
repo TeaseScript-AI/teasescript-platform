@@ -1,0 +1,29 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyItemAt(listValue, position) {
+  if position < 0 {
+    return listValue[listValue.length + position]
+  }
+  return listValue.get(position, default: null)
+}
+// Groovy's multiple assignment set each variable to the element at its position, and null past the end
+// (enforced_chastity's server state, enforced_slave's settings).
+let serverState = sexscriptLegacyValue("r,3,Kneel")
+let days = sexscriptLegacyValue(null)
+let taskName = sexscriptLegacyValue(null)
+let taskText = sexscriptLegacyValue(null)
+let values = serverState.findAll(/[^,]+/)
+serverState = sexscriptLegacyItemAt(values, 0)
+days = sexscriptLegacyItemAt(values, 1)
+taskName = sexscriptLegacyItemAt(values, 2)
+taskText = sexscriptLegacyItemAt(values, 3)
+if serverState == "r" {
+  say prose "Released after ${days} days", instant
+}
+say prose "Task ${taskName}, text ${taskText}", instant
+let values2 = "Sam/away".findAll(/[^\/]+/)
+let subName = sexscriptLegacyItemAt(values2, 0)
+let drop = sexscriptLegacyItemAt(values2, 1)
+say prose "${subName} ${drop}", instant
+exit

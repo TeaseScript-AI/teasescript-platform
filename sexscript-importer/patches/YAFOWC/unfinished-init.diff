@@ -1,0 +1,13 @@
+--- a/scripts/YAFOWC.groovy
++++ b/scripts/YAFOWC.groovy
+@@ -53,7 +53,9 @@
+ 	showButton("Continue")
+ 	return null
+ }
+-if(!loadString("yafowc.line1")){
++// Legacy bug: a setup left before its last question (the times each line is written) has line 1 but no count, so
++// the main path failed on the missing count; such a setup runs again (patch unfinished-init).
++if(!loadString("yafowc.line1") || loadInteger("yafowc.needed") == null || loadInteger("yafowc.numOfLines") == null){
+ 	init()
+ }else{	
+ //initialization

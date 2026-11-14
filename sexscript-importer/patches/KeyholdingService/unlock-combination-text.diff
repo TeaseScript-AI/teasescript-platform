@@ -1,0 +1,13 @@
+--- a/scripts/KeyholdingService.groovy
++++ b/scripts/KeyholdingService.groovy
+@@ -1014,8 +1014,8 @@
+ 			waitWithGauge(60)
+ 			setImage("KeyholdingService/24.jpg");
+ 			show("Tack... Det räcker nu.  Jag skall vänta på din återkomst\n\n"+
+-			      "Du kan öppna låset till kukburen nu...\n\n")+
+-				  "Kombinationen är:\n\n${tttxt(ccombo)}"+
++			      "Du kan öppna låset till kukburen nu...\n\n"+
++				  "Kombinationen är:\n\n${tttxt(ccombo)}")
+ 			showButton("Upplåst nu " +loadString("intro.keyholder")+".")
+ 			unlock()
+ 			show("Jag hoppas du har haft lika roligt som jag.")

@@ -1,0 +1,14 @@
+--- a/scripts/Banjo/dungeoncrawl.groovy
++++ b/scripts/Banjo/dungeoncrawl.groovy
+@@ -2022,9 +2022,9 @@
+ 		arenaOpponents = arenaOpponents + ["Mermaid"]
+ 	if(loadBoolean("Banjo.SpankedHeroRPG.arena.fairyqueen") || debug)
+ 		arenaOpponents = arenaOpponents + ["Fairy Queen"]
+-	if(loadBoolean("Banjo.SpankedHeroRPG.arena.adventurer") || debug)
+-		arenaOpponents = arenaOpponents + ["Mugger"]
+ 	if(loadBoolean("Banjo.SpankedHeroRPG.arena.mugger") || debug)
++		arenaOpponents = arenaOpponents + ["Mugger"]
++	if(loadBoolean("Banjo.SpankedHeroRPG.arena.adventurer") || debug)
+ 		arenaOpponents = arenaOpponents + ["Adventurer"]
+ 	if(loadBoolean("Banjo.SpankedHeroRPG.arena.trainer") || debug)
+ 		arenaOpponents = arenaOpponents + ["Sasha"]

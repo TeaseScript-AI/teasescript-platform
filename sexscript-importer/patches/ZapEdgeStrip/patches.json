@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "swimsuit-image-name",
+      "layer": "source",
+      "category": "b",
+      "reason": "The shared clothing-image helper returns \"swipsuitF.png\" for a female swimsuit; the package ships images/Bclothes/swimsuitF.png, and the male entries next to it (speedosM.png, shortsM.png) are spelled correctly. Fix the misspelled file name.",
+      "diff": "swimsuit-image-name.diff"
+    },
+    {
+      "id": "bikini-top-image",
+      "layer": "source",
+      "category": "e",
+      "reason": "The female bikini top image is chosen when the clothes name contains \"bikini\" and no \"top\", so \"bikini top\" fell through to the bikini bottom image (bikinitopF.png, which the unit has, never showed). Test that the name contains \"top\".",
+      "diff": "bikini-top-image.diff"
+    }
+  ]
+}

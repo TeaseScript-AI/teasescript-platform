@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "quiz-replay-pictures",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the picture did not come back when a quiz sent the player back: after a wrong name (page 390-39, \"WRONG!\") the replayed introduction from \"I'm Julie…\" showed that page instead of the opening page 10-1, and after a wrong answer in the last quiz (page 600-60, \"LMAO!\") the replayed \"We're not through with you…\" part showed it instead of page 490-49; both pages are set just before their loop, so only the first pass had them. Set them again at the start of each pass (10-1 stays before the loop for the twins' greeting).",
+      "diff": "quiz-replay-pictures.diff"
+    }
+  ]
+}

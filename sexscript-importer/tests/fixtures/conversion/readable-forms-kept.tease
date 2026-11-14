@@ -1,0 +1,12 @@
+// Forms that keep their legacy shape: a null test of a random item before another test of one draws twice, which a
+// fallback would draw once, and a helper that tests a value of its own instead of its parameter is no chance helper.
+let values = [null, "yes", "no"]
+if values.random == null or values.random == "yes" {
+  say prose "Hit", instant
+}
+let P = 0
+function percentChance(ignored) {
+  return P > randomInteger(0..100)
+}
+say prose "Chance ${percentChance(100)}", instant
+exit

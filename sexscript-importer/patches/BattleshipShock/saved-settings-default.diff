@@ -1,0 +1,22 @@
+--- a/scripts/BattleshipShock.groovy
++++ b/scripts/BattleshipShock.groovy
+@@ -11,7 +11,7 @@
+ setImage(null)
+ show(Title+"Setting up...")
+ 
+-def Connected = loadBoolean(B+".Connected")?:true
++def Connected = loadBoolean(B+".Connected"); if(Connected==null)Connected = true
+ if(!isConnected()){Connected = false}
+ save(B+".Connected", Connected)
+ if(Connected){
+@@ -21,8 +21,8 @@
+ 		showButton("OK")
+ 	}
+ }
+-def ShowPics = loadBoolean(B+".ShowPics")?:true
+-def TakePics = loadBoolean(B+".TakePics")?:true
++def ShowPics = loadBoolean(B+".ShowPics"); if(ShowPics==null)ShowPics = true
++def TakePics = loadBoolean(B+".TakePics"); if(TakePics==null)TakePics = true
+ 
+ def ASize = 7
+ def xString = "ABCDEFG"

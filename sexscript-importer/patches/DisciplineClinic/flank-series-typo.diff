@@ -1,0 +1,11 @@
+--- a/scripts/DisciplineClinic/Punish.groovy
++++ b/scripts/DisciplineClinic/Punish.groovy
+@@ -6253,7 +6253,7 @@
+ 		else counting = false
+ 		thisSeries = getRandom(6)
+ 		//Do not alternate when spanking flanks also never repeat same series
+-		while ((spot == "flank" && s > 2) || (thisSeries == lastSeries)) {
++		while ((spot == "flank" && thisSeries > 2) || (thisSeries == lastSeries)) {
+ 			thisSeries = getRandom(6)
+ 		}
+ 		switch(thisSeries) {

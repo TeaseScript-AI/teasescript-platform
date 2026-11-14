@@ -1,0 +1,12 @@
+--- a/scripts/DisciplineClinic/Punish.groovy
++++ b/scripts/DisciplineClinic/Punish.groovy
+@@ -3290,7 +3290,8 @@
+ 				save(scriptText+".cornerBase", cornerBase)
+ 			}	
+ 			else {
+-				setImageReception()
++				// Legacy bug: Brianna's picture came along with this text from the reception; the mistress speaks it here, as in the sibling branch.
++				setImageImplement()
+ 				dialogArray = ["That's okay, but I hate that you are not getting the most out of this program.",
+ 						"Fair enough, but please consider raising them in the future.  I hate to see you not get the most out of this process.",
+ 						"Okay, but I feel like you are cheating yourself just a bit here.",

@@ -1,0 +1,41 @@
+--- a/scripts/DCAfterDark/Claire.groovy
++++ b/scripts/DCAfterDark/Claire.groovy
+@@ -617,22 +617,22 @@
+ 	scene3Clothespins()
+ 	scene3AnalDildo()
+ 	
+-	if (percentChance(60)) {
+-		scene3CBT()
+-		scene3Pegging()
+-		scene3Estim()
+-	}
+-	else if (percentChance(60)) {
+-		scene3CBT()
+-		scene3Estim()
+-		//Client has cum, give a rest and have a conversation
+-		scene3Pegging()
+-	}
+-	else {
+-		scene3Pegging()
+-		scene3CBT()
+-		scene3Estim()
+-	}	
++//	if (percentChance(60)) {
++//		scene3CBT()
++//		scene3Pegging()
++//		scene3Estim()
++//	}
++//	else if (percentChance(60)) {
++//		scene3CBT()
++//		scene3Estim()
++//		//Client has cum, give a rest and have a conversation
++//		scene3Pegging()
++//	}
++//	else {
++//		scene3Pegging()
++//		scene3CBT()
++//		scene3Estim()
++//	}	
+ }
+ 
+ def scene4FullScene = {

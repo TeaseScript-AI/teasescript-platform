@@ -1,0 +1,11 @@
+--- a/scripts/jewell/negotiations.groovy
++++ b/scripts/jewell/negotiations.groovy
+@@ -69,7 +69,7 @@
+ 	show("(You've got "+loadInteger("cybermistress.points")+" points)\n"+"The 24 hours starts now. Change immediately.")
+ 	break
+ 
+-case "Write a big 'Sissy Whore' on your body. Leave it there for at least 24 hours.":
++case "Write 'Sissy Whore' on your body. Leave it there for at least 24 hours.":
+ 	if(loadInteger("cybermistress.points")==null)
+ 		save("cybermistress.points", 80)
+ 	if(loadFirstTrue("toys.husband", "toys.wife")==null)

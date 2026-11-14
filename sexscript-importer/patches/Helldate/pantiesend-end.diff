@@ -1,0 +1,12 @@
+--- a/scripts/helldate3.groovy
++++ b/scripts/helldate3.groovy
+@@ -203,7 +203,8 @@
+ 	save("helldate3.face1", getFile("Show your face"))
+ 	show("")
+ 	wait(1)
+-	block = "pantiesend"
++	// Patched legacy bug: "pantiesend" has no case, so the loop never ended; every other branch ends at "end1".
++	block = "end1"
+ 	break
+ 
+ case "panties2.1":

@@ -1,0 +1,20 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -488,7 +488,7 @@
+ 
+ 	final requestables = [:];
+ 	final addRequestable = { String name, String label, func, cond = null ->
+-		requestables[name] = [lbl: label, act: func, cond: cond];
++		requestables[name] = [lbl: label, act: func, cond: cond, arg: null];
+ 	};
+ 	final removeRequestable = { String name ->
+ 		requestables.remove(name);
+@@ -509,7 +509,7 @@
+ 	}
+ 	final options = [:];
+ 	final addOption = { String name, String label, func, cond = null ->
+-		options[name] = [lbl: label, act: func, cond: cond];
++		options[name] = [lbl: label, act: func, cond: cond, arg: null];
+ 	};
+ 	
+ 	def firstActions = [];

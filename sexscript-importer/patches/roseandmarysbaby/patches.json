@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "nightie-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the dressing step reads clothes.nighty; the wardrobe saves the nightie as clothes.nightie, and nothing saves the other spelling, so the nightie was never put on. Read clothes.nightie.",
+      "diff": "nightie-key.diff"
+    }
+  ]
+}

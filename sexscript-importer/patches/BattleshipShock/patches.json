@@ -1,0 +1,25 @@
+{
+  "patches": [
+    {
+      "id": "saved-settings-default",
+      "layer": "source",
+      "category": "e",
+      "reason": "Settings the rules menu turns off and saves come back on at the next start: they are read as loadBoolean(key) ?: true, and Groovy elvis treats a saved false like a missing value. Read the saved value, and take true only where nothing is saved.",
+      "diff": "saved-settings-default.diff"
+    },
+    {
+      "id": "think-rest",
+      "layer": "source",
+      "category": "b",
+      "reason": "The computer chose its shot by placing the player's unsunk ships at random 10,000 times by default, retrying each placement until it fits the shots so far, without a wait; the legacy player computed that in about a third of a second on an empty board. A TeaseScript run stops a session after 1,000,000 steps without a wait (TSR037), and one such think takes about 14 times that, more once ships are hit, so the first enemy turn stopped the package. The think rests for a hundredth of a second every 1,000 placements, which lets the player run it in parts; the configured tries, the placement and shot-selection algorithms, and the existing time-based shortening stay as they were. The rests add about 0.9 seconds on an empty board, more where placements need retries; since they count toward the elapsed time, a short time limit can end the think earlier. The owner kept the legacy strength (decision 2026-10-10); a runtime that runs a long computation in parts is the real fix (#827).",
+      "diff": "think-rest.diff"
+    },
+    {
+      "id": "photo-check",
+      "layer": "source",
+      "category": "b",
+      "reason": "The picture check rejected a picture that was missing, whose file name lacked \"captured\", that was blank, or whose file was more than 30 minutes old, to catch a file uploaded in place of a webcam picture. The conversion cannot read a file's age, so it dropped the whole check with the confirmation that follows it, and no picture was ever shown or accepted: getPicture() returned null after five tries. takePhoto() only takes a camera picture, so the patch keeps the tests for a missing and a blank picture (the conversion answers the blank test false, SX_PHOTO_PIXELS) and drops the file-name and file-age tests; the confirmation stays.",
+      "diff": "photo-check.diff"
+    }
+  ]
+}

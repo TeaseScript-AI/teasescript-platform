@@ -1,0 +1,29 @@
+--- a/scripts/helldate3.groovy
++++ b/scripts/helldate3.groovy
+@@ -995,13 +995,14 @@
+ 
+ case "humanfurniture21":
+ 	show("Hmm do I need something other?")
++	// Legacy bug: no block humanfurniture22bf exists; the anal part starts at humanfurniture22b (patch furniture-path).
+ 	if(loadBoolean("helldate.LimitAnalY"))
+ 		if(loadBoolean("helldate.LimitPissOral"))
+ 			block = "humanfurniture22a"
+ 		else
+ 			block = "humanfurniture26"
+ 	else
+-		block = "humanfurniture22bf"
++		block = "humanfurniture22b"
+ 	break
+ 
+ case "humanfurniture22a":
+@@ -1047,7 +1048,9 @@
+ case "humanfurniture25":
+ 	show("Should that be the last? I don't know.")
+ 	wait(5)
+-	if(loadBoolean("helldate.LimitPissOral"))
++	// Legacy bug: the toilet scene came for a player whose hard limit it is; as at humanfurniture21, it comes for the
++	// others (patch furniture-path).
++	if(!loadBoolean("helldate.LimitPissOral"))
+ 		block = "humanfurniture26"
+ 	else
+ 		block = "humanfurniture22a"

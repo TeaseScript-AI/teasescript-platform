@@ -1,0 +1,20 @@
+--- a/scripts/toy/sleep.groovy
++++ b/scripts/toy/sleep.groovy
+@@ -50,7 +50,7 @@
+ 	}
+ 
+ 	toy.metaClass.bedtime { rt, schedTime ->
+-		imgSpec = [LINGERIE,nTITS,nTEASE]
++		def imgSpec = [LINGERIE,nTITS,nTEASE]
+ 		def t = schedTime + (6 * (int)HOUR) + getRandom(2 * (int)HOUR);
+ 		if (rt || getTime() < t) {
+ 			dress([imgSpec]);
+@@ -243,7 +243,7 @@
+ 	}
+ 
+ 	toy.metaClass.bedtimeCheck { rt ->
+-		imgSpec = [nTITS,nTEASE];
++		def imgSpec = [nTITS,nTEASE];
+ 		if (rt && sessionSummon(imgSpec)) {
+ 			adjustPunish(75);
+ 			present(imgSpec, [

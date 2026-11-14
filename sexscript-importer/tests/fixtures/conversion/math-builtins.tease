@@ -1,0 +1,15 @@
+// Java's Math.sqrt(), Math.pow(), and Math.abs() are TeaseScript's sqrt(), pow(), and abs().
+let side = askInteger prose "Side?", prefill: 3
+let area: number = pow(side, 2)
+let diagonal = sqrt(2 * area)
+// Java's (int) cast truncates, Math.round() rounds, Math.floor() floors.
+let whole = toInteger(sqrt(10))
+let nearest = round(pow(1.5, 3))
+let below = floor(pow(2, 0.5))
+let distance = abs(side - 10)
+let cube = pow(side, 3)
+say prose "${area} ${diagonal} ${whole} ${nearest} ${below} ${distance} ${cube}", instant
+// A whole power stays an integer until a fraction is stored.
+area = area / 3
+say prose "${area}", instant
+exit

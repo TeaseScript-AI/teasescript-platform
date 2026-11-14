@@ -1,0 +1,12 @@
+--- a/scripts/DareWiliam/tasks.groovy
++++ b/scripts/DareWiliam/tasks.groovy
+@@ -283,6 +283,9 @@
+ show("So, you think you have completed your punishment? Well, let's see.");
+ waitWithGauge(3);
+ def startTime = loadInteger("DareWiliam.Time");
++// Legacy bug: without the start code 964158, which saves the start time, Groovy failed on the missing time; the
++// punishment counts as not started, as the anal tasks end without their saved start (patch wrap-up-without-start).
++if (startTime == null) return null;
+ def elapsed = getTime() - startTime;
+ if (elapsed < 216000) {
+ show("Report the following code to your master: 85"+elapsed+".");

@@ -1,0 +1,11 @@
+--- a/scripts/KeyholdingService.groovy
++++ b/scripts/KeyholdingService.groovy
+@@ -267,7 +267,7 @@
+ def imagefiles = imgfilelist.findAll { f -> f.name.endsWith(".jpg"); }.name
+ imagefiles += imgfilelist.findAll { f -> f.name.endsWith(".jpeg"); }.name
+ if (imagefiles.size() == 0) {
+-	if (likemale) {
++	if (loadBoolean("intro.likemale") == true) {
+ 		imagefiles += ["../default-male.jpg"]
+ 	}
+ 	else {

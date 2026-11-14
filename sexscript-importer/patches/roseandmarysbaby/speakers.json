@@ -1,0 +1,24 @@
+{
+  "reason": "Two mothers take turns: Rose (pictures roseandmarysbaby/rose*) and Mary (pictures roseandmarysbaby/mary*). Every message is said by the mother whose picture was set last; Rose opens.",
+  "speakers": {
+    "rose": {
+      "firstName": "Rose"
+    },
+    "mary": {
+      "firstName": "Mary"
+    }
+  },
+  "default": "rose",
+  "prefixes": [],
+  "switches": [
+    {
+      "image": "roseandmarysbaby/rose",
+      "speaker": "rose"
+    },
+    {
+      "image": "roseandmarysbaby/mary",
+      "speaker": "mary"
+    }
+  ],
+  "names": []
+}

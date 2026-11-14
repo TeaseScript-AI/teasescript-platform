@@ -1,0 +1,11 @@
+--- a/scripts/jewell/trainTorture.groovy
++++ b/scripts/jewell/trainTorture.groovy
+@@ -139,7 +139,7 @@
+ 
+ case "cock3":
+ 	if(loadBoolean("toys.clothespins")!=true) {
+-		block="clock1"
++		block="cock1"
+ 		break
+ 	}
+ 	def messages14 = ["Place 2 clothespins on your ball sack and one on your shaft.","Put 4 clothespins on your ball sack and one on your shaft.","Put 6 clothespins on your ball sack and 2 on your shaft."]

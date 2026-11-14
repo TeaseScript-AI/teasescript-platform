@@ -1,0 +1,35 @@
+{
+  "reason": "A game show: the host Lady Sonia (pictures Default/punish/reward) runs the game and speaks every unprefixed message; the two randomly drawn contestants speak only in messages written Opponent[Opponent1][0]+\": \"+… and Opponent[Opponent2][0]+\": \"+…, which name them. The opening title sequence announcing the host is the show's announcer.",
+  "speakers": {
+    "host": {
+      "title": "Lady",
+      "firstName": "Sonia"
+    },
+    "opponent1": {
+      "displayName": "Contestant"
+    },
+    "opponent2": {
+      "displayName": "Contestant"
+    }
+  },
+  "default": "narrator",
+  "prefixes": [
+    {
+      "expression": "Opponent[Opponent1][0]",
+      "file": "scripts/EarnYourOrgasmGame.groovy",
+      "speaker": "opponent1"
+    },
+    {
+      "expression": "Opponent[Opponent2][0]",
+      "file": "scripts/EarnYourOrgasmGame.groovy",
+      "speaker": "opponent2"
+    }
+  ],
+  "switches": [
+    {
+      "at": "scripts/EarnYourOrgasmGame.groovy:347",
+      "speaker": "host"
+    }
+  ],
+  "names": []
+}

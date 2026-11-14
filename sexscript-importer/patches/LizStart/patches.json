@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "stop-playing",
+      "layer": "source",
+      "category": "b",
+      "reason": "The single-game menu offers cards, dancing and push-ups, and every game returns to it, so the session never ended; the legacy player ended the script by closing it. As in ShockYourself's end-session, the menu also offers 4. Stop playing, which ends the session (owner decision).",
+      "diff": "stop-playing.diff"
+    }
+  ]
+}

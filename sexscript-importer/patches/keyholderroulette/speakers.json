@@ -1,0 +1,60 @@
+{
+  "reason": "One keyholder at a time holds the player's key; who she is follows the saved integer current_mistress (0-14), which also picks her picture folder and her switch case, whose text starts with her name. Mistress 0 (Susan Wayland, folder 0) also gives the opening explanation. The destiny menu and the reset confirmation are system screens.",
+  "speakers": {
+    "keyholder": {
+      "firstName": "Susan",
+      "lastName": "Wayland"
+    }
+  },
+  "default": "keyholder",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/keyholderroulette.groovy:33",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/keyholderroulette.groovy:108",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/keyholderroulette.groovy:365",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/keyholderroulette.groovy:367",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/keyholderroulette.groovy:393",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "current_mistress",
+      "files": [
+        "scripts/keyholderroulette.groovy"
+      ],
+      "speaker": "keyholder",
+      "values": {
+        "0": "Susan Wayland",
+        "1": "Lynn Violle",
+        "2": "Elizabeth Marxs",
+        "3": "Danielle Trixie",
+        "4": "Amber Rouge",
+        "5": "Ali Rose",
+        "6": "Jodi Taylor",
+        "7": "Bree Daniels",
+        "8": "Natasha Malkova",
+        "9": "Amber Rouge",
+        "10": "Bailey Jay",
+        "11": "Brittany Jayde",
+        "12": "Lisa Ann and Amy Anderssen",
+        "13": "Liz Vicious",
+        "14": "Bree Daniels"
+      },
+      "otherwise": "Mistress"
+    }
+  ]
+}

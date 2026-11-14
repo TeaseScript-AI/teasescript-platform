@@ -1,0 +1,12 @@
+--- a/scripts/interrogation.groovy
++++ b/scripts/interrogation.groovy
+@@ -646,7 +646,8 @@
+ 	def face_pic = loadString("interrogation.session_facepic")
+ 	def first_name = loadString("interrogation.session_firstname")
+ 	def last_name = loadString("interrogation.session_lastname")
+-	def sex_partners = loadInteger("interrogation.session_sexpartners")
++	def sex_partners_text = loadString("interrogation.session_sexpartners")
++	def sex_partners = (sex_partners_text != null && sex_partners_text.isNumber()) ? sex_partners_text.toDouble().intValue() : null
+ 	def cheated = loadString("interrogation.session_cheated")
+ 	def location = loadString("interrogation.session_location")
+ 	def start_time = loadInteger("interrogation.session_start")

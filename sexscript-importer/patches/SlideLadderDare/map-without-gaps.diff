@@ -1,0 +1,30 @@
+--- a/scripts/TheSnowyOwl/SlideLadderDare.groovy
++++ b/scripts/TheSnowyOwl/SlideLadderDare.groovy
+@@ -3346,6 +3346,7 @@
+ 	maxblock=33
+ 	def nmap=atleast(msg, 50, 30, 0)
+ 	def nseg=(int)(((nmap-1)+maxblock-1)/maxblock)
++	map[0]=0
+ 	def imap=1
+ 	def isqu0=0
+ 	def isqu1=0
+@@ -3390,17 +3391,16 @@
+ 		msg+=" goto="+n+"/"+ngoto
+ 		block=shuffle(block,nblock)
+ 		for (i=0 ; i<nblock ; i++)
+-			map[imap+i]=block[i]
++			map << block[i]
+ 		imap+=nblock
+ //		showPopup(msg)
+ 	}
+-	map[0]=0
+ 	def tail=[100,101,101,101,101,101]
+ 	firsthelp=0
+ 	lasthelp=nmap+1
+ 	finisqu=nmap
+ 	for (i=0 ; tail[i] != null ; i++)
+-		map[nmap+i]=tail[i]
++		map << tail[i]
+ 	lastcorner=-1
+ 	for (i=1 ; i<=nmap ; i++)
+ 	{

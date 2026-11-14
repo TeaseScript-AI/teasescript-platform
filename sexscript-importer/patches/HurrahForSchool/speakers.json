@@ -1,0 +1,211 @@
+{
+  "reason": "St Priapus's staff take turns, each in their own closure under their own picture: the classroom teacher of each lesson (\"My name is \"+Mr/Miss+\" \"+surname drawn by SchTeacherNum; also classroom discipline SchA0), the Head Dr Grimes (SchA1, prospectus message), the School Nurse (SchA2), the Head Boy/Girl prefect (SchA3), the Games Master/Mistress (SchA4, games lessons) and the unnamed Art teacher (art lessons). Menus, prospectus pages, timetable, photo records, votes, reports and the record camera are system text.",
+  "speakers": {
+    "teacher": {
+      "firstName": "Piggs"
+    },
+    "head": {
+      "title": "Dr",
+      "lastName": "Grimes",
+      "displayName": "Head"
+    },
+    "nurse": {
+      "title": "Nurse"
+    },
+    "headboy": {
+      "displayName": "Head Boy"
+    },
+    "games": {
+      "displayName": "Games Master"
+    },
+    "art": {
+      "displayName": "Art Teacher"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchTakeSchoolPicture",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchRecord",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchA0",
+      "speaker": "teacher"
+    },
+    {
+      "after": "scripts/HurrahForSchool.groovy:659",
+      "speaker": "teacher"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchA1",
+      "speaker": "head"
+    },
+    {
+      "at": "scripts/HurrahForSchool.groovy:675",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/HurrahForSchool.groovy:741",
+      "speaker": "head"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchA2",
+      "speaker": "nurse"
+    },
+    {
+      "after": "scripts/HurrahForSchool.groovy:804",
+      "speaker": "nurse"
+    },
+    {
+      "after": "scripts/HurrahForSchool.groovy:837",
+      "speaker": "nurse"
+    },
+    {
+      "after": "scripts/HurrahForSchool.groovy:860",
+      "speaker": "nurse"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchA3",
+      "speaker": "headboy"
+    },
+    {
+      "after": "scripts/HurrahForSchool.groovy:959",
+      "speaker": "headboy"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchA4",
+      "speaker": "games"
+    },
+    {
+      "at": "scripts/HurrahForSchool.groovy:1137",
+      "speaker": "games"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchLesson0",
+      "speaker": "teacher"
+    },
+    {
+      "after": "scripts/HurrahForSchool.groovy:1181",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/HurrahForSchool.groovy:1253",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/HurrahForSchool.groovy:1261",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/HurrahForSchool.groovy:1273",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/HurrahForSchool.groovy:1311",
+      "speaker": "teacher"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchLesson1",
+      "speaker": "games"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchLesson2",
+      "speaker": "art"
+    },
+    {
+      "after": "scripts/HurrahForSchool.groovy:1745",
+      "speaker": "art"
+    },
+    {
+      "after": "scripts/HurrahForSchool.groovy:1768",
+      "speaker": "art"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchFetish",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchStart",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/HurrahForSchool.groovy:1906",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchReport",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchProspectus",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/HurrahForSchool.groovy:2013",
+      "speaker": "head"
+    },
+    {
+      "at": "scripts/HurrahForSchool.groovy:2022",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/HurrahForSchool.groovy:SchStop",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/HurrahForSchool.groovy:1157"
+      ],
+      "files": [
+        "scripts/HurrahForSchool.groovy"
+      ],
+      "speaker": "teacher",
+      "template": "{SchTeacherTitle[SchSex]} {SchTeacherName[SchTeacherNum]}"
+    },
+    {
+      "variable": "SchSex",
+      "files": [
+        "scripts/HurrahForSchool.groovy"
+      ],
+      "speaker": "games",
+      "values": {
+        "0": "Games Master",
+        "1": "Games Mistress",
+        "2": "Games Master",
+        "3": "Games Mistress"
+      },
+      "otherwise": "Games Master"
+    },
+    {
+      "variable": "SchSex",
+      "files": [
+        "scripts/HurrahForSchool.groovy"
+      ],
+      "speaker": "headboy",
+      "values": {
+        "0": "Head Boy",
+        "1": "Head Girl",
+        "2": "Head Boy",
+        "3": "Head Girl"
+      },
+      "otherwise": "Head Boy"
+    },
+    {
+      "after": [
+        "scripts/HurrahForSchool.groovy:2014"
+      ],
+      "files": [
+        "scripts/HurrahForSchool.groovy"
+      ],
+      "speaker": "head",
+      "template": "Dr Grimes"
+    }
+  ]
+}

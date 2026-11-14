@@ -1,0 +1,70 @@
+{
+  "reason": "Three versions of one linear tease (v0.1, v1.2 English, v1.2 German). The Mistress sends the player to her friend, the friend sends the player on to her own friend (the yoga session), and a fourth woman gives the last task (its three branches use other women's pictures). Nobody is named; each hand-over is a fixed point in the file.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress"
+    },
+    "friend": {
+      "displayName": "Friend"
+    },
+    "yoga": {
+      "displayName": "Yoga friend"
+    },
+    "domme": {
+      "title": "Mistress"
+    }
+  },
+  "default": "mistress",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/Hard times/Hard times.groovy",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Hard times/Hard times.groovy:255",
+      "speaker": "friend"
+    },
+    {
+      "at": "scripts/Hard times/Hard times.groovy:442",
+      "speaker": "yoga"
+    },
+    {
+      "at": "scripts/Hard times/Hard times.groovy:503",
+      "speaker": "domme"
+    },
+    {
+      "entry": "scripts/hard_times.groovy",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/hard_times.groovy:148",
+      "speaker": "friend"
+    },
+    {
+      "at": "scripts/hard_times.groovy:335",
+      "speaker": "yoga"
+    },
+    {
+      "at": "scripts/hard_times.groovy:396",
+      "speaker": "domme"
+    },
+    {
+      "entry": "scripts/hard_times_de.groovy",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/hard_times_de.groovy:148",
+      "speaker": "friend"
+    },
+    {
+      "at": "scripts/hard_times_de.groovy:335",
+      "speaker": "yoga"
+    },
+    {
+      "at": "scripts/hard_times_de.groovy:396",
+      "speaker": "domme"
+    }
+  ],
+  "names": []
+}

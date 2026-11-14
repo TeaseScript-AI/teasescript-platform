@@ -1,0 +1,11 @@
+--- a/scripts/Banjo/dungeoncrawl.groovy
++++ b/scripts/Banjo/dungeoncrawl.groovy
+@@ -5788,7 +5788,7 @@
+ 						"since you can only get it from Fairies and they can be... quite troublesome!\n\nI will happily pay you 30c if you can ever get your "+
+ 						"hands on any, though.")
+ 					questAlchemy = 4
+-				} else if(questAlchemy==2 && hasAlchemyDust) {
++				} else if(questAlchemy==4 && hasAlchemyDust) {
+ 					showDialog("alchemist","XEVANIA","Fairy Dust!\n\nWow, I don't want to ask what you had to do to get this, but I'm very grateful!\n\n"+
+ 						"As promised, here's your reward.")
+ 					rewardMoney(30)

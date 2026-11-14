@@ -1,0 +1,90 @@
+{
+  "reason": "One keyholder (a Mistress, Swedish text) speaks every Swedish line; her name is what the player chose on the first run (getString at 451, default \"Mistress\", stored as intro.keyholder). The untranslated English online-storage screens, Swedish ID notices, the update notes and the fallback error are system text.",
+  "speakers": {
+    "keyholder": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/KeyholdingService.groovy:387",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:564",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:621",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:676",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:695",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:705",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:720",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:768",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:782",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:788",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:801",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:1217",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:1227",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:1351",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:1361",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:1598",
+      "speaker": "keyholder"
+    },
+    {
+      "at": "scripts/KeyholdingService.groovy:1808",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "keyholdernamn",
+      "files": [
+        "scripts/KeyholdingService.groovy"
+      ],
+      "speaker": "keyholder",
+      "template": "{}"
+    }
+  ]
+}

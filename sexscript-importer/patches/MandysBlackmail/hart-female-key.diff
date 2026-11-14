@@ -1,0 +1,11 @@
+--- a/scripts/mandys_blackmail_de.groovy
++++ b/scripts/mandys_blackmail_de.groovy
+@@ -264,7 +264,7 @@
+ 		show("Sag mir bescheid, wenn du denkst das du hart genung bist.\n\nWage es nicht zu kommen!")
+ 	else
+ 		show("Sag mir bescheid, wenn du denkst das du nass genung bist.\n\nWage es nicht zu kommen!")
+-	if(!loadBoolean("Hart.female"))
++	if(!loadBoolean("intro.female"))
+ 		showButton("Hard, mistress")
+ 	else
+ 		showButton("Nass, Herrin")

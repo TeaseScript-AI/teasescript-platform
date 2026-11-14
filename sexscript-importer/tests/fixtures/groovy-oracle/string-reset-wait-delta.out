@@ -1,0 +1,4 @@
+before unset
+WAIT 1
+before unset
+WAIT 1

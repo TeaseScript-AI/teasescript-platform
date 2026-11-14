@@ -1,0 +1,65 @@
+--- a/scripts/Concentration.groovy
++++ b/scripts/Concentration.groovy
+@@ -102,31 +102,12 @@
+ //
+ // This section scans through the ImageFolder and subfolders to find .jpg files.  The game will then randomly show from this list.
+ //
+-def allImages=findImages(foldername)
+-def TopDir=findDir(foldername)
+-def moreDir1=[]
+-def moreDir2=[]
+-def moreDir3=[]
+-for (def i=0;i<TopDir.size();i++) {
+-	if (allImages.size()>=MaxImageNo) {break}
+-	allImages=allImages+findImages(TopDir[i])
+-	moreDir1=findDir(TopDir[i])
+-	for (def j=0;j<moreDir1.size();j++) {
+-		if (allImages.size()>=MaxImageNo) {break}
+-		allImages=allImages+findImages(moreDir1[j])
+-		moreDir2=findDir(moreDir1[j])
+-		for (def k=0;k<moreDir2.size();k++) {
+-			if (allImages.size()>=MaxImageNo) {break}
+-			allImages=allImages+findImages(moreDir2[k])
+-			moreDir3=findDir(moreDir2[k])
+-			for (def l=0;l<moreDir3.size();l++) {
+-				if (allImages.size()>=MaxImageNo) {break}
+-				allImages=allImages+findImages(moreDir3[l])
+-			}
+-		}
+-
++// The images of the folder and its subfolders, as the folder walks below found them.
++def allImages=[]
++new File(foldername).eachFileRecurse(groovy.io.FileType.FILES) {
++	if (it.name.endsWith('.jpg') && allImages.size()<MaxImageNo) {
++		allImages=allImages+it
+ 	}
+-
+ }
+ //allImages=allImages[1..10]
+ //show(allImages)
+@@ -352,21 +333,14 @@
+ 
+ def RunStim = {selectedFolder->
+ 
+-		def currentFolder
+-    def testFolder = new File("sounds/" + selectedFolder)
+-    if (!testFolder.exists()) {
+-        currentFolder = "sounds"
+-    } else {
+-        currentFolder = "sounds/" + selectedFolder
+-    }
++		// The package holds the folder that eStimSound names, ShockYourself.
++		def currentFolder = "sounds/ShockYourself"
+ 
+     def soundlist = []
+-    def dh = new File(currentFolder)
+-    dh.eachFile {
++    new File("sounds/ShockYourself").eachFile {
+         if (it.name.endsWith('.wav')) {
+ 
+-            it = it.getName()
+-            soundlist = soundlist + it
++            soundlist = soundlist + it.getName()
+         }
+     }
+ 

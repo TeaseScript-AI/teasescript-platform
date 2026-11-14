@@ -1,0 +1,42 @@
+--- a/scripts/guillotine.groovy
++++ b/scripts/guillotine.groovy
+@@ -640,17 +640,11 @@
+ 		link = link.replaceAll("https", "http")
+ 
+ 		// Verify that the URL is valid
+-		try {
+-    			def URL url = new URL(link)
+-    			def URLConnection conn = url.openConnection()
+-    			conn.connect()
++		if (link.toLowerCase().startsWith("http:")) {
+ 			valid = true
+-		} catch (MalformedURLException e) {
++		} else {
+ 			badURL()
+ 			valid = false
+-		} catch (IOException e) {
+-			bad(URL)
+-			valid = false
+ 		}
+ 	}
+     save("guillotine.url",link)
+@@ -945,17 +939,11 @@
+ 				newsURL = newsURL.replaceAll("https", "http")
+ 
+ 				// Verify that the URL is valid
+-				try {
+-    					def URL url = new URL(newsURL)
+-    					def URLConnection conn = url.openConnection()
+-    					conn.connect()
++				if (newsURL.toLowerCase().startsWith("http:")) {
+ 					valid = true
+-				} catch (MalformedURLException e) {
++				} else {
+ 					badURL()
+ 					valid = false
+-				} catch (IOException e) {
+-					bad(URL)
+-					valid = false
+ 				}
+ 			}
+ 		}

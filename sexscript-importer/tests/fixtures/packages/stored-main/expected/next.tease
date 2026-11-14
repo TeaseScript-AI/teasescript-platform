@@ -1,0 +1,7 @@
+// The next script reads the club's lists back, one as a whole and one an element at a time.
+// NOTE SX_LOAD_OPEN_NULL line 2: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+let notes = sexscriptLegacyLoad("club.notes", sexscriptLegacyValue(null))
+// NOTE SX_LENGTH_RECEIVER line 3: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+sexscriptLegacySave("next.notes", notes.length)
+sexscriptLegacySave("next.toy", load("club.toys.1", default: ""))
+exit

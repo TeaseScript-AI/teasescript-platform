@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "years-variable",
+      "layer": "source",
+      "category": "b",
+      "reason": "The report reads the stored years of experience, which may be missing, into i, the counter that the fetish loop right after counts with. A whole-number counter that may hold null cannot count in TeaseScript, and the compiler cannot see that the loop sets it first. The years go into their own variable, which nothing else uses.",
+      "diff": "years-variable.diff"
+    }
+  ]
+}

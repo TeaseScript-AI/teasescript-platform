@@ -1,0 +1,42 @@
+--- a/scripts/Domme2/fun.groovy
++++ b/scripts/Domme2/fun.groovy
+@@ -40,7 +40,7 @@
+ def reward = { i
+ 			->
+ 			def r = loadInteger("domme2.reward")
+-			(1..i).each {
++			if (i >= 1) (1..i).each {
+ 			r++
+ 			}
+ 			save("domme2.reward",r)
+@@ -383,7 +383,7 @@
+ 				showButton(">")	
+ 				showButton("Ready, Miss.")
+ 				show("")
+-				(1..m).each {
++				if (m >= 1) (1..m).each {
+ 					image()
+ 					switch(getRandom(4)) {
+ 						case 0: show("Wank with your dominant hand.") ; break
+--- a/scripts/Domme2/ask.groovy
++++ b/scripts/Domme2/ask.groovy
+@@ -79,7 +79,7 @@
+ 			p=0
+ 			else
+ 			p = loadInteger("domme2.punish")
+-			(1..i).each {
++			if (i >= 1) (1..i).each {
+ 			p++
+ 			}
+ 			save("domme2.punish",p)
+--- a/scripts/Domme2/spanking.groovy
++++ b/scripts/Domme2/spanking.groovy
+@@ -25,7 +25,7 @@
+ 		message, spanks, time ->
+ 		show(""+message+"\n\n. . ")
+ 		wait(2)
+-		(1..spanks).each {
++		if (spanks >= 1) (1..spanks).each {
+ 			x++
+ 			show(message+"\n\n."+x+".")
+ 			playBackgroundSound("swat.wav")

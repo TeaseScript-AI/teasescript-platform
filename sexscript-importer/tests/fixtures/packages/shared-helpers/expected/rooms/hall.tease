@@ -1,0 +1,24 @@
+let phrases = ["Kneel.", "Wait."]
+let mistress = load "mistress", default: ""
+function image {
+  showImage "room.jpg"
+}
+function taunt {
+  say prose phrases.random, instant
+}
+function greet {
+  say prose "Welcome to ${mistress}'s house.", instant
+}
+function enter {
+  image()
+  say prose "Come in.", instant
+}
+let level = 1
+function report {
+  say prose "Level ${level}", instant
+}
+enter()
+report()
+greet()
+taunt()
+goto "rooms/garden.tease"

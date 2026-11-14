@@ -1,0 +1,51 @@
+--- a/scripts/ChastityBeadMistress/ChastityBeadMistress.Permission.groovy
++++ b/scripts/ChastityBeadMistress/ChastityBeadMistress.Permission.groovy
+@@ -52,7 +52,7 @@
+ 	}
+ 	return "ChastityBeadMistress/ChastityBeadMistress.Main";
+ }
+-else (choice == 1)
++else if (choice == 1)
+ {
+ 	return "ChastityBeadMistress/ChastityBeadMistress.Main";
+ }
+--- a/scripts/ChastityBeadMistress/ChastityBeadMistress.Settings.groovy
++++ b/scripts/ChastityBeadMistress/ChastityBeadMistress.Settings.groovy
+@@ -48,7 +48,7 @@
+ 	save("chastityBeadMistress.startingBlackBeads", 5);
+ 	save("chastityBeadMistress.currentBlackBeads", 5);
+ 	save("chastityBeadMistress.startingYellowBeads", 1);
+-	save("chastityBeadMistress.currentBlackBeads", 1);
++	save("chastityBeadMistress.currentYellowBeads", 1);
+ 	save("chastityBeadMistress.startingPinkBeads", 1);
+ 	save("chastityBeadMistress.currentPinkBeads", 1);
+ 	save("chastityBeadMistress.startingRedBeads", 1);
+@@ -69,7 +69,7 @@
+ 	save("chastityBeadMistress.startingBlackBeads", 30);
+ 	save("chastityBeadMistress.currentBlackBeads", 30);
+ 	save("chastityBeadMistress.startingYellowBeads", 5);
+-	save("chastityBeadMistress.currentBlackBeads", 5);
++	save("chastityBeadMistress.currentYellowBeads", 5);
+ 	save("chastityBeadMistress.startingPinkBeads", 5);
+ 	save("chastityBeadMistress.currentPinkBeads", 5);
+ 	save("chastityBeadMistress.startingRedBeads", 5);
+--- a/scripts/ChastityBeadMistress/ChastityBeadMistress.Intro.groovy
++++ b/scripts/ChastityBeadMistress/ChastityBeadMistress.Intro.groovy
+@@ -67,7 +67,7 @@
+ 	save("chastityBeadMistress.startingBlackBeads", 5);
+ 	save("chastityBeadMistress.currentBlackBeads", 5);
+ 	save("chastityBeadMistress.startingYellowBeads", 1);
+-	save("chastityBeadMistress.currentBlackBeads", 1);
++	save("chastityBeadMistress.currentYellowBeads", 1);
+ 	save("chastityBeadMistress.startingPinkBeads", 1);
+ 	save("chastityBeadMistress.currentPinkBeads", 1);
+ 	save("chastityBeadMistress.startingRedBeads", 1);
+@@ -87,7 +87,7 @@
+ 	save("chastityBeadMistress.startingBlackBeads", 30);
+ 	save("chastityBeadMistress.currentBlackBeads", 30);
+ 	save("chastityBeadMistress.startingYellowBeads", 5);
+-	save("chastityBeadMistress.currentBlackBeads", 5);
++	save("chastityBeadMistress.currentYellowBeads", 5);
+ 	save("chastityBeadMistress.startingPinkBeads", 5);
+ 	save("chastityBeadMistress.currentPinkBeads", 5);
+ 	save("chastityBeadMistress.startingRedBeads", 5);

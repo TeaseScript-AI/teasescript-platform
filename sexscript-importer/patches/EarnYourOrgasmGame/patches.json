@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "body-part-pair",
+      "layer": "source",
+      "category": "b",
+      "reason": "Every body part is a pair of its name and whether it is in play, but the last one was written [\"exposed cockhead,1\"], one text with the 1 inside the quotes. Groovy read its missing second item as null, and wrote past its end when the setup turned it off; a TeaseScript list has no item there. The pair is written as the others are.",
+      "diff": "body-part-pair.diff"
+    }
+  ]
+}

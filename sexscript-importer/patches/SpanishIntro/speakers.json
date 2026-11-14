@@ -1,0 +1,30 @@
+{
+  "reason": "One named character, Mistress Melanie (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Melanie",
+      "displayName": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/SpanishIntro.groovy:125",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/SpanishIntro.groovy:180"
+      ],
+      "files": [
+        "scripts/SpanishIntro.groovy"
+      ],
+      "speaker": "main",
+      "template": "Mistress Melanie"
+    }
+  ]
+}

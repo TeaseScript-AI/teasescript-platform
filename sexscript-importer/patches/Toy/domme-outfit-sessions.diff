@@ -1,0 +1,42 @@
+--- a/scripts/toy/domme.groovy
++++ b/scripts/toy/domme.groovy
+@@ -5,6 +5,9 @@
+ 
+ 	// The sessions available now, with their probabilities.
+ 	toy.metaClass.sessionChoices { int punishment ->
++		final outfit = loadString("toy.owner.outfit");
++		if (DOMME.id == "danniiharwood" && outfit == "dungeon") return [[theme: "dungeon torture", probability: 1]];
++		if (DOMME.id == "lucyohara" && outfit == "bedroom") return [[theme: "humiliation", probability: 1]];
+ 		final sessions = [];
+ 		if (punishment < 50) sessions.add([theme: "stroking and edging", probability: 50]);
+ 		if (has("dildo")) sessions.add([theme: "blowjob training", probability: 5]);
+@@ -15,6 +18,8 @@
+ 
+ 	toy.metaClass.runSession { String theme, int punishment ->
+ 		switch (theme) {
++			case "dungeon torture": sessionDungeonTorture(punishment); break;
++			case "humiliation": sessionHumiliation(punishment); break;
+ 			case "stroking and edging": sessionStrokingAndEdging(punishment); break;
+ 			case "blowjob training": sessionBlowjobTraining(punishment); break;
+ 			case "reminder who's boss": sessionWhosBoss(punishment); break;
+@@ -63,5 +68,20 @@
+ 		sessionTake(randRange(1, 2 + (int)(punishment / 100)), punish, [], 'punishApply');
+ 		sessionTake(1, ['postChastity'], []);
+ 	};
++	// The author's per-outfit overrides from Dannii's dungeon and Lucy's bedroom.
++	toy.metaClass.sessionDungeonTorture { int punishment ->
++		sessionDress([['preChastity'], ['preGag', 'preClamps', 'preCollar', 'preStrip'], ['playBeatCock', 'playBeatBalls', 'playClamps'], ['postChastity']]);
++		sessionTake(1, ['preChastity'], []);
++		sessionTake(4, ['preGag', 'preClamps', 'preCollar', 'preStrip'], [], 'punishMultiply');
++		sessionRepeat(randRange(4, 6), ['playBeatCock', 'playBeatBalls', 'playClamps'], [], 'punishApply');
++		sessionTake(1, ['postChastity'], []);
++	};
++
++	toy.metaClass.sessionHumiliation { int punishment ->
++		sessionDress([['preStrip'], ['playEdges', 'playSuck'], ['postChastity']]);
++		sessionTake(1, ['preStrip'], []);
++		sessionRepeat(randRange(2, 4), ['playEdges', 'playSuck'], []);
++		if (can("perm_chaste") || randRange(1, 2) == 1) sessionTake(1, ['postChastity'], []);
++	};
+ 	return null;
+ }

@@ -1,0 +1,80 @@
+--- a/scripts/DareOTK.groovy
++++ b/scripts/DareOTK.groovy
+@@ -149,7 +149,7 @@
+ def lastMistress = (loadString("DareOTK.lastMistress"))
+ def maxCorner = (loadInteger("DareOTK.maxCorner"))
+ if(maxCorner==null) maxCorner = DareLevel + CornerAdd + 2
+-def maxLines = (loadInteger("OTK.maxLines"))
++def maxLines = (loadInteger("DareOTK.maxLines"))
+ if(maxLines==null) maxLines = (DareLevel * 2) + LinesAdd + 3
+ def severity = (loadInteger("DareOTK.severity"))
+ if(severity == null) severity = 2
+@@ -426,7 +426,7 @@
+ }	
+ 
+ def setImageInfo = {
+-	mistress = getRandom(4)+1
++	mistress = getRandom(5)+1
+ 	if (mistress==1) mistressSet1()
+ 	if (mistress==2) mistressSet2()
+ 	if (mistress==3) mistressSet3()
+@@ -766,9 +766,9 @@
+ 					wait(5)
+ 				}	
+ //				show("Corner time minutes above default set at: "+CornerAdd+" minutes.")
+-				save("OTK.CornerAdd",CornerAdd)
++				save("DareOTK.CornerAdd",CornerAdd)
+ 				maxCorner = DareLevel + CornerAdd + 2
+-				save("OTK.maxCorner",maxCorner)
++				save("DareOTK.maxCorner",maxCorner)
+ //				wait(5)
+ 			}
+ 			else if(record==2) {
+@@ -784,7 +784,7 @@
+ 					CornerEnd = false
+ 					show("Choose corner end set at: false\n\nOnly some specific disciplinarians will give you a corner time at the end of the session.")
+ 				}		
+-				save("OTK.CornerEnd",CornerEnd)
++				save("DareOTK.CornerEnd",CornerEnd)
+ //				wait(5)
+ 			}
+ 			else if(record==3) {
+@@ -798,9 +798,9 @@
+ 					wait(5)
+ 				}	
+ //				show("Number of lines above default set at: "+LinesAdd+".")
+-				save("OTK.LinesAdd",LinesAdd)
++				save("DareOTK.LinesAdd",LinesAdd)
+ 				maxLines = (DareLevel * 2) + LinesAdd + 3
+-				save("OTK.maxLines",maxLines)
++				save("DareOTK.maxLines",maxLines)
+ //				wait(5)
+ 			}
+ 			else if(record==4){
+@@ -1317,7 +1317,7 @@
+ 	}
+ 	else if (mistress=="Chloe") {
+ 		setImageIntro()
+-		if(loadBoolean("DareOTK.met."+mistress+"")) {
++		if(loadInteger("DareOTK.met."+mistress+"")) {
+ 			show("Hello "+name+".\n\nIt's time for a new OTK dare from me, isn't it?.\n\n"+
+ 				"It's time for a sound spanking!\n\nI like spanking cute "+boyGirl+"s asses!")
+ 			wait(7)
+@@ -1335,7 +1335,7 @@
+ 	} 	
+ 	else if (mistress=="Courtney") {
+ 		setImageIntro()
+-		if(loadBoolean("DareOTK.met."+mistress+"")) {
++		if(loadInteger("DareOTK.met."+mistress+"")) {
+ 			show("Hi "+name+".\n\nBack again?\n\nI'll use my  hand and a hard wooden paddle to dare you!\n\n"+
+ 				"You'll get a sore, bruised bottom!")
+ 			wait(7)
+@@ -1349,7 +1349,7 @@
+ 	} 
+ 	else if (mistress=="Krissy") {
+ 		setImageIntro()
+-		if(loadBoolean("DareOTK.met."+mistress+"")) {
++		if(loadInteger("DareOTK.met."+mistress+"")) {
+ 			show("Hey "+name+".\n\nBack again?\n\n"+
+ 				"I embrace my alternative lifestyle and I always enjoy a good punk rock concert!\n\n"+
+ 				"I would love to rock your ass again!")

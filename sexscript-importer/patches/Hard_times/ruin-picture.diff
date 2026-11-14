@@ -1,0 +1,36 @@
+--- a/scripts/hard_times.groovy
++++ b/scripts/hard_times.groovy
+@@ -497,7 +497,8 @@
+ 		show("CUM FOR ME NOW!!!!");
+ 		wait(3);
+ 
+-		setImage("hard_times/kathia_nobili/fast3.jpg");
++		// Legacy bug: the blowjob scene's picture of another woman was shown here; the ruin scene's unused ruin3 fits.
++		setImage("hard_times/lady_fyre/ruin3.jpg");
+ 
+ 		show("HANDS OFF!!! RUIN IT!!");
+ 
+--- a/scripts/hard_times_de.groovy
++++ b/scripts/hard_times_de.groovy
+@@ -496,7 +496,8 @@
+ 		show("KOMM FÜR MICH JETZT!!!!");
+ 		wait(3);
+ 
+-		setImage("hard_times/kathia_nobili/fast3.jpg");
++		// Legacy bug: the blowjob scene's picture of another woman was shown here; the ruin scene's unused ruin3 fits.
++		setImage("hard_times/lady_fyre/ruin3.jpg");
+ 
+ 		show("HÄNDE WEG!!! RUINIERE IHN!!!");
+ 
+--- a/scripts/Hard times/Hard times.groovy	2026-10-15 00:00:00
++++ b/scripts/Hard times/Hard times.groovy	2026-10-15 00:00:00
+@@ -604,7 +604,8 @@
+ 		show("CUM FOR ME NOW!!!!");
+ 		wait(3);
+ 
+-		setImage("Hard times/fast3.jpg");
++		// Legacy bug: the blowjob scene's picture of another woman was shown here; the ruin scene's unused ruin3 fits.
++		setImage("Hard times/ruin3.jpg");
+ 
+ 		show("HANDS OFF!!! RUIN IT!!");
+ 

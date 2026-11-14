@@ -1,0 +1,13 @@
+--- a/scripts/ChastityRouletteAlt.groovy
++++ b/scripts/ChastityRouletteAlt.groovy
+@@ -285,8 +285,8 @@
+ 					else
+ 						MaxMultiplier=maxMultiplierText.toDouble()	// Set to number entered
+ 
+-					// If an invalid value was entered, 'unset' it.
+-					if (MaxMultiplier<0) MaxMultiplier = -1
++					// If an invalid value was entered, 'unset' it. Patched legacy bug: 0, which the prompt shows for 'not set', divided the days by zero.
++					if (MaxMultiplier<=0) MaxMultiplier = -1
+ 					break;
+ 				 case 3:
+ 					// Maximum days per spin. If it was not set, change it to 0 for show

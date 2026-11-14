@@ -1,0 +1,18 @@
+--- a/scripts/KeyholdingService.groovy
++++ b/scripts/KeyholdingService.groovy
+@@ -445,10 +445,12 @@
+ 		save("intro.name", name);
+ 		
+ 	}
+-def keyholder = loadBoolean("intro.keyholder")
+-	if(keyholder==null) {
++// The keyholder's name, read as the text it is (it was a boolean read, null only while nothing was saved), so that
++// the speaker takes it on every run and the question comes while there is none.
++def keyholdernamn = loadString("intro.keyholder")
++	if(keyholdernamn==null) {
+ 		setImage("KeyholdingService/1.jpg");
+-		def keyholdernamn = getString("OK "+loadString("intro.name")+". Vill du ge din keyholder ett särskild namn "+
++		keyholdernamn = getString("OK "+loadString("intro.name")+". Vill du ge din keyholder ett särskild namn "+
+ 										"eller vill du bara kalla mig Mistress?", "Mistress");
+ 		save("intro.keyholder", keyholdernamn);
+ 	}

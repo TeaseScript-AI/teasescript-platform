@@ -1,0 +1,11 @@
+--- a/scripts/DCAfterDark/Harmony.groovy
++++ b/scripts/DCAfterDark/Harmony.groovy
+@@ -5887,7 +5887,7 @@
+ 	show("Are you trying to get a free session?")
+ 	wait(3)
+ 	showButton("-->")
+-	system.exit(0)
++	exit()
+ }
+ executeSession()
+ return scriptText+"/DCAfterDarkMain.groovy"

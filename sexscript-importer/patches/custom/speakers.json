@@ -1,0 +1,81 @@
+{
+  "reason": "Mistress Isabella hands the player to her friends one after another; each friend's section opens with her own picture (setImage of her named .jpg) and Isabella returns with mistress.jpg. The twins Haruka and Sakura speak together, partly in one message with Name: labels inside; three picture-less lines are the author's notes.",
+  "speakers": {
+    "isabella": {
+      "title": "Mistress",
+      "firstName": "Isabella"
+    },
+    "twins": {
+      "displayName": "Haruka and Sakura"
+    },
+    "sophia": {
+      "title": "Mistress",
+      "firstName": "Sophia"
+    },
+    "scarlett": {
+      "title": "Miss",
+      "firstName": "Scarlett"
+    },
+    "annabella": {
+      "title": "Mistress",
+      "firstName": "Annabella"
+    },
+    "grace": {
+      "title": "Mistress",
+      "firstName": "Grace"
+    },
+    "maria": {
+      "title": "Mistress",
+      "firstName": "Maria"
+    },
+    "alice": {
+      "title": "Mistress",
+      "firstName": "Alice"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "image": "mistress.jpg",
+      "speaker": "isabella"
+    },
+    {
+      "at": "scripts/custom.groovy:41",
+      "speaker": "twins"
+    },
+    {
+      "image": "Girl 1.jpg",
+      "speaker": "sophia"
+    },
+    {
+      "image": "scarlett.jpg",
+      "speaker": "scarlett"
+    },
+    {
+      "image": "annabella.jpg",
+      "speaker": "annabella"
+    },
+    {
+      "image": "grace.jpg",
+      "speaker": "grace"
+    },
+    {
+      "image": "maria.jpg",
+      "speaker": "maria"
+    },
+    {
+      "image": "alice.jpg",
+      "speaker": "alice"
+    },
+    {
+      "at": "scripts/custom.groovy:334",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/custom.groovy:348",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

@@ -1,0 +1,10 @@
+--- a/scripts/Locker.groovy
++++ b/scripts/Locker.groovy
+@@ -74,7 +74,6 @@
+ 	settings = receiveMap("Locker.sku")
+ 	//settings = load("Locker."+uuid)
+ 	wait(2)
+-	show("settings: " + settings)
+ 	save("Locker.receivedSettings", settings)
+ 	wait(2)
+ 	show("Map: " + loadMap("Locker."+uuid))

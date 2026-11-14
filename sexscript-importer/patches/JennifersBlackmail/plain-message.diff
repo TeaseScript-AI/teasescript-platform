@@ -1,0 +1,41 @@
+--- a/scripts/jennifer_has_fun.groovy
++++ b/scripts/jennifer_has_fun.groovy
+@@ -48,29 +48,6 @@
+ def ran_start = loadBoolean("jennifer_has_fun.ran_start")
+ def testmode = loadBoolean("jennifer_has_fun.testmode")
+ if (testmode == null) testmode = false;
+-// Encryption function - Yes fuckers! - And thanks "Emma"
+-def e = {
+-	c ->
+-	def k = key
+-	def d = ""
+-	for (def i = 0; i < c.length(); i +=1)
+-	{
+-		if ((((int)c.charAt(i)) < (int)'a') || 
+-            (((int)c.charAt(i)) > (int)'z'))
+-		{
+-			d += c.charAt(i)
+-		}
+-		else
+-		{
+-			def curr = ((int)c.charAt(i) - (int)'a') + ((int)k.charAt(i % k.length()) - (int)'a' + 1)
+-			curr = curr % 26
+-			curr = curr + (int)'a'
+-			d = d + (char)curr
+-		}
+-	}
+-	d
+-}
+-
+ // Only download pic if not already downloaded
+ def showSImage = { sicode ->
+   def sipic = null
+@@ -193,7 +170,7 @@
+   show("OK lets start off having you naked...");
+   wait(1)
+   showButton("Naked Mistress")
+-  show(e("Rxruj bqq vizo huyxs I yfoo l bacm fk ryjc saaroyvw.."))
++  show("Right now edge while I have a look at your computer..")
+   def starttime = getTime();
+   wait(1)
+ 

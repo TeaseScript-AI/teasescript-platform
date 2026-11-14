@@ -1,0 +1,13 @@
+--- a/scripts/toy/availability.groovy
++++ b/scripts/toy/availability.groovy
+@@ -8,7 +8,9 @@
+ 	
+ 	toy.metaClass.getRecentAvail { days ->
+ 		def dayNum = getDayNum();
+-		return (0..days-1).collect { day -> getAvail(dayNum - day) }.sum();
++		def total = 0;
++		for (day in 0..days-1) total += getAvail(dayNum - day);
++		return total;
+ 	}
+ 	
+ 	toy.metaClass.setSummonFail = {

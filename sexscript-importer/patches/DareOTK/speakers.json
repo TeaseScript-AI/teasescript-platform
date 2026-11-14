@@ -1,0 +1,162 @@
+{
+  "reason": "Six OTK spankers (Miss Anikka, Miss Ashley, Miss Briella, Miss Chloe, Miss Courtney, Miss Krissy) take turns: one at a time, held in the variable mistress, which changes with every picker, random pick, info page and statistics page. The one whose picture is shown speaks every line, including the spankers' collective 'we' texts on the title, info and settings screens. Menus that only ask for a choice, data tables, set-confirmations, resets and the auto-selection screen are system text.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress"
+    }
+  },
+  "default": "mistress",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/DareOTK.groovy:infodare",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DareOTK.groovy:IntroMistress",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DareOTK.groovy:rules",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DareOTK.groovy:stats",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DareOTK.groovy:mistressIntro",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DareOTK.groovy:cornerStart",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DareOTK.groovy:lineWriting",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DareOTK.groovy:enter",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:652",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:733",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:755",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:785",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:794",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:837",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:839",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:844",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:859",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:903",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:909",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:921",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:926",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:937",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:1058",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:1083",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:1098",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:1146",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:1206",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:1487",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DareOTK.groovy:1487",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DareOTK.groovy:1501",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/DareOTK.groovy:1505",
+      "speaker": "mistress"
+    }
+  ],
+  "names": [
+    {
+      "variable": "mistress",
+      "files": [
+        "scripts/DareOTK.groovy"
+      ],
+      "speaker": "mistress",
+      "values": {
+        "Anikka": "Miss Anikka",
+        "Ashley": "Miss Ashley",
+        "Briella": "Miss Briella",
+        "Chloe": "Miss Chloe",
+        "Courtney": "Miss Courtney",
+        "Krissy": "Miss Krissy",
+        "Paris": "Miss Paris",
+        "Phoenix": "Miss Phoenix",
+        "Snow": "Miss Snow",
+        "Default": "Mistress"
+      },
+      "otherwise": "Mistress",
+      "except": [
+        "scripts/DareOTK.groovy:407",
+        "scripts/DareOTK.groovy:429"
+      ]
+    }
+  ]
+}

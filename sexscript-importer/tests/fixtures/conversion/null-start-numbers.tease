@@ -1,0 +1,99 @@
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+// Numbers declared without a value, or as null, that functions set start at 0: no code compares them with null, and
+// Groovy truth treats null and 0 alike.
+let score = 0
+let bonus = 0
+function award {
+  score = 10
+  bonus = 2
+}
+if score == 0 {
+  say prose "No score yet", instant
+}
+award()
+say prose "Total ${score + bonus}", instant
+// A number that a function can show before its first value showed null in Groovy; it shows 0 now.
+// NOTE SX_NULL_START_NUMBER line 13: Groovy showed strokes as null until its first value; it starts at 0 here, so a text shown before then says 0.
+let strokes = 0
+function report {
+  say prose "Strokes so far: ${strokes}", instant
+}
+report()
+strokes = 5
+report()
+// A number that the code compares with null keeps its null start, since null and 0 differ there.
+let level = null
+function pick {
+  level = askInteger prose "Level?", prefill: 3
+}
+if level == null {
+  pick()
+}
+say prose "Level ${level}", instant
+// So do numbers that functions add to, since Groovy failed on a null sum.
+let points = 0
+function addPoints {
+  points = 0
+  points += 300
+}
+addPoints()
+say prose "Points ${points}", instant
+// A Date's milliseconds are a moment, so a variable that starts as null and then takes them holds the moment.
+let started = getAbsoluteDateTime()
+function mark {
+  started = getAbsoluteDateTime()
+}
+mark()
+say prose "Took ${round((getAbsoluteDateTime() - started) / 1 ms)}", instant
+// A function's own counter starts at 0 too, also where another function names a text the same.
+function fill(n) {
+  let i = 0
+  let marks = []
+  i = 0
+  while i < n {
+    // NOTE SX_LIST_GROWTH line 42: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if i < marks.length {
+      marks[i] = i * 2
+    } else {
+      marks.add(i * 2)
+    }
+    i += 1
+  }
+  say prose "Marks ${marks.length}", instant
+}
+function spell {
+  for i in ["a", "b"] {
+    say prose i, instant
+  }
+}
+fill(3)
+spell()
+// So do numbers set from a closure that returns a load with a default through another one, as SlideLadderDare's
+// loadInteger0 over loadIntegerVal.
+function loadOr(key, fallbackValue) {
+  let stored = sexscriptLegacyLoadInteger(key)
+  return stored otherwise fallbackValue
+}
+function loadSet(key, fallbackValue2) {
+  let value = loadOr(key, fallbackValue2)
+  if value == 0 {
+    return fallbackValue2
+  }
+  return value
+}
+let spanks = 0
+function configure {
+  spanks = loadSet("game.spanks", 4)
+}
+configure()
+say prose "Spanks ${spanks * 2}", instant
+exit

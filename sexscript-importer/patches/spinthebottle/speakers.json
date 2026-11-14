@@ -1,0 +1,97 @@
+{
+  "reason": "A multiplayer strip game run by impersonal game screens (system). Alexis, the virtual female player ('Hi, I'm Alexis! While I'm not real…'), speaks under her own pictures: the opponent setup, the pillory deal and pose choice, the double-or-nothing offer, the reminders of unfinished forfeits/spankings, and the round messages that quote her as the virtual opponent. Real opponents are other human players whose comments are relayed inside system text.",
+  "speakers": {
+    "alexis": {
+      "firstName": "Alexis"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/spinthebottle.groovy:355",
+      "speaker": "alexis"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:372",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:870",
+      "speaker": "alexis"
+    },
+    {
+      "function": "scripts/spinthebottle.groovy:doubleDown",
+      "speaker": "alexis"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:1003",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/spinthebottle.groovy:riskPillory",
+      "speaker": "alexis"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:1079",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:1122",
+      "speaker": "alexis"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:1127",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/spinthebottle.groovy:unfinished",
+      "speaker": "alexis"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:1217",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:1237",
+      "speaker": "alexis"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:1244",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/spinthebottle.groovy:doPunishment",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/spinthebottle.groovy:unfinished_spanking",
+      "speaker": "alexis"
+    },
+    {
+      "after": "scripts/spinthebottle.groovy:1996",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/spinthebottle.groovy:2002",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/spinthebottle.groovy:2036",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:2102",
+      "speaker": "alexis"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:2123",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/spinthebottle.groovy:2130",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

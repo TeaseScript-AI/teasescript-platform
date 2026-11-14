@@ -1,0 +1,17 @@
+{
+  "reason": "One named character, Alisha (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "firstName": "Alisha"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/countdowngame.groovy:1406",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

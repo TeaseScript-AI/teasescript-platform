@@ -1,0 +1,25 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/housework.groovy:11",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/housework.groovy:15",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/housework.groovy:52",
+      "speaker": "narrator"
+    }
+  ],
+  "names": []
+}

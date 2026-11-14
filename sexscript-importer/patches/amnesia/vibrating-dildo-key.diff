@@ -1,0 +1,12 @@
+--- a/scripts/amnesia.groovy
++++ b/scripts/amnesia.groovy
+@@ -4,7 +4,8 @@
+ // Milovana - http://www.milovana.com/webteases/showtease.php?id=19636
+ // With the 14-01-04 autorisation of Evinctus, orignal author
+ 
+-if(loadFirstTrue('toys.dildo','vibrating_dildo')==null) {
++// Legacy bug: the vibrating dildo is the toy chest's toys.vibrating_dildo (patch vibrating-dildo-key).
++if(loadFirstTrue('toys.dildo','toys.vibrating_dildo')==null) {
+ 	show("A dildo or dildo alternative is needed")
+ 	return;
+ }

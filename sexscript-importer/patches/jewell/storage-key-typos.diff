@@ -1,0 +1,65 @@
+--- a/scripts/jewell/confessions.groovy
++++ b/scripts/jewell/confessions.groovy
+@@ -110,7 +110,7 @@
+ 	return "jewell/punishments"
+ 
+ case "Report - Used priviledge to cum":
+-	if(loadInteger("jewell.permit_Orgasm")==null || loadInteger("jewell.permit_Orgasm")<getTime()) {
++	if(loadInteger("cybermistress.permit_Orgasm")==null || loadInteger("cybermistress.permit_Orgasm")<getTime()) {
+ 		show("You were not allowed to (or : too late)")
+ 		showButton("Sorry, Mistress")
+ 		save("cybermistress.points", Math.max(0,-20+loadInteger("cybermistress.points")))
+@@ -122,11 +122,11 @@
+ 		save("cybermistress.points", 80)
+ 	save("cybermistress.points", 0+loadInteger("cybermistress.points"))
+ 	show("(You've got "+loadInteger("cybermistress.points")+" points)\n"+"")
+-	save("jewell.permit_Orgasm", null)
++	save("cybermistress.permit_Orgasm", null)
+ 	break
+ 
+ case "Report - Used priviledge to masturbate":
+-	if(loadInteger("jewell.permit_Masturbation")==null || loadInteger("jewell.permit_Masturbation")<getTime()) {
++	if(loadInteger("cybermistress.permit_Masturbation")==null || loadInteger("cybermistress.permit_Masturbation")<getTime()) {
+     	setImage("jewell/confess.jpg")
+ 		show("You were not allowed to (or : too late)")
+ 		showButton("Sorry Mistress")
+@@ -139,7 +139,7 @@
+ 		save("cybermistress.points", 80)
+ 	save("cybermistress.points", 0+loadInteger("cybermistress.points"))
+ 	show("(You've got "+loadInteger("cybermistress.points")+" points)\n"+"")
+-	save("jewell.permit_Masturbation", null)
++	save("cybermistress.permit_Masturbation", null)
+ 	break
+ 
+ case "Report - Completed assignment":
+--- a/scripts/jewell/cumPermission.groovy
++++ b/scripts/jewell/cumPermission.groovy
+@@ -103,7 +103,7 @@
+ 		block="toyspick"
+ 		break
+ 	}
+-	if(loadBoolean("toys.ringgag")!=true) {
++	if(loadBoolean("toys.ring_gag")!=true) {
+ 		block="toyspick"
+ 		break
+ 	}
+@@ -488,7 +488,7 @@
+ 	break
+ 
+ case "buttgasm":
+-	if(true!=loadBoolean("buttplug_On")) {
++	if(true!=loadBoolean("cumpermission.buttplug_On")) {
+ 		block="edgegasm"
+ 		break
+ 	}
+--- a/scripts/jewell/ritualNight.groovy
++++ b/scripts/jewell/ritualNight.groovy
+@@ -212,7 +212,7 @@
+ 	break	
+ 	
+ case "spreader":
+-	if(loadBoolean("clothes.spreader_bar")!=true) {
++	if(loadBoolean("toys.spreader_bar")!=true) {
+ 		block="picktoy"
+ 		break
+ 	}

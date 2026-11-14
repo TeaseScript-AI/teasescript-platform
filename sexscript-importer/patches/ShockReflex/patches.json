@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "start-level-max",
+      "layer": "source",
+      "category": "e",
+      "reason": "When a hit or miss is set to step the intensity down, each set starts at powerLevelMax, which is never defined (only powerLevelMin = pLevelMin is), so Groovy failed there. Start at the saved maximum, pLevelMax.",
+      "diff": "start-level-max.diff"
+    },
+    {
+      "id": "box-muller-zero",
+      "layer": "source",
+      "category": "e",
+      "reason": "BoxMullerRandom takes Math.log(getRandom(1000)/1000), the log of zero whenever getRandom(1000) gives 0 (one draw in a thousand), which gave -Infinity in Groovy and stops the script in TeaseScript. U is drawn from (getRandom(1000)+1)/1001 instead, which is never zero and keeps the distribution almost the same.",
+      "diff": "box-muller-zero.diff"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "toy-keys",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the basement scene reads loadBoolean(\"ankle_cuffs\") and loadBoolean(\"estim\"); the toy chest saves these toys as toys.ankle_cuffs and toys.estim, and nothing saves the bare keys, so the scene always took the variant without cuffs and estim. Read the toy chest's keys.",
+      "diff": "toy-keys.diff"
+    }
+  ]
+}

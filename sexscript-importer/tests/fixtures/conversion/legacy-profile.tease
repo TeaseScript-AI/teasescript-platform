@@ -1,0 +1,198 @@
+speaker system {
+  title: "System"
+}
+// Legacy storage kept a list or a map as one key per element (key.0, key.name), which a save removed with the key
+// and load() rebuilt; these two functions do the same, listing those keys under sexscriptLegacy.storedKeys.
+function sexscriptLegacySave(key, value) {
+  let stored: string[] = load "sexscriptLegacy.storedKeys", default: []
+  let fresh: string[] = []
+  let prefix = "${key}."
+  delete key
+  if value is list or value is dict {
+    let names: string[] = [key]
+    let values: list = [value]
+    let position = 0
+    while position < names.length {
+      let name = names[position]
+      let item = values[position]
+      position += 1
+      if item is list {
+        let index = 0
+        for element in item {
+          names.add("${name}.${index}")
+          values.add(element)
+          index += 1
+        }
+      } else if item is dict {
+        for entry, inner in item {
+          names.add("${name}.${entry}")
+          values.add(inner)
+        }
+      } else {
+        if item == null {
+          save "null" as name
+        } else {
+          save item as name
+        }
+        fresh.add(name)
+      }
+    }
+  } else if value != null {
+    save value as key
+    fresh.add(key)
+  }
+  let kept: string[] = []
+  for name in stored {
+    if (name == key or name.startsWith(prefix)) and not fresh.contains(name) {
+      delete name
+    } else {
+      kept.add(name)
+    }
+  }
+  for name in fresh {
+    if not stored.contains(name) {
+      kept.add(name)
+    }
+  }
+  save kept as "sexscriptLegacy.storedKeys"
+}
+function sexscriptLegacyLoad(key, whenMissing = null) {
+  let value = load key, default: null
+  let present = value != null
+  if value is string {
+    if value.lowercase() == "null" {
+      value = null
+    }
+  }
+  if not present {
+    let stored: string[] = load "sexscriptLegacy.storedKeys", default: []
+    let prefix = "${key}."
+    let parts: string[] = []
+    for name in stored {
+      if name.startsWith(prefix) {
+        let part = name.substring(prefix.length).split(".")[0]
+        if not parts.contains(part) {
+          parts.add(part)
+        }
+      }
+    }
+    let numbered = true
+    for part in parts {
+      if not part.matches(/[0-9]+/) {
+        numbered = false
+      }
+    }
+    if parts.length > 0 and numbered {
+      let items: list = []
+      for part in parts {
+        let index = toInteger(part)
+        while items.length <= index {
+          items.add(null)
+        }
+        items[index] = sexscriptLegacyLoad("${prefix}${part}")
+      }
+      value = items
+    } else if parts.length > 0 {
+      let entries: dict = dict{}
+      for part in parts {
+        entries[part] = sexscriptLegacyLoad("${prefix}${part}")
+      }
+      value = entries
+    }
+  }
+  return value otherwise whenMissing
+}
+function sexscriptLegacyAskProfile {
+  if load("intro.name", default: "") == "" {
+    save (askText as system ("What is your name?", prefill: "Slave").replace("\n", " ")) as "intro.name"
+  }
+  let savedFemale: boolean? = load "intro.female", default: null
+  if savedFemale == null {
+    save (askBoolean as system "Are you a woman ?") as "intro.female"
+  }
+  let savedLikemale: boolean? = load "intro.likemale", default: null
+  if savedLikemale == null {
+    // NOTE SX_LOAD_OPEN_NULL: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+    if load("intro.likefemale", default: sexscriptLegacyValue(null)) == true {
+      save (askBoolean as system "Are you also attracted to men ?") as "intro.likemale"
+    } else {
+      save true as "intro.likemale"
+    }
+  }
+  player.firstName = load "intro.name", default: ""
+  if load("intro.female", default: null) == true {
+    player.gender = "female"
+  } else {
+    player.gender = "male"
+  }
+  let profileToysFields = dict{}
+  let profileToysIndex = 0
+  for profileToysKey in ["toys.dildo"] {
+    if load(profileToysKey, default: null) == null {
+      profileToysFields[profileToysKey] = { value: false, text: ["dildo"][profileToysIndex] }
+    }
+    profileToysIndex += 1
+  }
+  if profileToysFields.length > 0 {
+    let profileToysAnswers = askForm as system "What do you have in your toy chest ?", fields: profileToysFields
+    for profileToysKey in profileToysAnswers {
+      save profileToysAnswers[profileToysKey] as profileToysKey
+    }
+  }
+  let profileClothesFields = dict{}
+  let profileClothesIndex = 0
+  for profileClothesKey in ["clothes.panties"] {
+    if load(profileClothesKey, default: null) == null {
+      profileClothesFields[profileClothesKey] = { value: false, text: ["panties"][profileClothesIndex] }
+    }
+    profileClothesIndex += 1
+  }
+  if profileClothesFields.length > 0 {
+    let profileClothesAnswers = askForm as system "What do you own ?", fields: profileClothesFields
+    for profileClothesKey in profileClothesAnswers {
+      save profileClothesAnswers[profileClothesKey] as profileClothesKey
+    }
+  }
+}
+// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (clothes.panties, intro.female, intro.likemale, intro.name, toys.dildo) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.
+sexscriptLegacyAskProfile()
+function sexscriptLegacyValue(value) {
+  return value
+}
+function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+// The legacy desktop intro asked the player's name and gender once; a package that only reads them asks once.
+let gender = "boy"
+if load("intro.female", default: false) {
+  gender = "girl"
+}
+say prose "Hello, ${load("intro.name", default: "")}, my good ${gender}", instant
+if load("intro.likemale", default: false) {
+  say prose "You like men too", instant
+}
+if not load("toys.dildo", default: false) {
+  say prose "A dildo or dildo alternative is needed", instant
+}
+// A save of an owned item corrects the answer, so the item is still asked first.
+let conditional = load("clothes.panties", default: false) == true
+if conditional {
+  conditional = not askBoolean prose() ("Are you wearing your panties?")
+}
+if conditional {
+  save false as "clothes.panties"
+}
+// Keys that are one another's elements go through the storage helpers; the profile's answers, whose keys the form
+// names, stay plain saves.
+sexscriptLegacySave("club.level", 3)
+sexscriptLegacySave("club.level.kink", 5)
+say prose "Kink ${sexscriptLegacyLoadInteger("club.level.kink")}", instant
+// Legacy load() read null for a key that held an empty list, which stored nothing, so such a key keeps the helpers.
+sexscriptLegacySave("club.picks", [])
+// NOTE SX_LOAD_OPEN_NULL line 15: Legacy read null for a missing key; nothing tells this key's type where a load could declare it, so this read keeps that null of an open type, checked where it is used.
+say prose "No picks ${sexscriptLegacyLoad("club.picks", sexscriptLegacyValue(null)) == null}", instant
+exit

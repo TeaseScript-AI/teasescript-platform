@@ -1,0 +1,24 @@
+--- a/scripts/DisciplineClinic/OffenseSelect.groovy
++++ b/scripts/DisciplineClinic/OffenseSelect.groovy
+@@ -1458,7 +1458,7 @@
+ 			if (pickOffense > 0) offenseSelected = true
+ 		}
+ 		if (whichMenu != notInMenuText) {
+-			systemOffenseLevel = offenseArray[pickOffense-1][1]
++			systemOffenseLevel = offenseArray[pickOffense-1][1] as int
+ 			setOffense(offenseArray[pickOffense-1][0], true, whichMenu)
+ 		}
+ 		
+@@ -1692,10 +1692,10 @@
+ 				}
+ 				else if (offenseChoice > 0) {
+ 					offenseLevel = loadInteger(scriptText+"."+offenseArray[offenseChoice - 1][0]+"OffenseLevel")
+-					if (offenseLevel == null) offenseLevel = offenseArray[offenseChoice - 1][1]
++					if (offenseLevel == null) offenseLevel = offenseArray[offenseChoice - 1][1] as int
+ 					setToDefault = getSelectedValue("Would you like to use the clinic's level or set your own?", ["Clinic Value", "Set My Own"])
+ 					if (setToDefault == 0) {
+-						offenseLevel = offenseArray[offenseChoice - 1][1]
++						offenseLevel = offenseArray[offenseChoice - 1][1] as int
+ 						save(scriptText+"."+offenseArray[offenseChoice - 1][0]+"OffenseLevel",null)
+ 						save(scriptText+"."+offenseArray[offenseChoice - 1][0]+"OffenseLevelVerified",null)
+ 						show("Offense Level for "+offenseTextArray[offenseChoice-1]+" has been returned to default of "+offenseLevel+".")

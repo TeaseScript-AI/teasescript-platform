@@ -1,0 +1,22 @@
+{
+  "reason": "One named character, Domina Amanda (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Domina",
+      "firstName": "Amanda"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/dominaamanda.groovy:131",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/dominaamanda.groovy:146",
+      "speaker": "narrator"
+    }
+  ],
+  "names": []
+}

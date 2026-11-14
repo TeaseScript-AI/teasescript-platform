@@ -1,0 +1,20 @@
+--- a/scripts/enforced_chastity.groovy
++++ b/scripts/enforced_chastity.groovy
+@@ -492,7 +492,7 @@
+ wait(5)
+ user_choice = getSelectedValue("When a user fails to correctly complete a task and fails the program their profile is moved to the fails section queue\nEach time a new user fails the queue moves them along 1 space\nOnce a user reaches the end of the queue their profile is removed\nContinue to fails or go back to the menu",["View fails","Back"])
+ if (user_choice == 0) {
+-	failstring=receiveString("enforced_chastity.fails1")
++	failstring=receiveString("enforced_chastity.fails1") ?: "null"
+ 	if (failstring==null||failstring.contains("null")){
+ 		show("no current fails")
+ 		showButton("back")
+@@ -522,7 +522,7 @@
+ 		
+ 			
+ 				nextfail++
+-				failstring=receiveString("enforced_chastity.fails"+nextfail)
++				failstring=receiveString("enforced_chastity.fails"+nextfail) ?: "end"
+ 				showButton("Next failure")
+ 				}
+ 			new File(failpic3).delete()

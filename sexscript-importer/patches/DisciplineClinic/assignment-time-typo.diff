@@ -1,0 +1,11 @@
+--- a/scripts/DisciplineClinic/Punish.groovy
++++ b/scripts/DisciplineClinic/Punish.groovy
+@@ -808,7 +808,7 @@
+ 	assignment, days=0, level=0 ->
+ 	
+ 	def tmpTime = loadInteger(scriptText+"."+assignment+".Time")
+-	if (tmpTime == null) tmp = 0
++	if (tmpTime == null) tmpTime = 0
+ 	def daysRemaining = days - Math.round((getTime() - tmpTime)/day)
+ 
+ 	save(scriptText+"."+assignment+".Days", days)

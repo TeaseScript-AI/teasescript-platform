@@ -1,0 +1,3 @@
+delete "lines.kitty"
+say prose "Kitty is reset.", instant
+exit

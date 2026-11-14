@@ -1,0 +1,52 @@
+--- a/scripts/theEdger/theEdger-cum.groovy
++++ b/scripts/theEdger/theEdger-cum.groovy
+@@ -29,7 +29,9 @@
+ def FileStart = loadString("theEdger.FileStart")
+ def FileMax = loadInteger("theEdger.FileMax")
+ 
+-def PicCodeA, PicCodeB, PicCodeBChars, PicNumberB, NumberPics, PicKey, MissLen
++def PicCodeA, PicCodeB, PicNumberB, NumberPics, PicKey, MissLen
++// Every use sets it from PicCodeB first; it starts as the characters of empty text, so it always holds characters.
++def PicCodeBChars = "".toCharArray()
+ int PicNumber
+ 
+ def PicCodeMax = 50
+--- a/scripts/theEdger/theEdger-go.groovy
++++ b/scripts/theEdger/theEdger-go.groovy
+@@ -17,7 +17,9 @@
+ def FileStart = loadString("theEdger.FileStart")
+ def FileMax = loadInteger("theEdger.FileMax")
+ 
+-def PicCodeA, PicCodeB, PicCodeBChars, PicNumber, NumberPics
++def PicCodeA, PicCodeB, PicNumber, NumberPics
++// Every use sets it from PicCodeB first; it starts as the characters of empty text, so it always holds characters.
++def PicCodeBChars = "".toCharArray()
+ 
+ def PicCodeMax = 50
+ 
+--- a/scripts/theEdger/theEdger-stop.groovy
++++ b/scripts/theEdger/theEdger-stop.groovy
+@@ -17,7 +17,9 @@
+ def FileStart = loadString("theEdger.FileStart")
+ def FileMax = loadInteger("theEdger.FileMax")
+ 
+-def PicCodeA, PicCodeB, PicCodeBChars, PicCodeP, PicCodeQ, PicCodeQChars, PicNumber, NumberPics, PicKey
++def PicCodeA, PicCodeB, PicCodeP, PicCodeQ, PicCodeQChars, PicNumber, NumberPics, PicKey
++// Every use sets it from PicCodeB first; it starts as the characters of empty text, so it always holds characters.
++def PicCodeBChars = "".toCharArray()
+ 
+ def PicCodeMax = 50
+ 
+--- a/scripts/theEdger.groovy
++++ b/scripts/theEdger.groovy
+@@ -24,7 +24,9 @@
+ 	showButton("OK")
+ }
+ 
+-def PicCodeA, PicNumberA, PicCodeB, PicCodeBChars, PicNumberB, PicNumber, NumberPics, PicKey, MissLen
++def PicCodeA, PicNumberA, PicCodeB, PicNumberB, PicNumber, NumberPics, PicKey, MissLen
++// Every use sets it from PicCodeB first; it starts as the characters of empty text, so it always holds characters.
++def PicCodeBChars = "".toCharArray()
+ def PicNumCode = [], PicKeyCode = [], PlCodeCode = [], PlNameCode = []
+ def PicCodeMax = 50
+ 

@@ -1,0 +1,20 @@
+// An object field written by a method stays in reach of other functions, also when a nested block declares a
+// local of the same name.
+let x = 7
+function readX {
+  return x
+}
+function calculate {
+  if x > 0 {
+    let xValue = 1
+    save xValue as "inner"
+  }
+  let sumResult = 0
+  for it in [1] {
+    sumResult += readX()
+  }
+  x = sumResult
+  save x as "result"
+}
+calculate()
+exit

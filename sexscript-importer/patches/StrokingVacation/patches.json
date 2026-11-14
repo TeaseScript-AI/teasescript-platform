@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "finish-routine",
+      "layer": "source",
+      "category": "e",
+      "reason": "The gayyes block shows the Finish this routine! button (Beende diese Routine! in StrokingVacation_de) but sets no next block and does not end the script, so the legacy script showed the button again and again. Pressing it now sets endReached, as the script's other endings do.",
+      "diff": "finish-routine.diff"
+    }
+  ]
+}

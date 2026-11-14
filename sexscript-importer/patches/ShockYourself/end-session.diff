@@ -1,0 +1,19 @@
+--- a/scripts/ShockYourself.groovy
++++ b/scripts/ShockYourself.groovy
+@@ -908,7 +908,7 @@
+             "Test and calibrate eStim first!\n\n" +
+             "Attach the electrodes and Start Punishment Program!\n\n" +
+             getParameterText()
+-    int menu = getSelectedValue(show(txt), ["Start", "Start with CD tray and Countdown", "Change Variables", "Test eStim"])
++    int menu = getSelectedValue(show(txt), ["Start", "Start with CD tray and Countdown", "Change Variables", "Test eStim", "End session"])
+     if (menu == 0) playGame()
+     if (menu == 1) {
+         int countDown = 0
+@@ -942,6 +942,7 @@
+         if (openCDTray) openCdTrays()
+     } else if (menu == 2) changeConfig()
+     else if (menu == 3) testEstim()
++    else if (menu == 4) exit()
+ }
+ 
+ 

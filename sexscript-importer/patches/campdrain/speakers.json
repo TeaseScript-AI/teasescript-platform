@@ -1,0 +1,317 @@
+{
+  "reason": "Camp counselors take turns: the head counselor Mikayla opens every day and runs the edge tests, then each counselor has her own section, a case of the day file's switch on the saved goto value (case \"Daisy\", \"Mason003\", \"C004\" ...), and introduces herself; the drainers Mistress Ezada Sinn and Mistress Sophie each have a case in drainers.groovy. Each section start is an at switch; the shared helper functions speak for whoever called them; the setup menu has no speaker.",
+  "speakers": {
+    "mikayla": {
+      "firstName": "Mikayla",
+      "displayName": "Head Counselor"
+    },
+    "daisy": {
+      "firstName": "Daisy"
+    },
+    "carmen": {
+      "firstName": "Carmen"
+    },
+    "dominno": {
+      "firstName": "Dominno"
+    },
+    "divinity": {
+      "firstName": "Divinity",
+      "lastName": "Love"
+    },
+    "jayden": {
+      "firstName": "Jayden"
+    },
+    "bryce": {
+      "firstName": "Bryce"
+    },
+    "dahlia": {
+      "firstName": "Dahlia"
+    },
+    "mason": {
+      "firstName": "Mason"
+    },
+    "allie": {
+      "firstName": "Allie"
+    },
+    "bella": {
+      "firstName": "Bella"
+    },
+    "madison": {
+      "firstName": "Madison"
+    },
+    "sophie": {
+      "firstName": "Sophie"
+    },
+    "counselor_c002": {
+      "displayName": "Counselor"
+    },
+    "counselor_c007": {
+      "displayName": "Counselor"
+    },
+    "ezada": {
+      "title": "Mistress",
+      "firstName": "Ezada",
+      "lastName": "Sinn"
+    },
+    "mistress_sophie": {
+      "title": "Mistress",
+      "firstName": "Sophie"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/campdrain.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/campdrain.groovy:51",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain.groovy:58",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:27",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:64",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:91",
+      "speaker": "daisy"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:118",
+      "speaker": "carmen"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:161",
+      "speaker": "dominno"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:193",
+      "speaker": "divinity"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:234",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:350",
+      "speaker": "daisy"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:506",
+      "speaker": "carmen"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:712",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:785",
+      "speaker": "dominno"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:858",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:862",
+      "speaker": "dominno"
+    },
+    {
+      "at": "scripts/campdrain/day1.groovy:901",
+      "speaker": "divinity"
+    },
+    {
+      "at": "scripts/campdrain/day2.groovy:27",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day2.groovy:64",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day2.groovy:100",
+      "speaker": "jayden"
+    },
+    {
+      "at": "scripts/campdrain/day2.groovy:247",
+      "speaker": "bryce"
+    },
+    {
+      "at": "scripts/campdrain/day2.groovy:359",
+      "speaker": "jayden"
+    },
+    {
+      "at": "scripts/campdrain/day2.groovy:503",
+      "speaker": "carmen"
+    },
+    {
+      "at": "scripts/campdrain/day2.groovy:709",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day2.groovy:782",
+      "speaker": "dominno"
+    },
+    {
+      "at": "scripts/campdrain/day2.groovy:855",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day2.groovy:859",
+      "speaker": "dominno"
+    },
+    {
+      "at": "scripts/campdrain/day4.groovy:27",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day4.groovy:62",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day4.groovy:84",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day4.groovy:104",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day4.groovy:176",
+      "speaker": "dahlia"
+    },
+    {
+      "at": "scripts/campdrain/day5.groovy:31",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day5.groovy:91",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day5.groovy:141",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day5.groovy:251",
+      "speaker": "mason"
+    },
+    {
+      "at": "scripts/campdrain/day5.groovy:321",
+      "speaker": "mason"
+    },
+    {
+      "at": "scripts/campdrain/day5.groovy:375",
+      "speaker": "mason"
+    },
+    {
+      "at": "scripts/campdrain/day5.groovy:467",
+      "speaker": "mason"
+    },
+    {
+      "at": "scripts/campdrain/day5.groovy:588",
+      "speaker": "mason"
+    },
+    {
+      "at": "scripts/campdrain/day5.groovy:679",
+      "speaker": "mason"
+    },
+    {
+      "at": "scripts/campdrain/day5.groovy:745",
+      "speaker": "mason"
+    },
+    {
+      "at": "scripts/campdrain/day6.groovy:31",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day6.groovy:76",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day6.groovy:120",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day6.groovy:157",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:31",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:75",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:120",
+      "speaker": "mikayla"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:189",
+      "speaker": "allie"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:227",
+      "speaker": "counselor_c002"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:286",
+      "speaker": "bella"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:352",
+      "speaker": "bryce"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:466",
+      "speaker": "carmen"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:512",
+      "speaker": "madison"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:584",
+      "speaker": "counselor_c007"
+    },
+    {
+      "at": "scripts/campdrain/day7.groovy:662",
+      "speaker": "sophie"
+    },
+    {
+      "at": "scripts/campdrain/drainers.groovy:31",
+      "speaker": "ezada"
+    },
+    {
+      "at": "scripts/campdrain/drainers.groovy:106",
+      "speaker": "mistress_sophie"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/campdrain/day1.groovy:28",
+        "scripts/campdrain/day2.groovy:28",
+        "scripts/campdrain/day4.groovy:28"
+      ],
+      "files": [
+        "scripts/campdrain/day1.groovy",
+        "scripts/campdrain/day2.groovy",
+        "scripts/campdrain/day4.groovy"
+      ],
+      "speaker": "mikayla",
+      "template": "Mikayla"
+    }
+  ]
+}

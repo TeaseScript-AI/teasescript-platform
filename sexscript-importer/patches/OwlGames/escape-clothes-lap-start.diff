@@ -1,0 +1,20 @@
+--- a/scripts/TheSnowyOwl/Escape.groovy
++++ b/scripts/TheSnowyOwl/Escape.groovy
+@@ -282,7 +282,7 @@
+ def grpclothes=[0,1,7,12,14]
+ def yourclothes=[]
+ def clothes=[]
+-def nclothes
++def nclothes = 0
+ 
+ def randclothes=
+ {clothesmf,clotheson ->
+@@ -746,7 +746,7 @@
+ // @ Initialize
+ 
+ def lap=[]
+-def nlap
++def nlap = 5
+ def lastlap
+ def yourlap=-1
+ def pointsfinish

@@ -1,0 +1,11 @@
+--- a/scripts/Banjo/spankparty.groovy
++++ b/scripts/Banjo/spankparty.groovy
+@@ -1582,7 +1582,7 @@
+ 			seatingArray = seatingArray + [p2spanker]
+ 			seatingLeftoversArray = seatingLeftoversArray - p2spanker
+ 		}
+-		if(p2spanked) {
++		if(p3spanked) {
+ 			seatingArray = seatingArray + [p3spanker]
+ 			seatingLeftoversArray = seatingLeftoversArray - p3spanker
+ 		}

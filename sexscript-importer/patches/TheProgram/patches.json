@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "misc-image-folder",
+      "layer": "source",
+      "category": "b",
+      "reason": "Therapist sessions B to E show 33 cartoon and toy pictures from TheMisc/cartoon/ and TheMisc/toys/, a folder the unit does not have. The pictures are in TheProgram/cartoon/ and TheProgram/toys/, where each script's closing image list names them; use that folder.",
+      "diff": "misc-image-folder.diff"
+    }
+  ]
+}

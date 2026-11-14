@@ -1,0 +1,39 @@
+function sexscriptLegacyListMin(items) {
+  if items.length == 0 {
+    return null
+  }
+  let best = items.first
+  for item in items {
+    if item < best {
+      best = item
+    }
+  }
+  return best
+}
+// Parameters are not proven to be lists or text; methods with one meaning on both convert as they are.
+function hasWord(words, word) {
+  return words.contains(word)
+}
+function describe(items) {
+  // NOTE SX_LIST_JOIN line 3: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+  return items.join(", ")
+}
+function zeros(scores) {
+  return scores.count(0)
+}
+function lowest(scores) {
+  return sexscriptLegacyListMin(scores)
+}
+function colon(line) {
+  return line.indexOf(":") otherwise -1
+}
+let tags = ["red", "blue"]
+say prose "Red: ${hasWord(tags, "red")}, in text: ${hasWord("a red door", "red")}", instant
+say prose "Tags: ${describe(tags)}", instant
+say prose "Zeros: ${zeros([0, 3, 0])}, lowest: ${lowest([4, 2, 9])}", instant
+say prose "Colon at ${colon("key: value")}", instant
+let answer = load "answer", default: ""
+if answer != "" and answer.contains("yes") {
+  say prose "Agreed", instant
+}
+exit

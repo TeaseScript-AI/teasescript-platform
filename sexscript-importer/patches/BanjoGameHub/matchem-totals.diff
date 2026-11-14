@@ -1,0 +1,13 @@
+--- a/scripts/Banjo/matchem.groovy
++++ b/scripts/Banjo/matchem.groovy
+@@ -1345,8 +1345,8 @@
+ 	playerStart()
+ 	mistressStart()
+ 	displayScore()
+-	mistressTotal = mistressMatch1+mistressMatch2+mistressMatch3+mistressMatch4+mistressMatch5
+-	playerTotal = playerMatch1+playerMatch2+playerMatch3+playerMatch4+playerMatch5
++	mistressTotal = mistressMatch1.toInteger()+mistressMatch2.toInteger()+mistressMatch3.toInteger()+mistressMatch4.toInteger()+mistressMatch5.toInteger()
++	playerTotal = playerMatch1.toInteger()+playerMatch2.toInteger()+playerMatch3.toInteger()+playerMatch4.toInteger()+playerMatch5.toInteger()
+ 	if(playerTotal>=mistressTotal) {
+ 		first = "player"
+ 		spacer = "\n\n\n\n\n\n\n\n."

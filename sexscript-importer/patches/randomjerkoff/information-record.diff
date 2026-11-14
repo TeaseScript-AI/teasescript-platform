@@ -1,0 +1,70 @@
+--- a/scripts/randomjerkoff.groovy
++++ b/scripts/randomjerkoff.groovy
+@@ -186,7 +186,7 @@
+ 
+ 
+ def id = loadString("randomjerkoff.id")
+-def information = ['firstStart':'', 'counter':0]
++def information = ['firstStart':'', 'counter':0, 'maxPoints':1000]
+ 
+ // @TODO: creat init method
+ debug('ID ist ' + id)
+@@ -197,16 +197,16 @@
+     id = (tmp[0]+ "_" + getRandom(1000000) + "_" + today.format('ddMMyyyy'))
+     save("randomjerkoff.id", id);
+     
+-    setInformation(id, information, 'firstStart', today)
+-    setInformation(id, information, 'counter', 1)
+-    setInformation(id, information, 'maxPoints', 1000)
++    information['firstStart'] = today.format('yyyy-MM-dd')
++    information['counter'] = 1
++    information['maxPoints'] = 1000
+     saveInformation(id, information)
+     information = getInformation(id)
+ } else {
+     information = getInformation(id)
+     def tempCounter = information['counter']    
+     tempCounter++
+-    setInformation(id, information, 'counter', tempCounter)
++    information['counter'] = tempCounter
+     saveInformation(id, information)
+     debug('saved...')
+     debug(information)
+@@ -225,17 +225,17 @@
+     debug(tmpInformation)
+     if ('' == tmpInformation) {
+         information['imagepath'] = null
+-        setInformation(id, information, 'imagepath', null)
++        information['imagepath'] = null
+         saveInformation(id, information)
+         showButton('Imagepath is reset to default')
+     } else {
+         def folder = new File(tmpInformation)
+         if (folder.exists()) {
+-            setInformation(id, information, 'imagepath', tmpInformation)
++            information['imagepath'] = tmpInformation
+             saveInformation(id, information)
+             showButton('New Path: ' + tmpInformation)
+         } else {
+-            setInformation(id, information, 'imagepath', null)
++            information['imagepath'] = null
+             showButton('Path not found - set path to default')
+         }
+     }
+@@ -328,13 +328,13 @@
+ 	}
+ }
+ if (null == information['maxPoints']) {
+-    setInformation(id, information, 'maxPoints', points)
++    information['maxPoints'] = points
+ } else {
+     def maxP = information['maxPoints'];
+-    if (maxP < points) {
++    if (maxP != null && maxP < points) {
+         maxP = points
+     }
+-    setInformation(id, information, 'maxPoints', maxP)
++    information['maxPoints'] = maxP
+ }
+ saveInformation(id, information)
+ 

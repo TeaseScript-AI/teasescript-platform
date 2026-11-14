@@ -1,0 +1,3 @@
+// A top-level helper without setInfos is no entry.
+save "Arial" as "font"
+exit

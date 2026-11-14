@@ -1,0 +1,128 @@
+{
+  "reason": "A self-bondage timer program. The owner the player sets up (Mistress or Master, owner_title plus an optional owner_name with its leading space, as the settings text shows owner_title+owner_name) speaks the session from the setup questions on, mostly about herself in the third person (\"Mistress will drive you silly\") mixed with first person (\"Feel how my hands...\"). The author's signed guide (slave-girl Diana), hardware checks, settings, countdowns and timer/status lines have no speaker.",
+  "speakers": {
+    "owner": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:126",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:131",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:201",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:233",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:244",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:277",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:313",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:333",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:365",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:375",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:421",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:488",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:493",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:662",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:668",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:675",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:709",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:713",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:850",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:858",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:865",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:898",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Mistress_Decision_Session.groovy:902",
+      "speaker": "owner"
+    }
+  ],
+  "names": [
+    {
+      "variable": "owner_title",
+      "files": [
+        "scripts/Mistress_Decision_Session.groovy"
+      ],
+      "speaker": "owner",
+      "template": "{}",
+      "except": [
+        "scripts/Mistress_Decision_Session.groovy:13"
+      ]
+    },
+    {
+      "variable": "owner_name",
+      "after": [
+        "scripts/Mistress_Decision_Session.groovy:196"
+      ],
+      "files": [
+        "scripts/Mistress_Decision_Session.groovy"
+      ],
+      "speaker": "owner",
+      "template": "{owner_title}{}"
+    }
+  ]
+}

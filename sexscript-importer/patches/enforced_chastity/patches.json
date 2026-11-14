@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "fails-end",
+      "layer": "source",
+      "category": "b",
+      "reason": "The list of failures reads its entries with receiveString, which gives null for a missing one; TeaseScript keeps the loop's text non-null. A missing first entry reads as null text, which the script already treats as no current fails, and a missing next entry as end, the loop's own stop value (the legacy script failed there with a null pointer).",
+      "diff": "fails-end.diff"
+    }
+  ]
+}

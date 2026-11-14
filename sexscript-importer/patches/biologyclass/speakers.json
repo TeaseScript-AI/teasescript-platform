@@ -1,0 +1,57 @@
+{
+  "reason": "One named character, Kate (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Kate"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/biologyclass.groovy:49",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/biologyclass.groovy:66",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/biologyclass.groovy:73",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/biologyclass.groovy:76",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/biologyclass.groovy:78",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/biologyclass.groovy:103",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/biologyclass.groovy:133",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/biologyclass.groovy:281",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/biologyclass.groovy:352",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/biologyclass.groovy:373",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/biologyclass.groovy:375",
+      "speaker": "narrator"
+    }
+  ],
+  "names": []
+}

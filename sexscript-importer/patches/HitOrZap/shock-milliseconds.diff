@@ -1,0 +1,13 @@
+--- a/scripts/HitOrZap.groovy
++++ b/scripts/HitOrZap.groovy
+@@ -283,7 +283,9 @@
+     shockSequence.each { s ->
+         String sound = SOUNDSDIR + getRandomEstimFileName() + pLevel + EXT
+         playBackgroundSound(sound)
+-        wait(s)
++        // The legacy timer slept whole milliseconds, so a shock time with a float residue far below one slept 0 ms;
++        // TeaseScript refuses such a wait late in a scene (TSR050). Wait the whole milliseconds (patch shock-milliseconds).
++        wait(Math.round(s * 1000) / 1000)
+         playBackgroundSound(null)
+     }
+ 

@@ -1,0 +1,25 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/daremegamehow.groovy:10",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/daremegamehow.groovy:24",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/daremegamehow.groovy:57",
+      "speaker": "narrator"
+    }
+  ],
+  "names": []
+}

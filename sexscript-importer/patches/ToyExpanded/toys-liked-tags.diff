@@ -1,0 +1,41 @@
+--- a/scripts/toy/toys.groovy
++++ b/scripts/toy/toys.groovy
+@@ -152,6 +152,14 @@
+ 		return hadtoys;
+ 	}
+ 
++	// Whether the toy has a tag the player likes.
++	toy.metaClass.likesAnyTag { List tags ->
++		for (tag in tags) {
++			if (likes(tag)) return true;
++		}
++		return false;
++	}
++
+ 	toy.metaClass.removeAllToys { imageSpec, probKeep = 0, offer=false ->
+ 		def toRemove = [];
+ 		for (s in toys.keySet()) {
+@@ -162,19 +170,20 @@
+ 		if (toRemove.contains(PLUGGED)) toRemove = [PLUGGED] + (toRemove - [PLUGGED]);
+ 		toRemove.each { state ->
+ 			def stateToy = findStateToy(state);
+-			if (getRandom(100) >= (toys[stateToy].tags.any{tag -> likes(tag)} ? probKeep*2 : probKeep)) {
++			final liked = likesAnyTag(toys[stateToy].tags);
++			if (getRandom(100) >= (liked ? probKeep*2 : probKeep)) {
+ 				removeToy(state, [DRESSED], offer);
+ 			}
+ 			else {
+ 				def mintime = 120;
+-				def maxtime = (toys[stateToy].tags.any{tag -> likes(tag)} ? 1800:180);
++				def maxtime = (liked ? 1800:180);
+ 				if (state == PLUGGED) {
+ 					present(imageSpec, [
+ 							["The buttplug stays in your ass for a while,", "Keep that ass plugged,"],
+ 							["my little slut.", "it can use some training."]]);
+ 					showButtonG("Yes, ${dommeTitle()}", "ok");
+ 					mintime = 150;
+-					maxtime = (toys[stateToy].tags.any{tag -> likes(tag)} ? 1800:480);
++					maxtime = (liked ? 1800:480);
+ 				}
+ 				addEvent("$RELEASEFROM-$state", getTime() + mintime + getRandom(maxtime-mintime + 10 * getPunish()),
+ 						RELEASEFROM, state);

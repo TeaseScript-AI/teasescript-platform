@@ -1,0 +1,12 @@
+{
+  "reason": "Debbie (the title \"Debbie 2\", \"GO to sleep with Debbie\") gives every instruction; the speaker check found the first data's \"no character\" wrong.",
+  "speakers": {
+    "debbie": {
+      "firstName": "Debbie"
+    }
+  },
+  "default": "debbie",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

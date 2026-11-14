@@ -1,0 +1,11 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -127,7 +127,7 @@
+ 	boolean has(String i) { loadBoolean("toys.$i") == true }
+ 	boolean likes(String i) { loadBoolean("fetish.$i") == true }
+ 	boolean can(String i) { loadBoolean("toy.permission.$i") == true }
+-	boolean perm(String i) { can(it) }
++	boolean perm(String i) { can(i) }
+ 	boolean getPermission(String i) { getProp("permission.$i", loadB) }
+ 	void setPermission(String i, boolean v) { setProp("permission.$i", v) }
+ 	void givePermission(String i) { setPermission(i, true) }

@@ -1,0 +1,20 @@
+--- a/scripts/StrokingVacation.groovy
++++ b/scripts/StrokingVacation.groovy
+@@ -149,6 +149,7 @@
+ 
+ case "gayyes":
+ 	showButton("Finish this routine!")
++	endReached = true
+ 	break
+ 
+ case "gayno":
+--- a/scripts/StrokingVacation_de.groovy
++++ b/scripts/StrokingVacation_de.groovy
+@@ -149,6 +149,7 @@
+ 
+ case "gayyes":
+ 	showButton("Beende diese Routine!")
++	endReached = true
+ 	break
+ 
+ case "gayno":

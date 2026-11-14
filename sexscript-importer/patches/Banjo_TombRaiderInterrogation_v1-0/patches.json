@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "saved-preferences-belt",
+      "layer": "source",
+      "category": "e",
+      "reason": "Two author errors. The start copies a saved punish_* preference only where it is true (if(loadBoolean(key))), so a saved \"No\" from the advanced setup, which says the preferences are saved for every session, was ignored on later visits: test that a value is saved (!=null). The belt branches test !spanktoy4==\"belt\", which compares the negated text with \"belt\" and is always false, so the basket implement was never fetched: test spanktoy4!=\"belt\".",
+      "diff": "saved-preferences-belt.diff"
+    },
+    {
+      "id": "section-endings",
+      "layer": "source",
+      "category": "e",
+      "reason": "The script is split into section closures (trcode_*) to work around a legacy limit, and each of its 24 endings (23 \"The End\" buttons after leaving Croft Manor, and the setup's \"Quit\" for the male-only notice) ends with return \"intro\" or return null inside its closure, which in Groovy leaves only the closure: play went on with the next section of the interrogation after the ending. A flag set at each ending skips the later sections, and the script then ends as those returns meant. All 24 read as endings (ending text or a Quit choice, then nothing that fits after it); the script's own end is unchanged.",
+      "diff": "section-endings.diff"
+    }
+  ]
+}

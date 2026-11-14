@@ -1,0 +1,96 @@
+--- a/scripts/DiceBets.groovy
++++ b/scripts/DiceBets.groovy
+@@ -257,11 +257,12 @@
+ def OpponentDice
+ def PlayerDice = 3
+ 
+-def OpponentRolls
++// The rolls start as lists, which the main loop sorts (patch sorted-rolls).
++def OpponentRolls = []
+ def OpponentRoundScore = 0
+ def OpponentRunningScore = 0
+ 
+-def PlayerRolls
++def PlayerRolls = []
+ def PlayerRoundScore = 0
+ def PlayerRunningScore = 0
+ 
+@@ -726,14 +727,16 @@
+     return rolls
+ }
+ 
+-def showRolls = { rolledDice, Active ->
++// Patch sorted-rolls (a semantics bridge): Groovy's sort() sorted the caller's list in place, which a TeaseScript
++// parameter, a copy, cannot do; the callers sort their rolls themselves, and these functions sort their own copy.
++def showRolls = { List rolledDice, Active ->
+     def number = rolledDice.size()
+     def RollText = ""
+     for (def dicecounter = 0; dicecounter < number; dicecounter++) {
+         RollText = RollText + rolledDice[dicecounter] + " "
+     }
+     if (number > Active) {
+-        rolledDice = rolledDice.sort()
++        rolledDice = rolledDice.sort(false)
+         rolledDice = rolledDice.reverse()
+         RollText = RollText + "\nUse the "
+         for (def dicecounter = 0; dicecounter < Active; dicecounter++) {
+@@ -744,8 +747,8 @@
+     return RollText
+ }
+ 
+-def RollScore = { rolledDice, Active ->
+-    rolledDice = rolledDice.sort()
++def RollScore = { List rolledDice, Active ->
++    rolledDice = rolledDice.sort(false)
+     rolledDice = rolledDice.reverse()
+     if (rolledDice.size() < Active) {
+         Active = rolledDice.size()
+@@ -1566,7 +1569,7 @@
+     setAvailable(randomAvail)
+ }
+ 
+-def ReRoll = { who, RolledDice, active ->
++def ReRoll = { who, List RolledDice, active ->
+     if (RolledDice.size() < active) {
+         active = RolledDice.size()
+     }
+@@ -1574,7 +1577,7 @@
+     def oldscore = RollScore(RolledDice, active)
+ 
+     def rollPrices = [150, 100, 50, 25, 10, 0]
+-    RolledDice = RolledDice.sort()
++    RolledDice = RolledDice.sort(false)
+     RolledDice = RolledDice.reverse()
+     def rerollDice = RolledDice[active - 1]
+     def rerollPrice = rollPrices[rerollDice - 1]
+@@ -1588,7 +1591,7 @@
+             PlayerRunningScore = PlayerRunningScore - oldscore
+             PlayerCredits = PlayerCredits - rerollPrice
+             def newRoll = getRandom(6) + 1
+-            RolledDice = RolledDice.sort()
++            RolledDice = RolledDice.sort(false)
+             RolledDice = RolledDice.reverse()
+             RolledDice[active - 1] = newRoll
+             PlayerRunningScore = PlayerRunningScore + RollScore(RolledDice, active)
+@@ -1606,7 +1609,7 @@
+             OpponentCredits = OpponentCredits - rerollPrice
+             showButton("OK")
+             def newRoll = getRandom(6) + 1
+-            RolledDice = RolledDice.sort()
++            RolledDice = RolledDice.sort(false)
+             RolledDice = RolledDice.reverse()
+             RolledDice[active - 1] = newRoll
+             OpponentRunningScore = OpponentRunningScore + RollScore(RolledDice, active)
+@@ -1863,10 +1866,12 @@
+             wait(2)
+         }
+         OpponentRolls = RollDice(OpponentDice)
++        OpponentRolls = OpponentRolls.sort()
+         OpponentRoundScore = RollScore(OpponentRolls, ActiveDice)
+         OpponentRunningScore = OpponentRunningScore + OpponentRoundScore
+ 
+         PlayerRolls = RollDice(PlayerDice)
++        PlayerRolls = PlayerRolls.sort()
+         PlayerRoundScore = RollScore(PlayerRolls, ActiveDice)
+         PlayerRunningScore = PlayerRunningScore + PlayerRoundScore
+         currentCheat = 0

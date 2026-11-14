@@ -1,0 +1,17 @@
+--- a/scripts/KeyholdingService.groovy
++++ b/scripts/KeyholdingService.groovy
+@@ -845,10 +845,11 @@
+ 		case "slickaorgasm":
+ 		    show("")
+ 		    setImage("KeyholdingService/20.jpg");
+-			"Jag är så kåt nu, så skall få slicka mig till on skön orgasm som räcker för oss båda."
++			// Legacy bug: these two lines were a bare text and an assignment to text, so neither was shown; show them.
++			show("Jag är så kåt nu, så skall få slicka mig till on skön orgasm som räcker för oss båda.")
+ 			wait(5)
+-		    text = "Jag blir alltid så kåt av att veta att jag får behålla din kuk inlåst.."+
+-			"\nJag vill att du slickar min fitta."
++		    show("Jag blir alltid så kåt av att veta att jag får behålla din kuk inlåst.."+
++			"\nJag vill att du slickar min fitta.")
+ 		    wait(5)
+ 		    setImage("KeyholdingService/slickaorgasm1.jpg");
+ 		    show("kom och ge mig en orgasm..")

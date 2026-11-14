@@ -1,0 +1,12 @@
+--- a/scripts/roseandmarysbaby.groovy
++++ b/scripts/roseandmarysbaby.groovy
+@@ -38,7 +38,8 @@
+ 
+ def n = getRandom(2)
+ def clothesOn = false 
+-if(n==0 && loadBoolean("clothes.nighty")) {
++// Legacy bug: the wardrobe saves the nightie as clothes.nightie (patch nightie-key).
++if(n==0 && loadBoolean("clothes.nightie")) {
+ 	show("This soft and sensitive skin should not be exposed to coldness.\n\n" +
+ 		"We put on a nighty now.\n\n")
+ 	showButton("Nigthy on.")

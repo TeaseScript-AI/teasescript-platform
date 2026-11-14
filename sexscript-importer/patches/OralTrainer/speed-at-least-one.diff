@@ -1,0 +1,13 @@
+--- a/scripts/OralTrainer/OralTrainerImpl.groovy
++++ b/scripts/OralTrainer/OralTrainerImpl.groovy
+@@ -607,7 +607,9 @@
+       DommeSays("Don't worry... we'll get that gag reflex licked in no time.", 5, false, true);
+     }
+ 
+-     m_SpeedRating = score;
++     // Patched legacy bug: an answer of 0 or less gave a speed of 0 or less, by which the sessions later divided (0)
++     // or which made their waits negative; the slowest speed is one thrust a minute.
++     m_SpeedRating = Math.max(score, 1);
+   }
+ 
+   private static void EnduranceSession()

@@ -1,0 +1,189 @@
+{
+  "reason": "One named character, Alexis (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Alexis"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/HitOrZap.groovy:152",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:317",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:380",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:423",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:444",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:457",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:477",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:485",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:493",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:523",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:560",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:590",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:594",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:603",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:615",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:632",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:650",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:667",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:679",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:682",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:701",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:733",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:813",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:893",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:950",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:994",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1002",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1007",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1015",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1029",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1056",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1067",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1081",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1135",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1155",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1175",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1189",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1250",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1253",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1283",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1291",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1320",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1362",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/HitOrZap.groovy:1383",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

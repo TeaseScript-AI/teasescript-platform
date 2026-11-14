@@ -1,0 +1,19 @@
+--- a/scripts/Lizforall/game/single/gamechoose.groovy
++++ b/scripts/Lizforall/game/single/gamechoose.groovy
+@@ -31,7 +31,7 @@
+ //--------------------------------------
+ 
+ setImage null
+-def texts = ["1. Cards","2. Dancing","3. Push ups"]
++def texts = ["1. Cards","2. Dancing","3. Push ups","4. Stop playing"]
+ def gioco = getSelectedValue("Choose the game!\n\n", texts)
+ 
+ switch (gioco) {
+@@ -39,6 +39,7 @@
+ 		break
+ 	case 1:	return "Lizforall/game/single/Ballo"
+ 		break
++	case 3:	return null
+ 	default:	return "Lizforall/game/single/Flex"
+ }
+ //--------------------------------------

@@ -1,0 +1,11 @@
+--- a/scripts/PunishmentChooser.groovy
++++ b/scripts/PunishmentChooser.groovy
+@@ -1200,7 +1200,7 @@
+ 		else {
+ 			for (i=0; i<numPunishments; i++) {
+ 				percentage = punishmentsWeightArray[i]/totalWeight*100
+-				percentage.round(2)
++//				percentage.round(2)
+ 				if (punishmentsWeightArray[i] > 0) dialog2 = dialog2 + "<b>"
+ 				dialog2 = dialog2 + percentage.round(2)+"%    -->  "+punishmentsNameArray[i]
+ 				dialog2 = dialog2 + punishmentSkipReasonArray[i] +"\n"

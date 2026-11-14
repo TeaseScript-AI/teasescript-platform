@@ -1,0 +1,11 @@
+--- a/scripts/Boobs.groovy
++++ b/scripts/Boobs.groovy
+@@ -634,7 +634,7 @@
+ case "Spank2":
+ 	playBackgroundSound("xatmspank.wav")
+ 	show("Spank fast and hard!")
+-	wait(player)
++	showButton("Done!")
+ 	block = "Boobs3"
+ 	break
+ 

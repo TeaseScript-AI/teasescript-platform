@@ -1,0 +1,62 @@
+{
+  "reason": "A visual novel narrated in the second person. Sabrina (the variable girl) speaks her lines behind a girl+\": \" prefix, Paul behind a literal \"Paul: \" prefix; a few of Sabrina's lines carry no prefix and are switched by line, and the fake remote-access screen is a system screen.",
+  "speakers": {
+    "sabrina": {
+      "firstName": "Sabrina"
+    },
+    "paul": {
+      "firstName": "Paul"
+    }
+  },
+  "default": "narrator",
+  "prefixes": [
+    {
+      "expression": "girl",
+      "file": "scripts/interesting_night.groovy",
+      "speaker": "sabrina"
+    },
+    {
+      "text": "Paul",
+      "speaker": "paul"
+    }
+  ],
+  "switches": [
+    {
+      "message": "scripts/interesting_night.groovy:196",
+      "speaker": "sabrina"
+    },
+    {
+      "at": "scripts/interesting_night.groovy:200",
+      "speaker": "sabrina"
+    },
+    {
+      "at": "scripts/interesting_night.groovy:211",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/interesting_night.groovy:256",
+      "speaker": "sabrina"
+    },
+    {
+      "at": "scripts/interesting_night.groovy:258",
+      "speaker": "sabrina"
+    },
+    {
+      "at": "scripts/interesting_night.groovy:316",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/interesting_night.groovy:323",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/interesting_night.groovy:429",
+      "speaker": "sabrina"
+    },
+    {
+      "at": "scripts/interesting_night.groovy:432",
+      "speaker": "narrator"
+    }
+  ],
+  "names": []
+}

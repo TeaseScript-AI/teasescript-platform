@@ -1,0 +1,58 @@
+--- a/scripts/ScarlettsBlackmail.groovy
++++ b/scripts/ScarlettsBlackmail.groovy
+@@ -316,6 +316,8 @@
+ else // initiationCompleted
+ {
+ 	def goddessImage = 1+getRandom(14);
++	// The chosen goddess in a variable, so the speaker data names her in this menu run too.
++	def goddess = loadString("ScarlettsBlackmail.goddess");
+ 	// Patched legacy bug: the profile is stored in chunks under scriptVersion_id_<n>, and scriptVersion_id holds their
+ 	// count, which this read as the profile; it is put together from its chunks, as at the first visit.
+ 	def countProfileChunks = receiveInteger(scriptVersion+"_"+id);
+@@ -326,7 +328,7 @@
+ 		if(nextProfileChunk != null)
+ 			profile += nextProfileChunk;
+ 	}
+-	setImage("ScarlettsBlackmail/"+loadString("ScarlettsBlackmail.goddess")+"/"+(goddessImage<10?"0":"")+goddessImage+".jpg");
++	setImage("ScarlettsBlackmail/"+goddess+"/"+(goddessImage<10?"0":"")+goddessImage+".jpg");
+ 	while(true)
+ 	{
+ 		def menuOptions = ["I want to check how much longer I have to stay locked up",
+@@ -462,7 +464,7 @@
+ 				break;
+ 		}
+ 		showButton("Back to main menu");
+-	setImage("ScarlettsBlackmail/"+loadString("ScarlettsBlackmail.goddess")+"/"+(goddessImage<10?"0":"")+goddessImage+".jpg");
++	setImage("ScarlettsBlackmail/"+goddess+"/"+(goddessImage<10?"0":"")+goddessImage+".jpg");
+ 	}
+ }
+ // TODO: enhance or reduce the time in chastity based on some tasks that the user needs to do for Goddess
+--- a/scripts/ScarlettsBlackmail_de.groovy
++++ b/scripts/ScarlettsBlackmail_de.groovy
+@@ -316,6 +316,8 @@
+ else // initiationCompleted
+ {
+ 	def goddessImage = 1+getRandom(14);
++	// The chosen goddess in a variable, so the speaker data names her in this menu run too.
++	def goddess = loadString("ScarlettsBlackmail.goddess");
+ 	// Patched legacy bug: the profile is stored in chunks under scriptVersion_id_<n>, and scriptVersion_id holds their
+ 	// count, which this read as the profile; it is put together from its chunks, as at the first visit.
+ 	def countProfileChunks = receiveInteger(scriptVersion+"_"+id);
+@@ -326,7 +328,7 @@
+ 		if(nextProfileChunk != null)
+ 			profile += nextProfileChunk;
+ 	}
+-	setImage("ScarlettsBlackmail/"+loadString("ScarlettsBlackmail.goddess")+"/"+(goddessImage<10?"0":"")+goddessImage+".jpg");
++	setImage("ScarlettsBlackmail/"+goddess+"/"+(goddessImage<10?"0":"")+goddessImage+".jpg");
+ 	while(true)
+ 	{
+ 		def menuOptions = ["Ich möchte wissen, wie lange ich noch eingesperrt bleiben muss.",
+@@ -462,7 +464,7 @@
+ 				break;
+ 		}
+ 		showButton("Zurück zum Hauptmenü");
+-	setImage("ScarlettsBlackmail/"+loadString("ScarlettsBlackmail.goddess")+"/"+(goddessImage<10?"0":"")+goddessImage+".jpg");
++	setImage("ScarlettsBlackmail/"+goddess+"/"+(goddessImage<10?"0":"")+goddessImage+".jpg");
+ 	}
+ }
+ // TODO: enhance or reduce the time in chastity based on some tasks that the user needs to do for Goddess

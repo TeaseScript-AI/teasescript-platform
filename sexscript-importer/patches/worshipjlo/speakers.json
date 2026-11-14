@@ -1,0 +1,26 @@
+{
+  "reason": "One named character, Jennifer Lopez (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Jennifer",
+      "lastName": "Lopez"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/worshipjlo.groovy:5",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/worshipjlo.groovy:19",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/worshipjlo.groovy:31",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

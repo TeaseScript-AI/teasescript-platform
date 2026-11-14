@@ -1,0 +1,12 @@
+--- a/scripts/campdrain/day7.groovy
++++ b/scripts/campdrain/day7.groovy
+@@ -448,7 +448,8 @@
+ 			showButton("Continue");
+ 			
+ 			
+-			setImage("milovana/17664/140-ecfaa463bbeb3b41b3dadba3eb3ae4715cf0f2b7.jpg");
++			// Legacy bug: Bella's closing picture came along with her closing words; this is Bryce's section, so her picture of its start.
++			setImage("milovana/17664/160-232c7c224d2c0b14dce97d84ca303314a313c959.jpg");
+ 			show("Well done, holding back like that like a good boy. I look forward to seeing more of you!");
+ 			
+ 			showButton("Continue");

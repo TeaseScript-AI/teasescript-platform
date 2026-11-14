@@ -1,0 +1,72 @@
+{
+  "reason": "Goddess Scarlett greets the player and runs the initiation; after she lets the player choose (124), the chosen goddess speaks, Scarlett (picture folder 0) or her friend Christina (folder 1), named by the variable goddess (0/1). Connection and development warnings before her first picture and the not-yet-implemented menu notices are system text.",
+  "speakers": {
+    "goddess": {
+      "title": "Goddess",
+      "firstName": "Scarlett"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/ScarlettsBlackmail.groovy:84",
+      "speaker": "goddess"
+    },
+    {
+      "at": "scripts/ScarlettsBlackmail.groovy:318",
+      "speaker": "goddess"
+    },
+    {
+      "at": "scripts/ScarlettsBlackmail.groovy:363",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/ScarlettsBlackmail.groovy:367",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/ScarlettsBlackmail.groovy:457",
+      "speaker": "goddess"
+    },
+    {
+      "entry": "scripts/ScarlettsBlackmail_de.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/ScarlettsBlackmail_de.groovy:84",
+      "speaker": "goddess"
+    },
+    {
+      "at": "scripts/ScarlettsBlackmail_de.groovy:318",
+      "speaker": "goddess"
+    },
+    {
+      "at": "scripts/ScarlettsBlackmail_de.groovy:363",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/ScarlettsBlackmail_de.groovy:367",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/ScarlettsBlackmail_de.groovy:458",
+      "speaker": "goddess"
+    }
+  ],
+  "names": [
+    {
+      "variable": "goddess",
+      "files": [
+        "scripts/ScarlettsBlackmail.groovy",
+        "scripts/ScarlettsBlackmail_de.groovy"
+      ],
+      "speaker": "goddess",
+      "values": {
+        "0": "Goddess Scarlett",
+        "1": "Goddess Christina"
+      },
+      "otherwise": "Goddess Scarlett"
+    }
+  ]
+}

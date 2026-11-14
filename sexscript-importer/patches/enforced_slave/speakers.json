@@ -1,0 +1,62 @@
+{
+  "reason": "A registration program for an online slave-training service: almost every screen is a form, menu, status or contract text without a speaker. The chosen trainer (variable dom: \"Mistress\", \"Master\" or a name the player types) speaks only the personal first-person lines of the initial task and collaring (\"become my new training slave\", \"This is how I want you\") and one rebuke in the slave-name prompt.",
+  "speakers": {
+    "trainer": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/enforced_slave.groovy:342",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_slave.groovy:344",
+      "speaker": "trainer"
+    },
+    {
+      "at": "scripts/enforced_slave.groovy:557",
+      "speaker": "trainer"
+    },
+    {
+      "at": "scripts/enforced_slave.groovy:562",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_slave.groovy:597",
+      "speaker": "trainer"
+    },
+    {
+      "at": "scripts/enforced_slave.groovy:612",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_slave.groovy:638",
+      "speaker": "trainer"
+    },
+    {
+      "at": "scripts/enforced_slave.groovy:660",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_slave.groovy:669",
+      "speaker": "trainer"
+    },
+    {
+      "at": "scripts/enforced_slave.groovy:733",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "dom",
+      "files": [
+        "scripts/enforced_slave.groovy"
+      ],
+      "speaker": "trainer",
+      "template": "{}"
+    }
+  ]
+}

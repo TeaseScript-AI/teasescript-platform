@@ -1,0 +1,17 @@
+--- a/scripts/ChastityRouletteAlt.groovy
++++ b/scripts/ChastityRouletteAlt.groovy
+@@ -170,12 +170,12 @@
+ def getHolidays = { year, month, day ->
+ 	def days = 0
+ 	// set date of holiday
+-	def holiday=new Date().copyWith(year: year,month: month-1,dayOfMonth: day)
++	def holiday=new Date(year-1900, month-1, day)
+ 	// Count days between holiday and current locked date
+ 	days=holiday-(today+(int)Total)
+ 	// If its today or already passed this year, add a year
+ 	if (days <= 0 ) {
+-		holiday=new Date().copyWith(year: year+1,month: month-1,dayOfMonth: day)
++		holiday=new Date(year+1-1900, month-1, day)
+ 		// and count again
+ 		days=holiday-(today+(int)Total)
+ 	}

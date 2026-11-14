@@ -1,0 +1,11 @@
+--- a/scripts/Domme3/Domme3Class.groovy
++++ b/scripts/Domme3/Domme3Class.groovy
+@@ -664,7 +664,7 @@
+ 						
+ 						def messages8 = ["Wag your tail for me! Show how happy you are to be my little puppy! I want to see some enthusiasm, and don't stop until I say!","Wag your tail, puppy, hard as you can. I want to see an excited little puppy. Don't stop until I say!"]
+ 						main.show(messages8[main.getRandom(2)])
+-						sleep(1000*(20+getRandom(40)))
++						sleep(1000*(20+main.getRandom(40)))
+ 						
+ 						main.show("Okay, my little puppy-dog, that's enough of that for now.")
+ 						sleep(2000)

@@ -1,0 +1,291 @@
+--- a/scripts/TheProgram/002TherapistB.groovy
++++ b/scripts/TheProgram/002TherapistB.groovy
+@@ -36,14 +36,14 @@
+ break
+ 
+ case "Page063":
+-setImage("TheMisc/cartoon/tc001.jpg");
++setImage("TheProgram/cartoon/tc001.jpg");
+ show("Riley Reid: \n\n You could become a Cum Cow.");
+ showButton("Continue");
+ block = "Page064"
+ break
+ 
+ case "Page064":
+-setImage("TheMisc/cartoon/tc002.jpg");
++setImage("TheProgram/cartoon/tc002.jpg");
+ show("Riley Reid: \n\n You could become a Sissy Maid.");
+ showButton("Continue");
+ block = "Page065"
+@@ -86,49 +86,49 @@
+ break
+ 
+ case "Page069":
+-setImage("TheMisc/cartoon/tc101.jpg");
++setImage("TheProgram/cartoon/tc101.jpg");
+ show("Riley Reid: \n\n We would begin with an initial assessment to determine how easy we can milk your precious Cum.");
+ showButton("Continue");
+ block = "Page070"
+ break
+ 
+ case "Page070":
+-setImage("TheMisc/cartoon/tc102.jpg");
++setImage("TheProgram/cartoon/tc102.jpg");
+ show("Riley Reid: \n\n We will of course need to take several samples of your Cum for testing. \n\n Extracting these samples can be intense.");
+ showButton("Continue");
+ block = "Page071"
+ break
+ 
+ case "Page071":
+-setImage("TheMisc/cartoon/tc103.jpg");
++setImage("TheProgram/cartoon/tc103.jpg");
+ show("Riley Reid: \n\n Then our specially trained engineers would train you to cum at the slightest touch.");
+ showButton("Continue");
+ block = "Page072"
+ break
+ 
+ case "Page072":
+-setImage("TheMisc/cartoon/tc104.jpg");
++setImage("TheProgram/cartoon/tc104.jpg");
+ show("Riley Reid: \n\n If you were hoping we would be extracting your delicious Cum with our mouths you will be disapointed.");
+ showButton("Continue");
+ block = "Page073"
+ break
+ 
+ case "Page073":
+-setImage("TheMisc/cartoon/tc105.jpg");
++setImage("TheProgram/cartoon/tc105.jpg");
+ show("Riley Reid: \n\n Once you are prepared a milking machine would be connected to your swollen cock at all times.");
+ showButton("Continue");
+ block = "Page074"
+ break
+ 
+ case "Page074":
+-setImage("TheMisc/cartoon/tc106.jpg");
++setImage("TheProgram/cartoon/tc106.jpg");
+ show("Riley Reid: \n\n For the first few months our employees will keep you aroused by continuously fucking your ass.");
+ showButton("Continue");
+ block = "Page075"
+ break
+ 
+ case "Page075":
+-setImage("TheMisc/cartoon/tc107.jpg");
++setImage("TheProgram/cartoon/tc107.jpg");
+ show("Riley Reid: \n\n Finally you will be upgraded to a milking station where fucking machines will replace our employees to ensure 24/7 Cum Milking.");
+ showButton("Continue");
+ block = "Page085"
+@@ -142,56 +142,56 @@
+ break
+ 
+ case "Page077":
+-setImage("TheMisc/cartoon/tc201.jpg");
++setImage("TheProgram/cartoon/tc201.jpg");
+ show("Riley Reid: \n\n We would begin with an initial assessment to determine how much of a little Bitch you are.");
+ showButton("Continue");
+ block = "Page078"
+ break
+ 
+ case "Page078":
+-setImage("TheMisc/cartoon/tc202.jpg");
++setImage("TheProgram/cartoon/tc202.jpg");
+ show("Riley Reid: \n\n Once we are sure that you are a suitable Sissy we will begin to Pump you full of Hormones.");
+ showButton("Continue");
+ block = "Page079"
+ break
+ 
+ case "Page079":
+-setImage("TheMisc/cartoon/tc203.jpg");
++setImage("TheProgram/cartoon/tc203.jpg");
+ show("Riley Reid: \n\n It will be fun to watch them shape your body into something more feminine.");
+ showButton("Continue");
+ block = "Page080"
+ break
+ 
+ case "Page080":
+-setImage("TheMisc/cartoon/tc204.jpg");
++setImage("TheProgram/cartoon/tc204.jpg");
+ show("Riley Reid: \n\n A new fitness routine will also help beat you into the desired shape.");
+ showButton("Continue");
+ block = "Page081"
+ break
+ 
+ case "Page081":
+-setImage("TheMisc/cartoon/tc205.jpg");
++setImage("TheProgram/cartoon/tc205.jpg");
+ show("Riley Reid: \n\n Of course you will not be ready until your body can impress our clients.");
+ showButton("Continue");
+ block = "Page082"
+ break
+ 
+ case "Page082":
+-setImage("TheMisc/cartoon/tc206.jpg");
++setImage("TheProgram/cartoon/tc206.jpg");
+ show("Riley Reid: \n\n Once you are acceptable your life as a Sissy Maid can begin. \n\n Your days will be spent cleaning.");
+ showButton("Continue");
+ block = "Page083"
+ break
+ 
+ case "Page083":
+-setImage("TheMisc/cartoon/tc207.jpg");
++setImage("TheProgram/cartoon/tc207.jpg");
+ show("Riley Reid: \n\n Your evenings spent serving and entertaining at parties.");
+ showButton("Continue");
+ block = "Page084"
+ break
+ 
+ case "Page084":
+-setImage("TheMisc/cartoon/tc208.jpg");
++setImage("TheProgram/cartoon/tc208.jpg");
+ show("Riley Reid: \n\n Your nights spent pleasuring cock.");
+ showButton("Continue");
+ block = "Page085"
+@@ -339,7 +339,7 @@
+ break
+ 
+ case "Page104":
+-setImage("TheMisc/cartoon/ta000.jpg");
++setImage("TheProgram/cartoon/ta000.jpg");
+ if(getBoolean("Riley Reid: \n\n Do you enjoy having your ass spanked?",
+ 	"No Mistress", "Yes Mistress")) {
+ 	block = "Page105"
+--- a/scripts/TheProgram/002TherapistC.groovy
++++ b/scripts/TheProgram/002TherapistC.groovy
+@@ -78,7 +78,7 @@
+ break
+ 
+ case "Page116":
+-setImage("TheMisc/cartoon/ta001.jpg");
++setImage("TheProgram/cartoon/ta001.jpg");
+ if(getBoolean("Riley Reid: \n\n Would you enjoy your Mistress burying her dildos into your ass?",
+ 	"No Miss", "Yes Miss")) {
+ 	block = "Page120"
+@@ -89,7 +89,7 @@
+ 	}
+ 
+ case "Page117":
+-setImage("TheMisc/cartoon/ta002.jpg");
++setImage("TheProgram/cartoon/ta002.jpg");
+ if(getBoolean("Riley Reid: \n\n Would you enjoy her training your ass to take larger and larger strap-ons?",
+ 	"No Miss", "Yes Miss")) {
+ 	block = "Page120"
+@@ -100,7 +100,7 @@
+ 	}
+ 
+ case "Page118":
+-setImage("TheMisc/cartoon/ta003.jpg");
++setImage("TheProgram/cartoon/ta003.jpg");
+ if(getBoolean("Riley Reid: \n\n Would you enjoy pleasing your Mistress by using that training to compete with other slaves?",
+ 	"No Miss", "Yes Miss")) {
+ 	block = "Page120"
+@@ -111,7 +111,7 @@
+ 	}
+ 
+ case "Page119":
+-setImage("TheMisc/cartoon/ta004.jpg");
++setImage("TheProgram/cartoon/ta004.jpg");
+ show("Riley Reid: \n\n I think you could be an excellent exhibition slave. \n\n While you are fingering that ass try to close your hand and fist yourself.");
+ showButton("Continue");
+ block = "Page121"
+@@ -125,7 +125,7 @@
+ break
+ 
+ case "Page121":
+-setImage("TheMisc/cartoon/ta005.jpg");
++setImage("TheProgram/cartoon/ta005.jpg");
+ if(getBoolean("Riley Reid: \n\n Would you enjoy being fucked in the ass by another Submissive?",
+ 	"No Miss", "Yes Miss")) {
+ 	block = "Page125"
+@@ -136,7 +136,7 @@
+ 	}
+ 
+ case "Page122":
+-setImage("TheMisc/cartoon/ta006.jpg");
++setImage("TheProgram/cartoon/ta006.jpg");
+ if(getBoolean("Riley Reid: \n\n Would you enjoy it more if a Mistress was fucking him while he fucked you?",
+ 	"No Miss", "Yes Miss")) {
+ 	block = "Page125"
+@@ -147,7 +147,7 @@
+ 	}
+ 
+ case "Page123":
+-setImage("TheMisc/cartoon/ta007.jpg");
++setImage("TheProgram/cartoon/ta007.jpg");
+ if(getBoolean("Riley Reid: \n\n Would you enjoy him sucking your cock as a thank you while a Mistress fucked his ass?",
+ 	"No Miss", "Yes Miss")) {
+ 	block = "Page125"
+@@ -158,7 +158,7 @@
+ 	}
+ 
+ case "Page124":
+-setImage("TheMisc/cartoon/ta008.jpg");
++setImage("TheProgram/cartoon/ta008.jpg");
+ show("Riley Reid: \n\n I know a Mistress who would enjoy tying two Slaves together while she and a friend fuck their asses.");
+ showButton("Continue");
+ block = "Page126"
+@@ -172,7 +172,7 @@
+ break
+ 
+ case "Page126":
+-setImage("TheMisc/cartoon/ta009.jpg");
++setImage("TheProgram/cartoon/ta009.jpg");
+ if(getBoolean("Riley Reid: \n\n Would you enjoy being fucked by a Sadistic Shemales cock?",
+ 	"No Miss", "Yes Miss")) {
+ 	block = "Page130"
+@@ -183,7 +183,7 @@
+ 	}
+ 
+ case "Page127":
+-setImage("TheMisc/cartoon/ta010.jpg");
++setImage("TheProgram/cartoon/ta010.jpg");
+ if(getBoolean("Riley Reid: \n\n Would you enjoy a shemale fucking your ass while another fucked your throat?",
+ 	"No Miss", "Yes Miss")) {
+ 	block = "Page130"
+@@ -194,7 +194,7 @@
+ 	}
+ 
+ case "Page128":
+-setImage("TheMisc/cartoon/ta011.jpg");
++setImage("TheProgram/cartoon/ta011.jpg");
+ if(getBoolean("Riley Reid: \n\n Would you enjoy sucking a shemale cock every day?",
+ 	"No Miss", "Yes Miss")) {
+ 	block = "Page130"
+@@ -205,7 +205,7 @@
+ 	}
+ 
+ case "Page129":
+-setImage("TheMisc/cartoon/ta012.jpg");
++setImage("TheProgram/cartoon/ta012.jpg");
+ show("Riley Reid: \n\n Excelent. \n\n I know three Shemale Femdoms who meet for food three times a day \n\n They are always looking for a new cocksucker to service them under the table.");
+ showButton("Continue");
+ block = "Page131"
+@@ -280,7 +280,7 @@
+ 	}
+ 
+ case "Page138":
+-setImage("TheMisc/cartoon/ts001.jpg");
++setImage("TheProgram/cartoon/ts001.jpg");
+ show("Riley Reid: \n\n Yes I can picture you as a little Sissy Slut");
+ showButton("Continue");
+ return "TheProgram/002TherapistD";
+--- a/scripts/TheProgram/002TherapistD.groovy
++++ b/scripts/TheProgram/002TherapistD.groovy
+@@ -135,7 +135,7 @@
+ break
+ 
+ case "Page154":
+-setImage("TheMisc/toys/dildo01.jpg");
++setImage("TheProgram/toys/dildo01.jpg");
+ if(getBoolean("Riley Reid: \n\n Do you have a vibrating dildo, "+loadString("user.slave_first")+""+loadString("user.slave_last")+"?",
+ 	"No Mistress", "Yes Mistress")) {
+ 	block = "Page_not_ready"
+--- a/scripts/TheProgram/002TherapistE.groovy
++++ b/scripts/TheProgram/002TherapistE.groovy
+@@ -71,7 +71,7 @@
+ break
+ 
+ case "Page179":
+-setImage("TheMisc/toys/fleshlight01.jpg");
++setImage("TheProgram/toys/fleshlight01.jpg");
+ if(getBoolean("Riley Reid: \n\n Do you have a fleshlight, "+loadString("user.slave_first")+""+loadString("user.slave_last")+"?",
+ 	"No Mistress", "Yes Mistress")) {
+ 	block = "Page_not_ready"

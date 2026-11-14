@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "toy-keys",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the clamp task reads toys.nippleclamps; the toy chest saves nipple clamps as toys.nipple_clamps, and nothing saves the other spelling, so only clothespins counted. Read toys.nipple_clamps.",
+      "diff": "toy-keys.diff"
+    }
+  ]
+}

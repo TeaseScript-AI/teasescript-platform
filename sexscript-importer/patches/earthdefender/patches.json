@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "arcade-lose-reset",
+      "layer": "source",
+      "category": "e",
+      "reason": "Starting an Arcade run resets gameWon and gameOver but not loseWave, which only a defeat sets (killPlayer); after a lost run, a second run in the same session kept loseWave true, so every wave skipped its combat and the game could not be won. Reset loseWave with the other per-game flags.",
+      "diff": "arcade-lose-reset.diff"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+--- a/scripts/Banjo/smackedforcash.groovy
++++ b/scripts/Banjo/smackedforcash.groovy
+@@ -196,15 +196,15 @@
+ def spankSound = "smack"
+ def spankSoundLimit = 4
+ def spankWord = "spanks"
+-def implement1
+-def implement2
+-def implement3
+-def implement4
+-def implement5
+-def implement6
+-def implement7
+-def implement8
+-def implement9
++def implement1 = ""
++def implement2 = ""
++def implement3 = ""
++def implement4 = ""
++def implement5 = ""
++def implement6 = ""
++def implement7 = ""
++def implement8 = ""
++def implement9 = ""
+ def implementArray
+ def envelopeNumber
+ def envelopeArray

@@ -1,0 +1,273 @@
+{
+  "reason": "Dungeon RPG. Characters speak through the dialog helpers, which print \"[TALKER]\\n'line'\" with a literal upper-case tag (SASHA, VAN GWYNETH, QUEEN LANDRIA, FELICIA, XEVANIA, KARIN, PIRI, DHANIL, MAYLEE, the harpies LIZZY/IZZY/DIZZY, MUGGER, BANDIT, BANDIT LEADER, MERMAID, GUARD/GUARD 1/GUARD 2, VOICE), so each line is attributed by its bracket tag; the shopkeepers' menus use the same form via shopSeller. One unnamed adventurer speaks inside a narration (3424). showNarration texts and the story passages are narration; menus, rooms, combat, loot, shops, saves and settings are system text.",
+  "speakers": {
+    "sasha": {
+      "firstName": "Sasha"
+    },
+    "gwyneth": {
+      "firstName": "Van",
+      "lastName": "Gwyneth"
+    },
+    "landria": {
+      "title": "Queen",
+      "firstName": "Landria"
+    },
+    "felicia": {
+      "firstName": "Felicia"
+    },
+    "xevania": {
+      "firstName": "Xevania"
+    },
+    "karin": {
+      "firstName": "Karin"
+    },
+    "piri": {
+      "firstName": "Piri"
+    },
+    "dhanil": {
+      "firstName": "Dhanil"
+    },
+    "maylee": {
+      "firstName": "Maylee"
+    },
+    "lizzy": {
+      "firstName": "Lizzy"
+    },
+    "izzy": {
+      "firstName": "Izzy"
+    },
+    "dizzy": {
+      "firstName": "Dizzy"
+    },
+    "mugger": {
+      "displayName": "Mugger"
+    },
+    "bandit": {
+      "displayName": "Bandit"
+    },
+    "banditleader": {
+      "displayName": "Bandit Leader"
+    },
+    "mermaid": {
+      "displayName": "Mermaid"
+    },
+    "guard": {
+      "displayName": "Guard"
+    },
+    "guard1": {
+      "displayName": "Guard 1"
+    },
+    "guard2": {
+      "displayName": "Guard 2"
+    },
+    "voice": {
+      "displayName": "Voice"
+    },
+    "adventurer": {
+      "displayName": "Adventurer"
+    },
+    "talker": {
+      "displayName": "Character"
+    }
+  },
+  "default": "system",
+  "prefixes": [
+    {
+      "text": "SASHA",
+      "speaker": "sasha",
+      "form": "[{}]\n"
+    },
+    {
+      "text": "BANDIT",
+      "speaker": "bandit",
+      "form": "[{}]\n"
+    },
+    {
+      "text": "MERMAID",
+      "speaker": "mermaid",
+      "form": "[{}]\n"
+    },
+    {
+      "text": "VOICE",
+      "speaker": "voice",
+      "form": "[{}]\n"
+    },
+    {
+      "expression": "talker",
+      "file": "scripts/Banjo/dungeoncrawl.groovy",
+      "form": "[{}]\n",
+      "speaker": "talker"
+    }
+  ],
+  "switches": [
+    {
+      "entry": "scripts/Banjo/spankedherorpg.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/dungeoncrawl.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/dungeoncrawl.groovy:setImageRoom",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/dungeoncrawl.groovy:playerTurn",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/dungeoncrawl.groovy:enemyTurn",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/dungeoncrawl.groovy:showStatus",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:404",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:404",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:3223",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:3226",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:3230",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:3230",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:3242",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:3242",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:3410",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:3421",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:3424",
+      "speaker": "adventurer"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:3424",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:3778",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:3778",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:3781",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:3781",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:4049",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:4049",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:4054",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:4054",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:5991",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:5991",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:7582",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:7630",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:8256",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:8256",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:8262",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:8262",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:8452",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:8452",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:10460",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:10460",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:10466",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:10466",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/dungeoncrawl.groovy:10563",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/Banjo/dungeoncrawl.groovy:10563",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

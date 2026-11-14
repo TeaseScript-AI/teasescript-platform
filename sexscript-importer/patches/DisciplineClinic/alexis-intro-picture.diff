@@ -1,0 +1,13 @@
+--- a/scripts/DisciplineClinic/DisciplineClinicMain.groovy
++++ b/scripts/DisciplineClinic/DisciplineClinicMain.groovy
+@@ -555,8 +555,9 @@
+ //Mistress info
+ def mistressInfo = {
+ 	if(mistress=="Alexis") {
+-		show("I will put you in your place and teach you a lesson... \n\nYou have no idea how much I love spanking "+menWomen+"! ")
++		// Legacy bug: Alexis's first words came before her picture; set it first, as for the other mistresses.
+ 		setImageIntro()
++		show("I will put you in your place and teach you a lesson... \n\nYou have no idea how much I love spanking "+menWomen+"! ")
+ 		showButton("-->")
+ 		setImageIntro()
+ 		show("Are you ready for this, bad "+boyGirl+"?\n\n"+

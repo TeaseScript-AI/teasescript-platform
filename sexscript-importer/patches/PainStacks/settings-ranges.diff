@@ -1,0 +1,47 @@
+--- a/scripts/PainStacks.groovy
++++ b/scripts/PainStacks.groovy
+@@ -391,17 +391,21 @@
+     waitTimeRandom = loadBoolean(SCRIPTNAME + ".waitTimeRandom")
+     painLevelHidden = loadBoolean(SCRIPTNAME + ".painLevelHidden")
+ 
+-    painLevelRange.clear()
+-    shockTimeRange.clear()
+-    waitTimeRange.clear()
+-    glitchesRange.clear()
++    def levels = []
+     for (int i = 0; i <= 2; i++) {
+-        painLevelRange.add(loadInteger(SCRIPTNAME + ".painLevelRange." + i))
++        def level = loadInteger(SCRIPTNAME + ".painLevelRange." + i)
++        if (level != null) levels.add(level)
+     }
++    def shockTimes = []
++    def waitTimes = []
++    def glitches = []
+     for (int i = 0; i <= 1; i++) {
+-        shockTimeRange.add(loadFloat(SCRIPTNAME + ".shockTimeRange." + i))
+-        waitTimeRange.add(loadFloat(SCRIPTNAME + ".waitTimeRange." + i))
+-        glitchesRange.add(loadInteger(SCRIPTNAME + ".glitchesRange." + i))
++        def shockTime = loadFloat(SCRIPTNAME + ".shockTimeRange." + i)
++        if (shockTime != null) shockTimes.add(shockTime)
++        def waitTime = loadFloat(SCRIPTNAME + ".waitTimeRange." + i)
++        if (waitTime != null) waitTimes.add(waitTime)
++        def glitch = loadInteger(SCRIPTNAME + ".glitchesRange." + i)
++        if (glitch != null) glitches.add(glitch)
+     }
+ 
+     List<String> estimNames = getEstimFileNames()
+@@ -423,10 +427,10 @@
+     if (shockTimeRandom == null) shockTimeRandom = SHOCKTIMERANDOM
+     if (waitTimeRandom == null) waitTimeRandom = WAITTIMERANDOM
+     if (painLevelHidden == null) painLevelHidden = PAINLEVELHIDDEN
+-    if (painLevelRange.any { e -> e == null }) painLevelRange = PAINLEVELRANGE
+-    if (shockTimeRange.any { e -> e == null }) shockTimeRange = SHOCKTIMERANGE
+-    if (waitTimeRange.any { e -> e == null }) waitTimeRange = WAITTIMERANGE
+-    if (glitchesRange.any { e -> e == null }) glitchesRange = GLITCHESRANGE
++    painLevelRange = levels.size() == 3 ? levels : PAINLEVELRANGE
++    shockTimeRange = shockTimes.size() == 2 ? shockTimes : SHOCKTIMERANGE
++    waitTimeRange = waitTimes.size() == 2 ? waitTimes : WAITTIMERANGE
++    glitchesRange = glitches.size() == 2 ? glitches : GLITCHESRANGE
+     if (shockType == null) shockType = SHOCKTYPES[0]
+ }
+ 

@@ -1,0 +1,25 @@
+--- a/scripts/Banjo/gameofchance_ee.groovy
++++ b/scripts/Banjo/gameofchance_ee.groovy
+@@ -366,6 +366,11 @@
+ 		noMatchSpanks = getInteger("You must set the number of spanks to at least 1.\n\n(default is 4)",4)
+ 	}
+ 	jokerChance = getInteger("Enter the number of Jokers you want in the deck.\n\n(default is 4, current is "+jokerChance+")",4)
++	// Legacy bug: a negative number of Jokers made a deck too small for its cards; ask again, as for the other
++	// numbers (patch reroll-values).
++	while(jokerChance<0) {
++		jokerChance = getInteger("You must set the number of Jokers to at least 0.\n\n(default is 4)",4)
++	}
+ 	if(jokerChance>0) {
+ 		jokerSpanks = getInteger("Enter the number of spanks you get when a Joker is drawn.\n\n(default is 10, current is "+jokerSpanks+")",10)
+ 		while(jokerSpanks<1) {
+@@ -521,7 +526,9 @@
+ 		suit = randomCard / 13
+ 		while(dealt[suit*13+cardValue])
+ 		{
+-			cardValue = getRandom(14)
++			// Legacy bug: getRandom(14), left from the 56-card deck, can give the value 13 and so the slot 52, past a deck
++			// without enough jokers; a redraw takes one of the 13 values (patch reroll-values).
++			cardValue = getRandom(13)
+ 			suit = getRandom(4)
+ 		}
+ 		dealt[suit*13+cardValue] = true

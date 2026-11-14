@@ -1,0 +1,62 @@
+def text = "Start"
+text += " and more"
+def menu = ["Back"]
+def extra = ["One", "Two"]
+menu = ["Back"] + extra + ["Last"]
+menu += extra
+menu << "Tail"
+def n = 1
+n += 2
+def date = new Date()
+def month = date[Calendar.MONTH] + 1
+def hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+def dow = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+def dayOfYear = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+def sameDay = date[Calendar.DAY_OF_YEAR]
+def days = Math.round(n / 2)
+if (hour > 22) System.exit(0)
+// Java date patterns: the ISO date is a machine format, other patterns are shown in the player's local form.
+def stamp = new Date().format("yyyy-MM-dd")
+show("Status of " + stamp + " at " + new Date().format("HH:mm") + ", day " + dayOfYear + " " + sameDay)
+// A pattern of number fields that is no whole date or time is written from the fields as Java wrote them.
+def today = new java.text.SimpleDateFormat("dd/MM").format(new Date())
+if (today == "24/12") show("Merry Christmas")
+// A date built from Unix seconds is the current moment minus the seconds since then, shown in the local date form.
+def lockedSince = loadInteger("training.lockedSince")
+if (lockedSince == null) lockedSince = 1790000000
+show("Locked since " + new Date((long) lockedSince * 1000).format("dd, MMM, yyyy"))
+// A list + a value that may be a list or one element appends at runtime what Groovy appended.
+def pickAll = { impl -> ([] + impl).size() }
+show("Picked " + pickAll(["paddle", "cane"]) + " " + pickAll("belt"))
+// Groovy text * n and list * n repeat the text or the list's elements, a fractional n cut to whole times.
+def chant = ["toy"] * 2 + ["pet"]
+def laughs = 2.5
+show(chant.join(" ") + " " + "ha" * laughs)
+// The sum of a list that may be empty adds up in a whole number, and is null without elements, as Groovy's was.
+def dayCount = getInteger("How many days?", 0)
+def total = (0..<dayCount).collect { day -> day * 2 }.sum()
+show("Total " + total)
+// A Date's format(pattern) shows a time or date in the player's local form, and number fields exactly (Farkel's denial).
+def denialEnd = Calendar.getInstance()
+denialEnd.add(Calendar.MINUTE, 30)
+def until = denialEnd.getTime()
+show("Wait until " + until.format("HH:mm") + " " + until.format("dd/MM"))
+// A formatter in a variable writes a date the script saves or parses again exactly, and parses it back, as jewell counts
+// the days since it last ran.
+def dayFormat = new java.text.SimpleDateFormat("y/M/d")
+def lastRun = loadString("game.lastRun")
+def thisRun = dayFormat.format(new Date())
+save("game.lastRun", thisRun)
+if (lastRun != null && dayFormat.parse(thisRun) - dayFormat.parse(lastRun) > 2) show("You stayed away too long.")
+// So is a text the script saves through a copy of it.
+def savedDay = new Date().format("y-M-d")
+def savedCopy = savedDay
+save("game.savedDay", savedCopy)
+// A Date the script moves by days stays a Date: its month counts from 0, and `date` is its day of the month.
+def tomorrow = new Date()
+tomorrow = tomorrow + 1
+if (tomorrow.month + 1 == 10 && tomorrow.date == 31) show("Halloween tomorrow")
+// A conditional of the moved Date or a text holds either.
+def visible = getRandom(2) == 0
+def counted = getRandom(2) == 0
+show("Until " + (visible ? (tomorrow + 2) : "?") + ", " + (counted ? 2 : "some") + " days")

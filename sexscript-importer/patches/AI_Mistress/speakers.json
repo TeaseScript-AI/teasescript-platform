@@ -1,0 +1,53 @@
+{
+  "reason": "One LLM-driven Mistress whose persona the player picks at run time from scripts/AI_Mistress/personalities/*.txt (Miss Emily, Miss Jeniffer, Liz, Miss Pixy), shown by the chosen file's personalityName from line 707 on; she speaks only through showAI (her generated replies) and ask (her generated questions). Menus, settings, task cards, camera prompts and session screens are system text.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/AI_Mistress.groovy:stroke",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/AI_Mistress.groovy:edge",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/AI_Mistress.groovy:spank",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/AI_Mistress.groovy:ask",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/AI_Mistress.groovy:ai_takePic",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/AI_Mistress.groovy:showAI",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/AI_Mistress.groovy:fetchStreamedResponse",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/AI_Mistress.groovy:465",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/AI_Mistress.groovy:574",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/AI_Mistress.groovy:showMainMenu",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

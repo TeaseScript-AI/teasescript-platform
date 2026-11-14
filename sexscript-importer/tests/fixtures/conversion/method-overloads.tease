@@ -1,0 +1,9 @@
+// An object method overload that only casts its parameters for another overload of the same name and arity: the one
+// converted function casts them itself.
+function steps(count, labelValue) {
+  count = toInteger(count)
+  save count * 2 as labelValue
+}
+steps(2.5, "steps")
+steps(3, "more")
+exit

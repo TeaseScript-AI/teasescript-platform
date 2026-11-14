@@ -1,0 +1,8 @@
+{
+  "reason": "No character speaks: a game, menu, utility or demo, so all text is system text.",
+  "speakers": {},
+  "default": "system",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

@@ -1,0 +1,14 @@
+// MIGRATION INCOMPLETE: 2 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+// Date texts whose Java pattern TeaseScript cannot match stay TODOs: a formatter's parse() of a month name, and the
+// current date with names as text the script saves.
+let monthFormat = "dd-MMM-yyyy"
+// TODO SX_DYNAMIC_OR_OBJECT_CALL line 4: Object/dynamic Groovy method calls are not lowered by the first slice.
+// | def parsedMonth = monthFormat.parse("02-Oct-2026")
+let parsedMonth = null
+// TODO SX_DATE_FORMAT line 5: The script saves or parses this date text again, so it needs Java's exact pattern "dd-MMM-yyyy", whose names or time zone TeaseScript does not write; build the text from the date fields.
+// | def namedDay = new Date().format("dd-MMM-yyyy")
+let namedDay = null
+save namedDay as "game.namedDay"
+exit

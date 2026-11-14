@@ -1,0 +1,50 @@
+{
+  "reason": "One unnamed Domme (\"I'm your Domme for strict domestic discipline\") speaks every message of every reachable script; the player calls her Miss. Settings can swap her picture pack (black or red latex Domme), not her role. The SMinder dating-site tease inside SMinder.groovy sits after an unconditional top-level return and never runs; its app screens are system and its matched women (Lydia Lucious, Kinky Kimberley and her slave, Lady Heather, Miss Dolly) are attributed page by page for completeness. The unreachable old exercise script has its own personal trainer.",
+  "speakers": {
+    "domme": {
+      "displayName": "Domme"
+    },
+    "trainer": {
+      "displayName": "Trainer"
+    },
+    "lydia": {
+      "firstName": "Lydia",
+      "lastName": "Lucious"
+    },
+    "kimberley": {
+      "displayName": "Kinky Kimberley"
+    },
+    "kimberleySlave": {
+      "displayName": "Kimberley's slave"
+    },
+    "heather": {
+      "title": "Lady",
+      "firstName": "Heather"
+    },
+    "dolly": {
+      "title": "Miss",
+      "firstName": "Dolly"
+    }
+  },
+  "default": "domme",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/Domme.groovy",
+      "speaker": "domme"
+    },
+    {
+      "entry": "scripts/Domme/popup.groovy",
+      "speaker": "domme"
+    },
+    {
+      "entry": "scripts/SMinder.groovy",
+      "speaker": "domme"
+    },
+    {
+      "entry": "scripts/Domme/exerciseOld.groovy",
+      "speaker": "trainer"
+    }
+  ],
+  "names": []
+}

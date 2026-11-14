@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "settings-debug",
+      "layer": "source",
+      "category": "b",
+      "reason": "A debug line shows the settings map received from the online service as text; TeaseScript cannot show an object in a text, and the next lines save the same map anyway. The debug line is dropped.",
+      "diff": "settings-debug.diff"
+    }
+  ]
+}

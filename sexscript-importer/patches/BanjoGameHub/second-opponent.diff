@@ -1,0 +1,13 @@
+--- a/scripts/Banjo/penaltybox.groovy
++++ b/scripts/Banjo/penaltybox.groovy
+@@ -1038,7 +1038,9 @@
+ 			pickOpponent2 = getRandom(opponentArray.size())
+ 			if(pickOpponent2==pickOpponent1) {
+ 				pickOpponent2 = pickOpponent2 + 1
+-				if(pickOpponent2>opponentArray.size()) {
++				// Legacy bug: where the first pick was the last opponent, the second, one further, read past the list (null in
++				// Groovy); it takes the opponent before the first instead (patch second-opponent).
++				if(pickOpponent2>=opponentArray.size()) {
+ 					pickOpponent2 = pickOpponent2 - 2
+ 				}
+ 			}

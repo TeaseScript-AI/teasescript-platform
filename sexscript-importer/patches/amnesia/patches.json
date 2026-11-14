@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "vibrating-dildo-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the start checks loadFirstTrue('toys.dildo', 'vibrating_dildo'); the toy chest saves the vibrating dildo as toys.vibrating_dildo, and nothing saves vibrating_dildo, so a player with only a vibrating dildo was sent away. Read toys.vibrating_dildo.",
+      "diff": "vibrating-dildo-key.diff"
+    }
+  ]
+}

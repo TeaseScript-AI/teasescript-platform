@@ -1,0 +1,277 @@
+{
+  "reason": "One owner (Mistress or Master, chosen in setup, with an optional personal name) speaks every in-character line of the chastity program; the owner's shown name follows owner_title + owner_name (owner_name is \" \" or \" Name\"), as the text shows it. Setup, menus, warnings, privacy FAQ, photo checks, uploads, stats, server fail captions and error screens are system text.",
+  "speakers": {
+    "owner": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/enforced_chastity.groovy:57",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:156",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:158",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:175",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:183",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:195",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:210",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:236",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:256",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:261",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:265",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:270",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:272",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:282",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:291",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:312",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:324",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:332",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:377",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:440",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:457",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:467",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:487",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:547",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:557",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:570",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:572",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:581",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:584",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:586",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:597",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:599",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:608",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:612",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:624",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:633",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:646",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:651",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:655",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:666",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:692",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:706",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:774",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:804",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:806",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:809",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:819",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:828",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:831",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:849",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:859",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:861",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:864",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:875",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:884",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:886",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:891",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:894",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:903",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:906",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/enforced_chastity.groovy:913",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "owner_title",
+      "files": [
+        "scripts/enforced_chastity.groovy"
+      ],
+      "speaker": "owner",
+      "template": "{}"
+    },
+    {
+      "variable": "owner_name",
+      "after": [
+        "scripts/enforced_chastity.groovy:424"
+      ],
+      "files": [
+        "scripts/enforced_chastity.groovy"
+      ],
+      "speaker": "owner",
+      "template": "{owner_title}{}"
+    }
+  ]
+}

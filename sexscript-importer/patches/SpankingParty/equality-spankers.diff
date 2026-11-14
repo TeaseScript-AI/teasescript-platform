@@ -1,0 +1,14 @@
+--- a/scripts/Banjo/spankparty.groovy
++++ b/scripts/Banjo/spankparty.groovy
+@@ -2617,6 +2617,11 @@
+ 
+ def loadParty = {
+ 	spankers = loadInteger("Banjo.spankparty.spankers")
++	// Legacy bug: a party saved in equality mode keeps its number of guests, also where the player list loaded now has
++	// fewer players, so setColors ran out of colours and read colour positions below 0; equality mode has one guest per
++	// player (patch equality-spankers).
++	if(loadBoolean("Banjo.spankparty.equalityMode")==true && spankers>players)
++		spankers = players
+ 	spankersTemp = spankers
+ 	spanker1 = loadString("Banjo.spankparty.spanker1")
+ 	spanker2 = loadString("Banjo.spankparty.spanker2")

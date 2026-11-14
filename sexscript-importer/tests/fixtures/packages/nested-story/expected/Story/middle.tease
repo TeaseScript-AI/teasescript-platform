@@ -1,0 +1,2 @@
+say prose "The middle part.", instant
+goto "Story/end.tease"

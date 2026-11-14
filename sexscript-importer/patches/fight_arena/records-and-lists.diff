@@ -1,0 +1,138 @@
+--- a/scripts/fight_arena.groovy
++++ b/scripts/fight_arena.groovy
+@@ -134,20 +134,8 @@
+             "attSkillTarget", "defSkillArms", "defSkillLegs", "defSkillBody", "defSkillTarget"]  // for opponents and coach, will be displayed to user as "unknown"
+ def SKILL_LIST = ["recupSkill", "attSkillArms", "attSkillLegs", "attSkillBody",                    // List of skills
+             "attSkillTarget", "defSkillArms", "defSkillLegs", "defSkillBody", "defSkillTarget"]
+-def ATTRIBUTES_TO_DISPLAY = [[name:           "Name",                   // Fighter attributes displayed to user (others remain hidden)
+-                              you:            "This is",                // organized into groups for display purposes
+-                              dopeLevel:      "Dope reduces speed by"],
+-                             [speed:          "Speed (innate)",
+-                              strength:       "Strength (innate)",
+-                              recupSkill:     "Recuperating Skill"],
+-                             [attSkillArms:   "Punching Skill",
+-                              attSkillLegs:   "Kicking Skill",
+-                              attSkillBody:   "Bodyslamming Skill",
+-                              attSkillTarget: "Target Skill"],
+-                             [defSkillArms:   "Punching Defense Skill",
+-                              defSkillLegs:   "Kicking Defense Skill",
+-                              defSkillBody:   "Bodyslamming Defense Skill",
+-                              defSkillTarget:  "Target Defense Skill"]]
++def ATTRIBUTE_LABELS = [name: "Name", you: "This is", dopeLevel: "Dope reduces speed by", speed: "Speed (innate)", strength: "Strength (innate)", recupSkill: "Recuperating Skill", attSkillArms: "Punching Skill", attSkillLegs: "Kicking Skill", attSkillBody: "Bodyslamming Skill", attSkillTarget: "Target Skill", defSkillArms: "Punching Defense Skill", defSkillLegs: "Kicking Defense Skill", defSkillBody: "Bodyslamming Defense Skill", defSkillTarget: "Target Defense Skill"]   // Fighter attributes displayed to user (others remain hidden)
++def ATTRIBUTES_TO_DISPLAY = [["name", "you", "dopeLevel"], ["speed", "strength", "recupSkill"], ["attSkillArms", "attSkillLegs", "attSkillBody", "attSkillTarget"], ["defSkillArms", "defSkillLegs", "defSkillBody", "defSkillTarget"]]   // organized into groups for display purposes
+ def TOURNAMENT_STATUS = [not_in:                 "Not currently in tournament",      // Where the user is in the game play
+                          practicing:             "Practicing",
+                          awaiting_fight_start:   "Waiting for fight time",
+@@ -160,7 +148,8 @@
+                               defSkills: "find out the defense skills of"]
+ def FAVOR_ADMINISTER_DOPE = [administer_dope: "administer dope to"]
+ def FAVOR_GET_DOPE = [get_dope: "give me a dope capsule"]
+-def FAVOR_CHOICE = STARTING_FAVOR_CHOICES + FAVOR_ADMINISTER_DOPE + FAVOR_GET_DOPE
++def FAVOR_CHOICE = [ssr: STARTING_FAVOR_CHOICES.ssr, attSkills: STARTING_FAVOR_CHOICES.attSkills, defSkills: STARTING_FAVOR_CHOICES.defSkills,
++                    administer_dope: FAVOR_ADMINISTER_DOPE.administer_dope, get_dope: FAVOR_GET_DOPE.get_dope]
+ def PUNISHMENT_UNITS = 10    // Number of units of punishment user will receive in each punishment session
+ def DOPE_CAPSULES_PER_LEVEL = [1: 1,     // Number of dope capsules which defeated computer opponent will have to offer at each level
+                                2: 1,     // Also used to determine how much dope a computer player administers to an opponent
+@@ -653,8 +642,8 @@
+         result += "<tr style=\"border:1px solid black\"><td>"
+         keyList = []
+         for ( attrib in group ) {                                            // Attribute labels
+-            result += attrib.value + "<br>"
+-            keyList += attrib.key
++            result += ATTRIBUTE_LABELS[attrib] + "<br>"
++            keyList += attrib
+         }
+         iter = 0
+         for (fighter in fighterList) {                                                       // Attribute values for each fighter
+@@ -1183,7 +1172,7 @@
+     def rightRange = (x - rangeSize + 1) .. x                        // the numbers of the fighters in the right branch of the tree
+     def range
+     def branch
+-    if (fighter.num in leftRange) {
++    if (fighter.num in ((x - doubleRangeSize + 1) .. (x - rangeSize))) {
+         range = rightRange           // if our fighter is in the left branch of the tree then opponent is the winner of the right branch
+         branch = "right"
+     } else {
+@@ -1806,11 +1795,7 @@
+ // Given an attribute key such as "recupSkill", returns user-friendly text describing that attribute
+ def get_attribute_text = {
+     attribute_key ->
+-    for (group in ATTRIBUTES_TO_DISPLAY) {
+-        if (attribute_key in group) {
+-            return group[attribute_key]
+-        }
+-    }
++    return ATTRIBUTE_LABELS[attribute_key]
+ }
+ 
+ // Presents confirmation screen, then enters player into tournament if confirmed
+@@ -2076,7 +2061,7 @@
+     } else {              // if not the final fight level
+         if (GLOBAL.favors_completed == 0) {
+             message += "Ha ha! I am the winner and you are a LOSER.<br><br>"
+-            GLOBAL.favor_choices = STARTING_FAVOR_CHOICES.values() as String[]
++            GLOBAL.favor_choices = STARTING_FAVOR_CHOICES.values().toList()
+             save_favor_choices()
+         }
+         def choice               // to choose which favor to demand
+@@ -2109,13 +2094,16 @@
+             // show info or acknowledge doping at beginning of fight
+             switch(choice) {
+                 case FAVOR_CHOICE.ssr:
+-                    opponent.unknown -= ["speed", "strength", "recupSkill"]
++                    List unknownBeforeSsr = opponent.unknown
++                    opponent.unknown = unknownBeforeSsr - ["speed", "strength", "recupSkill"]
+                     break
+                 case FAVOR_CHOICE.attSkills:
+-                    opponent.unknown -= ["attSkillArms", "attSkillLegs", "attSkillBody", "attSkillTarget"]
++                    List unknownBeforeAttack = opponent.unknown
++                    opponent.unknown = unknownBeforeAttack - ["attSkillArms", "attSkillLegs", "attSkillBody", "attSkillTarget"]
+                     break
+                 case FAVOR_CHOICE.defSkills:
+-                    opponent.unknown -= ["defSkillArms", "defSkillLegs", "defSkillBody", "defSkillTarget"]
++                    List unknownBeforeDefense = opponent.unknown
++                    opponent.unknown = unknownBeforeDefense - ["defSkillArms", "defSkillLegs", "defSkillBody", "defSkillTarget"]
+                     break
+                 case FAVOR_CHOICE.administer_dope:
+                     opponent.dopeLevel += 1
+@@ -2313,19 +2301,22 @@
+         // Act on the player's choice
+         switch(GLOBAL.favor_choices[playerChoice]) {
+             case FAVOR_CHOICE.ssr.capitalize() + " " + opponent.name:
+-                opponent.unknown -= ["speed", "strength", "recupSkill"]
++                List unknownBeforeSsr = opponent.unknown
++                opponent.unknown = unknownBeforeSsr - ["speed", "strength", "recupSkill"]
+                 show("Here's the info...")
+                 showButton("Let me see it")
+                 view_fighter_attributes()
+                 break
+             case FAVOR_CHOICE.attSkills.capitalize() + " " + opponent.name:
+-                opponent.unknown -= ["attSkillArms", "attSkillLegs", "attSkillBody", "attSkillTarget"]
++                List unknownBeforeAttack = opponent.unknown
++                opponent.unknown = unknownBeforeAttack - ["attSkillArms", "attSkillLegs", "attSkillBody", "attSkillTarget"]
+                 show("Here's the info...")
+                 showButton("Let me see it")
+                 view_fighter_attributes()
+                 break
+             case FAVOR_CHOICE.defSkills.capitalize() + " " + opponent.name:
+-                opponent.unknown -= ["defSkillArms", "defSkillLegs", "defSkillBody", "defSkillTarget"]
++                List unknownBeforeDefense = opponent.unknown
++                opponent.unknown = unknownBeforeDefense - ["defSkillArms", "defSkillLegs", "defSkillBody", "defSkillTarget"]
+                 show("Here's the info...")
+                 showButton("Let me see it")
+                 view_fighter_attributes()
+@@ -2618,10 +2609,11 @@
+         default_fighter["priority"] = BASE_PRIORITY + default_fighter.speed
+         default_fighter["points"] = 0
+         def unknown_count = loadInteger(SAVE_STRING + key + ".unknown_count")
+-        default_fighter["unknown"] = []
++        def loadedUnknown = []
+         for (def index = 0; index < unknown_count; index++) {
+-            default_fighter["unknown"] += loadString(SAVE_STRING + key + ".unknown" + index)
+-        }        
++            loadedUnknown += loadString(SAVE_STRING + key + ".unknown" + index)
++        }
++        default_fighter["unknown"] = loadedUnknown        
+     }
+     return default_fighter
+ }

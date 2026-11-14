@@ -1,0 +1,29 @@
+--- a/scripts/DisciplineClinic/Punish.groovy
++++ b/scripts/DisciplineClinic/Punish.groovy
+@@ -5674,7 +5674,7 @@
+ 					setSpankPosition()
+ 				}
+ 				if(mumble==1) {
+-					def dialogMercy = getSelectedValue(dialog, ["Please Stop",  "I won't do it again!", "I need a break", "I'm sorry"])
++					def dialogMercy = getSelectedValue(null, ["Please Stop",  "I won't do it again!", "I need a break", "I'm sorry"])
+ 					if (dialogMercy == 0){
+ 						dialogArray = ["You want to stop?  Oh no, dear, we are just getting started!  Get that "+assPhrase()+" up in the air.",
+ 							"You will take this!\n\nKeep your mouth shut!\n\nDon't beg!  Arch your back, stick it out! I'm going to let the "+implement+" do the talking.",
+@@ -5706,7 +5706,7 @@
+ 					}
+ 					strict = strict + 2
+ 					wait(6)
+-					dialogMercy = getSelectedValue(dialog, ["Yes, Miss",  "Yes, Mistress", "Yes, Domina", "Yes, Ma'am"])
++					dialogMercy = getSelectedValue(null, ["Yes, Miss",  "Yes, Mistress", "Yes, Domina", "Yes, Ma'am"])
+ 					if (dialogMercy == 0){
+ 						if (title != "Miss"){
+ 							setImageScold()
+@@ -8637,7 +8637,7 @@
+ 		show("You'd better figure out your time management issues!\n\nAs it is, I'm going to have to give you an extra hard blistering right now!")
+ 		strict = strict + 2
+ 		wait(6)
+-		response = getSelectedValue(dialog, ["I understand.",  "Please miss, I'm so sore.", "Oh god"])
++		response = getSelectedValue(null, ["I understand.",  "Please miss, I'm so sore.", "Oh god"])
+ 		if(response==1) {
+ 			setImageScold()
+ 			show("Excuse me?!?\n\nSince when are you allowed to talk back around here?\n\nNow you are getting extra on top of extra!\n\nHave anything else to say "+sirMadam+"?")

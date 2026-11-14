@@ -1,0 +1,58 @@
+{
+  "reason": "A short story tease: narration in the second person, then the friend shouting from outside, the sister Zoey catching the player, one message where the mom and Zoey talk to each other, and the mom (the title's mother) giving the orders from the facesitting on. No code signal; switches follow the text and the pictures (Zoey is the brunette in 2-anger and 5-3, the mom the blonde in 1-4 and 6-10).",
+  "speakers": {
+    "friend": {
+      "displayName": "Friend"
+    },
+    "zoey": {
+      "firstName": "Zoey",
+      "displayName": "Sister"
+    },
+    "mom": {
+      "displayName": "Mom"
+    },
+    "momAndZoey": {
+      "displayName": "Mom and Zoey"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/smotherbyamother.groovy:17",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/smotherbyamother.groovy:24",
+      "speaker": "friend"
+    },
+    {
+      "at": "scripts/smotherbyamother.groovy:26",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/smotherbyamother.groovy:29",
+      "speaker": "zoey"
+    },
+    {
+      "at": "scripts/smotherbyamother.groovy:32",
+      "speaker": "momAndZoey"
+    },
+    {
+      "at": "scripts/smotherbyamother.groovy:34",
+      "speaker": "mom"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/smotherbyamother.groovy:32"
+      ],
+      "files": [
+        "scripts/smotherbyamother.groovy"
+      ],
+      "speaker": "zoey",
+      "template": "Zoey"
+    }
+  ]
+}

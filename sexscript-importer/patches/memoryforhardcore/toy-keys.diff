@@ -1,0 +1,12 @@
+--- a/scripts/memoryforhardcore.groovy
++++ b/scripts/memoryforhardcore.groovy
+@@ -141,7 +141,8 @@
+ }
+ 
+ if(condPain) {
+-	if(loadBoolean("toys.clothespins") || loadBoolean("toys.nippleclamps")) {
++	// Legacy bug: the toy chest saves the nipple clamps as toys.nipple_clamps (patch toy-keys).
++	if(loadBoolean("toys.clothespins") || loadBoolean("toys.nipple_clamps")) {
+ 		show("Now put some nippleclamps, or clothespins, on your nipples")
+ 		waitWithGauge(20)
+ 		if(getRandom(2)==1) {

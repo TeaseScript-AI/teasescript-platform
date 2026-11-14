@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "personality-file",
+      "layer": "source",
+      "category": "b",
+      "reason": "loadMistressPersonalities listed the package folder scripts/LLM_Mistress/personalities with eachFile and parsed each .txt file with JsonSlurper; a package cannot list a folder, so the converted list stayed empty and the configuration's personality choice indexed it (V2 explorer: TSR024 at LLM_Mistress.tease:450). The folder holds one file, config.txt; the patched loader parses its JSON written into the script. Its personality text had raw line breaks inside the JSON string, which Groovy's JsonSlurper accepted and fromJson() does not (strict JSON), so they are written as escapes, which parse to the same value (checked in Groovy: equal to the file's).",
+      "diff": "personality-file.diff"
+    }
+  ]
+}

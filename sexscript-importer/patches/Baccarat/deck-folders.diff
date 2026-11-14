@@ -1,0 +1,14 @@
+--- a/scripts/Baccarat.groovy
++++ b/scripts/Baccarat.groovy
+@@ -138,9 +138,8 @@
+ 	def DeckNames = []
+ 	setImage("Bcards/"+DeckName+"/"+getRandom(52)+".png")
+ 	if(getBoolean(Title+"Current deck is "+DeckName, "select new deck", "cancel")){		
+-		new File(getDataFolder().replaceAll("\\\\", "/")+"images/Bcards/").eachFile() {file->
+-			if(file.isDirectory()) {DeckNames << file.getName()}
+-		}
++		// The deck folders of images/Bcards, which TeaseScript cannot list
++		DeckNames = ["AmericanBeautiesDeck1890", "BoysDeck", "CloistersDeck1475", "FrenchDeck19thC", "GirlsDeck", "GoodallDeck1870", "HansSebaldBehamDeck1523", "LeFlorentinDeck", "MemoiresdeCasanovaDeck", "StandardDeck1", "StandardDeck2"]
+ 		def i=0
+ 		while(i<DeckNames.size){
+ 			setImage("Bcards/"+DeckNames[i]+"/"+getRandom(52)+".png")

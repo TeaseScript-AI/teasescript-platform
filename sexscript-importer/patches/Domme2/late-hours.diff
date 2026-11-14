@@ -1,0 +1,11 @@
+--- a/scripts/Domme2/sleep.groovy
++++ b/scripts/Domme2/sleep.groovy
+@@ -470,7 +470,7 @@
+ 							case "clock-edge":
+ 								reward(5)
+ 								def hourNow = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+-								hourNow = (hourNow + 24 - loadInteger("jewell.latehours")) % 24
++								hourNow = (hourNow + 24 - (loadInteger("jewell.latehours") ?: 0)) % 24
+ 								def hourAlarm = (hourNow+getRandom(5)+1)%24
+ 								show("You will set your alarm for "+hourAlarm+":00 o'clock.\n"+
+ 											"You'll have to wake up, edge "+(getRandom(2)+2)+" times, then back to sleep !\n\n You earn 5 reward points!")

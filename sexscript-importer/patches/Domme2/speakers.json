@@ -1,0 +1,37 @@
+{
+  "reason": "One unnamed strict domestic Domme (Mistress by the owner rule; she calls herself 'your Domme' and 'your Mistress') speaks every message in all 22 scripts. The player may swap her picture pack (black or red latex mistress) in Settings; the new woman is equally unnamed and says the same lines. Only the break countdown timer and a debug fallback are system text.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress"
+    }
+  },
+  "default": "mistress",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/Domme2/ask.groovy:waitWithCountDown",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Domme2/ask.groovy:405",
+      "speaker": "mistress"
+    },
+    {
+      "after": "scripts/Domme2/ask.groovy:457",
+      "speaker": "mistress"
+    },
+    {
+      "after": "scripts/Domme2/ask.groovy:516",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Domme2/sleep.groovy:527",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Domme2/sleep.groovy:527",
+      "speaker": "mistress"
+    }
+  ],
+  "names": []
+}

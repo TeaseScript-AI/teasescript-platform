@@ -1,0 +1,33 @@
+--- a/scripts/ShockQuiz.groovy
++++ b/scripts/ShockQuiz.groovy
+@@ -122,13 +122,15 @@
+     rounds = loadInteger("ShockQuiz.rounds")
+     questionsPerRound = loadInteger("ShockQuiz.questionsPerRound")
+     answertime = loadInteger("ShockQuiz.answertime")
+-    painLevelRange.clear()
+-    shockTimeRange.clear()
++    def levels = []
+     for (int i = 0; i <= 2; i++) {
+-        painLevelRange.add(loadInteger("ShockQuiz.painLevelRange." + i))
++        def level = loadInteger("ShockQuiz.painLevelRange." + i)
++        if (level != null) levels.add(level)
+     }
++    def times = []
+     for (int i = 0; i <= 1; i++) {
+-        shockTimeRange.add(loadFloat("ShockQuiz.shockTimeRange." + i))
++        def time = loadFloat("ShockQuiz.shockTimeRange." + i)
++        if (time != null) times.add(time)
+     }
+     List<String> estimNames = getEstimFileNames()
+     if (estimNames.isEmpty()) {
+@@ -143,8 +145,8 @@
+     if (rounds == null) rounds = ROUNDS
+     if (questionsPerRound == null) questionsPerRound = QUESTIONSPERROUND
+     if (answertime == null) answertime = ANSWERTIME
+-    if (painLevelRange.any { e -> e == null }) painLevelRange = PAINLEVELRANGE
+-    if (shockTimeRange.any { e -> e == null }) shockTimeRange = SHOCKTIMERANGE
++    painLevelRange = levels.size() == 3 ? levels : PAINLEVELRANGE
++    shockTimeRange = times.size() == 2 ? times : SHOCKTIMERANGE
+     if (estimFileNames.isEmpty()) estimFileNames = estimNames
+ }
+ 

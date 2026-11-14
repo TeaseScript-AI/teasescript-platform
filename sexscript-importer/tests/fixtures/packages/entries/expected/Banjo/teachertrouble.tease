@@ -1,0 +1,10 @@
+---
+title: "Teacher Trouble"
+author: "Banjo"
+description: "School days"
+keywords: "school"
+---
+// Legacy setInfos(): API version 9, status "v2.3", color 0x000000, language "EN"
+
+say prose "Class begins", instant
+goto "Banjo/schoolpack.tease"

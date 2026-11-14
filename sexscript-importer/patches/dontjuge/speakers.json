@@ -1,0 +1,62 @@
+{
+  "reason": "One named character, Mistress Stephanie (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Stephanie"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/dontjuge.groovy:5",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:7",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:10",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:19",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:27",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:37",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:40",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:67",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:75",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:81",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:89",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/dontjuge.groovy:91",
+      "speaker": "narrator"
+    }
+  ],
+  "names": []
+}
