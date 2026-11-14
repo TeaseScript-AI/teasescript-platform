@@ -76,6 +76,7 @@ import {
   carried,
   carriedBy,
   carriedByRead,
+  keepsOwn,
   keepsOwnRead,
   type DispatchReads,
   type CarrierRole,
@@ -980,6 +981,11 @@ export class Admission {
   /** An array of steps as a `Strip` (`carried`'s). */
   public arrayStrip(steps: readonly string[]): StepsStrip {
     return arrayStrip(this.pass.program, steps);
+  }
+
+  /** Whether the receiver's or the key's decision leaves a value's operation its own value. */
+  public keepsOwn(value: PlaceId): boolean {
+    return keepsOwn(this.pass.program, value, this.#dispatch);
   }
 
   /**
