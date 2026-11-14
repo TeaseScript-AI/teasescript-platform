@@ -227,11 +227,11 @@ function goalRules(frontier: Frontier, goal: Goal): void {
     if (own.length > 0) selfMarks(frontier, goal.node, own, s, into);
     return;
   }
-  // a literal's index node: its child at the step, F11's `missing` where an object lacks it, its reads one step below
   const { literal, index, at, id } = node;
   if (at.reference) throw new Decline("reference");
   if (at.others.length > 0) throw new Decline("native");
-  // (an element of a collection, or of an empty one, is a collection's: declined; an object's is F11's `missing`)
+  // (an element of a collection, or of an empty one, is a collection's: declined; an object's is a missing property's
+  // `missing`)
   if (s === "element" && (at.children.has(s) || at.empty)) throw new Decline("collection");
   const child = at.children.get(s);
   if (child !== undefined) into(litNode(frontier, literal, pathAt(contract, id, s), child));

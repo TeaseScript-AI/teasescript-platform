@@ -32,7 +32,7 @@ import type {
 import { typeTags } from "./terms.js";
 import { Retained, retainedModule } from "../retained/retained.js";
 
-// The literal index (§8): one index of a literal's structure per literal value or cell, its paths and signature.
+// The literal index: one index of a literal's structure per literal value or cell, its paths and signature.
 
 /** An object of a literal at a path (`IndexNode.objects`). */
 export interface IndexObject {
@@ -128,7 +128,6 @@ export function pathAt(contract: Contract, parent: number, step: string): number
   contract.pathParents.push(parent);
   contract.pathDepths.push(contract.pathDepths[parent]! + 1);
   contract.pathLastSteps.push(step);
-  // (G3 stage 1's metadata, each from its parent's and the step alone: `key-ids.ts`)
   contract.pathFirstSteps.push(parent === 0 ? step : contract.pathFirstSteps[parent]!);
   contract.pathMembers.push(memberStep([step], 0) === 0 ? id : contract.pathMembers[parent]!);
   contract.pathProperties.push(contract.pathProperties[parent]! && propertyOnly(step));
@@ -360,7 +359,7 @@ export function kindsPart(
  * One index of a literal's structure per literal value or cell, built once in the literal's size, through its nested
  * literals at every step. Per path: the kinds its own terms give (once per kind), the values standing there that are
  * no literal (a read once per source identity, once per exact identity for the value side; a call once per callee
- * result; every other value), the objects there with their properties (F11's missing), the references and the empty
+ * result; every other value), the objects there with their properties, the references and the empty
  * collections. A query reads only the entries at its path and its prefixes.
  */
 export function literalIndex(contract: Contract, literal: PlaceId): LiteralIndex {
@@ -401,7 +400,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
   else {
     const tasks: Task[] = [];
     for (const d of cells(literal).reverse())
-      // a literal's element that admission rejected is ignored (A6, ADR 0021 1.3)
+      // a literal's element that admission rejected is ignored (ADR 0021 1.3)
       if (contract.pass.lists.live(d)) tasks.push({ kind: "value", g: d, value: d.value! });
     nodes.push({ node: root, tasks });
   }
@@ -432,7 +431,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
             );
           continue;
         }
-        // §8: a call is a read of its callee's result key (F20) and a read its source: k calls of one
+        // a call is a read of its callee's result key and a read its source: k calls of one
         // function, k copies of one source, are one entry at the path, their guards and ingress its annotations
         const source = yield* contract.needValue(value);
         if (contract.copiedKey(value) === null) {
@@ -453,8 +452,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
         // one snapshot: one key read here, where nothing between the reads changes what they read
         const snapshot = contract.readSnapshot(value)!;
         // (k reads of one host global, or of one projection of it, are one entry as well, by their snapshot, their
-        // leaves unioned: an occurrence stays fresh as its own leaf, never as an entry each path reads again,
-        // S6-CARRIERS §3.1, Codex r23 F1, #1210)
+        // leaves unioned: an occurrence stays fresh as its own leaf, never as an entry each path reads again, #1210)
         const leaf = ingressLeafOf(contract, value);
         const id = contract.kept(
           !sharing() ? `v${value}` : leaf === undefined ? source.id : snapshot,
@@ -586,18 +584,10 @@ function aloneLiteral(
 }
 
 /**
- * §8: a literal's identity is its structure when no reference and no ingress stands in it (the kinds of its own
- * terms, the sources of its reads and calls, its objects' properties at every path), else the literal itself; the
- * marks of its reads are never identity (docs/specifications/type-inference-accepted-record/sharing.md#r4-17).
+ * A literal's identity (`signatures`): its interned signature shape (`nodeShape`, `sig`) where that is plain (no
+ * reference kind, no ingress occurrence, no value standing for itself), else the literal itself (`v<literal>`); the
+ * marks of its reads are never part of it (docs/specifications/type-inference-accepted-record/sharing.md#r4-17).
  */
-export function literalSignature(contract: Contract, literal: PlaceId): string {
-  if (!contract.signatures.has(literal)) {
-    if (contract.indexing.has(literal)) return `v${literal}`;
-    contract.settle(signatureWork(contract, literal));
-  }
-  return contract.signatures.get(literal)!;
-}
-
 export function* signatureWork(contract: Contract, literal: PlaceId): IdentityWork {
   if (contract.signatures.has(literal)) return;
   const index = yield* contract.needIndex(literal);
@@ -615,9 +605,9 @@ export function* signatureWork(contract: Contract, literal: PlaceId): IdentityWo
 /**
  * #1203: below their root, a literal path's classes of computed-key loads (`OtherGroup.loads`) on either side, their
  * members' answers merged, made once per pass at their first read there and taken at every later one for a step. Each
- * load's value there is F19's host data whatever the path, the node and the default (on the value side its one demand
- * below the root, `Values.#operationItems`), naming its own ingress (C9), so the merge keeps every member's leaf, and
- * loads of different defaults answer together. The root, with a `null` default's `null`, is read member by member.
+ * load's value there is host data (`hostAt`) whatever the path, the node and the default, naming its own ingress, so
+ * the merge keeps every member's leaf, and loads of different defaults answer together. The root, with a `null`
+ * default's `null`, is read member by member.
  */
 export function* loadsBelow(
   contract: Contract,
@@ -674,8 +664,8 @@ const loadsFlows = retainedModule<readonly OtherGroup[], readonly Inclusion[]>(
  * #1456: a prefix's property index over its sources (`PropertyIndex`), each a closed object literal stored whole: its
  * entries (the sharing off) or its groups at the prefix (`shared.groups`, on). Each source keeps its literal's one
  * object's property names and writer (`IndexObject`), each name its path below the prefix (`pathAt`) and the source a
- * holder there, each charged as it is made; every source in its writers' order, which F11's `missing` names the
- * earliest lacking of (F28, also with the sharing on: #1323), charged as a sort.
+ * holder there, each charged as it is made; every source in its writers' order, which a missing property's `missing`
+ * names the earliest lacking of (also with the sharing on: #1323), charged as a sort.
  */
 export function propertyIndex(
   contract: Contract,
@@ -726,9 +716,10 @@ export function propertyIndex(
 }
 
 /**
- * F11 at a property of a prefix's index (its path `path`, `step` its name), once per property: the earliest writer of
- * a source without it that F11 names (F28), by a walk of the writers' order that passes only its holders, and the first
- * such source's position, by a walk of the sources' order, where its `missing` stands among the holders' answers.
+ * The sources of a prefix's index without a property (its path `path`, `step` its name), once per property: the
+ * earliest writer of one, which its `missing` names, by a walk of the writers' order that passes only its holders, and
+ * the first such source's position, by a walk of the sources' order, where its `missing` stands among the holders'
+ * answers.
  */
 export function propertyLack(
   contract: Contract,
@@ -761,7 +752,7 @@ export function propertyLack(
   return lack;
 }
 
-/** F11: the first object at the path without the property, once per (path, property): its token, or `null`. */
+/** The first object at the path without the property, once per (path, property): its token, or `null`. */
 export function lackingAt(
   contract: Contract,
   index: LiteralIndex,

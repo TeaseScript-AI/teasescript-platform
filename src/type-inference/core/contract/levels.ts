@@ -44,7 +44,7 @@ import type {
 } from "./model.js";
 import { Retained, retainedModule } from "../retained/retained.js";
 
-// A prefix's levels (§4.6): its entries grouped at a path, and a literal's structure by path.
+// A prefix's levels: its entries grouped at a path, and a literal's structure by path.
 
 /** A prefix entry's kinds at the rest of the path. */
 export function* entryAt(
@@ -54,12 +54,11 @@ export function* entryAt(
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   contract.pass.program.work.charge("invSteps");
-  // (a cursor's span read one step at a time, its path's id where a key or a value takes it whole, G3 stage 1)
   const ref = restRef(contract, rest);
   if (entry.unk !== undefined) return [unknownItem(entry.unk, entry.w)];
-  // F6, F7: the contract's M is open
+  // a clear's or a removal's entry: the emptiness mark is open (the collection may hold none)
   if (entry.empty === true) return ref.length === 1 && ref.at(0) === "element" ? [EMPTY] : [];
-  // F5: an add's element; an `addAll` contributes kinds, never emptiness (M unchanged)
+  // an add's element; an `addAll` contributes kinds, never emptiness (the emptiness mark unchanged)
   if (entry.elem !== undefined) {
     if (ref.length === 0 || ref.at(0) !== "element") return [];
     const at = ref.from(1).after(entry.at ?? []);
@@ -81,7 +80,6 @@ export function* entryAt(
       );
     return kept;
   }
-  // §3.2: a copy read under a guard; a tested child's mark by the entry's holder at the path
   if (entry.key !== undefined) {
     // (#1668: the copied key below, the edge a copy makes, as its marks and writer annotate it)
     const below = flow?.child() ?? null;
@@ -117,11 +115,10 @@ export function* entryAt(
 }
 
 /**
- * A prefix's entries as its levels read them (§4.6), once per prefix: each entry a level's member (`levelMember`)
+ * A prefix's entries as its levels read them, once per prefix: each entry a level's member (`levelMember`)
  * starts the levels, every other entry answers each path by itself.
  */
 export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStores): PrefixLevels {
-  // (a prefix in its identity, as the levels hold it: G3 stage 1)
   const prefix = contract.canonicalKey(asked);
   const known = contract.levelBases.get(prefix);
   if (known !== undefined) return known;
@@ -157,7 +154,8 @@ export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStore
  * #1456: whether a prefix entry is a closed object literal stored whole, whose properties are its object's alone: one
  * object term, no projection, copied key, element or cell, unguarded, without ingress; its holder marking no path
  * (`marksNothing`) is asked after, of a prefix every entry of which is this. Its property's answer is then the
- * literal's own there, and a property it lacks F11's `missing` with the literal's writer; any other entry is unproved.
+ * literal's own there, and a property it lacks a missing property's `missing` with the literal's writer; any other
+ * entry is unproved.
  */
 export function closedObject(contract: Contract, entry: PrefixEntry): boolean {
   const { program } = contract.pass;
@@ -180,7 +178,7 @@ export function closedObject(contract: Contract, entry: PrefixEntry): boolean {
  * #1456: a prefix's contributions at a path below it whose first step is a property, where its entries are closed
  * objects (`PrefixLevels.closed`), from its property index (`propertyIndex`): the answers of the sources holding the
  * property alone (each entry by itself at the path, the sharing off; on, their groups at the path, folded from theirs
- * one step at a time as `groupsAt` folds, never kept as the prefix's), and F11's one `missing` for those without it,
+ * one step at a time, never kept as the prefix's), and one `missing` for those without it,
  * with the earliest literal writer, standing where the first of them stands among the holders (`propertyLack`); `null`
  * for any other prefix or path (a selection below the property: each entry by itself, `contractAlong`), which its
  * levels answer, and for the prefix's reads before its index pays: its first at the levels' own cost, so a prefix
@@ -189,7 +187,7 @@ export function closedObject(contract: Contract, entry: PrefixEntry): boolean {
  * holders' own.
  *
  * #1948, #1585: the same at any depth below the property. What this reasons about lasts the pass's index of the
- * prefix's settled stores (`Contract.propertyIndexes`): the prefix's groups it was made from, and the F11 `missing`
+ * prefix's settled stores (`Contract.propertyIndexes`): the prefix's groups it was made from, and the `missing`
  * it places where the first source without the property stands. Such a source is a closed object lacking the
  * property, so its read at every path below the property is that `missing`, with its own object's writer, and nothing
  * below; and each group's fold key holds its root object's property names at every path below the prefix
@@ -221,7 +219,7 @@ export function* propertyItems(
     // property: all for an absent one, none for one every source holds. Its sources' names are counted once its reads
     // could pay for the least index, at most all sources but one saved a read against one name a source
     // (`propertyIndex` charges at least two units a source), so that a prefix of two objects read fewer than four times
-    // takes its levels alone, as before #1948; each name's holders, once they could pay for this index, so that a prefix
+    // takes its levels alone; each name's holders, once they could pay for this index, so that a prefix
     // of a few wide objects read twice is never counted; from then on each read adds the sources its own property
     // lacks, until they reach the index's construction. Objects read only at properties they all hold are never
     // indexed; k objects of a distinct property each are, at their fifth read; k objects of k shared properties
@@ -265,7 +263,8 @@ export function* propertyItems(
     }
     index.saved += sources.length - (index.holding.get(rest.at(0)!) ?? 0);
     if (index.saved < cost) return null;
-    // (#1323: with the sharing on every group, F11's earliest lacking named among them as among entries off)
+    // (#1323: with the sharing on every group, the earliest source without the property named among them as among
+    // entries off)
     const shared = groups === null ? null : { groups };
     index = propertyIndex(contract, stores.list, shared);
     contract.propertyIndexes.set(stores, index);
@@ -325,7 +324,6 @@ function holderGroups(
   const memoKey = joinParts(restPart(path));
   const known = index.folds.get(memoKey);
   if (known !== undefined) return known;
-  // (a read of the property itself folds its holders afresh, keeping nothing, as before #1948)
   const kept = asked.length > 1;
   if (kept) contract.keepText(memoKey.length);
   contract.keep(path.length === 1 ? holders.length : 1);
@@ -343,14 +341,14 @@ function holderGroups(
 }
 
 /**
- * S6c (the typed-ingress presets, S4's product): a prefix's entries that answer by themselves (`prefixLevels`), in
+ * A prefix's entries that answer by themselves (`prefixLevels`), in
  * groups that answer alike at every path apart from their writers and ingress stores, once per prefix: adds of values
  * of one class (`classOf`, its ingresses by what their contract reads), each unguarded or each guarded, none holding
  * a mark (a holder of no guarded path, read or reference); any other entry its own group. An entry's ingress stores
- * reach only its unknowns (C9), an operator's result its operand's identity, so where the group's first answers
- * without either, it answers for the group, the earliest writer for its kinds (F28); k adds of a typed `load` of one
- * default, or of literals of two, each its own source, read at k fields, are one group read once per field
- * (review r6 B2). In the entries' order.
+ * reach only its unknowns, an operator's result its operand's identity, so where the group's first answers
+ * without either, it answers for the group, the earliest writer for its kinds; k adds of a typed `load` of one
+ * default, or of literals of two, each its own source, read at k fields, are one group read once per field. In the
+ * entries' order.
  */
 export function entryGroups(contract: Contract, levels: PrefixLevels): readonly EntryGroup[] {
   const known = contract.entryGroupsOf.get(levels);
@@ -383,7 +381,7 @@ export function entryGroups(contract: Contract, levels: PrefixLevels): readonly 
   return groups;
 }
 
-/** Whether a holder marks no path (§3.2): none of its paths guarded, no read and no reference of its own. */
+/** Whether a holder marks no path: none of its paths guarded, no read and no reference of its own. */
 export function markFree(contract: Contract, holder: Holder | null): boolean {
   if (holder === null) return true;
   collectMarks(contract);
@@ -391,12 +389,12 @@ export function markFree(contract: Contract, holder: Holder | null): boolean {
 }
 
 /**
- * A prefix entry as a level's member (§4.6): a literal stored whole, or a projection of one by property or index
+ * A prefix entry as a level's member: a literal stored whole, or a projection of one by property or index
  * steps, the selected prefix normalized to the literal and the steps into it, so the k projections
  * `({noise: hostValue otherwise null, data: root}).data` are the literals at `data`, whose level holds the read of
  * `root` once; `null` for any other entry, which answers each path itself, and for a literal holding a carrier whose
  * operand read is marked below it: such literals differ by where their reads are marked, so a level of k of them
- * would be k groups at every path, its work beside each entry's own answer (Codex r21 B1).
+ * would be k groups at every path, its work beside each entry's own answer.
  */
 function levelMember(contract: Contract, entry: PrefixEntry): LevelGroup | null {
   if (
@@ -432,7 +430,7 @@ function levelMember(contract: Contract, entry: PrefixEntry): LevelGroup | null 
 }
 
 /**
- * S6-CARRIERS §4.6: a prefix's level members grouped at a path below it, built from the groups one step up: groups
+ * A prefix's level members grouped at a path below it, built from the groups one step up: groups
  * that hold the same structure below the path (`levelsOf`, at the member's steps into its literal) and the same
  * facts at every step above it merge, the earliest standing for the group and the annotations united; a group whose
  * marks may depend on steps past the path stays its own. Once per prefix and path, so k literals that differ only
@@ -444,7 +442,6 @@ export function groupsAt(
   base: readonly LevelGroup[],
   path: Rest,
 ): readonly LevelGroup[] {
-  // (a prefix in its identity, as the levels' groups are named by it: G3 stage 1; a span by its name, never its text)
   const prefix = contract.canonicalKey(asked);
   const memoKey = joinParts(prefix, restPart(path));
   const known = contract.levelGroups.get(memoKey);
@@ -492,7 +489,7 @@ function foldGroups(
       id = pathBelow(contract, id, step);
     }
     const cell = program.cellOwner.get(group.literal)?.kind === "cell" ? "cell" : "";
-    // (its marks: alike where they cannot depend on steps past the path, else its own, §3.2)
+    // (its marks: alike where they cannot depend on steps past the path, else its own)
     const marks =
       group.holder === null
         ? ""
@@ -548,8 +545,8 @@ function foldGroups(
 
 /**
  * #1323 (docs/specifications/type-inference-accepted-record/sharing.md#r4-371): a group's items at `rest` (below its
- * steps), annotated and with its writer, F11's pure `missing` among them named as the unshared join names it: by the
- * earliest (`firstWriter`, F28) `missing` writer among its members' own completed reads there, each
+ * steps), annotated and with its writer, a pure `missing` among them named as the unshared join names it: by the
+ * earliest (`firstWriter`) `missing` writer among its members' own completed reads there, each
  * `contractOfValueAt(member.literal, member.at + rest)`, the other items, reasons, context and the holder's position
  * the group's; `EMPTY` has no writer. The fold's equivalence proves where its members hold a `missing`: only where the
  * group's items do. Reads the equivalence proves alike share one scan of the members (`absenceClass`); where none is
@@ -584,7 +581,7 @@ export function* groupRead(
       ];
       if (literal !== null) flow!.attach(literal, "annotated", "writer");
       for (const member of list.slice(1))
-        // #1668: I, each member's entry read takes the flow (`entryAt`)
+        // #1668: each member's entry read takes the flow (`entryAt`)
         for (const item of yield* work.sharedSteps(contract.entryAt(member.entry!, rest, flow)))
           out.push(item);
       // (merged here, so its reader merges what the group's own read would give it)
@@ -597,7 +594,7 @@ export function* groupRead(
       earliest = null;
       for (const member of list) {
         let found = false;
-        // #1668: K, a member's own read names the writer of the group's `missing`; none of its items is included
+        // #1668: a member's own read names the writer of the group's `missing`; none of its items is included
         for (const item of yield* work.sharedSteps(
           contract.contractOfValueAt(
             member.literal,
@@ -702,7 +699,7 @@ const KEPT_ABSENCES = retainedModule<Contract, Map<string, Writer | null>>(
 );
 
 /**
- * A literal's structure by path, once (§4.6): what stands at each path of its index itself (its own terms' kinds,
+ * A literal's structure by path, once: what stands at each path of its index itself (its own terms' kinds,
  * its reads' and other values' structures, its objects' property names, a reference, an empty collection), and below
  * each path everything under it, interned; each by its path's id (`pathAt`).
  */
