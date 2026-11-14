@@ -571,19 +571,20 @@ test("a dead store of host data into a written place is checked against its writ
       .map((line) => `  ${line}`)
       .join("\n");
   // per dead shape: the program with `body` dead, and its live form
-  const shapes: readonly (readonly [string, (body: string) => string, (body: string) => string])[] = [
+  const shapes: readonly (readonly [string, (body: string) => string, (body: string) => string])[] =
     [
-      "a function nothing calls",
-      (body) => `function use(x) {\n${indented(body)}\n}\nexit\n`,
-      (body) => `function use(x) {\n${indented(body)}\n}\nuse(1)\nexit\n`,
-    ],
-    ["after exit", (body) => `exit\n${body}\n`, (body) => `${body}\nexit\n`],
-    [
-      "a branch on a literal false",
-      (body) => `if false {\n${indented(body)}\n}\nexit\n`,
-      (body) => `${body}\nexit\n`,
-    ],
-  ];
+      [
+        "a function nothing calls",
+        (body) => `function use(x) {\n${indented(body)}\n}\nexit\n`,
+        (body) => `function use(x) {\n${indented(body)}\n}\nuse(1)\nexit\n`,
+      ],
+      ["after exit", (body) => `exit\n${body}\n`, (body) => `${body}\nexit\n`],
+      [
+        "a branch on a literal false",
+        (body) => `if false {\n${indented(body)}\n}\nexit\n`,
+        (body) => `${body}\nexit\n`,
+      ],
+    ];
   const observe = (source: string, name: string, levels: number) => {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
