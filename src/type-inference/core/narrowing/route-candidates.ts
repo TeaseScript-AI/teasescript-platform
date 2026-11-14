@@ -1,8 +1,3 @@
-/*
- * The route rule's candidates (`NarrowingRoutes`, routes.ts): a key's candidate definitions by callable body, each with
- * the reach of its writer side over the closed statements of its layers, and the nearest one whose writer side
- * reaches a read.
- */
 import { joinParts, keepText, type WorkLedger } from "../budget.js";
 import type { Definition, Key } from "../definitions.js";
 import { each, mapped, passing, sorted, steps } from "../charged-iteration.js";
@@ -26,7 +21,7 @@ export interface Candidates {
 }
 
 /**
- * A sparse layer of closed statements (N3, §13.3) over a parent layer: a key's kill layer over its parent key's (the
+ * A sparse layer of closed statements over a parent layer: a key's kill layer over its parent key's (the
  * key's own kills, and the compound statements they close beside the shared layer and every layer below), or a key's
  * test layer for one offending kind over its kill layer (the blocking tests of the needed form, and what they close).
  * A prefix's kills stay in the prefix's layer, never copied into a descendant's. Per block, the indexes it closes
@@ -40,7 +35,7 @@ export interface Layer {
   readonly arms: ReadonlyMap<TreeStatement, number>;
   /** The arms it closes, each counted once among the layers (a feasibility layer closes arms with no statement). */
   readonly closedArms: ReadonlySet<TreeBlock>;
-  /** The shared layer's applicability: calls close only for a key with an owner outside its activation (X6). */
+  /** The shared layer's applicability: calls close only for a key with an owner outside its activation. */
   readonly calls: boolean;
 }
 
@@ -75,11 +70,10 @@ export class RouteCandidates extends RouteTests {
   }
 
   /**
-   * The end of the block a definition's open writer side reaches (N3 (a)): from its statement up, each block's
-   * statements after the one left open; out of a loop's body only where its header leaves it, its header open. N3's "no
-   * back edge between" is the read never before the candidate in a body they share: a round's end that reaches the code
-   * after the loop is the route out of it (the set's `3b/loop/nested/changed` errs on a `null` stored in an inner loop's
-   * body and read after it); a loop only a `break` leaves stops the writer side.
+   * The end of the block a definition's open writer side reaches: from its statement up, each block's statements after
+   * the one left open; out of a loop's body only where its header leaves it, its header open. No route with a back edge
+   * between them counts: the read never stands before the candidate in a body they share, and a round's end that
+   * reaches the code after the loop is the route out of it; a loop only a `break` leaves stops the writer side.
    */
   #reach(chain: readonly Place[], layer: Layer | null, calls: boolean): number {
     this.#work.charge("eventSteps");
@@ -165,7 +159,6 @@ export class RouteCandidates extends RouteTests {
       );
       let size = 1;
       for (const _ of steps(work, "indexSteps", () => size < list.length)) size *= 2;
-      // a tree of maxima over the reaches, its leaves from `size` on
       const reaches: number[] = [];
       for (const _ of steps(work, "indexSteps", () => reaches.length < 2 * size)) {
         const leaf = reaches.length - size;
@@ -192,7 +185,6 @@ export class RouteCandidates extends RouteTests {
     const work = this.#work;
     const before = lowerBound(work, candidates.starts, at);
     const { reaches, size } = candidates;
-    // the rightmost leaf below `before` whose reach is at least `at`
     const search = (node: number, low: number, high: number): number => {
       work.charge("eventSteps");
       if (low >= before || reaches[node]! < at) return -1;

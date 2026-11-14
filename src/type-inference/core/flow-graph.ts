@@ -51,26 +51,20 @@ import { Retained } from "./retained/retained.js";
 export { literalRounds, literalTruth, type LiteralRounds } from "./flow-graph/literals.js";
 
 /*
- * The control-flow graph of the coarse core (O4, checkpoint 9; the design is the coarse-core table, its §3.1, X4, X5,
- * L1–L13 and P7), built from the ASTs, not from the plan: `plan/control-flow.ts` has no node per expression, and the
- * core's exact path answers a read at the expression that makes it. Every statement and every expression is a node, in
- * evaluation order (the shared order helpers of `expression-children.ts`), so a definition and a read can be compared
- * by dominance. type-core-flow-graph.test.ts compares it with the lowering's control flow.
+ * The control-flow graph of the type core, built from the ASTs, not from the plan: `plan/control-flow.ts` has no node
+ * per expression, and the core's exact path answers a read at the expression that makes it. Every expression is a node,
+ * in evaluation order, so a definition and a read can be compared by dominance.
  *
- * Calls are summarized as the lowering's `PlanControlFlow` does: a call's `call-in` node enters the callee's entry, and
- * a summary edge from it to its `call-out` node stands for the return; no edge leads from a callee's exit back. The
- * session starts at the program's entry, runs the session-start values of every global and speaker (the startup
- * region, which dominates every file), and enters the first file. What the graph proves from literals (P7) is a dead
- * edge: a literal condition, `switch` subject or lazy operand, a literal `repeat` count (`0`: the body is dead; `1`: no
- * second round; `1` or more: the body runs before the loop is left), a `for` over a literal collection (empty: the body
- * is dead; not empty: the body runs before the loop is left), a `get` on a list literal with a literal index, and a
- * parameter default that every call supplies or none does. A call that cannot return has a dead summary edge.
+ * Calls are summarized: a call's `call-in` node enters the callee's entry, and a summary edge from it to its `call-out`
+ * node stands for the return; no edge leads from a callee's exit back. The session starts at the program's entry, runs
+ * the session-start values of every global and speaker (the startup region, which dominates every file), and enters the
+ * first file. What the graph proves from literals is a dead edge, as a call that cannot return has a dead summary edge.
  * Dead code keeps its nodes, joined to the live code before it by dead edges, so every node has a dominator.
  */
 
 /**
- * The graph of a project's files, in project order: `main.tease` first, where the session starts, as the lowering
- * orders them (`compileStableProject`), each with the name pass's picks for its glob targets, as the lowering takes them.
+ * The graph of a project's files, in project order: `main.tease` first, where the session starts, each with the name
+ * pass's picks for its glob targets.
  */
 export function buildFlowGraph(files: readonly FlowGraphFile[]): FlowGraph {
   return new FlowGraphBuilder(files).build();
@@ -290,8 +284,8 @@ export class FlowGraphBuilder {
   }
 
   /**
-   * F18: the nodes made from `first` on, a typed parse's or load's default, read the state at `call`,
-   * the node before its default runs.
+   * The nodes made from `first` on, a typed parse's or load's default, read the state at `call`, the node before its
+   * default runs.
    */
   public snapshotFrom(first: number, call: FlowNode): void {
     this.#defaults.push({ first, end: this.nodes.length, call });
@@ -301,7 +295,7 @@ export class FlowGraphBuilder {
    * The node whose state each default's node reads: its outermost typed call's, since a nested typed call's default
    * runs at its call, which no event separates from the outer call. The ranges nest and each is recorded after those
    * inside it, so taken last first an outer range comes before its own: an inner one, whose first node the outer has
-   * set, is skipped, and each node is set once. The same walk notes the calls whose default reads a variable or computes.
+   * set, is skipped, and each node is set once.
    */
   #snapshotsOf(): Map<FlowNode, FlowNode> {
     const snapshots = new Map<FlowNode, FlowNode>();
@@ -311,8 +305,8 @@ export class FlowGraphBuilder {
       for (let index = first; index < end; index += 1) {
         const node = this.nodes[index]!;
         snapshots.set(node, call);
-        // (literal data, a typed call's own result among it, keeps the contract's walk; a read or a computation needs the
-        // value side's, which reads the snapshot)
+        // (literal data, a typed call's own result among it, keeps the contract's walk; a read or a computation needs
+        // the value side's, which reads the snapshot)
         switch (node.expression?.kind) {
           case undefined:
           case "numberLiteral":
@@ -340,8 +334,6 @@ export class FlowGraphBuilder {
     }
     return snapshots;
   }
-
-  // ------------------------------------------------------------------------------------------- nodes and regions
 
   public node(
     kind: FlowNodeKind,
@@ -382,7 +374,7 @@ export class FlowGraphBuilder {
     return node;
   }
 
-  /** An edge, once; a dead one is never taken (P7, a call that cannot return). */
+  /** An edge, once; a dead one is never taken. */
   public link(from: FlowNode | null, to: FlowNode | null, dead = false): void {
     if (from === null || to === null) return;
     const key = edgeKey(from, to);
