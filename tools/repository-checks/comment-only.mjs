@@ -7,7 +7,8 @@ import { ts } from "ts-morph";
 //   node tools/repository-checks/comment-only.mjs FROM TO [PATH…]
 //
 // FROM is the reviewed commit, TO the new one; PATHs limit the change, as Git's literal pathspecs. It prints one line
-// per changed file, in Git's order, the path quoted as a JSON string when it holds a control character, `"` or `\`:
+// per changed file, in Git's order, the path quoted as a JSON string when it holds a control character, `"` or `\`,
+// and a token's text escaped as in a JSON string:
 //   only comments: PATH: comments deleted | comments changed | whitespace only
 //   differs in more: PATH: what differs first, with its place at TO and at FROM
 //   not proven: PATH: why the file was not compared
@@ -73,7 +74,7 @@ function placeOf(file, position) {
   return `${line + 1}:${character + 1}`;
 }
 
-/** The parse's leaves in source order, without recursion, so that deeply nested code cannot exhaust the stack. */
+// Iterative, so that deeply nested code cannot exhaust the stack.
 function leavesOf(file) {
   const leaves = [];
   const pending = [file];
@@ -87,11 +88,6 @@ function leavesOf(file) {
   return leaves;
 }
 
-/**
- * `text` as the parser reads it: `{ error }`, why it is not compared, or `{ file, entries, plain }`. `entries` is what
- * rules 1 to 3 compare, per token: the gap before it when that holds a comment a tool reads, the token, and whether a
- * line break precedes it. `plain` holds, per token, the other comments in the gap before it.
- */
 function readSource(path, text, scriptKind) {
   const file = ts.createSourceFile(
     path,
@@ -143,7 +139,8 @@ function readSource(path, text, scriptKind) {
       } else tools.push(tool);
     }
     const tokenText = text.slice(start, token.end);
-    const shown = `\`${tokenText.length > 40 ? `${tokenText.slice(0, 40)}…` : tokenText}\``;
+    const excerpt = tokenText.length > 40 ? `${tokenText.slice(0, 40)}…` : tokenText;
+    const shown = `\`${JSON.stringify(excerpt).slice(1, -1)}\``;
     if (tools.length > 0) {
       const what = `a comment a tool reads (${tools.join(", ")})`;
       entries.push({ type: "tool", key: gap, at: gapStart, what });
@@ -174,7 +171,6 @@ function describeDifference(from, to, index) {
   return `${after?.what ?? "nothing"} added ${place}`;
 }
 
-/** Whether `kept` is `all` with some of its items removed, the others unchanged and in order. */
 function isSublist(kept, all) {
   let at = 0;
   for (const item of kept) {
@@ -185,10 +181,6 @@ function isSublist(kept, all) {
   return true;
 }
 
-/**
- * The verdict on one file's two texts, `fromText` and `toText`, as the file at `path`: `{ verdict, detail }`, the
- * verdict one of "only comments", "differs in more" and "not proven".
- */
 export function compareTexts(path, fromText, toText) {
   const scriptKind = KINDS[path.slice(path.lastIndexOf("."))];
   if (scriptKind === undefined)
@@ -217,7 +209,6 @@ function git(args) {
   return execFileSync("git", ["--literal-pathspecs", ...args], { maxBuffer: 1 << 30 });
 }
 
-/** The blob `id` as text, or undefined when it is not UTF-8. */
 function blobText(id) {
   const bytes = git(["cat-file", "blob", id]);
   const text = bytes.toString("utf8");
@@ -232,7 +223,6 @@ function shownPath(path) {
   return plain ? path : JSON.stringify(path);
 }
 
-/** The verdict on one changed file, a record of `git diff --raw`. */
 function compareChange({ status, fromMode, toMode, fromBlob, toBlob, path, fromPath }) {
   const differs = (detail) => ({ verdict: "differs in more", detail });
   if (status === "A") return differs("added");
@@ -251,7 +241,6 @@ function compareChange({ status, fromMode, toMode, fromBlob, toBlob, path, fromP
   return compareTexts(path, fromText, toText);
 }
 
-/** The changed files between the commits `from` and `to`, limited to `paths`, as records of `git diff --raw`. */
 function changesBetween(from, to, paths) {
   const fields = git(["diff", "--raw", "-z", "-M", "--no-abbrev", from, to, "--", ...paths])
     .toString("utf8")

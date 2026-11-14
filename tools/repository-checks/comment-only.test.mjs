@@ -120,7 +120,6 @@ test("a deeply nested expression is compared without exhausting the stack", () =
   assert.deepEqual(result, { verdict: "only comments", detail: "comments deleted" });
 });
 
-// One comment per consumer in the repository, chosen independently of how the tool groups them.
 const CONSUMERS = [
   ["TypeScript", "a.ts", "// @ts-expect-error: the fixture is wrong on purpose."],
   ["TypeScript", "a.ts", '/// <reference types="node" />'],
@@ -183,6 +182,7 @@ test("the command prints one line per changed file and exits 0 only when each di
     "new\nline.ts": `// Deleted.\n${program}`,
     "-leading.ts": `// Deleted.\n${program}`,
     "typed.ts": "export const a: number = 1;\n",
+    "template.mjs": "export const x = `first\nsecond`;\n",
     "notes.md": "# Notes\n",
     "before.ts": "export const moved = 2;\n",
     "mode.mjs": program,
@@ -194,6 +194,7 @@ test("the command prints one line per changed file and exits 0 only when each di
     "new\nline.ts": program,
     "-leading.ts": program,
     "typed.ts": "export const a: 1 = 1;\n",
+    "template.mjs": "export const x = `first\nthird`;\n",
     "notes.md": "# Notes, changed\n",
     "added.ts": "export const added = 4;\n",
   });
@@ -212,6 +213,7 @@ test("the command prints one line per changed file and exits 0 only when each di
       "differs in more: after.ts: renamed from before.ts",
       "differs in more: deleted.mjs: deleted",
       "differs in more: mode.mjs: mode 100644 became 100755",
+      "differs in more: template.mjs: ``first\\nsecond`` became ``first\\nthird`` at 1:18 (1:18 at FROM)",
       "differs in more: typed.ts: `number` became `1` at 1:17 (1:17 at FROM)",
       "not proven: notes.md: no parser for this kind of file",
       "only comments: -leading.ts: comments deleted",
