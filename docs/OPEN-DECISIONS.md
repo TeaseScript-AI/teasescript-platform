@@ -41,6 +41,18 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTUR
 - Optional author-defined recovery points beyond automatic recovery frontiers, including rollback scope and treatment of
   irreversible external effects.
 
+### Published compiled delivery (open)
+
+Whether a published Tease reaches the Playroom already compiled, avoiding client compilation at each load, remains
+open. Research around 2026-11-04 considered how compression keeps a compiled script small, then paused. The owner's
+preference (2026-11-14) is to send a compiled version.
+
+[#2708](https://github.com/TeaseScript-AI/teasescript-platform/issues/2708) is a small temporary proof of concept;
+it decides nothing about publication. Current constraints are the
+[source and playback entry boundary](RUNTIME.md#canonical-source-to-runtime-route),
+[checkpoint contract](decisions/0015-serializable-runtime-architecture.md#checkpoints) and
+[platform ownership](DATA-AND-API.md).
+
 ## Language, Standard Library, and modules
 
 Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRARIES.md), the

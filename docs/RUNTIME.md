@@ -1,5 +1,46 @@
 # Runtime
 
+## Reading map
+
+Choose the sections for your question and follow their decision links. The
+[ADR index](decisions/README.md) gives each decision's status and scope.
+
+- **This file: runtime contracts.** Execution/session APIs, action completion,
+  time, media, values, host inputs and validation. Start with the operation you
+  change and the shared boundaries it links.
+- **[Error codes](#runtime-errors).** Look up a runtime failure and its repair;
+  the same section owns the error-message contract.
+- **[Current formats](#format-evolution).** Find the current revisions and when
+  to increase them; [checkpoint boundaries](#checkpoint-boundary) cover restore.
+
+Start from the question:
+
+- **Where does a script stop, and how does Continue work after closing?**
+  [Checkpoints](#checkpoint-boundary),
+  [ADR 0015](decisions/0015-serializable-runtime-architecture.md#checkpoints),
+  [ADR 0016](decisions/0016-resumable-pending-action-runtime-contract.md#state-transitions)
+  and [Playroom lifecycle](ui/PLAYER-UI.md#session-start-and-user-activation).
+- **Is published code fetched compiled, or compiled on every load?**
+  [Source and playback entries](#canonical-source-to-runtime-route) describe the
+  current APIs; [published compiled delivery](OPEN-DECISIONS.md#published-compiled-delivery-open)
+  records the open publication question and temporary proof of concept.
+- **Who persists saved data, and what can another tab change?**
+  [Script storage](#script-storage),
+  [host persistence and tabs](DATA-AND-API.md#script-storage-in-the-browser),
+  [the running session's storage view](DEBUGGER.md#playroom-debug) and
+  [Continue and reconciliation](ui/PLAYER-UI.md#session-start-and-user-activation).
+- **Where can Tease and package code run?**
+  [Playroom and package isolation](SECURITY.md#playroom-and-package-isolation);
+  [custom-view surfaces](decisions/0012-custom-view-capability.md).
+- **Which operation rules apply?**
+  [Pending actions](#accepted-resumable-pending-action-model),
+  [time and interrupts](#timers-and-scene-time),
+  [media](#stage-image-and-media-playback), [session API](#runtime-sessions)
+  or [Debug trace](#debug-trace).
+- **Is a choice already decided?** Follow the topic's decision links and the
+  [ADR index](decisions/README.md), then the
+  [remaining open choices](OPEN-DECISIONS.md).
+
 ## Playroom and playground execution adapters
 
 `player/runtime/runtime-adapter.ts` is the framework-independent Playroom adapter shared by the Playroom and the

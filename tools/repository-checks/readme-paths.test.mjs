@@ -10,7 +10,7 @@ import { isolateGit } from "../fixture-git.mjs";
 
 isolateGit();
 
-// The Player maps and start/ownership route must reject stale names without treating commands as files.
+// The maps, ADR index and start/ownership route must reject stale names without treating commands as files.
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const tool = fileURLToPath(new URL("./readme-paths.mjs", import.meta.url));
@@ -45,6 +45,8 @@ function check({ player = "", component = "" }, files = {}) {
     "docs/agents/README.md": "",
     "docs/agents/DIRECT-REPOSITORY.md": "",
     "docs/ORCHESTRATION.md": "# Orchestration\n\n## Repository ownership\n",
+    "docs/RUNTIME.md": "# Runtime\n\n## Reading map\n",
+    "docs/decisions/README.md": "",
     ...files,
   });
   try {
@@ -159,6 +161,8 @@ test("directory context covers depth, ./ and fragments, stays in its paragraph a
     const root = checkout({
       "player/README.md": "",
       "player/vue/src/README.md": "",
+      "docs/RUNTIME.md": "## Reading map\n",
+      "docs/decisions/README.md": "",
       ...Object.fromEntries(surfaces.map(({ path, prefix }) => [path, prefix])),
       [`${folder}/member.mjs`]: "",
       "elsewhere/member.mjs": "",
@@ -268,3 +272,24 @@ test("a span that is no path, a link's text, and a fenced block are not checked"
   );
   assert.deepEqual(result, { status: 0, problems: [] });
 });
+
+for (const { path, prefix, suffix, line } of [
+  {
+    path: "docs/RUNTIME.md",
+    prefix: "# Runtime\n\n## Reading map\n\n",
+    suffix: "\n## Runtime contract\n`outside-map.md`\n",
+    line: 5,
+  },
+  { path: "docs/decisions/README.md", prefix: "# Decisions\n\n", suffix: "", line: 3 },
+]) {
+  test(`${path} checks routing names, with Runtime limited to its map`, () => {
+    const files = { [path]: `${prefix}\`missing.md#target\`\n${suffix}` };
+    assert.deepEqual(check({}, files), {
+      status: 1,
+      problems: [`${path}:${line}: \`missing.md#target\` names no tracked file or folder`],
+    });
+    files[path] = `${prefix}\`tools/real.mjs#target\`\n${suffix}`;
+    files["tools/real.mjs"] = "";
+    assert.deepEqual(check({}, files), { status: 0, problems: [] });
+  });
+}

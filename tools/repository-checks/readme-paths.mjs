@@ -7,7 +7,8 @@ import { remark } from "remark";
 import remarkGfm from "remark-gfm";
 
 // Checks backticked repository names in the two Player READMEs, the three start-route documents, and only
-// "Repository ownership" in docs/ORCHESTRATION.md against Git's tracked files and folders.
+// "Repository ownership" in docs/ORCHESTRATION.md, the Runtime reading map and the ADR index against Git's
+// tracked files and folders.
 //
 //   node tools/repository-checks/readme-paths.mjs       (in the repository's top folder; `npm run check:readme-paths`)
 //
@@ -43,6 +44,8 @@ const DOCUMENTS = [
   { path: "docs/agents/README.md", extended: true },
   { path: "docs/agents/DIRECT-REPOSITORY.md", extended: true },
   { path: "docs/ORCHESTRATION.md", extended: true, heading: "Repository ownership" },
+  { path: "docs/RUNTIME.md", extended: true, heading: "Reading map" },
+  { path: "docs/decisions/README.md", extended: true },
 ];
 const SOURCE = /\.(?:ts|vue|mjs|js|json|md|css)$/u;
 const root = process.cwd();
