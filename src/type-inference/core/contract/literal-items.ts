@@ -25,7 +25,7 @@ import { selectionOf, selectionPieces } from "./selections.js";
 // A literal's items at a path from its index, and its type or its cell's stores at a path.
 
 /**
- * A literal's items at a path from its index: the value side (`exact`: F12,
+ * A literal's items at a path from its index: the value side (`exact`:
  * docs/specifications/type-inference-accepted-record/contract.md#section-2-f12, a read below an element step is not
  * followed below its own kinds but takes its contract), else the contract.
  */
@@ -41,16 +41,14 @@ export function* indexItems(
   const { program } = contract.pass;
   // (#1668: the value side's gathers are its own: a contract that reads a literal exactly records no flow of it)
   if (exact) flow?.opaque("exact");
-  // (a cursor's span read one step at a time as far as the index goes, its rests views: G3 stage 1)
   const rest = restRef(contract, asked);
   const index = contract.literalIndex(literal);
   // an element cell, or a literal read as one (`below`): every path below lies below an element step
   const inElement = below || program.cellOwner.get(literal)?.kind === "cell";
   const out: Item[] = [];
-  // the read passes an element step over a copy (F12: X3)
   let overCopy = false;
   // the contributions the read gathers: past an element step, several of them are several elements, of which
-  // positions do not tell which one (F12)
+  // positions do not tell which one
   let sources = 0;
   // each prefix of the path: its id and the index's node there, `null` past the deepest one the index holds
   const paths: ({ readonly id: number; readonly at: IndexNode } | null)[] = [
@@ -134,12 +132,11 @@ export function* indexItems(
       );
       // (one by one: a selection's alternatives grow with the source, past one call's arguments)
       for (const item of selected.items) out.push(item);
-      // each alternative a selection takes is a contribution of the read (§3.4: several past an element step)
+      // each alternative a selection takes is a contribution of the read (several past an element step)
       sources += selected.sources;
       break;
     }
     if (length === rest.length) break;
-    // F11: an object here without the next step contributes `missing`; a reference, an opaque member (F19a)
     const lacking = lackingAt(contract, index, path, rest.at(length));
     if (lacking !== null)
       out.push(
@@ -148,7 +145,7 @@ export function* indexItems(
           : unknownItem(REASON.missing, lacking),
       );
     if (prefix.at.reference) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
-    // an empty collection on the way holds no element (the contract's M below it; the value's at its end)
+    // an empty collection on the way holds no element (the contract's emptiness mark below it; the value's at its end)
     if (
       rest.at(length) === "element" &&
       paths[length + 1]?.at.empty === true &&
@@ -156,10 +153,9 @@ export function* indexItems(
     )
       out.push(EMPTY);
   }
-  // S3 §1's route: past an element step over a copy the contract answered (F12)
   if (exact && overCopy)
     contract.overCopy.add(contract.kept(joinParts(literal, restPart(asked), node?.id ?? "-")));
-  // §3.4: the X word is the read's (`member` past an element step over a copy), shared by every known-kind
+  // the exact path's word is the read's (`member` past an element step over a copy), shared by every known-kind
   // item, definite ones included, whatever its writer; an unknown keeps its reason's word. Past an element step that
   // gathers several elements the element read makes each kind only possible: its word too, by the precedence
   if (overCopy)
@@ -175,6 +171,13 @@ export function* indexItems(
     : out;
 }
 
+/**
+ * V30 §19: the button values of the options a literal holds at `path`, read at `after` below them,
+ * per record alternative: the `value` of a record that has the key (`byValue`), the `text` of one that has none (the
+ * property's own cell, its sources kept); a value that is no record is its own button's value, and a record whose keys
+ * are unknown, or a reference, has the runtime's (both with the `value`s). With the number of alternatives it chooses
+ * among, whichever key it reads: each is a contribution of the read.
+ */
 function* selectedAt(
   contract: Contract,
   literal: PlaceId,

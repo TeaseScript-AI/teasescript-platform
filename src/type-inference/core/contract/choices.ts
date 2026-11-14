@@ -52,9 +52,8 @@ const LABELS = retainedModule<ValueConstraint, readonly (ValueKind | null | unde
  * the options hold without writing it (a variable's, a call's) per record alternative where its path meets the records
  * (`SELECTED_VALUE`, `SELECTED_TEXT`, the literal's objects). Where a store goes below a property of that name after
  * a record is made (`stored`), that key is read by its key instead, as the literal's records no longer say what it
- * holds: the `value` as its key gives it, and every record's `text` where some record lacks the `value` (F11's
- * `missing`), possible where some has one. Only the `options` are read (`Contract.choiceOptions`: one of each class),
- * in order, those of the `part` asked (a wide choice's, `Values.choiceRange`, `Values.choiceElements`).
+ * holds: the `value` as its key gives it, and every record's `text` where some record lacks the `value` (its
+ * `missing`), possible where some has one.
  */
 export function* choiceItems(
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
@@ -124,7 +123,7 @@ export function* choiceItems(
   ): Work<void> {
     const selected = object === null ? null : (object.value ?? object.text);
     if (object !== null && selected !== null) {
-      // an element of a written list or set reads as its literal analogue, below the list's element step (F12)
+      // an element of a written list or set reads as its literal analogue, below the list's element step
       const key = object.value !== null ? "value" : "text";
       // #1668: a choice's reads: its includer records `opaque`
       out.push(...(yield* element ? buttonValue(place, [key], true) : buttonValue(selected, [])));
@@ -151,7 +150,7 @@ export function* choiceItems(
     }
     if (content?.kind === "list" || content?.kind === "set") {
       // written choice objects alone: together below the list's element step, as its literal analogue reads them
-      // (§3.4: several elements), each by the keys it writes, which no store reaches before the choice (once per list:
+      // (several elements), each by the keys it writes, which no store reaches before the choice (once per list:
       // a wide choice's every part asks it)
       let objects = OBJECTS_ONLY().get(content.elements);
       if (objects === undefined)

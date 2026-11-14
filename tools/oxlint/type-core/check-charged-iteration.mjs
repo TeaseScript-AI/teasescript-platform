@@ -221,7 +221,7 @@ const OBJECTS_OUTSIDE = new Set([
     "Contract.prefixStores",
   ]),
   ...core("type-inference/core/contract/literal-index.ts", ["lackingAt"]),
-  ...core("type-inference/core/contract/others.ts", ["readGroupsAt", "othersAt"]),
+  ...core("type-inference/core/contract/class-groups.ts", ["readGroupsAt", "othersAt"]),
   ...core("type-inference/core/contract/key-contract.ts", ["receiverWalk"]),
   ...core("type-inference/core/contract/frontier.ts", ["pushedSlot"]),
   ...core("type-inference/core/contract/terms.ts", ["termAt"]),
@@ -247,7 +247,7 @@ const OBJECTS_COLLECTIONS = new Set([
   // no walk: an instanceof test, a record's rest or the array itself, a lazy view of the steps
   ...core("type-inference/core/contract/key-ids.ts", ["isPathSteps", "stepsRest", "restRef"]),
   // charged as they build: each entry of a list once (`invSteps`), the list's groups kept per list
-  ...core("type-inference/core/contract/others.ts", ["readGroupsAt", "othersAt"]),
+  ...core("type-inference/core/contract/class-groups.ts", ["readGroupsAt", "othersAt"]),
   // no walk, the array kept whole and charged by its length (`keepArray`)
   ...core("type-inference/core/budget.ts", ["keptArray"]),
   // charged by the text it scans (`invSteps`)

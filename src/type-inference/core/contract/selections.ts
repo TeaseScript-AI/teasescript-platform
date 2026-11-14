@@ -85,7 +85,7 @@ export function selectionOf(
 
 /**
  * #1278: the parts a selection's read takes at `after`, once per selection and property: where `after` starts with an
- * author's property no test reads (`testedSteps`: a mark at any other such path is the mark at its prefix, §3.2), the
+ * author's property no test reads (`testedSteps`: a mark at any other such path is the mark at its prefix), the
  * objects that may hold it in order (the open ones and those whose names hold it), and between them the runs of closed
  * objects that lack it, each answering there as at `ABSENT`, at any path below; else every object. A read's answer is
  * merged before it is read (each kind once, its earliest writer, kinds in the order they first come), so a run's

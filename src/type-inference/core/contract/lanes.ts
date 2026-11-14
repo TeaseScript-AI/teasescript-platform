@@ -9,9 +9,8 @@ import { writtenOf } from "./terms.js";
 import { wrapperFacts } from "./wrapper-facts.js";
 import { Retained, retainedModule } from "../retained/retained.js";
 
-// G3 stage 1 (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-196): a binding's wrapper shape,
-// the frozen structural part of `wrapperHop`, and the lane the keys of each `(binding, first step)` family take from
-// it.
+// A binding's wrapper shape (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-196), the frozen
+// structural part of `wrapperHop`, and the lane the keys of each `(binding, first step)` family take from it.
 
 /** The representation a family's keys take in a pass: cursors (`key-ids.ts`) or their text. */
 export type KeyLane = "cursor" | "text";
@@ -20,11 +19,11 @@ export type KeyLane = "cursor" | "text";
 export type ShapeAsker = "hop" | "lane";
 
 /**
- * A wrapper shape or a key lane asked, with what the question cost (criterion 2 of the early selector): its pass
- * (in the order the recording first saw it), binding and first step; for a shape its asker, answer (`stopped` where the
- * ledger stopped it), whether its memo answered, and the units it charged by counter, as the demand's own work, a shared
- * build's or work counted apart; for a lane its lane, whether its family was frozen already or was being built, which
- * leaves it text for the pass. Each with the demand whose run asked (`Solver.reading`).
+ * A wrapper shape or a key lane asked, with what the question cost: its pass (in the order the recording first saw it),
+ * binding and first step; for a shape its asker, answer (`stopped` where the ledger stopped it), whether its memo
+ * answered, and the units it charged by counter, as the demand's own work, a shared build's or work counted apart; for
+ * a lane its lane, whether its family was frozen already or was being built, which leaves it text for the pass. Each
+ * with the demand whose run asked (`Solver.reading`).
  */
 export type KeyRecord =
   | {
@@ -101,7 +100,7 @@ let textKeys = false;
 
 /**
  * Test and evidence only: `run` with every family's keys their text, its lane's question still asked and its shape
- * still found (`keyLane`): the early selector's work alone, beside the representation's (Astra's criterion 3).
+ * still found (`keyLane`): the early selector's work alone, beside the representation's.
  */
 export function withTextKeys<T>(run: () => T): T {
   if (textKeys) throw new Error("Text keys are already in force.");
@@ -299,7 +298,8 @@ function shapeOf(contract: Contract, binding: PlaceId, step: string): WrapperHop
  * (`wrapperShape`), text where it does not; text for the pass, too, where the question comes while the shape is being
  * found or the identity layer or the marks are being built (`building`), whose unfinished state a shape found then
  * would read, never promoted later. A key with no first step keeps its text, and the live conditions of `wrapperHop`
- * (an ingress, a stop) decide answers, never a lane. A fresh pass (A6, a stopped set, the finishing) asks afresh. A
+ * (an ingress, a stop) decide answers, never a lane. A fresh pass (admission's next pass after a rejection, a stopped
+ * set, the finishing) asks afresh. A
  * family the program's facts alone leave without a wrapper (`wrapperFacts`) is text at once, asking no shape: a typed
  * key's identity and charges stay what they were.
  */

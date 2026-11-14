@@ -14,7 +14,9 @@ import type { KeptClass, ReadClass, ValueClass } from "./model.js";
 import { operatorOf } from "./operations.js";
 import { defaultOf, writtenOf } from "./terms.js";
 
-// The classes the value side keys a value by (S6c): a read's, a bound binding's, a literal's, from their parts.
+// The classes every discovery of a value keys it by, on either side
+// (docs/specifications/type-inference-accepted-record/sharing.md#r4-85): a read's, a bound binding's, a literal's, from
+// their parts.
 
 export const NO_CLASS: ValueClass = { cls: null, writers: () => [], mixed: 0 };
 
@@ -29,10 +31,11 @@ function isChoice(c: Extract<ValueConstraint, { readonly kind: "operation" }>): 
 
 /**
  * A read's snapshot: the key it copies, its guard bit, that key's exact-path signature at the
- * read's own node (`readSignature`, where the value side reads it: X1–X6, X7's block reach, P3) and the handlers' fact
- * the signature leaves to its caller (X7: whether a handler that may store the key has been created there, H9), so
- * reads of one key in one literal are one key read only where they read the same: a guard, a call storing to the key,
- * or one registering a handler between them keeps them apart (Codex r25 F1). Once per read; `null` for no read.
+ * read's own node (`readSignature`, where the value side reads it: the exact path's conditions, its block reach
+ * included) and the handlers' fact the signature leaves to its caller (whether a handler may have been registered
+ * before the read, `afterSomeCreation`), so reads of one key in one literal are one key read only where they read the
+ * same: a guard, a call storing to the key, or one registering a handler between them keeps them apart. Once per read;
+ * `null` for no read.
  */
 export function readSnapshot(contract: Contract, value: PlaceId): string | null {
   const known = contract.snapshots.get(value);
@@ -46,7 +49,6 @@ export function readSnapshot(contract: Contract, value: PlaceId): string | null 
     projection = program.projOf.get(root);
   }
   const node = program.occNode.get(root) ?? null;
-  // (a read that takes its narrowing joins its G's environment, S10 part 2b)
   const read = `${guards.guardedRead(value) ? "g" : ""}${contract.pass.values.narrowingMark(value)}${copied}`;
   const snapshot =
     node === null
@@ -55,7 +57,7 @@ export function readSnapshot(contract: Contract, value: PlaceId): string | null 
           contract.work,
           read,
           // (a cursor's signature by its place's own key, as its family's one definition stands there and none below
-          // it: the read's reaching definition and events are that key's, its path apart, no text made, G3 stage 1)
+          // it: the read's reaching definition and events are that key's, its path apart, no text made)
           lists.readSignature(isKeyId(copied) ? keyOf(keyIdPlace(copied), []) : copied, node),
           handlers.afterSomeCreation(node) ? "h" : "",
         );
@@ -64,16 +66,16 @@ export function readSnapshot(contract: Contract, value: PlaceId): string | null 
 }
 
 /**
- * S6c: what a read's answer at every path below it rests on, as one text, so reads of one class answer alike at every
+ * What a read's answer at every path below it rests on, as one text, so reads of one class answer alike at every
  * path: its place and projection steps, and its guards there and below (`guardedRead`, `guardedBelowRead`: the
- * outermost tested paths below it whose regions hold it decide its mark at any path, §3.2); on the value side
+ * outermost tested paths below it whose regions hold it decide its mark at any path); on the value side
  * (`exact`) its snapshot too (`readSnapshot`: the exact path's signature at its node). A read of a stable
  * alias (`aliasOf`: an unwritten binding whose one definition is a whole copy of a read, on the value side the
- * read's exact answer) is that copy's read's class with its own steps and guards instead (S6-CARRIERS §4: a whole copy
- * of a stable source is an alias, never a contribution of its own), so k aliases of one source are one class; their
+ * read's exact answer) is that copy's read's class with its own steps and guards instead (a whole copy of a stable
+ * source is an alias, never a contribution of its own), so k aliases of one source are one class; their
  * answers differ only by the alias's writer, the earliest standing for each kind where they merge (`aliasWriter`).
  * Never coarser than the answer: `null` for a value that is no read, a loop's visit, or a read an ingress stands in
- * (its leaf is its own, S6-CARRIERS §3.1). Once per read and side, a chain of aliases on an explicit walk.
+ * (its leaf is its own). Once per read and side, a chain of aliases on an explicit walk.
  */
 export function readClass(contract: Contract, value: PlaceId, exact: boolean): string | null {
   const memo = contract.readClasses[exact ? 1 : 0]!;
@@ -96,7 +98,7 @@ export function readClass(contract: Contract, value: PlaceId, exact: boolean): s
 
 /**
  * The writer a read's answer takes from the alias it reads (`readClass`): the alias's one definition's, standing for
- * every kind of the alias's answer but its emptiness and a missing property's (F28); `null` for a read of no alias.
+ * every kind of the alias's answer but its emptiness and a missing property's; `null` for a read of no alias.
  */
 export function aliasWriter(contract: Contract, value: PlaceId, exact: boolean): Writer | null {
   contract.readClass(value, exact);
@@ -128,7 +130,6 @@ function ownClass(
     steps.reverse().join(" "),
     guards.guardedRead(value) ? "g" : "",
     guards.guardedBelowRead(value).join(" "),
-    // (on the value side, what its narrowing makes of its answer, S10 part 2b)
     exact ? contract.pass.values.narrowingMark(value) : "",
   ] as const;
   // (an alias of an alias read with no steps and no guard reads what that one reads: one class for the chain)
@@ -175,7 +176,7 @@ function aliasOf(
  * The one definition of the binding a read reads, where every path below the binding is that definition's value's
  * below it: an unwritten `let` or `global` with one definition, a whole store (none below it, in it or into it from
  * another callable: each would be a second definition), and on the value side the read's exact answer (`exactPath` at
- * its node, no rest: an event below the binding is one of its own, X6); once per read and side, `null` for any other.
+ * its node, no rest: an event below the binding is one of its own); once per read and side, `null` for any other.
  */
 function stableDefinition(contract: Contract, read: PlaceId, exact: boolean): Definition | null {
   const memo = contract.stableDefinitions[exact ? 1 : 0]!;
@@ -266,20 +267,10 @@ export function boundClass(contract: Contract, value: PlaceId, exact: boolean): 
 }
 
 /**
- * S6c: the class every discovery of the value side keys a value by, so that values of one class
- * answer alike at every path apart from the writers of their roles (`classWriters`) and, for a mixed class
- * (`classMixed`), an ingress's leaf or an operand's identity. A read by `readClass`; a read of a host global, whose
- * leaf is its own (`readClass`'s `null`), by the global and its guards, mixed (#1196); a projection (a property, an
- * element selection, a length) by its step and its owner's class; a call's result by the callee's result key (F20; on
- * the value side with the key's exact-path signature where the call returns); a literal by its structure (its own
- * kinds, objects, empty collections and absences per path, its cells' classes and guards, whether it is a cell); a
- * choice by its options (a label's kind, a choice object's selected value, any other option's value); a `load` or a
- * parse landing in no written type by its kind and its default's class and guards; any other operation by its family,
- * its name and its operands' classes (a `get`'s receiver and default, never its key, §4.6). On the value side
- * (`exact`) an operation only at its own node, a `get` or an `otherwise` with whether its default or fallback runs
- * (`Values.proofOf`). `null` for a loop's visit, a speaker, a literal holding a reference or a read its holder marks,
- * a choice holding a list's or a set's buttons, and a value any part of which has none. Once per value and side, on
- * an explicit walk.
+ * The class every discovery of a value keys it by, on either side, so that values of one class answer alike at every
+ * path apart from the writers of their roles (`classWriters`) and, for a mixed class (`classMixed`), an ingress's leaf
+ * or an operand's identity. `null` for a loop's visit, a speaker, a literal holding a reference or a read its holder
+ * marks, a choice holding a list's or a set's buttons, and a value any part of which has none.
  */
 export function classOf(contract: Contract, value: PlaceId, exact: boolean): string | null {
   return classed(contract, value, exact).cls;
@@ -330,8 +321,8 @@ export function writersOf(
 }
 
 /**
- * Whether a class (`classOf`) holds an ingress, whose external data names its own leaf (C9), or an operator's result,
- * which names its unknown operand by that operand's writer or by its own site (`fan`, F16): values of such a class
+ * Whether a class (`classOf`) holds an ingress, whose external data names its own leaf, or an operator's result,
+ * which names its unknown operand by that operand's writer or by its own site (`fan`): values of such a class
  * differ by those where their answer holds them (`differsIn`), so a site that shares them reads each where it does.
  */
 export function classMixed(contract: Contract, value: PlaceId, exact: boolean): number {
@@ -366,9 +357,9 @@ function classed(contract: Contract, value: PlaceId, exact: boolean): KeptClass 
     stack.pop();
     const joined = joinedClass(contract, top, exact, own);
     // (on the value side, the narrowing a read takes is part of every class it is given here, whichever way it was
-    // joined: its environment and its type test's spelling (`Values.narrowingMark`, Codex r8 on
-    // #1558), appended where its read class (`readClass`, which already holds it) gave none, a host read's and a
-    // projection of one's, so no class charges it twice (Codex r10)
+    // joined: its environment and its type test's spelling (`Values.narrowingMark`, #1558), appended where its read
+    // class (`readClass`, which already holds it) gave none, a host read's and a projection of one's, so no class
+    // charges it twice
     const { program } = contract.pass;
     const narrowed =
       exact &&
@@ -397,7 +388,7 @@ function classed(contract: Contract, value: PlaceId, exact: boolean): KeptClass 
 /**
  * The parts a kept class's walk reads (`writersOf`), in order: each part that holds a role, where a part with no writer
  * of its own and only one such part stands for that part. A walk then never enters an operand without writers, such as
- * a call's result, nor follows a chain of single operands (#1357, Codex r1 on #1417).
+ * a call's result, nor follows a chain of single operands (#1357, #1417).
  */
 function roleParts(
   contract: Contract,
@@ -473,7 +464,7 @@ function joinedClass(
   const read = contract.readClass(value, exact);
   if (read !== null)
     return { cls: read, mixed: 0, own: [contract.aliasWriter(value, exact)], parts };
-  // #1196: a host global's read answers external data at every path, on either side, named by its own leaf (C9) and
+  // #1196: a host global's read answers external data at every path, on either side, named by its own leaf and
   // marked where its guards mark it, so a value over it (a projection, a literal, a parse) is classed by its other parts
   if (program.occurrenceOf.has(value)) {
     if (!definitions.ingress.has(value)) return NO_KEPT_CLASS;
