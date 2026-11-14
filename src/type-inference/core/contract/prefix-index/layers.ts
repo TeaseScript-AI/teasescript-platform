@@ -610,7 +610,6 @@ export function topsAt(
   path: ReadPath,
 ): PrefixStores["also"] {
   const work = contract.pass.program.work;
-  // (the first read under a step keeps its memo, whether or not a layer lists it; later reads read it)
   const step = ref.read(0);
   const layers = stepLayersOf(
     contract,

@@ -41,13 +41,11 @@ export function* indexItems(
   const { program } = contract.pass;
   // (#1668: the value side's gathers are its own: a contract that reads a literal exactly records no flow of it)
   if (exact) flow?.opaque("exact");
-  // (a cursor's span read one step at a time as far as the index goes, its rests views)
   const rest = restRef(contract, asked);
   const index = contract.literalIndex(literal);
   // an element cell, or a literal read as one (`below`): every path below lies below an element step
   const inElement = below || program.cellOwner.get(literal)?.kind === "cell";
   const out: Item[] = [];
-  // the read passes an element step over a copy
   let overCopy = false;
   // the contributions the read gathers: past an element step, several of them are several elements, of which
   // positions do not tell which one
@@ -139,7 +137,6 @@ export function* indexItems(
       break;
     }
     if (length === rest.length) break;
-    // an object here without the next step contributes `missing`; a reference, an opaque member
     const lacking = lackingAt(contract, index, path, rest.at(length));
     if (lacking !== null)
       out.push(

@@ -557,7 +557,6 @@ export class Contract {
 
   /** `stop` for a key in its identity: a cursor stops at its path's id, never its text. */
   public stopKey(asked: Key): void {
-    // (a key in its identity: a wrapper family's text stops at its cursor's path)
     const key = this.canonicalKey(asked);
     if (isKeyId(key)) this.#stopAt(keyIdPlace(key), keyIdPath(key));
     else this.#stopAt(keyPlace(key), keyPath(key));

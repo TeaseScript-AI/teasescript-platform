@@ -44,7 +44,7 @@ import { resultOf, valueRoute } from "./value-kinds.js";
  * property, a stored `missing`), and the keys whose own stores and written type at a further property it does not
  * cover. Its read at `rest.s` for a property `s` then names its pure `missing` by `absentWriterAt` without reading `s`.
  * A demand once per value and path, read through `Solver.proven`; a route it does not follow declines (`complete`
- * false). Routed as `valueAt` routes (`valueRoute`).
+ * false).
  */
 export function objectsAt(
   contract: Contract,
