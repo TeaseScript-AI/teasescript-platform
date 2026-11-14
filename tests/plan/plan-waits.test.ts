@@ -275,6 +275,74 @@ test("an instruction that can make a block due while the script runs marks its f
   }
 });
 
+test("a block made due in a call's arguments marks the function the call enters, where the block waits", () => {
+  // At 2 s the main path's delay ends first; then b's round is due, and h.pause() ends it while quiet's arguments are
+  // evaluated, so the block starts after quiet's frame is pushed, before quiet runs anything (final review, #2769).
+  const { plan, waits, marked } = analysed(
+    main(
+      [
+        "let b = timer async hidden 100 s { }",
+        "let a = timer async hidden 1 s { b = timer async hidden 1 s { wait 1 s } }",
+        'function quiet(value) { say "quiet", instant }',
+        "function f(h) { quiet(h.pause()) }",
+        "wait 2 s",
+        "f(b)",
+        "exit",
+      ].join("\n"),
+    ),
+  );
+  assert.equal(marked("quiet"), true);
+  assert.equal(marked("f"), true);
+  const quiet = plan.functions.find((definition) => definition.name === "quiet")!;
+  const result = checkWaitsAgainstEngine(plan);
+  assert.deepEqual(result.unmarked, []);
+  assert.ok(result.live.has(quiet.id), "quiet is live at the block's wait");
+  // The check sees quiet live although it ran nothing: with quiet alone unmarked, it reports quiet and nothing else.
+  const missed = checkWaitsAgainstEngine(plan, 200, {
+    ...waits,
+    functionMayWait: (id) => id !== quiet.id && waits.functionMayWait(id),
+  }).unmarked;
+  assert.notDeepEqual(missed, []);
+  assert.deepEqual(
+    missed.filter((line) => !line.endsWith(`function or block ${quiet.id} is live unmarked`)),
+    [],
+  );
+});
+
+test("a computed file call whose destination may start a block marks every activation it may enter", () => {
+  const files = {
+    "main.tease": [
+      "let b = timer async hidden 10 s { wait 1 s }",
+      'function go { call (script("rooms/quiet.tease")) }',
+      "go()",
+      "exit",
+    ].join("\n"),
+    "rooms/quiet.tease": 'say "Quiet.", instant\nend',
+  };
+  const { plan, waits } = analysed(files);
+  const quiet = plan.files.findIndex((file) => file.path === "rooms/quiet.tease");
+  assert.equal(waits.fileMayWait(quiet), false);
+  // The same plan with a `pause()` in the destination: a block it starts waits above the activation the call enters.
+  const instructions = plan.instructions.map((instruction): Instruction => {
+    if (instruction.kind !== "transfer" || !("value" in instruction.destination))
+      return instruction;
+    const span = instruction.destination.value.span;
+    const pause = {
+      kind: "call",
+      callee: {
+        kind: "property",
+        object: { kind: "identifier", name: "b", span },
+        name: "pause",
+        span,
+      },
+      arguments: [],
+      span,
+    } as const;
+    return { ...instruction, destination: { ...instruction.destination, value: pause } };
+  });
+  assert.equal(planWaits({ ...plan, instructions }).fileMayWait(quiet), true);
+});
+
 test("at every wait of a played session, each live function, block and file call is marked", () => {
   const sources: readonly Readonly<Record<string, string>>[] = [
     main(
