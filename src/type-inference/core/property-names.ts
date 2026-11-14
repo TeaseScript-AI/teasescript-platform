@@ -700,10 +700,10 @@ function listingOf(
 }
 
 /**
- * The names of a value's known properties: those the keys below its sources store, and those the objects of
- * its literals and of the values its collections' adds insert have at its path. Each task it schedules, each prefix it visits and each key below a
- * key whose step it reads is charged, and every key, path, step and identity it keeps, through the kept helpers: no
- * key's text is split uncharged to read its steps (`keptStepBelow`, `keptPath`).
+ * The names of a value's known properties: those the keys below its sources store, and those the objects of its
+ * literals and of the values its collections' adds insert have at its path. Each task it schedules, each prefix it
+ * visits and each key below a key whose step it reads is charged, and every key, path, step and identity it keeps,
+ * through the kept helpers: no key's text is split uncharged to read its steps (`keptStepBelow`, `keptPath`).
  *
  * #1493, the pump bound: each task has the task that scheduled it (`from`) and records how many of that one's last
  * steps its path keeps untouched (`kept`): a key's step at a stored prefix keeps the rest below it (an add's one step
