@@ -1,5 +1,6 @@
 import type { PlaceId, TypeTerm } from "../../../graph.js";
 import type { CarrierKind, Operand } from "../../carriers.js";
+import { openness } from "../../contract/terms.js";
 import type { Definition, DefinitionIndex } from "../../definitions.js";
 import { propertyStep, type CoreProgram } from "../../program.js";
 
@@ -52,8 +53,11 @@ const CARRIED: Readonly<Record<CarrierKind, "below" | "none">> = {
  * The graph's routes by receiver, each charged as it is read: 0 for a whole copy, an argument, a return, a read and a
  * call's result; +1 for a list literal's element and an `add`; a store through a path, the path's element steps; a
  * literal's property, 0 into that property; a projection and an operation, the carrier table's routes (`operands`,
- * `CARRIED`). A place with a written type takes no route: the written type decides it. A form not named here makes no
- * route, so a cycle through it is never cut.
+ * `CARRIED`). A place whose written type is closed takes no route: the written type decides it. One that leaves a
+ * level open (`openness`: an unwritten element, an `object`'s properties) takes its routes, since below that level the
+ * contract reads its stores; its written levels are its own depth
+ * (docs/specifications/type-inference-accepted-record/contract.md#r4-457). A form not named here makes no route, so a
+ * cycle through it is never cut.
  */
 export function routesOf(
   program: CoreProgram,
@@ -64,7 +68,8 @@ export function routesOf(
   const work = program.work;
   const into = new Map<PlaceId, Route[]>();
   const add = (receiver: PlaceId, route: Route): void => {
-    if (writtenAt(program, receiver) !== null) return;
+    const written = writtenAt(program, receiver);
+    if (written !== null && !openness(work, written).below) return;
     const list = into.get(receiver);
     if (list === undefined) into.set(receiver, [route]);
     else list.push(route);

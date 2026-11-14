@@ -11,7 +11,7 @@ import { coreRequest } from "../../helpers/type-core-analysis.js";
 /*
  * #2764: the nesting cut. A cycle of copies, arguments, results and list literals that nests a value deeper on each
  * turn is followed one level deeper than what enters it (`M + 1`); a cycle that nests nothing deeper, and a place a
- * written type decides, are never cut.
+ * closed written type decides, are never cut.
  */
 
 const PART = `function part(value) {
@@ -160,8 +160,27 @@ test("a cycle that nests nothing deeper is never cut", () => {
   assert.equal(indexOf("let xs = [[1]]\nlet p = xs[0]\nxs = p\n").cut("xs"), null);
 });
 
-test("a place a written type decides takes no route into it, so its cycle is not cut", () => {
-  assert.equal(indexOf("let a: list[][] = [[]]\na = a + [a]\n").cut("a"), null);
+test("a place a closed written type decides takes no route into it, so its cycle is not cut", () => {
+  assert.equal(indexOf("let a: integer[][] = [[]]\na = a + [a]\n").cut("a"), null);
+});
+
+test("a written type that leaves a level open is cut below its written levels, never inside them (#2771)", () => {
+  // `list[][]` is a list of lists of `list`: three written levels, the third's element open, where the contract reads
+  // the stores. M = 3, so the cut is one level below them
+  assert.equal(indexOf("let a: list[][] = [[]]\na = a + [a]\n").cut("a"), 4);
+});
+
+test("a recursive function that fills a written dict with its own result is cut below the dict's level (#2771)", () => {
+  const loader = (entries: string): string =>
+    `function loadValue(key) {\n  let value = load key, default: null\n  if value == null {\n` +
+    `    let entries: ${entries} = dict{}\n    entries["a"] = loadValue("\${key}.a")\n    value = entries\n` +
+    `  }\n  return value\n}\nlet v = loadValue("x")\n`;
+  // `dict` leaves its values open: M = 1, its written level
+  const open = indexOf(loader("dict"));
+  for (const name of ["entries", "value", "loadValue.result"]) assert.equal(open.cut(name), 2, name);
+  // `string dict` is closed: it decides its values, takes no route, and no cycle is left
+  const closed = indexOf(loader("string dict"));
+  for (const name of ["entries", "value", "loadValue.result"]) assert.equal(closed.cut(name), null, name);
 });
 
 test("a cycle through a property is cut at that property", () => {
