@@ -48,7 +48,8 @@ export class NativeSet {
       const { key, whole } = memberKey(value);
       const bucket = known.keyed.get(key);
       if (bucket === undefined) known.keyed.set(key, [value]);
-      else if (whole === null || bucket.some((item) => nativeValueKey(item) === whole)) return false;
+      else if (whole === null || bucket.some((item) => nativeValueKey(item) === whole))
+        return false;
       else bucket.push(value);
     }
     this.#items.push(value);
@@ -90,7 +91,8 @@ export class NativeSet {
    * valid set do. A set whose index exists takes members only through `add`.
    */
   public appendUnindexed(member: NativeValue): void {
-    if (this.#membership !== null) throw new Error("A set with an index takes members through add.");
+    if (this.#membership !== null)
+      throw new Error("A set with an index takes members through add.");
     this.#items.push(member);
   }
 

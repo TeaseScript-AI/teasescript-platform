@@ -257,20 +257,14 @@ test("sets add, find, remove and clear members as today's sets do", () => {
       const member = pool[next(pool.length)]!;
       const operation = next(10);
       if (operation < 4)
-        assert.equal(
-          native.add(fromCanonical(member)),
-          addSerializableSetValue(canonical, member),
-        );
+        assert.equal(native.add(fromCanonical(member)), addSerializableSetValue(canonical, member));
       else if (operation < 7)
         assert.equal(
           native.remove(fromCanonical(member)),
           removeSerializableSetValue(canonical, member),
         );
       else if (operation < 9)
-        assert.equal(
-          native.has(fromCanonical(member)),
-          serializableSetContains(canonical, member),
-        );
+        assert.equal(native.has(fromCanonical(member)), serializableSetContains(canonical, member));
       else {
         native.clear();
         clearSerializableSet(canonical);
