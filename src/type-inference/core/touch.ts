@@ -296,13 +296,10 @@ export class Touches {
   readonly #metOwes = new Map<number, Found>();
   /**
    * The ring mark (#1270), defined here once. A whole-copy ring's members share one trie, each deciding by its own
-   * first store, so two elements copying different members may offend each other where their nodes are one node; a
-   * merge whose container holds a ring owes, not only where it differs from the other, the meetings found in making it
-   * (`meet`) or those with two kinds or more (`elements`), and nothing new for `copies`; a node merged with itself owes
-   * only the latter, for `elements` (`merge`, `#selfOwes`). A node is a
-   * *ring node* where a ring's trie stands at its own level: the trie itself (`ring`, a live group of two or more
-   * members), a node one of whose parts is a ring node (a copy's landed top, a merge), or a projection whose walk steps
-   * through a ring node (`sub`). A projection that steps only through nodes holding a ring at another path (a ring-free
+   * first store, so two elements copying different members may offend each other where their nodes are one node. A
+   * node is a *ring node* where a ring's trie stands at its own level: the trie itself (`ring`, a live group of two or
+   * more members), a node one of whose parts is a ring node (a copy's landed top, a merge), or a projection whose walk
+   * steps through a ring node (`sub`). A projection that steps only through nodes holding a ring at another path (a ring-free
    * sibling of a ring) is no ring node. A node *holds* a ring where a ring node stands in it at any depth
    * (`Touch.ring`). Both flags are set when a node is made: a ring marked later is seen only on its own node and on the
    * projections taken of it after. This set holds the ring tries and the ring projections, both marked after they were
