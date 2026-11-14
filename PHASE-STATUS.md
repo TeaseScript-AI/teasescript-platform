@@ -3,7 +3,7 @@
 ## Current phase and gate
 
 The current implementation phase combines the deterministic TypeScript language/runtime POC with the
-production-direction Vue Player foundation and local browser development surfaces. This file records verified
+production-direction Vue Playroom foundation and local browser development surfaces. This file records verified
 capability state at a high level; it is not the canonical source for source identity, live CI state, detailed
 contracts, or historical execution evidence.
 
@@ -35,46 +35,46 @@ accept syntax, architecture, or implementation details.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, defensive restore validation, and
   [engine-owned runtime sessions](docs/RUNTIME.md#runtime-sessions) that validate only new host input between snapshot
-  boundaries, on which the Player runs its sessions, and [controlled randomness](docs/RUNTIME.md#controlled-randomness),
+  boundaries, on which the Playroom runs its sessions, and [controlled randomness](docs/RUNTIME.md#controlled-randomness),
   with which a host chooses random outcomes or pauses at draws.
 - **Script storage:** `save`/`load`/`delete`, required lazy defaults, typed loads that ignore stored values of another
   type, a validated checkpointed session view, and host-acknowledged atomic writes under
-  [Runtime](docs/RUNTIME.md#script-storage). The Player keeps it in browser local storage
+  [Runtime](docs/RUNTIME.md#script-storage). The Playroom keeps it in browser local storage
   with a Clear saved script data control.
 - **Pending actions, timers, and chat pacing:** blocking `wait`/`timer` and asynchronous timers with presentation metadata,
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
   permanent buttons (`showPermanentButton`, `button.remove()`) whose clicks run their blocks like expiry interrupts;
   timer, media, and button blocks that share the function and block variables of the code that creates them (ADR 0024);
   protected compact interactions on one typed foreground family, which also holds `showPopup`'s dialog outside the
-  chat, `exportText`'s dialog in which the player copies or downloads a text, and `openUrl`, which the Player settles
+  chat, `exportText`'s dialog in which the player copies or downloads a text, and `openUrl`, which the Playroom settles
   once a new tab shows the address; and ADR 0018 resumable `say` pacing, where a paced
   `say` lasts its reading time before anything after it runs, with typed skip settlement. A `say` used as a value gives a `messageHandle`
   whose `text` changes the message in place and whose `remove()` takes it out of the conversation
-  ([Runtime](docs/RUNTIME.md#message-handles)), which the Player shows, announces politely, and Debug explains and
+  ([Runtime](docs/RUNTIME.md#message-handles)), which the Playroom shows, announces politely, and Debug explains and
   rewinds.
 - **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
   and photos taken with tags (`showImage tagged`, `findImages`, `takePhoto(tags:)`), and selection of files by
   their header tags (`goto tagged`, `call tagged`, `findScripts`), and blocking or asynchronous `playAudio`/`playVideo`
-  with playback ranges, repetition, volume, handles, seeks, timeline cues, `stopAudio`, Player load/progress
-  observations, and checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image
+  with playback ranges, repetition, volume, handles, seeks, timeline cues, `stopAudio`, Playroom load/progress
+  observations, and checkpoint restore at the language, compiler, and runtime level. The Playroom shows the Stage image
   and plays audio after explicit Start; browser video playback remains deferred.
 - **Camera capture:** `takePhoto()` as a typed capture action with trusted reference admission and non-fatal
-  unavailability under [Runtime](docs/RUNTIME.md#camera-capture). With a trusted host capability the Player opens the
+  unavailability under [Runtime](docs/RUNTIME.md#camera-capture). With a trusted host capability the Playroom opens the
   session camera after Start and captures silently; a photo saved through script storage is stored in the browser and
   shown again in a later run. Scripts show the camera's live view in a floating window or over the Stage with `showCamera [stage]` and hide it with `hideCamera`.
-  `askImage(...)` is a mandatory image interaction under [Runtime](docs/RUNTIME.md#image-input); the Player answers it
+  `askImage(...)` is a mandatory image interaction under [Runtime](docs/RUNTIME.md#image-input); the Playroom answers it
   in two steps under the question: a photo taken in a viewfinder the player opens, or an image file chosen or dropped
   onto the composer, becomes a preview on the Stage, and "Use image" answers with it, stored like a photo. Recording APIs and the advanced package media API remain
   deferred.
-- **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
+- **Playroom:** the POC Playroom is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript
   owner. A framework-independent adapter connects it to the implemented transcript, foreground-interaction, pacing,
   time-observation, runtime timer, checkpoint, and restore slice, including typed message markup with controlled links;
   authored runtime timers render in its timer rail on a session-owned scene clock (#444), and permanent buttons below
   them, inactive while their block runs (#610).
-  It also has the tools framework, browser-local Player Settings, and the Debug panel that Settings' Debug menu offers,
+  It also has the tools framework, browser-local Playroom Settings, and the Debug panel that Settings' Debug menu offers,
   with time controls, countdowns, a Now view, and a debug room that keeps debugging apart from normal play
-  (`docs/DEBUGGER.md#player-debug`), and a debug export a player
+  (`docs/DEBUGGER.md#playroom-debug`), and a debug export a player
   downloads with their consent from the error dialog, Settings, or the Debug panel, which `tools/debug-export.mjs`
   inspects and replays offline (`docs/DEBUGGER.md#debug-export`). It shows the runtime Stage image and plays authored
   audio through `player/media/media-device.ts` after the explicit Start activation (#446). The default build plays the
@@ -93,10 +93,10 @@ contracts and boundaries.
 
 - complete V30 coverage, complete static typing, measurement units, generalized duration ranges, and locale-aware
   duration presentation;
-- production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
+- production cross-origin Playroom/host integration, richer editor support, and final browser acceptance coverage;
 - pending-action capabilities beyond the implemented timer, permanent button, interaction, pacing, and media
   families; browser video playback, the layered scene, camera capture beyond `takePhoto()`, and custom views;
-- the cross-origin player-host protocol and production browser security integration;
+- the cross-origin Playroom-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
   community dependency resolution;
 - Laravel/PostgreSQL persistence, accounts, catalog, publishing, moderation, scheduling, continuous personalities,
