@@ -47,6 +47,18 @@ General reusable UI engineering and visual-design guidance lives in
 replace the Player-specific contract here.
 
 Player verification follows [`TESTING.md`](../TESTING.md), including its local browser and scoped visual-check route.
+Before READY, a change to what the Player shows takes screenshots in light and dark, on desktop and phone, and READY
+answers from them (owner, 2026-11-08):
+
+- Is any information shown twice?
+- Is any text stating the obvious?
+- Does anything move, flicker or reflow? A status element takes no layout space.
+- Is any element present without a purpose?
+- Are disabled controls visibly disabled?
+
+READY for a change to `player/` or its fixture packages also holds the whole `npm run test:player:browser` run on its
+head, as [`TESTING.md`](../TESTING.md#checks-and-corpora-by-component) requires; a scenario or two is not that run.
+
 ADR 0001 fixes the responsive PWA direction; exact offline, storage, cache, and update lifecycle choices remain in
 [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md) rather than being duplicated here.
 
@@ -145,6 +157,11 @@ signal when both axes are constrained: a tall shape can spend relatively more ve
 content, while a wide/short shape can preserve vertical control extent because horizontal reading room is more abundant.
 A narrow tall desktop window and a similarly shaped phone should therefore converge on the same layout reasoning.
 Foldables likewise use their currently available dimensions rather than a special device category.
+
+Phones are portrait only. The owner's words, translated: "A landscape screen is unrealistic; make it only for portrait
+mode on phones. A landscape screen can only occur on tablets, desktops and laptops; a phone is always portrait." A
+phone-sized landscape viewport is no test case or layout target; tablet, laptop and desktop landscape sizes stay. Owner
+decision, 2026-11-13.
 
 Manual open/closed tool intent is preserved across resizing and rotation when the tool region owns focus or remains the
 active interaction context. A responsive change must not spontaneously open a previously closed drawer. When an open

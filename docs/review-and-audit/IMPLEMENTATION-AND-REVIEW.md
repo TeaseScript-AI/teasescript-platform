@@ -339,6 +339,8 @@ requirement, supported path, real boundary, or class-appropriate rationale; evid
 applicable; practical impact; and the smallest complete repair or follow-up. For reuse or
 simplification, check nearby and shared code, then name the existing helper or simpler equivalent
 and the concrete cost removed.
+A reviewer who finds one instance of a kind of defect checks the whole change for that kind and lists every instance in
+the same round; the builder repairs that kind across the change, not only the lines named.
 The review comment records the exact head SHA, comparison base, scope, blockers and non-blocking
 findings, from the second round on whether each earlier finding is closed, checks and outcomes,
 including failures, warnings, skips, unavailable checks, remaining uncertainty, and whether the

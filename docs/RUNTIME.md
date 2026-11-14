@@ -2125,6 +2125,9 @@ The checkpoint revision represents the complete accepted checkpoint bundle:
 | Checkpoint envelope only       | checkpoint                      |
 | Internal implementation only   | none                            |
 
+A plan that bumps a revision searches `tests/fixtures` and `tools/runtime-oracle` for the current numbers and names
+every pinned fixture or oracle that holds one, with the repair it proposes.
+
 Instruction-plan and runtime-snapshot revisions remain independent and do not need matching numbers. No nested duplicate version fields, hidden sub-format registry, migration chain, or generated documentation synchronization is introduced.
 
 Current POC status: only the current revision of each format is supported and no migration exists. A non-current

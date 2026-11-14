@@ -686,6 +686,9 @@ A repair that only deletes or corrects comments needs no review round.
   against the new base equals the old diff, with line counts on both sides) or reruns the affected evidence. A rebase
   that changes the delta, including one that resolves conflicts, restarts the review rounds on the changed part; on the
   full route, a further final review happens only when that change alters the construction.
+- After a review, a wrong pushed head is repaired with a follow-up commit, not replaced: reviews and CI name heads by
+  SHA, and the squash merge makes the commit count irrelevant. A force-push with a lease is right only for a rebase
+  onto a moved base, which READY names with its `git range-diff`.
 
 ### Merge
 
