@@ -5,7 +5,7 @@ persistent personalities, roleplay adventures, and community-created packages. I
 who want to turn an idea into an interactive story, including people who have never programmed. Prior software development
 or frontend design experience is not assumed. Players are the people who experience those stories.
 
-The product direction includes accounts, forum, catalog, editor, player, package publishing, moderation, persistent state,
+The product direction includes accounts, forum, catalog, editor, Playroom, package publishing, moderation, persistent state,
 media, optional integrations, and deterministic LLM-assisted dialogue. These are staged capabilities, not all current
 implementation. Authoring should offer an easy starting point and room for experienced developers to express complex
 ideas within the platform's accepted execution and capability boundaries. The
@@ -13,7 +13,7 @@ ideas within the platform's accepted execution and capability boundaries. The
 support that progression in the language and editor.
 
 The current implementation focus includes the deterministic TypeScript language/runtime core, the local development
-playground, and the Vue Player. Laravel, PostgreSQL, accounts, publishing, and
+playground, and the Vue Playroom. Laravel, PostgreSQL, accounts, publishing, and
 production hosting are later milestones.
 
 ## Terminology
