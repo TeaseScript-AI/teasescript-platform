@@ -3,11 +3,7 @@ import type { KnownValue } from "../../static-evaluation.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { ContractRef, DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence } from "../graph.js";
 
-// An operation's result as a relation over what is known of its operands so far. Each contract family has one adapter
-// that reads the owning contract module (`conversions.ts`, `numeric-functions.ts`, `text-operations.ts`, ...) and
-// answers in these terms; `operationRelations()` (`index.ts`) serves them, and only the adapter tests read it. The type
-// core takes its results from `core/contract/` and `core/method-categories.ts`; of this file it reads the operand types
-// (`OperandView`, `OperationInputs`).
+// An operation's result as a relation over what is known of its operands so far.
 
 /** A reference to one operand of an operation: its receiver, a positional argument, or a named one. */
 export type OperandRef =
@@ -84,7 +80,7 @@ export interface OperationRelation {
   result(inputs: OperationInputs): OperationResult;
 }
 
-/** The relations of every contract family, by family and name (`operationRelations()`, `index.ts`). */
+/** The relations of every contract family, by family and name. */
 export interface OperationRelations {
   relation(contract: ContractRef): OperationRelation | undefined;
 }

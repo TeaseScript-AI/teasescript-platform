@@ -16,8 +16,7 @@ import { propertyName } from "./program.js";
 /*
  * The core's result: its outcome, its diagnostics (each with its class, kind, site, code and rule, what its sentences
  * name, and a warning's writers, context word and obligation) and the runtime checks no diagnostic owns; and its record
- * (`coreRecord`), the result as JSON-safe data the record tests compare (`tests/helpers/type-core-records.ts`).
- * `messages.ts` composes the sentences (D1–D3); the record holds none.
+ * (`coreRecord`), the result as JSON-safe data, which holds no sentence.
  */
 
 /** An error, a warning with a runtime check, a warning the runtime owes nothing for (`StaticDiagnostic`), a stop's mark. */
@@ -76,10 +75,9 @@ export interface Provenance {
  */
 export interface ContextDetail {
   /**
-   * Whether the word is the warned read's own (`detail` in `consumers/reports/warnings.ts`): its exact path failed
-   * there (`directWord`), the word is `later` or `budget`, or it names a reference's member the check reads; only then
-   * do the details below name what the read itself depends on; else the word came with a value from another line (a
-   * copy, a projection, a call) and its sentence speaks of that value's origin.
+   * Whether the word is the warned read's own: only then do the details below name what the read itself depends on;
+   * else the word came with a value from another line (a copy, a projection, a call) and its sentence speaks of that
+   * value's origin.
    */
   readonly direct: boolean;
   /** `unknown`: the value comes from outside the script (host data, a typeless `load` or `fromJson`, F19). */
@@ -541,7 +539,7 @@ export interface CoreResult {
   readonly diagnostics: readonly CheckedDiagnostic[];
   /**
    * The checks no shown diagnostic owns: the boundary checks (C9), then the obligations of the warnings a stop moved to
-   * the runtime (`coreResult`).
+   * the runtime.
    */
   readonly checks: readonly Obligation[];
 }
@@ -669,8 +667,8 @@ export interface RecordDiagnostic {
 }
 
 /**
- * A result as JSON-safe data in the shape the record tests compare: sites by file path, writers as tokens, and
- * `runtimeChecks` holding every warning's obligation, one per warning, and every other check once.
+ * A result as JSON-safe data: sites by file path, writers as tokens, and `runtimeChecks` holding every warning's
+ * obligation, one per warning, and every other check once.
  */
 export interface CoreRecord {
   readonly outcome: CoreOutcome;

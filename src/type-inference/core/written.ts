@@ -20,11 +20,10 @@ import type { WrittenTypeError } from "./result.js";
  * The core's check of written types (V30 §13, ADR 0021 3.4): a union never holds a whole list, set or dict beside
  * another type, wherever a type is written (a variable, a parameter, a result, and a type test, whose type is one that
  * can follow `let x:`, ADR 0021 4.1), also inside another type (a list or set element, a dict value). `null` beside a
- * collection is its optional form (`integer[] | null` is `integer[]?`) and stays allowed. The collector reads the same
- * types into kinds (`typeTerm`) and reports nothing; this check reads the written types alone, independent of the flow,
- * so a written type in code that never runs or in a function no call reaches errs too. A place keeps its written type
- * as the collector reads it, which decides the place (A1) and checks its stores and reads as any written type does;
- * the error adds nothing there.
+ * collection is its optional form (`integer[] | null` is `integer[]?`) and stays allowed. This check reads the written
+ * types alone, independent of the flow, so a written type in code that never runs or in a function no call reaches errs
+ * too. A place keeps its written type as the collector reads it, which decides the place (A1) and checks its stores and
+ * reads as any written type does; the error adds nothing there.
  */
 
 /** The type names that stand for any list, set or dict (V30 §13). */

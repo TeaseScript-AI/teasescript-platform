@@ -30,8 +30,7 @@ export const REASON = { external: 1, opaque: 2, deferred: 4, missing: 8, budget:
  * The context words in the order a warning names the first: the reasons' words (`unmodelled` to `unknown`), which are
  * decided first, then those of the exact path's conditions X1 to X7, then A7's `later`, and last `budget`, a value the
  * analysis stopped before deciding (B1, D4). `reasonContext` orders the first four, the reasons' own words,
- * differently (`external`'s `unknown` before `deferred-parameter`); `mergeItems` rewrites an early unknown's word to
- * `reasonContext`'s, so the two orders never meet on an unknown (#2486).
+ * differently (`external`'s `unknown` before `deferred-parameter`).
  */
 export const CONTEXT_WORDS = [
   "unmodelled",
@@ -85,8 +84,7 @@ export interface Item {
   /** External data that no ingress store brought, merged beside some that one did (C9). */
   readonly loose?: true;
   /**
-   * The guard mark: the value was read under a test of its path, so no consumer errs on it. An item made from others
-   * takes it from them through `marksOf` or `computedMarks`, as it takes `called`.
+   * The guard mark: the value was read under a test of its path, so no consumer errs on it.
    */
   readonly guarded?: true;
   /**
@@ -96,10 +94,8 @@ export interface Item {
    */
   readonly called?: true;
   /**
-   * A kind a type test proved of external data (`narrowedItems`, #1073), or a stopped read of an ingress
-   * (`Consumers.valueItems`): the kind is proved or unknown, never the ingress, so a consumer still asks C9's boundary
-   * of the ingress the data came by. An item made from others takes it through `marksOf`, never through
-   * `computedMarks`.
+   * A kind a type test proved of external data (`narrowedItems`, #1073), or a stopped read of an ingress: the kind is
+   * proved or unknown, never the ingress, so a consumer still asks C9's boundary of the ingress the data came by.
    */
   readonly fromExternal?: true;
   /**
@@ -184,9 +180,8 @@ export function makeItem(
 
 /**
  * The marks an item made from others takes from them, each where one of them has it: the guard mark (`guarded`), the
- * through-a-call flag (`called`, AD-3) and a test's kind of external data (`fromExternal`). A merge of one kind, a
- * written domain's kinds and a step below an unknown take them here; a computed item (an operator's row, `carried`'s
- * transfers) takes `computedMarks`, the same without `fromExternal`. A new mark that travels belongs in both.
+ * through-a-call flag (`called`, AD-3) and a test's kind of external data (`fromExternal`). A new mark that travels
+ * belongs here and in `computedMarks`.
  */
 export function marksOf(from: readonly Item[]): {
   readonly guarded?: true;
@@ -249,8 +244,7 @@ export function firstContext(a: ContextWord | null, b: ContextWord | null): Cont
 /**
  * The word of one unknown's reasons: the first present in the rank `external` (`unknown`), `opaque`
  * (`unmodelled`), `deferred` (`deferred-parameter`), `missing` (`missing`), `budget` (`budget`); an unknown without
- * reasons says `unknown`. This order differs from `CONTEXT_WORDS`' (`deferred-parameter` comes before `unknown` there);
- * `mergeItems` rewrites an early unknown's word to this one (#2486).
+ * reasons says `unknown`. This order differs from `CONTEXT_WORDS`' (`deferred-parameter` comes before `unknown` there).
  */
 export function reasonContext(reasons: number): ContextWord {
   if ((reasons & REASON.external) !== 0) return "unknown";
@@ -580,8 +574,7 @@ export function alternatives(items: readonly Item[], scope: ItemScope): Item[] {
 }
 
 /**
- * Every item a possibility, with `context` where no word comes first; an `unknown` keeps the word it carries
- * (`ownContext` gives its reasons' word where words meet).
+ * Every item a possibility, with `context` where no word comes first; an `unknown` keeps the word it carries.
  */
 export function weaken(items: readonly Item[], context: ContextWord | null = null): Item[] {
   return items.map((item) => ({
