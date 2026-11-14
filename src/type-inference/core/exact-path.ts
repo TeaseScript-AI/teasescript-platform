@@ -67,10 +67,7 @@ export type ExactAnswer =
 const ANY_PATH = "*";
 
 /*
- * Three tuning constants: each picks which of two ways answers a read, never the answer. Up to four sources tested at
- * one path, a read asks each, past them the path's spans; up to four anchors of a source, the path's spans hold its
- * copies run by run, past them the source is asked at the read; up to four trees, a source with several anchors is
- * listed under each, past them under every tree.
+ * Three tuning constants: each picks which of two ways answers a read, never the answer.
  */
 
 /** The trees of the copy forest a source with several anchors is listed under one by one; beyond, under all. */

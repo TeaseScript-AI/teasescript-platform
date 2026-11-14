@@ -20,8 +20,8 @@ import { amend, Retained } from "./retained/retained.js";
  * The definitions of the coarse core: every store, add, clear, removal, binding and return as a definition of a key at
  * its node, and the indexes the exact path asks of them: per key the definitions in dominator order with a lifting
  * table (the nearest dominating definition), per key the own events of the key and the keys below it, the owner sets
- * and the one global list of call sites, and the receiver rule (`DefinitionLists.certain`: a receiver is certain where
- * its preparation dominates the store and no own event of its key lies between). Nothing here evaluates a value.
+ * and the one global list of call sites, and the receiver rule (`DefinitionLists.certain`). Nothing here evaluates a
+ * value.
  */
 
 /**
@@ -1060,10 +1060,9 @@ export function joinedOperand(operand: PlaceId): number {
 }
 
 /**
- * The definition lists of one pass (each pass makes its own, without the stores of the rejected set it is given,
- * `createPass`'s `rejected`): per key its live definitions sorted in dominator order with a lifting table, the nearest
- * dominating definition over a key and its prefixes, the own-event lists, the first own event between two nodes, and
- * the receiver rule (`certain`).
+ * The definition lists of one pass: per key its live definitions sorted in dominator order with a lifting table, the
+ * nearest dominating definition over a key and its prefixes, the own-event lists, the first own event between two
+ * nodes, and the receiver rule (`certain`).
  */
 export class DefinitionLists {
   readonly #sorted = Retained.map<Key, SortedDefinitions>("DefinitionLists.#sorted");
@@ -1404,8 +1403,7 @@ export class DefinitionLists {
 
   /**
    * The receiver rule: a receiver is certain where its preparation dominates the effect and no own event of its key
-   * lies between them; a definition with no receiver to prepare, or whose preparation is never reached, is certain, and
-   * a loop's exit definition as its add.
+   * lies between them.
    */
   public certain(d: Definition): boolean {
     if (d.orig !== undefined) return this.certain(d.orig);

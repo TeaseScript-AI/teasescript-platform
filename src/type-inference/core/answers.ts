@@ -113,10 +113,7 @@ import type { IdentityView } from "./identity-view.js";
  * The answers of the coarse core: `analyseCore` runs once per compile and publishes, after its last pass, the frozen
  * surface (`Answers`): per source occurrence its items, route, place and obligations; per place its admitted type,
  * contract, ingresses and definitions; the projections and properties of a value; the bridge to the adapters' operand
- * views; and the whole program's diagnostics, checks, graph, budget counters and deferred bindings. The analysis runs
- * in admission's passes: each pass is a fresh analysis with the stores of the rejected set it is given left out
- * (`analyseCore`'s loop: in the ordinary case the previous pass's rejections), until that set is stable; a set that
- * repeats is a cycle, whose changing stores stay possibilities.
+ * views; and the whole program's diagnostics, checks, graph, budget counters and deferred bindings.
  */
 
 /** The parts of one pass of the analysis: each reads the others through it. */
@@ -147,9 +144,7 @@ type StoreTargets = ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]> |
 /**
  * One pass over an indexed program: the stores of `rejected` (by their definitions' order) left out, the keys of
  * `stopped` stopped from its start, and each selecting store (`selectingStores`) at its target in `targets`: an
- * object's own property or an element (#1275), or `null`, into nothing (#2378). With `completion`, a receiving
- * completion's pass: it keeps its cells for the receiving closure from its start, no decision of it stops at its
- * allowance, and it opens no epoch.
+ * object's own property or an element (#1275), or `null`, into nothing (#2378).
  */
 function createPass(
   program: CoreProgram,
@@ -657,7 +652,7 @@ export interface Answers {
   /**
    * These answers stopped at `limit` after the analysis ran to its end (a question after it spent the allowance): its
    * findings and decisions stand, its warning says so, and the solver computes nothing new for what is asked from then
-   * on: a value is answered from what had finished and the other after-stop sources `CoreAnswers.#items` lists.
+   * on.
    */
   stoppedAt(limit: BudgetLimit): Answers;
   /**
@@ -1250,10 +1245,7 @@ class CoreAnswers implements Answers {
   readonly #obligations = new Map<string, Obligation[]>();
   #stores: Map<FlowNode, Definition> | null = null;
   #known: ((expression: Expression) => KnownValue | undefined) | null = null;
-  /**
-   * The analysis stopped at a limit (statements nested past the nesting limit alone are no stop): from then on the
-   * solver computes nothing new (`#run`), and a value's items come from the sources `#items` lists.
-   */
+  /** The analysis stopped at a limit (statements nested past the nesting limit alone are no stop). */
   readonly #stopped: boolean;
 
   public constructor(
@@ -1658,7 +1650,7 @@ class CoreAnswers implements Answers {
     const items = this.#items(value, node, []);
     // a read of a binding or of a path below one; a projection of a literal, a call or an operation is no place
     const target = this.#readPlace(value);
-    // the route the read's answer took, recorded as it was answered; after a stop `contract`, a quiet read's `quiet`
+    // the route the read's answer took, recorded as it was answered
     const route: Route =
       target === null
         ? "value"
