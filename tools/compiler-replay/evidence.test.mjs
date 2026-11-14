@@ -19,7 +19,10 @@ import {
 import { ROOT, jobId, ran, standInQueue, tool, write } from "./test-fixtures.mjs";
 
 test("evidence: a run's class reads a limit only from a stop or a limit's refusal, the syntax gate from another refusal", () => {
-  assert.equal(classOf({ stopped: null }), "completed");
+  assert.equal(classOf({ stopped: null, analysed: true }), "completed");
+  // (a run the checker never saw, compile errors before it, has no analysis: never completed)
+  assert.equal(classOf({ stopped: null, analysed: false }), "unanalysed");
+  assert.equal(classOf({ stopped: null }), "uncompared");
   assert.equal(classOf({ stopped: "work" }), "limit");
   assert.equal(classOf({ stopped: "read-depth" }), "limit");
   assert.equal(
@@ -41,7 +44,17 @@ test("evidence: a run's class reads a limit only from a stop or a limit's refusa
   assert.equal(sourceClass([]), "uncompared");
   assert.equal(sourceClass(["limit", "threw", "completed"]), "threw");
   assert.equal(sourceClass(["threw", "incomplete"]), "incomplete");
-  assert.deepEqual(CLASSES, ["completed", "limit", "slice", "threw", "incomplete", "uncompared"]);
+  assert.equal(sourceClass(["completed", "unanalysed"]), "unanalysed");
+  assert.equal(sourceClass(["unanalysed", "slice"]), "slice");
+  assert.deepEqual(CLASSES, [
+    "completed",
+    "unanalysed",
+    "slice",
+    "limit",
+    "threw",
+    "incomplete",
+    "uncompared",
+  ]);
 });
 
 const compile = (fields = {}) => ({
@@ -55,6 +68,7 @@ const compile = (fields = {}) => ({
   allowance: 1000,
   stopped: null,
   outside: null,
+  analysed: true,
   ...fields,
 });
 const setMode = (mode, base = compile(), head = base) => ({
@@ -67,6 +81,9 @@ const MODE_NAMES = ["forward", "reversed", "forward, unshared", "reversed, unsha
 /** A compile that threw a `TypeError` at `at`, as `plans.mjs` records one. */
 const threw = (at) =>
   compile({ error: "TypeError: m", plan: null, diagnostics: null, thrown: `TypeError at ${at}` });
+/** A compile whose errors before the checker gave the core no request, as `plans.mjs` records one. */
+const unparsed = (fields = {}) =>
+  compile({ plan: null, trace: "0/0/0", units: 0, allowance: 0, analysed: false, ...fields });
 
 test("evidence: the set's sources by class on each tree, a class move apart from a difference, each tree's share of the limit", () => {
   const stopped = compile({ stopped: "work", units: 1001 });
@@ -93,10 +110,18 @@ test("evidence: the set's sources by class on each tree, a class move apart from
       name: "crashes elsewhere",
       modes: MODE_NAMES.map((m) => setMode(m, threw("f (a.js)"), threw("g (b.js)"))),
     },
+    { name: "unparsed", modes: MODE_NAMES.map((m) => setMode(m, unparsed())) },
+    {
+      name: "unparsed apart",
+      modes: MODE_NAMES.map((m) => setMode(m, unparsed(), unparsed({ diagnostics: "e" }))),
+    },
+    { name: "unparsed planned", modes: MODE_NAMES.map((m) => setMode(m, unparsed({ plan: "p" }))) },
+    { name: "unparsed now", modes: MODE_NAMES.map((m) => setMode(m, compile(), unparsed())) },
   ]);
   const summary = partSummary(sources);
   assert.deepEqual(summary.counts.base, {
-    completed: 3,
+    completed: 4,
+    unanalysed: 3,
     limit: 1,
     slice: 1,
     threw: 2,
@@ -105,6 +130,7 @@ test("evidence: the set's sources by class on each tree, a class move apart from
   });
   assert.deepEqual(summary.counts.head, {
     completed: 3,
+    unanalysed: 4,
     limit: 0,
     slice: 1,
     threw: 3,
@@ -116,6 +142,7 @@ test("evidence: the set's sources by class on each tree, a class move apart from
   assert.deepEqual(summary.moved, [
     "repaired: refused at the limit → completed",
     "crashes now: completed → threw",
+    "unparsed now: completed → no analysis (compile errors before the checker)",
   ]);
   assert.deepEqual(
     [summary.completed, summary.threwBoth, summary.differences],
@@ -129,6 +156,14 @@ test("evidence: the set's sources by class on each tree, a class move apart from
     ],
   );
   assert.deepEqual(summary.threwAlike, ["crashes: TypeError at f (a.js)"]);
+  // (no analysis on both trees: never among the completed, compared on its diagnostics and that no plan comes out)
+  assert.deepEqual(
+    [summary.unanalysed, summary.unanalysedDifferences],
+    [
+      ["unparsed", "unparsed apart", "unparsed planned"],
+      ["unparsed apart: diagnostics only", "unparsed planned: a plan without analysis"],
+    ],
+  );
   // (the heaviest on the base is the stopped run, past its allowance and below the fixed limit)
   const [base] = summary.shares;
   assert.deepEqual(
@@ -196,16 +231,18 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
   const summary = partSummary(areaSources(work, differences));
   assert.deepEqual(summary.counts.base, {
     completed: 4,
+    unanalysed: 1,
     limit: 0,
-    slice: 1,
+    slice: 0,
     threw: 0,
     incomplete: 2,
     uncompared: 1,
   });
   assert.deepEqual(summary.counts.head, {
     completed: 2,
+    unanalysed: 1,
     limit: 1,
-    slice: 1,
+    slice: 0,
     threw: 1,
     incomplete: 2,
     uncompared: 1,
@@ -233,6 +270,7 @@ const packageRun = (fields = {}) => ({
     units: 600,
     allowance: 1000,
     stopped: null,
+    analysed: true,
     ...fields,
   },
   route: {
@@ -291,17 +329,18 @@ test("evidence: a package's class is its analysis's, its first difference by par
       modes: MODE_NAMES.map((m) =>
         packageMode(m, {
           ...packageRun(),
-          analysis: { request: false, error: null, stopped: null, units: 0, allowance: 0 },
+          analysis: { analysed: false, error: null, stopped: null, units: 0, allowance: 0 },
         }),
       ),
     },
     { name: "hang", root: 0, incomplete: "safety net 3600 s" },
   ]);
   const summary = partSummary(sources);
-  // (a package whose files give no core request completed, with its compile compared, and is named on each tree)
-  assert.deepEqual(summary.unasked, [["unparsed"], ["unparsed"]]);
+  // (a package whose files give no core request has no analysis, its compile compared, and is named)
+  assert.deepEqual([summary.unanalysed, summary.unanalysedDifferences], [["unparsed"], []]);
   assert.deepEqual(summary.counts.base, {
-    completed: 3,
+    completed: 2,
+    unanalysed: 1,
     limit: 1,
     slice: 0,
     threw: 1,
@@ -407,6 +446,16 @@ test("evidence-report: equal only where every part asked ran and completed somet
       [alike.status, alike.reasons, alike.parts.set.threwAlike],
       [0, [], ["s2: TypeError at f (a.js)"]],
     );
+    // (a source with no analysis on both trees is never completed: counted and listed apart, equal where its diagnostics
+    // agree and no plan comes out)
+    const broken = (i) =>
+      i === 3 ? [{ ...fine(i)[0], modes: MODE_NAMES.map((m) => setMode(m, unparsed())) }] : fine(i);
+    const unanalysed = report({ setRecords: broken, packages: [pkg] });
+    assert.deepEqual(
+      [unanalysed.status, unanalysed.reasons, unanalysed.parts.set.completed],
+      [0, [], 15],
+    );
+    assert.deepEqual(unanalysed.parts.set.unanalysed, ["s3"]);
     const fresh = (i) =>
       i === 2
         ? [

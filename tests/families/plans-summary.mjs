@@ -66,10 +66,12 @@ function compileFault(c) {
     !shaped(
       c,
       ["plan", "diagnostics", "checks", "error", "trace", "questions", "units"],
-      ["allowance", "stopped", "outside", "thrown"],
+      ["allowance", "stopped", "outside", "thrown", "analysed"],
     )
   )
-    return "a compile without exactly its seven parts, or one of the four a runner since #2796 adds";
+    return "a compile without exactly its seven parts, or one of the five a runner since #2796 adds";
+  if (c.analysed !== undefined && typeof c.analysed !== "boolean")
+    return "a compile's analysed neither true nor false";
   if (c.allowance !== undefined && !whole(c.allowance))
     return "a compile's allowance no whole number";
   if (c.stopped !== undefined && !textOrNull(c.stopped))
