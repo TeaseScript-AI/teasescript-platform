@@ -128,14 +128,13 @@ export function pathTextLength(path: readonly string[]): number {
 }
 
 /**
- * The paths and keys the core makes, each through one of these helpers or the key helpers of `definitions.ts`
- * (`type-core-kept.test.ts` fails on one made past them). A text or array a structure keeps (a map's key, a set's
- * member, an entry's path or key) is made by a kept helper (`keptText`, `keptKey`, …), which charges its size to
- * `literalUnits` before it makes it, so a literal's depth, breadth or names reach the allowance before
- * the heap; one a step only looks up or passes on is made by its plain twin (`pathText`, `keyOf`, …), which charges
- * nothing: its making is the step's own work. Up to `SHORT` code units or elements ride on the unit of the step that
- * makes them, so an ordinary path costs nothing more; beyond it a text costs a unit per eight code units and an array a
- * unit per element, about their size in 8-byte words.
+ * The paths and keys the core makes, each through one of these helpers or the key helpers of `definitions.ts`. A text
+ * or array a structure keeps (a map's key, a set's member, an entry's path or key) is made by a kept helper
+ * (`keptText`, `keptKey`, …), which charges its size to `literalUnits` before it makes it, so a literal's depth,
+ * breadth or names reach the allowance before the heap; one a step only looks up or passes on is made by its plain twin
+ * (`pathText`, `keyOf`, …), which charges nothing: its making is the step's own work. Up to `SHORT` code units or
+ * elements ride on the unit of the step that makes them, so an ordinary path costs nothing more; beyond it a text costs
+ * a unit per eight code units and an array a unit per element, about their size in 8-byte words.
  */
 const SHORT = 32;
 
@@ -277,9 +276,9 @@ export class BudgetExhausted extends Error {
 
 /**
  * The work of one analysis. Counters change only through `charge`, which adds to the total too, so the counters always
- * sum to the total; the budget's test checks that identity over charged work. Until the analysis stops, each unit is
- * also counted to its spender (`spender`: 0 for setup, else a callable's number); after the stop (`stop`) the ledger
- * only counts the finishing work (`finishing`), never stopping it again.
+ * sum to the total. Until the analysis stops, each unit is also counted to its spender (`spender`: 0 for setup, else a
+ * callable's number); after the stop (`stop`) the ledger only counts the finishing work (`finishing`), never stopping
+ * it again.
  */
 export class WorkLedger {
   readonly #counts = new Map<WorkCounter, number>();
@@ -459,8 +458,7 @@ export class WorkLedger {
   }
 
   /**
-   * Ends an open `sharedSteps` build: its units counted as shared, what its readers repeated dropped. Its own end
-   * calls it, and so does a solver run that abandons it unfinished (a stop leaves its generator suspended).
+   * Ends an open `sharedSteps` build: its units counted as shared, what its readers repeated dropped.
    */
   public closeShared(): void {
     const window = this.#window;
@@ -550,14 +548,13 @@ export function countApart(work: WorkLedger, counter: WorkCounter, units = 1): v
 
 /**
  * The levels of a read chain the analysis follows in one run of native calls: a read's projections (`value[0][0]…`,
- * `value.x.y…`, `value.first.first…`), each read by a generator inside the one before (`Contract`'s `contractOfValue` and
- * `valueAt`, `Values`' `#valueAt`), so a deeper chain needs a deeper native stack; an operation's answer at a path runs
- * on its frame's own stack, its read chain new (`inline`, #1572). Past it the
- * analysis stops proving (`read-depth`) instead of overflowing that stack. A technical bound, not a language limit: on Node
- * 26.13.0's default stack (984 KiB) such a chain overflowed at 2,448 levels for index, property and `.first` reads, as
- * on 24.18.0 with the same build; 1,024 is about 40 % of that, leaving the stack a compile is called from and a heavier
- * level their room. `docs/RESOURCE-LIMITS.md` records it
- * (`compiler.core-read-depth`). After a stop, a read past it is not settled (`Solver.enterRead`).
+ * `value.x.y…`, `value.first.first…`), each read by a generator inside the one before, so a deeper chain needs a deeper
+ * native stack; an operation's answer at a path runs on its frame's own stack, its read chain new (`inline`, #1572).
+ * Past it the analysis stops proving (`read-depth`) instead of overflowing that stack. A technical bound, not a
+ * language limit: on Node 26.13.0's default stack (984 KiB) such a chain overflowed at 2,448 levels for index, property
+ * and `.first` reads, as on 24.18.0 with the same build; 1,024 is about 40 % of that, leaving the stack a compile is
+ * called from and a heavier level their room. `docs/RESOURCE-LIMITS.md` records it (`compiler.core-read-depth`). After
+ * a stop, a read past it is not settled.
  */
 export const READ_DEPTH_LIMIT = 1_024;
 

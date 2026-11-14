@@ -24,7 +24,7 @@ import { retainedModule } from "./retained/retained.js";
 
 /**
  * The deepest nesting of collections whose element types the slice's facts follow: a place or a written type with a
- * collection at this depth is outside the slice (`backend.ts` rejects it), so no fact is cut short. The candidate's cut,
+ * collection at this depth is outside the slice, so no fact is cut short. The candidate's cut,
  * not a language rule: the facts' type keys, the plan's conversion and the backend's slice rule follow no deeper.
  */
 export const SLICE_DEPTH = 256;

@@ -201,8 +201,7 @@ export interface ContractRef {
  * What the source says about an operation beyond its operands' types, which the owning result rules read: a written
  * form descriptor is not a computed one, a written `allowSkip: false` proves a photo is taken, an `askChoice` option
  * with a label before `:` returns that label. Built from the branches of those rules, one entry per written element,
- * each with the place of its expression. Collected without
- * reading any type.
+ * each with the place of its expression. Collected without reading any type.
  */
 export type SyntaxEvidence =
   | {
