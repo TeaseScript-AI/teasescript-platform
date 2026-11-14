@@ -96,10 +96,6 @@ const CASES: readonly [string, Files][] = [
     one("function keep(v) {\n  return v\n}\nlet n: integer = keep(hostValue)\nsay n\nexit\n"),
   ],
   [
-    "a store into a property of an untyped parameter",
-    one("function f(o) {\n  o.a = hostValue\n  say o.a\n}\nf({a: 1})\nexit\n"),
-  ],
-  [
     "a function that ends without a return",
     one("function f(x: integer) {\n  say x\n}\nlet r = f(hostValue)\nsay r == null\nexit\n"),
   ],
@@ -202,6 +198,7 @@ test("the derived oracle refuses a check into an untyped parameter or result", (
   for (const source of [
     "function shown(v) {\n  say v\n}\nshown(1)\nshown(hostValue)\nexit\n",
     "function pick(b) {\n  if b == null {\n    return 1\n  }\n  return b\n}\nlet n = pick(hostValue)\nsay n\nexit\n",
+    "function f(o) {\n  o.a = hostValue\n  say o.a\n}\nf({a: 1})\nexit\n",
   ]) {
     const request = coreRequest(one(source));
     assert.ok(request !== null);
@@ -231,7 +228,7 @@ test("another file's function: each file's stores are its own, and a run that wo
         path: "main.tease",
         source: "let a = 1\nlet b = 222222\nlet m: integer = hostValue\nshow()\nexit\n",
       },
-      { path: "helpers.tease", source: 'global function show {\n  let n = "text"\n  say n\n}\n' },
+      { path: "helpers.tease", source: 'global function show {\n  let n = "aaaaaaaaaaaaaaaa"\n  say n\n}\n' },
     ],
   ]) {
     const name = files[1]!.source;
