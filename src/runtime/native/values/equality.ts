@@ -11,8 +11,8 @@ import { nativeSetHas } from "./native-set.js";
 /**
  * `==` on native values, as `serializableEquals` decides it for their canonical forms: lists compare in order; objects,
  * dicts and sets regardless of order; primitives by `===` (`-0` is `0`); leaf records by `serializableEquals`. Nested
- * values use an explicit stack, so deep values never exhaust the JavaScript call stack. Comparing two sets builds the
- * right one's index.
+ * values use an explicit stack, so deep values never exhaust the JavaScript call stack. Set membership comparisons may
+ * build the right-hand set's index.
  */
 export function nativeEquals(left: NativeValue, right: NativeValue): boolean {
   const pending: Array<readonly [NativeValue, NativeValue]> = [[left, right]];

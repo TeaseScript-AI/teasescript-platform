@@ -1,9 +1,10 @@
-# Native engine
+# Native values
 
-The engine that is to replace today's executor (`../engine.ts`, `../evaluator.ts`) for the same plans (#1694): faster
-values, and later an executor over prepared plans. No production path runs it; every session a host creates runs
-today's executor on canonical values (`../values/`). Tests run this one beside it. At the cutover (#1695) today's
-executor leaves, so one engine, one state model and one checkpoint format remain.
+Values that live on the JavaScript side with today's meaning (#1694): arrays, `Map`s and sets with an index, with their
+copy, `==` and keys, for code generated from a Tease to run on. No production path uses them; every session a host
+creates runs today's executor on canonical values (`../values/`). Tests compare these values with today's canonical
+value functions. At the cutover (#1695) today's executor leaves, so one engine, one state model and one checkpoint
+format remain.
 
 What exists twice until the cutover (#1695 lists each pair in its comment "What leaves or is looked at at the
 cutover"):
