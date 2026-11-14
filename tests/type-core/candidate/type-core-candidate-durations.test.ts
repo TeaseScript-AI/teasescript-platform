@@ -43,6 +43,7 @@ interface Case {
 const UNIT = "this unit expression";
 const ANGLE = "this angle expression";
 const LITERAL = "this duration literal";
+const OPERAND = "an operand its instruction does not take";
 
 const UNITS: readonly (readonly [string, string])[] = [
   ["s", UNIT],
@@ -154,6 +155,11 @@ const UNDER_OFFERS: ReadonlySet<string> = new Set([
   ...NARROWED.map((source) => `${source}\nsay "AFTER"`),
 ]);
 
+/** Sources today's checker plans where the route declines, at the command, a duration an `otherwise` carries. */
+const TABLE_DECLINES: ReadonlySet<string> = new Set([
+  'let d: duration? = hostValue\nwait d otherwise 2 s\nsay "AFTER"',
+]);
+
 /** The judge's failures for one case's record. */
 function judge(sample: Case, record: DifferentialRecord, refusals: Set<string>): string[] {
   const failures: string[] = [];
@@ -170,6 +176,11 @@ function judge(sample: Case, record: DifferentialRecord, refusals: Set<string>):
         failures.push(
           `${at}: an under-offer ${mode.outside ?? "publishes"}, not refused at its unit`,
         );
+      continue;
+    }
+    if (TABLE_DECLINES.has(sample.source)) {
+      if (mode.outside !== OPERAND)
+        failures.push(`${at}: a decline ${mode.outside ?? "publishes"}, not "${OPERAND}"`);
       continue;
     }
     if (checker.plan) {
@@ -197,7 +208,7 @@ function judge(sample: Case, record: DifferentialRecord, refusals: Set<string>):
   return failures;
 }
 
-test("each duration literal, unit and angle publishes as today's where today plans, but for the listed under-offers, and is refused or answered as today's where today gives no plan", (t) => {
+test("each duration literal, unit and angle publishes as today's where today plans, but for the listed under-offers and declines, and is refused or answered as today's where today gives no plan", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "durations-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const cases = [...LITERAL_CASES, ...AMOUNT_CASES, ...PLACE_CASES];
@@ -213,6 +224,8 @@ test("each duration literal, unit and angle publishes as today's where today pla
     assert.ok(at >= 0 && found[at]!.checker.plan, source);
     assert.ok(refusals.has(`${source}\n${UNIT}`) || refusals.has(`${source}\n${ANGLE}`), source);
   }
+  for (const source of TABLE_DECLINES)
+    assert.ok(found[cases.findIndex((sample) => sample.source === source)]?.checker.plan, source);
   for (const text of [UNIT, ANGLE, LITERAL])
     assert.ok(
       [...refusals].some((refusal) => refusal.endsWith(`\n${text}`)),

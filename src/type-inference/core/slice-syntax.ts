@@ -4,11 +4,13 @@ import type {
   DurationLiteral,
   Expression,
   InteractionExpression,
+  ObjectLiteral,
   Program,
   Statement,
   TransferTarget,
   TypeAnnotation,
 } from "../../ast.js";
+import { isButtonBackground, isChoiceObjectProperty } from "../../choice-rules.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { dictMethod } from "../../dict-operations.js";
 import {
@@ -20,8 +22,17 @@ import { isBlankTextAnswer } from "../../interaction-answers.js";
 import { listMethod } from "../../list-methods.js";
 import { isTextMethod, TEXT_METHODS } from "../../text-operations.js";
 import type { SourceSpan } from "../../source.js";
-import { askParts, sayOperands, statementExpressions } from "../../expression-children.js";
+import {
+  askParts,
+  sayOperands,
+  showButtonOptions,
+  statementExpressions,
+  staticText,
+} from "../../expression-children.js";
+import { canonicalWebUrl } from "../../web-url.js";
 import { SLICE_DEPTH } from "./contract-descriptors.js";
+import type { ItemTag } from "./items.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS } from "../../value-kinds.js";
 import { methodCategory } from "./method-categories.js";
 import type { CoreFile } from "./program.js";
 
@@ -192,12 +203,327 @@ const pass = <K extends Statement["kind"]>(
 
 const MEDIA = "src/runtime/instructions/media.ts";
 const INTERACTION = "src/runtime/instructions/interaction.ts";
-/** Shown text: `fieldText` takes a value that shows as text and refuses any other. */
+const TIMERS = "src/runtime/instructions/timers.ts";
 const SHOWN_TEXT: OperandCheck = {
   file: "src/runtime/values/value-text.ts",
   function: "fieldText",
 };
 const UI_CHECK: OperandCheck = { file: INTERACTION, function: "materializeInteractionUi" };
+
+/**
+ * A command or request operand's rule (#2488's command operand table, step 1½): `takes`, the kinds the route admits
+ * there, as today's checker does, of which the instruction may still refuse a value as it runs; `form`, a rule on the
+ * operand as written (a known text, a choice object written in place); `today`, today's compile errors for a value the
+ * route does not admit; `check`, where the instruction refuses a value it does not take whatever the plan says.
+ */
+export interface OperandRule {
+  readonly takes: readonly ItemTag[];
+  readonly form?: (operand: Expression) => boolean;
+  readonly today: readonly string[];
+  readonly check: OperandCheck;
+}
+
+/** The kinds that show as text. */
+const SHOWS: readonly ItemTag[] = VALUE_KIND_NAMES.filter(
+  (kind) => VALUE_KINDS[kind].shown !== null,
+);
+const shown = (check: OperandCheck): OperandRule => ({
+  takes: SHOWS,
+  today: ["TSV040", "TSV042"],
+  check,
+});
+
+/** The kinds a choice's button may return (V30 §19). */
+const CHOICE_VALUES: readonly ItemTag[] = VALUE_KIND_NAMES.filter(
+  (kind) => VALUE_KINDS[kind].choice,
+);
+const CHOICE_CHECK: OperandCheck = {
+  file: "src/runtime/actions/choice-options.ts",
+  function: "expandChoiceOptions",
+};
+/**
+ * A choice's rule; `button`, an operand that gives a button itself, whose choice object written in place needs its
+ * shape.
+ */
+const choice = (takes: readonly ItemTag[], button: "returns" | "labelled" | null): OperandRule => ({
+  takes,
+  ...(button === null ? {} : { form: choiceObjectShape(button === "returns") }),
+  today: ["TSV029", "TSV040", "TSV042"],
+  check: CHOICE_CHECK,
+});
+const choiceObjectShape =
+  (returns: boolean) =>
+  (operand: Expression): boolean => {
+    const written = unwrapped(operand);
+    return (
+      written.kind !== "objectLiteral" ||
+      (written.properties.some((property) => property.name.name === "text") &&
+        written.properties.every(
+          (property) =>
+            isChoiceObjectProperty(property.name.name) &&
+            (returns || property.name.name !== "value"),
+        ))
+    );
+  };
+/** A rule on a known text, true where the text is not known. */
+const knownText =
+  (rule: (text: string) => boolean) =>
+  (operand: Expression): boolean => {
+    const text = staticText(operand);
+    return text === undefined || rule(text);
+  };
+
+/** The command operand table, by row and position; an ask's positions read as `askText.question`. */
+export const COMMAND_OPERANDS = {
+  showImageStatement: {
+    image: {
+      takes: ["string", "null"],
+      today: ["TSV036"],
+      check: { file: MEDIA, function: "showImage" },
+    },
+  },
+  openUrlStatement: {
+    url: {
+      takes: ["string"],
+      form: knownText((text) => canonicalWebUrl(text) !== null),
+      today: ["TSV043"],
+      check: UI_CHECK,
+    },
+    buttonText: shown(SHOWN_TEXT),
+    alwaysButton: { takes: ["boolean"], today: ["TSV043"], check: UI_CHECK },
+  },
+  exportTextStatement: {
+    text: { takes: ["string"], today: ["TSV043"], check: UI_CHECK },
+    title: shown(SHOWN_TEXT),
+    fileName: { takes: ["string"], today: ["TSV043"], check: UI_CHECK },
+  },
+  showPopupStatement: { message: shown(SHOWN_TEXT), buttonText: shown(SHOWN_TEXT) },
+  waitStatement: {
+    // (a duration without a unit after it; with one, `wait n s`, an amount of that unit, or a range of them)
+    duration: {
+      takes: ["duration"],
+      today: ["TSV043"],
+      check: { file: TIMERS, function: "timerDurationMs" },
+    },
+    amount: {
+      takes: ["integer", "number", "range"],
+      today: ["TSV043"],
+      check: { file: TIMERS, function: "timerDurationMs" },
+    },
+  },
+  deleteStatement: {
+    key: {
+      takes: ["string"],
+      today: ["TSV038"],
+      check: { file: "src/runtime/host-data/script-storage.ts", function: "storageKey" },
+    },
+  },
+  showButtonStatement: {
+    label: shown(SHOWN_TEXT),
+    background: {
+      takes: ["string", "null"],
+      form: knownText(isButtonBackground),
+      today: ["TSV029"],
+      check: UI_CHECK,
+    },
+    timeout: {
+      takes: ["duration"],
+      today: ["TSV043"],
+      check: { file: INTERACTION, function: "buttonTimeoutMs" },
+    },
+  },
+  sayStatement: {
+    pacing: {
+      takes: ["duration"],
+      today: ["TSV043"],
+      check: { file: "src/runtime/instructions/say.ts", function: "sayDurationMs" },
+    },
+  },
+  gotoStatement: {
+    path: {
+      takes: ["string"],
+      today: ["TSV043"],
+      check: { file: "src/runtime/evaluator.ts", function: "scriptReference" },
+    },
+  },
+  interactionExpression: {
+    // (a prefill is no position)
+    ...Object.fromEntries(
+      (
+        [
+          "askText",
+          "askNumber",
+          "askInteger",
+          "askDate",
+          "askTime",
+          "askDateTime",
+          "askPassword",
+          "askBoolean",
+        ] as const
+      ).flatMap((ask) => [
+        [`${ask}.question`, shown(SHOWN_TEXT)],
+        ...(ask === "askBoolean"
+          ? [
+              [`${ask}.yesText`, shown(SHOWN_TEXT)],
+              [`${ask}.noText`, shown(SHOWN_TEXT)],
+            ]
+          : [[`${ask}.hint`, shown(SHOWN_TEXT)]]),
+      ]),
+    ),
+    // (an `askChoice`'s buttons, V30 §19)
+    "askChoice.option": choice([...CHOICE_VALUES, "object", "list", "set"], "returns"),
+    "askChoice.element": choice([...CHOICE_VALUES, "object"], "returns"),
+    "askChoice.label": choice([...SHOWS, "object", "list", "set"], "labelled"),
+    "askChoice.labelledElement": choice([...SHOWS, "object"], "labelled"),
+    // (a choice object written in place: its text, shown, and also returned where it has no `value` and no label; its
+    // value)
+    "askChoice.text": choice(SHOWS, null),
+    "askChoice.returnedText": choice(CHOICE_VALUES, null),
+    "askChoice.value": choice(CHOICE_VALUES, null),
+    "askChoice.background": {
+      takes: ["string", "null"],
+      form: knownText(isButtonBackground),
+      today: ["TSV029"],
+      check: CHOICE_CHECK,
+    },
+  },
+} satisfies Readonly<Record<string, Readonly<Record<string, OperandRule>>>>;
+
+/** The table's rows by AST kind. */
+const OPERAND_RULES: Readonly<Record<string, Readonly<Record<string, OperandRule>>>> =
+  COMMAND_OPERANDS;
+
+/** A row's operand rules (`COMMAND_OPERANDS`), or `undefined` for a kind the table has no row for. */
+export function operandRules(kind: string): Readonly<Record<string, OperandRule>> | undefined {
+  return Object.hasOwn(OPERAND_RULES, kind) ? OPERAND_RULES[kind] : undefined;
+}
+
+/** An ask's name as a script writes it: `askText`, `askDateTime`. */
+const ASK_NAMES: Readonly<Record<InteractionExpression["interactionKind"], string>> = {
+  text: "askText",
+  number: "askNumber",
+  integer: "askInteger",
+  date: "askDate",
+  time: "askTime",
+  datetime: "askDateTime",
+  password: "askPassword",
+  boolean: "askBoolean",
+  choice: "askChoice",
+  form: "askForm",
+  booleans: "askBooleans",
+};
+
+/**
+ * A command's or an ask's operands by the table's positions (`COMMAND_OPERANDS`), in source order; an operand the table
+ * names no position for is not listed.
+ */
+export function commandOperands(
+  node: Statement | InteractionExpression,
+): readonly (readonly [string, Expression])[] {
+  switch (node.kind) {
+    case "showImageStatement":
+      return [["image", node.image]];
+    case "waitStatement":
+      return [[node.unit === null ? "duration" : "amount", node.duration]];
+    case "deleteStatement":
+      return [["key", node.key]];
+    case "showPopupStatement":
+    case "openUrlStatement":
+    case "exportTextStatement": {
+      const first =
+        node.kind === "showPopupStatement"
+          ? "message"
+          : node.kind === "openUrlStatement"
+            ? "url"
+            : "text";
+      return node.arguments.map((argument) => [
+        argument.kind === "namedArgument" ? argument.name.name : first,
+        argument.value,
+      ]);
+    }
+    case "showButtonStatement":
+      return [
+        ["label", node.label],
+        ...showButtonOptions(node).map((option) => [option.name, option.value] as const),
+      ];
+    case "sayStatement":
+      return node.pacing === null || node.pacing === "instant" ? [] : [["pacing", node.pacing]];
+    case "gotoStatement": {
+      const path = transferPath(node.target);
+      return path === null || path === undefined ? [] : [["path", path]];
+    }
+    case "interactionExpression":
+      return askOperandsByPosition(node);
+    default:
+      return [];
+  }
+}
+
+/**
+ * A choice object written in place, by its properties' positions: its text, returned where it has no `value` and the
+ * button does not return the value written before `:` (`labelled`).
+ */
+function choiceObject(object: ObjectLiteral, labelled: boolean): (readonly [string, Expression])[] {
+  const returned =
+    !labelled && !object.properties.some((property) => property.name.name === "value");
+  return object.properties.flatMap((property): (readonly [string, Expression])[] =>
+    property.name.name === "text"
+      ? [[returned ? "askChoice.returnedText" : "askChoice.text", property.value]]
+      : property.name.name === "value" || property.name.name === "background"
+        ? [[`askChoice.${property.name.name}`, property.value]]
+        : [],
+  );
+}
+
+/** An ask's operands by the table's positions (`commandOperands`). */
+function askOperandsByPosition(ask: InteractionExpression): (readonly [string, Expression])[] {
+  const name = ASK_NAMES[ask.interactionKind];
+  const named = (argument: string) =>
+    ask.formArguments.find((given) => given.name.name === argument)?.value ?? null;
+  const at = (position: string, operand: Expression | null) =>
+    operand === null ? [] : [[`${name}.${position}`, operand] as const];
+  if (ask.interactionKind === "choice")
+    return ask.options.flatMap((option): (readonly [string, Expression])[] => {
+      const value = unwrapped(option.expression);
+      if (option.value !== null)
+        return [
+          [`${name}.label`, option.expression],
+          ...(value.kind === "objectLiteral" ? choiceObject(value, true) : []),
+          ...(value.kind === "listLiteral"
+            ? value.elements.flatMap((element): (readonly [string, Expression])[] => {
+                const written = unwrapped(element);
+                return [
+                  [`${name}.labelledElement`, element],
+                  ...(written.kind === "objectLiteral" ? choiceObject(written, true) : []),
+                ];
+              })
+            : []),
+        ];
+      if (value.kind === "listLiteral")
+        return value.elements.flatMap((element): (readonly [string, Expression])[] => {
+          const written = unwrapped(element);
+          return [
+            [`${name}.element`, element],
+            ...(written.kind === "objectLiteral" ? choiceObject(written, false) : []),
+          ];
+        });
+      if (value.kind === "objectLiteral")
+        return [[`${name}.option`, option.expression], ...choiceObject(value, false)];
+      return [[`${name}.option`, option.expression]];
+    });
+  return [
+    ...at("question", ask.question ?? named("message")),
+    ...at("hint", ask.hint),
+    ...at("yesText", named("yesText")),
+    ...at("noText", named("noText")),
+  ].sort((a, b) => a[1].span.start.offset - b[1].span.start.offset);
+}
+
+/** The citations of a `pass` row's operands, read from the table. */
+const checksOf = (row: keyof typeof COMMAND_OPERANDS): Readonly<Record<string, OperandCheck>> =>
+  Object.fromEntries(
+    Object.entries(operandRules(row) ?? {}).map(([name, rule]) => [name, rule.check]),
+  );
 
 /**
  * The route's syntax table: a row for every AST kind (a kind without one, or a row for no kind, fails the build), so a
@@ -221,29 +547,21 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
         : walk([...sayOperands(node)]),
   },
   // (`showButton as` names its speaker as `say as` does, not walked)
-  showButtonStatement: pass({
-    label: SHOWN_TEXT,
-    background: UI_CHECK,
-    timeout: { file: INTERACTION, function: "buttonTimeoutMs" },
-  }),
-  waitStatement: pass({
-    duration: { file: "src/runtime/instructions/timers.ts", function: "timerDurationMs" },
-  }),
+  showButtonStatement: pass(checksOf("showButtonStatement")),
+  waitStatement: pass(checksOf("waitStatement")),
   timerStatement: REFUSED,
-  showImageStatement: pass({ image: { file: MEDIA, function: "showImage" } }),
+  showImageStatement: pass(checksOf("showImageStatement")),
   hideImageStatement: pass({}),
   showCameraStatement: REFUSED,
   hideCameraStatement: REFUSED,
-  showPopupStatement: pass({ message: SHOWN_TEXT, buttonText: SHOWN_TEXT }),
-  openUrlStatement: pass({ url: UI_CHECK, buttonText: SHOWN_TEXT, alwaysButton: UI_CHECK }),
-  exportTextStatement: pass({ text: UI_CHECK, title: SHOWN_TEXT, fileName: UI_CHECK }),
+  showPopupStatement: pass(checksOf("showPopupStatement")),
+  openUrlStatement: pass(checksOf("openUrlStatement")),
+  exportTextStatement: pass(checksOf("exportTextStatement")),
   showPermanentButtonStatement: REFUSED,
   playMediaStatement: REFUSED,
   stopAudioStatement: pass({}),
   saveStatement: REFUSED,
-  deleteStatement: pass({
-    key: { file: "src/runtime/host-data/script-storage.ts", function: "storageKey" },
-  }),
+  deleteStatement: pass(checksOf("deleteStatement")),
   exitStatement: modelled(),
   endStatement: REFUSED,
   labelStatement: REFUSED,

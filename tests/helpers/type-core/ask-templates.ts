@@ -1,8 +1,5 @@
-import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
-
 /*
- * The asks' part of the row guard's tables (`row-templates.ts`): their operand templates, their prefills, the buttons
- * the route refuses, and their request positions with a declared rule difference.
+ * The asks' part of the row guard's tables.
  */
 
 /** The basic asks with a `prefill:` (`askPassword` takes none), by the name an ask's position starts with. */
@@ -38,6 +35,7 @@ export const ASK_OPERANDS: Readonly<Record<string, readonly string[]>> = {
   "askChoice.option": ["let r = askChoice hostValue"],
   "askChoice.element": ["let r = askChoice [hostValue]"],
   "askChoice.label": ["let r = askChoice a: hostValue"],
+  "askChoice.labelledElement": ["let r = askChoice a: [hostValue]"],
   "askChoice.background": ['let r = askChoice {text: "t", background: hostValue}'],
   "askChoice.text": ["let r = askChoice {text: hostValue, value: 1}"],
 };
@@ -102,49 +100,3 @@ export const CHOICE_REFUSED: Readonly<Record<string, readonly string[]>> = {
     "ingress set",
   ],
 };
-
-/**
- * The asks' request operands with a declared rule difference (the lead's R41): a question or text an ask shows, which
- * `fieldText` refuses as a list or a value that shows no text (TSR021; a basic ask's question as it is said, at the
- * value, any other at the ask); a choice's buttons (`expandChoiceOptions`, TSR052 at the ask). A prefill is none of
- * them: the slice takes only a literal the request takes (`PREFILL_OPERANDS`). An ask's form of R18's third way (R38): the request opens no field or
- * button and the run does not wait; a basic ask's question may already have been said.
- */
-export const ASK_POSITIONS: readonly {
-  readonly row: SyntaxKind;
-  readonly operand: string;
-  readonly today: readonly string[];
-  readonly failure: readonly string[];
-  readonly at: "value" | "ask";
-}[] = [
-  ...[...PREFILLED_ASKS, "askPassword"].flatMap((ask) => [
-    {
-      operand: `${ask}.question`,
-      today: ["TSV040", "TSV042"],
-      failure: ["TSR021"],
-      at: "value" as const,
-    },
-    {
-      operand: `${ask}.hint`,
-      today: ["TSV040", "TSV042"],
-      failure: ["TSR021"],
-      at: "ask" as const,
-    },
-  ]),
-  ...["askBoolean.question", "askBoolean.yesText", "askBoolean.noText"].map((operand) => ({
-    operand,
-    today: ["TSV040", "TSV042"],
-    failure: ["TSR021"],
-    at: "ask" as const,
-  })),
-  ...["askChoice.option", "askChoice.element", "askChoice.label", "askChoice.background"].map(
-    (operand) => ({ operand, today: ["TSV029"], failure: ["TSR052"], at: "ask" as const }),
-  ),
-  // (a choice object's text beside the value its button returns: shown, never returned, so `fieldText` refuses it)
-  {
-    operand: "askChoice.text",
-    today: ["TSV040", "TSV042"],
-    failure: ["TSR021"],
-    at: "ask" as const,
-  },
-].map((position) => ({ row: "interactionExpression" as const, ...position }));

@@ -1,4 +1,6 @@
-import type { CallArgument, CallExpression, Expression } from "../../ast.js";
+import type { CallArgument, CallExpression, Expression, InteractionExpression } from "../../ast.js";
+import { MAX_INTERACTION_OPTION_ENTRIES } from "../../interaction-limits.js";
+import { unwrap } from "../../expression-children.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { BUILT_IN_SPEAKER_PROPERTIES } from "../../speaker-terms.js";
 import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } from "../backend.js";
@@ -11,13 +13,15 @@ import {
   SliceIndex,
   OutsideContract,
   SLICE_DEPTH,
-  unwrap,
 } from "./check-result/slice-index.js";
 import { oneType } from "./consumers/kinds.js";
 import { checkedOnSource, identityView, type IdentityView } from "./identity-view.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 import {
+  commandOperands,
+  operandRules,
+  type OperandRule,
   outsideSyntax,
   sliceCall,
   transferCall,
@@ -175,16 +179,15 @@ function outsideSlice(request: CoreAnalysisRequest, outside: Outside): Candidate
 
 /**
  * The kinds a call's arguments may have without the built-in signature check (C13, S9b) having anything to say, or
- * `null` for any: a conversion's value one of its kinds or text and its default one of its result's, also `null` where
- * it takes one (`fitsDefault`'s domain, which the core's C10 does not check yet); a transfer's path (`transferCall`)
- * text; every other argument of a slice call text; an unknown, which the runtime checks.
+ * `null` for any. A conversion's default takes `null` where its fallback is optional (`fitsDefault`'s domain, which the
+ * core's C10 does not check yet). A transfer's path is a command operand (`COMMAND_OPERANDS`).
  */
 function argumentKinds(call: CallExpression, argument: CallArgument): readonly string[] | null {
   const kind = sliceCall(call);
   if (kind === null)
     // (the syntax table admits no other call outside `sliceCall`, so the empty list is reached by no source today: it
     // refuses every argument of such a call rather than give it another call's rule)
-    return transferCall(call) ? ["string", "unknown"] : [];
+    return transferCall(call) ? null : [];
   const named = argument.kind === "namedArgument" ? argument.name.name : null;
   if (
     kind === "conversion" &&
@@ -271,30 +274,6 @@ export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: 
   check: { file: "src/runtime/evaluator.ts", function: "evaluate" },
 };
 
-/**
- * Whether the route admits a unit's or an angle's amount: one the core shows to be a number (`UNIT_AMOUNT`), or external
- * data, which the run checks. It deliberately declines an amount only a narrowing or an `otherwise` shows to be a number
- * (`n: integer?` under `n != null`, `(n otherwise 1) s`).
- */
-function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression): boolean {
-  const answer = answers.at(nodeOf(answers, index, amount));
-  const read = answer?.place ?? null;
-  const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
-  return (answer?.items ?? []).every((item) => {
-    if (item.tag === "empty") return true;
-    if (item.tag !== "unknown") return UNIT_AMOUNT.takes.includes(item.tag);
-    const reasons = item.reasons & ~REASON.missing;
-    if (reasons === 0) return true;
-    if (reasons !== REASON.external) return false;
-    if (admitted !== null)
-      return (
-        admitted.by === "undecided" ||
-        admitted.kinds.every((kind) => UNIT_AMOUNT.takes.includes(kind))
-      );
-    return unwrap(amount).kind === "identifier";
-  });
-}
-
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
 function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
@@ -346,7 +325,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           };
       }
   for (const unit of index.units)
-    if (!amountAdmitted(answers, index, unit.operand))
+    if (!operandAdmitted(answers, index, unit.operand, UNIT_AMOUNT))
       return {
         file: index.fileOf(unit),
         span: unit.span,
@@ -403,5 +382,160 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           };
       }
     }
+  for (const node of [...index.statements, ...index.asks]) {
+    const rules = operandRules(node.kind);
+    if (rules === undefined) continue;
+    for (const [position, operand] of commandOperands(node)) {
+      const rule = rules[position];
+      if (rule === undefined || !operandAdmitted(answers, index, operand, rule))
+        return {
+          file: index.fileOf(operand),
+          span: operand.span,
+          what: "an operand its instruction does not take",
+        };
+    }
+    if (node.kind !== "interactionExpression" || node.interactionKind !== "choice") continue;
+    // (a refusal that stands in for today's compile error: #2720)
+    const unshown = unshownChoiceText(answers, index, node, rules["askChoice.text"]!.takes);
+    if (unshown !== null)
+      return {
+        file: index.fileOf(unshown),
+        span: unshown.span,
+        what: "an operand its instruction does not take",
+      };
+    // (refusals that stand in for today's compile error: #2720)
+    if (
+      node.options.every((option) => {
+        const written = unwrap(option.expression);
+        return written.kind === "listLiteral" && written.elements.length === 0;
+      })
+    )
+      return { file: index.fileOf(node), span: node.span, what: "a choice without buttons" };
+    if (choiceButtons(answers, index, node) > MAX_INTERACTION_OPTION_ENTRIES)
+      return {
+        file: index.fileOf(node),
+        span: node.span,
+        what: "a choice of more buttons than it shows",
+      };
+  }
   return null;
+}
+
+/**
+ * The kinds an operand may hold: the core's, with a read of a place whose type is written or decided holding that type's
+ * kinds in place of its unknown.
+ */
+function operandKinds(
+  answers: Answers,
+  index: SliceIndex,
+  operand: Expression,
+): readonly ItemTag[] {
+  const answer = answers.at(nodeOf(answers, index, operand));
+  const read = answer?.place ?? null;
+  const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
+  return (answer?.items ?? []).flatMap((item): readonly ItemTag[] =>
+    item.tag === "unknown" && admitted !== null && admitted.by !== "undecided"
+      ? admitted.kinds
+      : [item.tag],
+  );
+}
+
+/**
+ * The buttons of a choice: each element of a list written in place, and one for each other option of a known kind
+ * beside `null` that is no collection (a computed collection's elements, an unknown option and a `null` one are not
+ * counted).
+ */
+function choiceButtons(answers: Answers, index: SliceIndex, ask: InteractionExpression): number {
+  let buttons = 0;
+  for (const option of ask.options) {
+    const written = unwrap(option.expression);
+    if (written.kind === "listLiteral") buttons += written.elements.length;
+    else {
+      const kinds = operandKinds(answers, index, option.expression).filter(
+        (kind) => kind !== "null" && kind !== "empty",
+      );
+      if (
+        kinds.length > 0 &&
+        kinds.every((kind) => kind !== "unknown" && kind !== "list" && kind !== "set")
+      )
+        buttons += 1;
+    }
+  }
+  return buttons;
+}
+
+/**
+ * The first option or element of a choice that is a computed choice object, or a computed list of them, whose `text`
+ * holds only known kinds the button cannot show (`shows`), none of them `null`; one written in place is a position of
+ * the table (`askChoice.text`).
+ */
+function unshownChoiceText(
+  answers: Answers,
+  index: SliceIndex,
+  ask: InteractionExpression,
+  shows: readonly ItemTag[],
+): Expression | null {
+  const unshown = (node: Expression, path: readonly string[]): boolean => {
+    const tags = answers
+      .valueAt(nodeOf(answers, index, node), path)
+      .items.map((item) => item.tag)
+      .filter((tag) => tag !== "empty");
+    return (
+      tags.length > 0 &&
+      tags.every((tag) => tag !== "unknown" && tag !== "null" && !shows.includes(tag))
+    );
+  };
+  const computed = (node: Expression, inList: boolean): boolean => {
+    const tags = (answers.at(nodeOf(answers, index, node))?.items ?? []).map((item) => item.tag);
+    return (
+      (tags.includes("object") && unshown(node, ["text"])) ||
+      (!inList &&
+        tags.includes("list") &&
+        answers
+          .valueAt(nodeOf(answers, index, node), ["element"])
+          .items.some((item) => item.tag === "object") &&
+        unshown(node, ["element", "text"]))
+    );
+  };
+  for (const option of ask.options) {
+    const written = unwrap(option.expression);
+    if (written.kind === "objectLiteral") continue;
+    if (written.kind !== "listLiteral") {
+      if (computed(option.expression, false)) return option.expression;
+      continue;
+    }
+    for (const element of written.elements)
+      if (unwrap(element).kind !== "objectLiteral" && computed(element, true)) return element;
+  }
+  return null;
+}
+
+/**
+ * Whether the route admits an operand: each value it may hold is of a kind its rule takes (`OperandRule`, or a unit's
+ * amount, `UNIT_AMOUNT`), or external data, which the run checks. It deliberately declines an operand only a narrowing
+ * or an `otherwise` shows to fit (`n: integer?` under `n != null`, `(n otherwise 1) s`).
+ */
+function operandAdmitted(
+  answers: Answers,
+  index: SliceIndex,
+  operand: Expression,
+  rule: Pick<OperandRule, "takes" | "form">,
+): boolean {
+  if (rule.form !== undefined && !rule.form(operand)) return false;
+  const answer = answers.at(nodeOf(answers, index, operand));
+  const read = answer?.place ?? null;
+  const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
+  const unwrappedOperand = unwrap(operand);
+  return (answer?.items ?? []).every((item) => {
+    if (item.tag === "empty") return true;
+    if (item.tag !== "unknown") return rule.takes.includes(item.tag);
+    const reasons = item.reasons & ~REASON.missing;
+    if (reasons === 0) return true;
+    if (reasons !== REASON.external) return false;
+    if (admitted !== null)
+      return (
+        admitted.by === "undecided" || admitted.kinds.every((kind) => rule.takes.includes(kind))
+      );
+    return unwrappedOperand.kind === "identifier";
+  });
 }

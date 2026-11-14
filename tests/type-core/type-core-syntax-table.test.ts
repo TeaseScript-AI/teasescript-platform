@@ -10,6 +10,7 @@ import {
   outsideSyntax,
   type SyntaxKind,
 } from "../../src/type-inference/core/slice-syntax.js";
+import { HELD_MODES } from "../helpers/type-core-held-host.js";
 
 /*
  * The candidate route's syntax table (`DISPOSITIONS`, #2498): a construct whose row is open is still refused when a
@@ -737,6 +738,28 @@ test("every open row is in the condition inventory or has no condition of its ow
     [],
   );
   assert.deepEqual([...conditional, ...UNCONDITIONAL].sort(), modelled);
+});
+
+test("a written union nested deeper than the analysis walks is refused as a written type in every mode, never thrown", () => {
+  // (the direct analysis of such a type throws `RangeError`; the slice takes no union, so the route never reaches it)
+  for (const depth of [2_000, 10_000]) {
+    let type = "integer";
+    for (let level = 0; level < depth; level += 1) type = `(integer | ${type})`;
+    const source = `let x: ${type} = hostValue\nexit\n`;
+    for (const mode of HELD_MODES)
+      assert.throws(
+        () =>
+          mode.run(() =>
+            compileProjectWithBackend(
+              [{ path: "main.tease", source }],
+              { globals: ["hostValue"] },
+              CORE_BACKEND,
+            ),
+          ),
+        (error) => error instanceof CandidateOutsideSlice && error.what === "this written type",
+        `${depth} levels [${mode.name}]`,
+      );
+  }
 });
 
 test("each open row refuses where its own condition fails, at its construct, with its text", () => {

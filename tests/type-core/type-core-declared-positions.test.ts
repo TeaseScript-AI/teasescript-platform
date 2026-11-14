@@ -7,14 +7,28 @@ import test from "node:test";
 import { compileProject, compileProjectWithBackend } from "../../src/compiler.js";
 import { CONVERSIONS } from "../../src/conversions.js";
 import { run } from "../../src/runtime/engine.js";
+import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
+import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { nodeOf, SliceIndex } from "../../src/type-inference/core/check-result/slice-index.js";
+import { REASON, type ItemTag } from "../../src/type-inference/core/items.js";
+import {
+  COMMAND_OPERANDS,
+  commandOperands,
+  DISPOSITIONS,
+  operandRules,
+  outsideSyntax,
+  type OperandRule,
+  type SyntaxKind,
+} from "../../src/type-inference/core/slice-syntax.js";
 import { VALUE_KINDS, type ValueKind } from "../../src/value-kinds.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
+import { coreRequest } from "../helpers/type-core-analysis.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
+import { runGlobals } from "../helpers/type-core-route.js";
 import {
   checkKey,
-  diagnosed,
   DOMAIN,
   type DifferentialRecord,
   errorsOf,
@@ -25,126 +39,112 @@ import {
   CONTEXTS,
   CONVERSION_INPUTS,
   DECLARED_REFUSALS,
-  DECLARED_RULE_DIFFERENCES,
+  DECLINED_ORIGINS,
   HOST_VALUES,
   HOSTLESS_VALUES,
-  FAILING_PRODUCER,
-  PAIRED_SAMPLES,
   type Sample,
   samples,
-  twinCommand,
 } from "../helpers/type-core/declared-samples.js";
-import { filesOf, OPERAND_TEMPLATES } from "../helpers/type-core/row-templates.js";
+import {
+  filesOf,
+  OPERAND_TEMPLATES,
+  ROW_TEMPLATES,
+  SAMPLED_TEMPLATES,
+} from "../helpers/type-core/row-templates.js";
 
 /*
- * The command operand positions' declared rule differences (#2488's design rulings, R2, keyed by position as the lead's
- * R14 has it; `DECLARED_RULE_DIFFERENCES`): each command operand position holds a value of every kind from every origin
- * (`samples`), compiled by today's checker and by the candidate route in the four held modes, and runs with the host
- * global at every value of the domain and, for a typed ingress, at a value of its kind. Where today's checker gives the
- * position's compile error, the route publishes as for the fitting twin, and each run ends in one of R18's three ways: as
- * the twin's where it does not reach the command; as the value alone does where its evaluation fails; with the
- * position's code at the command where every operand evaluates (R15: asserted where the run reaches it). Where today's
- * checker gives none, both publish and their runs are equal. The same holds in each context (`CONTEXTS`, R12), where the
- * route admits the value alone there; where it refuses that, it refuses the command alike (R16).
+ * The command operand table (#2488's step 1½): the route refuses at an operand what today's checker refuses there, and
+ * publishes as today what it plans, but for the declines it counts.
  */
 
-const position = (sample: Sample) =>
-  DECLARED_RULE_DIFFERENCES.find(
-    (declared) => declared.row === sample.row && declared.operand === sample.operand,
-  );
+/** The text of the table's refusal. */
+const TABLE_REFUSAL = "an operand its instruction does not take";
+
+const ruleOf = (sample: Sample): OperandRule | undefined =>
+  operandRules(sample.row)?.[sample.operand];
 
 /** A sample's source with its command in `context`: its prelude first. */
 const inContext = (sample: Sample, command: string, context: string): string =>
   `${sample.prelude}${CONTEXTS[context]!(command)}`;
 
-/** The samples the guard judges here: those a declared refusal names are the row guard's. */
+// EVIDENCE: invariant: the syntax table's keys are exactly the AST kinds (its mapped type).
+const TABLE_ROWS = (Object.keys(DISPOSITIONS) as SyntaxKind[]).filter(
+  (kind) => operandRules(kind) !== undefined,
+);
+
+/** A command operand position's templates (`SAMPLED_TEMPLATES`), by its row's name. */
+const templatesOf = (row: string, operand: string): readonly string[] | undefined =>
+  Object.entries(SAMPLED_TEMPLATES).find(([key]) => key === row)?.[1]?.[operand];
+
+/**
+ * The samples judged here: at a position of the table, those a declared refusal names aside (the row guard's), and a
+ * value ending in a number before a `wait`'s unit, whose number the unit makes a duration literal (`wait 2 s`,
+ * `wait hostValue otherwise 2 s`), not an amount.
+ */
 const SAMPLES = samples().filter(
   (sample) =>
-    !DECLARED_REFUSALS.some((declared) => declared.refused === sample.prelude + sample.command),
+    ruleOf(sample) !== undefined &&
+    !DECLARED_REFUSALS.some((declared) => declared.refused === sample.prelude + sample.command) &&
+    !(sample.operand === "amount" && /\d$/u.test(sample.value)),
 );
 
 /**
- * The samples sampled in every context: in each declared position, a list written in place, a date by a conversion and a
- * dict by a typed ingress, each a value the position does not take.
+ * The positions where the route's refusal of one of the core's diagnostics (`"this operand"`) may decline an outside
+ * value carried: a choice object's written in place, and an unlabelled option or element.
+ */
+const CORE_REFUSED_AT = new Set([
+  "askChoice.returnedText",
+  "askChoice.value",
+  "askChoice.option",
+  "askChoice.element",
+]);
+
+/**
+ * The samples sampled in every context: in each position, a list written in place, a date by a conversion and a dict
+ * by a typed ingress, each a value most positions do not take, and the failing producer.
  */
 const IN_CONTEXTS = SAMPLES.filter(
   (sample) =>
-    position(sample) !== undefined &&
-    ((sample.origin === "literal" && sample.kind === "list") ||
-      (sample.origin === "conversion" && sample.kind === "date") ||
-      (sample.origin === "ingress" && sample.kind === "dict") ||
-      sample.origin === "failing"),
+    (sample.origin === "literal" && sample.kind === "list") ||
+    (sample.origin === "conversion" && sample.kind === "date") ||
+    (sample.origin === "ingress" && sample.kind === "dict") ||
+    sample.origin === "failing",
 );
 
-/** The contexts no run reaches the command in: each run there ends as the fitting twin's. */
-const UNREACHED: ReadonlySet<string> = new Set([
-  "after exit",
-  "after an exiting if",
-  "after an exiting for",
-]);
-
-/** The refusal of a transfer's path the core knows to be no text (`argumentKinds`, `src/type-inference/core/backend.ts`). */
-const PATH_REFUSAL = "an argument that its built-in checks";
-
-/**
- * A transfer's path the route refuses as the path's argument rule does one written in place (`DECLARED_REFUSALS`, R28):
- * in code no run reaches, the core reads a typed ingress at its written type, here one other than text.
- */
-const refusedPath = (sample: Sample, context: string): boolean =>
-  position(sample)?.at === "call" &&
-  sample.origin === "ingress" &&
-  sample.kind !== "string" &&
-  UNREACHED.has(context);
-
-/** A run's failure as `[code, start, end]`, or `null` for a run that does not fail with a site. */
-function failureOf(run: string): [string, number, number] | null {
-  const match = /^failed (\w+)@(\d+):(\d+)$/u.exec(run);
-  return match === null ? null : [match[1]!, Number(match[2]), Number(match[3])];
-}
-
-/** Where an ask's template (`let r = <the ask>`) holds its ask. */
-const ASK_START = "let r = ".length;
+/** A declined sample's carrier form, as its count names it: the conversion, the element read or the carrier written. */
+const carrierOf = (sample: Sample): string =>
+  sample.origin === "conversion"
+    ? `${sample.value.slice(0, sample.value.indexOf("("))}(…, default: hostValue)`
+    : `${sample.prelude.trimEnd().replaceAll(/\n\s*/gu, "; ")}; ${sample.value}`.replace(
+        /^; /u,
+        "",
+      );
 
 /**
- * Where a reaching run fails: the command, the value in it, the call holding the value (a transfer's `script(…)`), or
- * the ask holding it (the whole of `let r = <the ask>` but its start), in a source whose command starts at `start`.
- */
-function reached(sample: Sample, start: number): Set<string> {
-  const declared = position(sample)!;
-  const value = start + OPERAND_TEMPLATES[sample.row]![sample.operand]![0]!.indexOf("hostValue");
-  const [from, to] =
-    declared.at === "statement"
-      ? [start, start + sample.command.length]
-      : declared.at === "value"
-        ? [value, value + sample.value.length]
-        : declared.at === "ask"
-          ? [start + ASK_START, start + sample.command.length]
-          : [value - "script(".length, value + sample.value.length + ")".length];
-  return new Set(declared.failure.map((code) => `failed ${code}@${from}:${to}`));
-}
-
-/**
- * One sample in one context, judged against its fitting twin (`twin`, the route's where it publishes, else today's) and
- * the value alone there (`alone`). `seen` collects each position's codes that occurred. `reach` lists the runs that reach
- * the command, which must fail there (R15).
+ * One sample in one context. `seen` collects each position's codes today refuses with, `declined` the samples the
+ * route declines where today plans, by origin.
  */
 function judge(
   sample: Sample,
   context: string,
   found: ReadonlyMap<string, DifferentialRecord>,
   seen: Set<string>,
-  reach: readonly number[],
+  declined: Map<string, number>,
 ): string[] {
   const source = inContext(sample, sample.command, context);
   const record = found.get(source)!;
   const name = `${JSON.stringify(source)} (${sample.kind}, ${sample.origin}, ${context})`;
-  const declared = position(sample);
+  const rule = ruleOf(sample)!;
   const today = errorsOf(record.checker);
   const failures: string[] = [];
   const alone = found.get(inContext(sample, `let v = ${sample.value}`, context));
   record.candidate.modes.forEach((mode, index) => {
     const at = `${name} [${mode.mode}]`;
     const aloneMode = alone?.candidate.modes[index];
+    if (mode.threw !== undefined) {
+      failures.push(`${at}: the route threw ${mode.threw}`);
+      return;
+    }
     // R16: where the route refuses the value alone, it refuses the command alike (the site is checked in-process)
     if (aloneMode?.outside !== undefined) {
       if (mode.outside !== aloneMode.outside)
@@ -153,113 +153,45 @@ function judge(
         );
       return;
     }
-    if (refusedPath(sample, context)) {
-      if (mode.outside !== PATH_REFUSAL)
-        failures.push(
-          `${at}: route ${mode.outside ?? mode.threw ?? "a plan"}, not "${PATH_REFUSAL}"`,
-        );
+    if (!record.checker.plan) {
+      if (mode.plan) failures.push(`${at}: today ${today.join(" ")}, the route a plan`);
+      if (today.some((code) => rule.today.includes(code)))
+        for (const code of today)
+          if (rule.today.includes(code)) seen.add(`${sample.row} ${sample.operand} ${code}`);
+          else
+            failures.push(`${at}: today's ${code} is not the position's (${rule.today.join(" ")})`);
       return;
     }
-    if (mode.outside !== undefined || mode.threw !== undefined) {
-      failures.push(
-        `${at}: route ${mode.outside ?? mode.threw}, today ${today.join(" ") || "a plan"}`,
-      );
+    if (mode.outside !== undefined) {
+      const by =
+        mode.outside === TABLE_REFUSAL
+          ? "table"
+          : mode.outside === "this operand" && CORE_REFUSED_AT.has(sample.operand)
+            ? "core"
+            : null;
+      if (by !== null && DECLINED_ORIGINS.has(sample.origin)) {
+        const key = `${sample.origin} (${by === "table" ? by : sample.operand}): ${carrierOf(sample)}`;
+        if (index === 0) declined.set(key, (declined.get(key) ?? 0) + 1);
+      } else failures.push(`${at}: today a plan, the route refuses (${mode.outside})`);
       return;
     }
-    if (record.checker.plan) {
-      // where today's checker gives no error: both publish, with today's checks, and their runs are equal
-      if (!mode.plan) failures.push(`${at}: today a plan, the route none`);
-      const carried = new Set(mode.plan?.checks.map(checkKey) ?? []);
-      for (const check of record.checker.plan.checks.map(checkKey))
-        if (!carried.has(check)) failures.push(`${at}: today's check missing: ${check}`);
-      const [runs, todays] = [
-        (mode.runs ?? []).map(outcome),
-        (record.checker.runs ?? []).map(outcome),
-      ];
-      if (JSON.stringify(runs) !== JSON.stringify(todays))
-        failures.push(`${at}: runs ${runs.join(", ")}, today ${todays.join(", ")}`);
-      return;
-    }
-    if (
-      declared === undefined ||
-      today.length === 0 ||
-      today.some((code) => !declared.today.includes(code))
-    ) {
-      // another compile error today: the route publishes no plan either, with today's errors
-      if (mode.plan || JSON.stringify(errorsOf(mode)) !== JSON.stringify(today))
-        failures.push(
-          `${at}: today ${today.join(" ")}, route ${mode.plan ? "a plan" : errorsOf(mode).join(" ")}`,
-        );
-      return;
-    }
-    // the declared difference: the route answers as for the fitting twin, but that a reaching run fails at the command
-    const twinRecord = found.get(inContext(sample, twinCommand(sample), context))!;
-    const twinMode = twinRecord.candidate.modes[index];
-    if (!twinMode?.plan) {
-      failures.push(
-        `${at}: its twin ${twinMode?.outside ?? twinMode?.threw ?? "publishes no plan"}`,
-      );
-      return;
-    }
-    const start = source.indexOf(sample.command, sample.prelude.length);
-    const value = start + OPERAND_TEMPLATES[sample.row]![sample.operand]![0]!.indexOf("hostValue");
-    const shift = twinCommand(sample).length - sample.command.length;
-    const asTwin = (offset: number): number | null =>
-      offset <= value ? offset : offset >= value + sample.value.length ? offset + shift : null;
-    const expected = diagnosed(twinMode).sort();
-    const answered = diagnosed(mode, asTwin).sort();
-    const runs = (mode.runs ?? []).map(outcome);
-    const twinRuns = (twinMode.runs ?? []).map(outcome);
-    const aloneRuns = (aloneMode?.runs ?? []).map(outcome);
-    const fails = reached(sample, start);
-    // each run ends in one of three ways, in the runtime's order (R18): it does not reach the command, as the twin's; an
-    // operand's evaluation fails, as the value alone does there; every operand evaluates, the command refuses the value
-    const aloneStart =
-      inContext(sample, `let v = ${sample.value}`, context).indexOf(
-        `let v = ${sample.value}`,
-        sample.prelude.length,
-      ) + "let v = ".length;
-    const wrong = runs.flatMap((ran, run) => {
-      const failed = failureOf(aloneRuns[run] ?? "");
-      if (
-        failed !== null &&
-        failed[1] >= aloneStart &&
-        failed[2] <= aloneStart + sample.value.length
-      ) {
-        const [code, from, to] = failed;
-        const shift = value - aloneStart;
-        return ran === `failed ${code}@${from + shift}:${to + shift}`
-          ? []
-          : [`run ${run}: ${ran}, its operand alone ${aloneRuns[run]}`];
-      }
-      if (ran === twinRuns[run] && !reach.includes(run)) return [];
-      return fails.has(ran) && !UNREACHED.has(context)
-        ? []
-        : [`run ${run}: ${ran}, its twin ${twinRuns[run]}`];
-    });
-    if (
-      !mode.plan ||
-      JSON.stringify(answered) !== JSON.stringify(expected) ||
-      runs.length !== twinRuns.length ||
-      wrong.length > 0
-    ) {
-      failures.push(
-        `${at}: route ${mode.plan ? "a plan" : "no plan"}, ${answered.join(", ")}; its twin ${expected.join(", ")}; ${wrong.join("; ")}`,
-      );
-      return;
-    }
-    for (const code of today) seen.add(`${declared.row} ${declared.operand} ${code}`);
-    for (const outcomeOf of runs)
-      if (fails.has(outcomeOf))
-        seen.add(`${declared.row} ${declared.operand} ${outcomeOf.split(/[ @]/u)[1]}`);
+    if (!mode.plan) failures.push(`${at}: today a plan, the route none`);
+    const carried = new Set(mode.plan?.checks.map(checkKey) ?? []);
+    for (const check of record.checker.plan.checks.map(checkKey))
+      if (!carried.has(check)) failures.push(`${at}: today's check missing: ${check}`);
+    const [runs, todays] = [
+      (mode.runs ?? []).map(outcome),
+      (record.checker.runs ?? []).map(outcome),
+    ];
+    if (JSON.stringify(runs) !== JSON.stringify(todays))
+      failures.push(`${at}: runs ${runs.join(", ")}, today ${todays.join(", ")}`);
   });
   return failures;
 }
 
-test("each sampled kind, origin and position answers as today's checker's answer declares, in every context", (t) => {
+test("each sampled kind, origin and position: where today refuses it, the route refuses it; where today plans, it publishes alike or declines a carried outside value", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "declared-positions-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
-  // each sample straight, and the context samples in every context; each with its fitting twin and its value alone
   const sources = new Map<
     string,
     { readonly sample: Sample; readonly hosts: readonly unknown[] }
@@ -268,8 +200,6 @@ test("each sampled kind, origin and position answers as today's checker's answer
     const hosts = sample.host === undefined ? [] : [sample.host];
     sources.set(inContext(sample, sample.command, context), { sample, hosts });
     sources.set(inContext(sample, `let v = ${sample.value}`, context), { sample, hosts });
-    if (position(sample) !== undefined)
-      sources.set(inContext(sample, twinCommand(sample), context), { sample, hosts });
   };
   for (const sample of SAMPLES) add(sample, "straight");
   for (const sample of IN_CONTEXTS)
@@ -283,29 +213,131 @@ test("each sampled kind, origin and position answers as today's checker's answer
     records(cases, folder).map((record, index) => [cases[index]!.files[0]!.source, record]),
   );
   const seen = new Set<string>();
+  const declined = new Map<string, number>();
   const failures = [
-    // R15: straight, every run reaches the command, but a typed ingress's runs whose value its type refuses
-    ...SAMPLES.flatMap((sample) =>
-      judge(
-        sample,
-        "straight",
-        found,
-        seen,
-        sample.host === undefined ? DOMAIN.map((_, run) => run) : [DOMAIN.length],
-      ),
-    ),
+    ...SAMPLES.flatMap((sample) => judge(sample, "straight", found, seen, declined)),
     ...IN_CONTEXTS.flatMap((sample) =>
       Object.keys(CONTEXTS)
         .filter((context) => context !== "straight")
-        .flatMap((context) => judge(sample, context, found, seen, [])),
+        .flatMap((context) => judge(sample, context, found, seen, declined)),
     ),
   ];
-  // each position's codes occur
-  for (const declared of DECLARED_RULE_DIFFERENCES)
-    for (const code of [...declared.today, ...declared.failure])
-      if (!seen.has(`${declared.row} ${declared.operand} ${code}`))
-        failures.push(`${declared.row} ${declared.operand}: ${code} no longer occurs`);
+  for (const row of Object.keys(COMMAND_OPERANDS))
+    for (const [operand, rule] of Object.entries(operandRules(row) ?? {}))
+      if (!rule.today.some((code) => seen.has(`${row} ${operand} ${code}`)))
+        failures.push(`${row} ${operand}: no sample today refuses with ${rule.today.join(" ")}`);
   assert.deepEqual(failures, []);
+  t.diagnostic(`declined: ${JSON.stringify(Object.fromEntries([...declined].sort()))}`);
+  assert.deepEqual(
+    [
+      ...new Set(
+        [...declined.keys()]
+          .filter((key) => key.includes(" (table): "))
+          .map((key) => key.split(" ")[0]),
+      ),
+    ].sort(),
+    [...DECLINED_ORIGINS].sort(),
+  );
+});
+
+test("the table refuses a value its position does not take at the operand, with its text, in every mode", () => {
+  let judged = 0;
+  for (const sample of SAMPLES) {
+    const rule = ruleOf(sample)!;
+    if (sample.origin !== "literal" || rule.takes.some((tag) => tag === sample.kind)) continue;
+    const source = `${sample.prelude}${CONTEXTS.straight!(sample.command)}`;
+    const today = compileProject(filesOf(sample.row, source), { globals: ["hostValue"] });
+    if (today.plan !== null) continue;
+    const template = templatesOf(sample.row, sample.operand)![0]!;
+    const start = sample.prelude.length + template.indexOf("hostValue");
+    for (const mode of HELD_MODES) {
+      const at = `${source} [${mode.name}]`;
+      let refusal: CandidateOutsideSlice | null = null;
+      try {
+        const { plan } = mode.run(() =>
+          compileProjectWithBackend(
+            filesOf(sample.row, source),
+            { globals: ["hostValue"] },
+            CORE_BACKEND,
+          ),
+        );
+        assert.equal(plan, null, at);
+      } catch (error) {
+        if (!(error instanceof CandidateOutsideSlice)) throw error;
+        refusal = error;
+      }
+      if (refusal?.what !== TABLE_REFUSAL) continue;
+      judged += 1;
+      assert.deepEqual(
+        [refusal.site.file, refusal.site.start, refusal.site.end],
+        [0, start, start + sample.value.length],
+        at,
+      );
+    }
+  }
+  assert.ok(judged > 0);
+});
+
+test("a property read that finds no such property fails at the read: the table judges the other sources' kinds, and the route publishes as today", () => {
+  for (const source of [
+    'let xs = [{a: "x"}, {b: "y"}]\nshowPopup xs[1].a\nexit\n',
+    'let o = {a: "x"}\nlet p = {a: "y", b: "z"}\nshowPopup [o, p][0].b\nexit\n',
+    'let xs = [{a: "x"}, {b: "y"}]\nlet r = askText(xs[0].a)\nexit\n',
+  ]) {
+    const files = [{ path: "main.tease", source }];
+    const today = compileProject(files, { globals: ["hostValue"] });
+    assert.ok(today.plan !== null, source);
+    for (const mode of HELD_MODES) {
+      const { plan } = mode.run(() =>
+        compileProjectWithBackend(files, { globals: ["hostValue"] }, CORE_BACKEND),
+      );
+      assert.ok(plan !== null, `${source} [${mode.name}]`);
+      assert.deepEqual(
+        runGlobals(plan, { hostValue: null }),
+        runGlobals(today.plan, { hostValue: null }),
+        `${source} [${mode.name}]`,
+      );
+    }
+  }
+});
+
+test("no table operand inside the slice holds an unknown of a reason the table does not admit: its refusal of one has no witness at a command operand", () => {
+  const pair = (row: SyntaxKind, source: string): readonly [SyntaxKind, string] => [row, source];
+  const sources = [
+    ...SAMPLES.map((sample) => pair(sample.row, inContext(sample, sample.command, "straight"))),
+    ...IN_CONTEXTS.flatMap((sample) =>
+      Object.keys(CONTEXTS).map((context) =>
+        pair(sample.row, inContext(sample, sample.command, context)),
+      ),
+    ),
+    ...TABLE_ROWS.flatMap((row) =>
+      (ROW_TEMPLATES[row] ?? []).flatMap((template) =>
+        typeof template === "string" ? [pair(row, `${template}\nexit\n`)] : [],
+      ),
+    ),
+  ];
+  const failures: string[] = [];
+  let judged = 0;
+  for (const [row, source] of sources) {
+    const request = coreRequest([...filesOf(row, source)]);
+    if (request === null || outsideSyntax(request.files, new Set(["hostValue"])) !== null) continue;
+    const answers = analyseCore(request);
+    const index = new SliceIndex(request.files.map((file) => file.program));
+    for (const node of [...index.statements, ...index.asks])
+      for (const [position, operand] of operandRules(node.kind) === undefined
+        ? []
+        : commandOperands(node)) {
+        judged += 1;
+        for (const item of answers.at(nodeOf(answers, index, operand))?.items ?? [])
+          if (item.tag === "unknown" && (item.reasons & ~(REASON.external | REASON.missing)) !== 0)
+            failures.push(
+              `${JSON.stringify(source)} ${position}: an unknown of reasons ${item.reasons}, which \`operandAdmitted\` refuses ` +
+                "with no witness at a command operand: write the witness and the row",
+            );
+      }
+  }
+  assert.deepEqual(failures, []);
+  assert.ok(judged > 0);
 });
 
 test("where the route refuses a value alone in a context, it refuses the command at the same site with the same text", () => {
@@ -370,6 +402,9 @@ test("the samples' origins are complete: each conversion the slice admits, and a
     );
   for (const kind of kinds)
     if (!VALUE_KINDS[kind].written) assert.ok(kind in HOSTLESS_VALUES, kind);
+  for (const row of Object.keys(COMMAND_OPERANDS))
+    for (const operand of Object.keys(operandRules(row) ?? {}))
+      assert.ok(templatesOf(row, operand) !== undefined, `${row} ${operand}`);
 });
 
 /**
@@ -388,132 +423,122 @@ const BOOKKEEPING: readonly string[] = [
 const fieldsOf = (snapshot: RuntimeSnapshot): Map<string, string> =>
   new Map(Object.entries(snapshot).map(([key, value]) => [key, JSON.stringify(value)]));
 
-test("a declared position's instruction refuses a value it does not take before the statement acts, in every mode", () => {
+/** The kind of a host value of the domain, as the core names it. */
+const kindOf = (value: SerializableRuntimeValue): ItemTag =>
+  value === null
+    ? "null"
+    : typeof value === "string"
+      ? "string"
+      : typeof value === "boolean"
+        ? "boolean"
+        : Number.isInteger(value)
+          ? "integer"
+          : "number";
+
+test("the host global at a position, the unknown the table admits: its instruction refuses a value it does not take before the statement acts, in every mode", () => {
   let judged = 0;
-  for (const sample of SAMPLES) {
-    const declared = position(sample);
-    if (declared === undefined) continue;
-    const source = `${sample.prelude}${sample.command}\nexit\n`;
-    const today = compileProject(filesOf(sample.row, source), { globals: ["hostValue"] });
-    const errors = today.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
-    if (
-      today.plan !== null ||
-      errors.some((diagnostic) => !declared.today.includes(diagnostic.code))
-    )
-      continue;
-    judged += 1;
-    const [start, end] = [sample.prelude.length, sample.prelude.length + sample.command.length];
-    const fails = reached(sample, start);
-    // (the runs that reach the command: every one, or a typed ingress's at its kind's value)
-    const hosts = sample.host === undefined ? DOMAIN : [sample.host];
-    for (const mode of HELD_MODES) {
-      const at = `${source} [${mode.name}]`;
-      const { plan } = mode.run(() =>
-        compileProjectWithBackend(
-          filesOf(sample.row, source),
-          { globals: ["hostValue"] },
-          CORE_BACKEND,
-        ),
-      );
-      assert.ok(plan !== null, at);
-      for (const hostValue of hosts) {
-        const first = createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } });
-        const before = fieldsOf(first);
-        const result = run(plan, first);
-        const failure = result.events.find((event) => event.kind === "runtimeFailure");
-        const failed =
-          failure?.kind === "runtimeFailure"
-            ? [failure.code, failure.span.start.offset, failure.span.end.offset]
-            : null;
-        // (a failing producer fails inside its value, before the command; any other value, at the command, R18)
-        const value =
-          start + OPERAND_TEMPLATES[sample.row]![sample.operand]![0]!.indexOf("hostValue");
-        assert.ok(
-          failed !== null &&
-            (sample.origin === "failing"
-              ? Number(failed[1]) >= value && Number(failed[2]) <= value + sample.value.length
-              : fails.has(`failed ${failed[0]}@${failed[1]}:${failed[2]}`)),
-          `${at} with ${JSON.stringify(hostValue)}: ${JSON.stringify(failed)}`,
+  // (the guard's templates: a choice object's positions refuse the host global, `CHOICE_OBJECT_OPERANDS`)
+  for (const kind of TABLE_ROWS)
+    for (const [operand, templates] of Object.entries(OPERAND_TEMPLATES[kind] ?? {})) {
+      const rule = operandRules(kind)?.[operand];
+      if (rule === undefined) continue;
+      const command = templates[0]!;
+      const source = `${command}\nexit\n`;
+      const [start, end] = [0, command.length];
+      for (const mode of HELD_MODES) {
+        const at = `${source} [${mode.name}]`;
+        const { plan } = mode.run(() =>
+          compileProjectWithBackend(
+            filesOf(kind, source),
+            { globals: ["hostValue"] },
+            CORE_BACKEND,
+          ),
         );
-        // nothing of the statement's effect: no event of it but the failure, and the session's state as before the
-        // statement, but for the run's own bookkeeping (the ingress's store is before it); an ask's form (R38): no
-        // field or button opens and the run does not wait, its question perhaps said by its own instruction before
-        const ask = sample.row === "interactionExpression";
-        const own = result.events.filter(
-          (event) =>
-            event.kind !== "runtimeFailure" &&
-            !(ask && event.kind === "say") &&
-            "span" in event &&
-            event.span !== null &&
-            event.span.start.offset >= start &&
-            event.span.start.offset < end,
-        );
-        assert.deepEqual(
-          own.map((event) => event.kind),
-          [],
-          at,
-        );
-        if (ask)
+        assert.ok(plan !== null, at);
+        for (const hostValue of DOMAIN) {
+          if (rule.takes.includes(kindOf(hostValue))) continue;
+          judged += 1;
+          const first = createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } });
+          const before = fieldsOf(first);
+          const result = run(plan, first);
+          const failure = result.events.find((event) => event.kind === "runtimeFailure");
+          assert.ok(
+            failure?.kind === "runtimeFailure" &&
+              failure.span.start.offset >= start &&
+              failure.span.end.offset <= end,
+            `${at} with ${JSON.stringify(hostValue)}: ${JSON.stringify(failure)}`,
+          );
+          // nothing of the statement's effect: no event of it but the failure, and the session's state as before the
+          // statement, but for the run's own bookkeeping; an ask's form: no field or button opens and the run
+          // does not wait, its question perhaps said by its own instruction before
+          const ask = kind === "interactionExpression";
+          const own = result.events.filter(
+            (event) =>
+              event.kind !== "runtimeFailure" &&
+              !(ask && event.kind === "say") &&
+              "span" in event &&
+              event.span !== null &&
+              event.span.start.offset >= start &&
+              event.span.start.offset < end,
+          );
           assert.deepEqual(
-            [result.snapshot.status, result.snapshot.foregroundAction],
-            ["failed", null],
-            `${at}: no field or button opens`,
+            own.map((event) => event.kind),
+            [],
+            at,
           );
-        else if (sample.prelude === "") {
-          const after = fieldsOf(result.snapshot);
-          const changed = [...new Set([...before.keys(), ...after.keys()])].filter(
-            (key) => !BOOKKEEPING.includes(key) && before.get(key) !== after.get(key),
-          );
-          assert.deepEqual(changed, [], `${at}: the session's state`);
+          if (ask)
+            assert.deepEqual(
+              [result.snapshot.status, result.snapshot.foregroundAction],
+              ["failed", null],
+              `${at}: no field or button opens`,
+            );
+          else {
+            const after = fieldsOf(result.snapshot);
+            const changed = [...new Set([...before.keys(), ...after.keys()])].filter(
+              (key) => !BOOKKEEPING.includes(key) && before.get(key) !== after.get(key),
+            );
+            assert.deepEqual(changed, [], `${at}: the session's state`);
+          }
         }
       }
     }
-  }
   assert.ok(judged > 0);
 });
 
-test("a command with one operand it does not take and another whose producer fails: its run fails, whichever comes first", (t) => {
-  const withPositions = Object.entries(OPERAND_TEMPLATES)
-    .filter(([, operands]) => Object.keys(operands!).length > 1)
-    .map(([row]) => row)
-    .sort();
-  assert.deepEqual(PAIRED_SAMPLES.map((paired) => paired.row).sort(), withPositions);
-  for (const paired of PAIRED_SAMPLES) {
-    const source = `${paired.command}\nexit\n`;
-    const today = compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] });
-    assert.equal(today.plan, null, source);
-    const declared = DECLARED_RULE_DIFFERENCES.find(
-      (difference) => difference.row === paired.row && difference.operand === paired.misfit,
-    )!;
-    const producer = source.indexOf(FAILING_PRODUCER);
-    const first = new Set<string>();
+test("the host global at a position, where the run ends before its instruction's check: as today's run, in every mode", () => {
+  // (a stored text, which today's checker cannot know)
+  const producer = "s.substring(50)";
+  for (const [source, position] of [
+    [`let s = load "k", default: "x"\nlet a = ${producer}\nopenUrl(hostValue)\nexit\n`, "url"],
+    [
+      `let s = load "k", default: "https://example.com"\nopenUrl(${producer}, alwaysButton: hostValue)\nexit\n`,
+      "alwaysButton",
+    ],
+  ] as const) {
+    const files = [{ path: "main.tease", source }];
+    const takes = operandRules("openUrlStatement")![position]!.takes;
+    assert.ok(
+      DOMAIN.some((hostValue) => !takes.includes(kindOf(hostValue))),
+      source,
+    );
+    const today = compileProject(files, { globals: ["hostValue"] });
+    assert.ok(today.plan !== null, `${source}: today ${JSON.stringify(today.diagnostics)}`);
+    const start = source.indexOf(producer);
     for (const mode of HELD_MODES) {
       const { plan } = mode.run(() =>
-        compileProjectWithBackend(
-          [{ path: "main.tease", source }],
-          { globals: ["hostValue"] },
-          CORE_BACKEND,
-        ),
+        compileProjectWithBackend(files, { globals: ["hostValue"] }, CORE_BACKEND),
       );
       assert.ok(plan !== null, `${source} [${mode.name}]`);
       for (const hostValue of DOMAIN) {
-        const result = run(
-          plan,
-          createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } }),
-        );
-        const failure = result.events.find((event) => event.kind === "runtimeFailure");
-        assert.ok(failure?.kind === "runtimeFailure", `${source} [${mode.name}]`);
-        const atProducer =
-          failure.span.start.offset >= producer &&
-          failure.span.end.offset <= producer + FAILING_PRODUCER.length;
+        const ran = runGlobals(plan, { hostValue });
+        const at = `${source} [${mode.name}] with ${JSON.stringify(hostValue)}: ${JSON.stringify(ran)}`;
+        const site = /@(\d+):(\d+)$/u.exec(ran.failure ?? "");
         assert.ok(
-          atProducer || declared.failure.includes(failure.code),
-          `${source}: ${failure.code}`,
+          site !== null && Number(site[1]) >= start && Number(site[2]) <= start + producer.length,
+          at,
         );
-        first.add(atProducer ? `the producer (${failure.code})` : `the command (${failure.code})`);
+        assert.deepEqual(ran, runGlobals(today.plan, { hostValue }), at);
       }
     }
-    // (which comes first is recorded, not ruled)
-    t.diagnostic(`${paired.command}: fails first at ${[...first].join(", ")}`);
   }
 });
