@@ -17,7 +17,7 @@ import {
   coreCheckResult,
 } from "../../../src/type-inference/core/check-result/check-result.js";
 import {
-  atLeastAsStrict,
+  provesAtLeastAsStrict,
   builtContainers,
 } from "../../../src/type-inference/core/check-result/kept-checks.js";
 import {
@@ -388,7 +388,7 @@ test("a reader keeps a contract it is at least as strict as, never one it is wea
     [objectOf({ n: anyOrNull }), objectOf({ n: int }), false],
   ] as const)
     assert.equal(
-      atLeastAsStrict(reader, contract),
+      provesAtLeastAsStrict(reader, contract),
       kept,
       `${JSON.stringify(reader)} against ${JSON.stringify(contract)}`,
     );

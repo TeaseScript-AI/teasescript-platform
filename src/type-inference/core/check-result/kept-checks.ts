@@ -70,7 +70,7 @@ export function notLost(
   // field the contract leaves open, still checks all the contract does)
   const carries = (type: TypePlan | null | undefined): boolean => {
     const at = type === null || type === undefined ? null : typeAt(type, below);
-    return at !== null && atLeastAsStrict(at, contract.ref);
+    return at !== null && provesAtLeastAsStrict(at, contract.ref);
   };
   if (
     carries(readerOf(value, checks, core)) ||
@@ -141,9 +141,10 @@ function readerOf(
 /**
  * Whether a stored literal carries a contract at `below` (property names and `[]` for an element) by its own structure:
  * followed through its properties and elements to the contract's level, a list or set whose every element carries the
- * contract's element, an object whose property carries each property the contract lists, a typed parse's or load's whole
- * value whose reader is at least as strict as the contract there, or a scalar literal of a kind at least as strict. The
- * value itself is a literal holding them, never the call alone (`readerOf`'s).
+ * contract's element, an object whose property carries each property the contract lists, a typed parse's or load's
+ * whole value whose reader is at least as strict as the contract there, or a number, string, boolean or null literal of
+ * a kind at least as strict (no other scalar literal, a regex among them, carries anything here). The value itself is a
+ * literal holding them, never the call alone (`readerOf`'s).
  */
 function literalCarries(
   value: Expression,
@@ -187,10 +188,10 @@ function literalCarries(
       });
     }
     const leaf = leafKind(node);
-    if (leaf !== null) return steps.length === 0 && atLeastAsStrict(leaf, type);
+    if (leaf !== null) return steps.length === 0 && provesAtLeastAsStrict(leaf, type);
     const reader = readerOf(node, checks, core);
     const there = reader === undefined ? null : typeAt(reader, steps);
-    return there !== null && atLeastAsStrict(there, type);
+    return there !== null && provesAtLeastAsStrict(there, type);
   };
   const root = unwrap(value);
   return (
@@ -199,7 +200,7 @@ function literalCarries(
   );
 }
 
-/** The type a scalar literal proves by its own syntax, `null` for any other expression. */
+/** The type a number, string, boolean or null literal proves by its own syntax, `null` for any other expression. */
 function leafKind(node: Expression): TypePlan | null {
   switch (node.kind) {
     case "numberLiteral":
@@ -216,19 +217,21 @@ function leafKind(node: Expression): TypePlan | null {
 }
 
 /**
- * Whether every value a check against `narrow` passes also passes one against `wide` (a check checks only the listed
- * properties an object has, and every element of a collection whose element type is not `null`).
+ * Whether it is proved that every value a check against `narrow` passes also passes one against `wide` (a check checks
+ * only the listed properties an object has, and every element of a collection whose element type is not `null`).
+ * `false` proves nothing: an object whose property is a union is not split across the members of a union of objects.
  */
-export function atLeastAsStrict(narrow: TypePlan, wide: TypePlan): boolean {
+export function provesAtLeastAsStrict(narrow: TypePlan, wide: TypePlan): boolean {
   if (narrow.kind === "union")
-    return narrow.members.every((member) => atLeastAsStrict(member, wide));
-  if (wide.kind === "union") return wide.members.some((member) => atLeastAsStrict(narrow, member));
+    return narrow.members.every((member) => provesAtLeastAsStrict(member, wide));
+  if (wide.kind === "union")
+    return wide.members.some((member) => provesAtLeastAsStrict(narrow, member));
   if (wide.kind === "object") {
     if (narrow.kind !== "object") return false;
     const own = new Map(narrow.properties.map((each) => [each.name, each.type]));
     return wide.properties.every((property) => {
       const type = own.get(property.name);
-      return type !== undefined && atLeastAsStrict(type, property.type);
+      return type !== undefined && provesAtLeastAsStrict(type, property.type);
     });
   }
   if (wide.kind === "list" || wide.kind === "set" || wide.kind === "dict") {
@@ -236,7 +239,7 @@ export function atLeastAsStrict(narrow: TypePlan, wide: TypePlan): boolean {
     return (
       narrow.kind === wide.kind &&
       (wide.element === null ||
-        (narrow.element !== null && atLeastAsStrict(narrow.element, wide.element)))
+        (narrow.element !== null && provesAtLeastAsStrict(narrow.element, wide.element)))
     );
   }
   // (a whole number is a number)
