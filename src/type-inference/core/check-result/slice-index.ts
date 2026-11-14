@@ -19,6 +19,7 @@ import type {
   FunctionDeclaration,
   FunctionParameter,
   TypeAnnotation,
+  GlobalStatement,
 } from "../../../ast.js";
 import { authorCallee, authorFunctions } from "../slice-syntax.js";
 import { type SourceSpan } from "../../../source.js";
@@ -52,11 +53,11 @@ export function isTransfer(store: Store): store is Transfer {
 }
 
 /**
- * What a store's check reads of the declaration of the place it writes: its kind (a `let`, a function's parameter or its
- * result), its name and its written type.
+ * What a store's check reads of the declaration of the place it writes: its kind (a `let`, a `global`, a function's
+ * parameter or its result), its name and its written type.
  */
 export interface Declaration {
-  readonly kind: "letStatement" | "functionParameter" | "functionResult";
+  readonly kind: "letStatement" | "globalStatement" | "functionParameter" | "functionResult";
   readonly name: Identifier;
   readonly typeAnnotation: TypeAnnotation | null;
 }
@@ -599,6 +600,19 @@ const DECLARED: readonly ((
       ? undefined
       : fn.parameters.find((parameter) => parameter.name.name === target.name);
   },
+  // a `global`, found by the name the target's root reads: a global's name is unique in the project and nothing shadows
+  // it (V30, "Global variables")
+  (index, _lets, store) => {
+    let root: Expression = store.target;
+    while (root.kind === "propertyAccessExpression" || root.kind === "indexExpression")
+      root = unwrap(root.object);
+    if (root.kind !== "identifier") return undefined;
+    const { name } = root;
+    return index.statements.find(
+      (statement): statement is GlobalStatement =>
+        statement.kind === "globalStatement" && statement.name.name === name,
+    );
+  },
 ];
 
 /** The declaration of the place an assignment writes, by the first case of `DECLARED` that resolves it. */
@@ -623,9 +637,9 @@ export function declarationOf(
   store: LetStatement | AssignmentStatement,
 ): Declaration {
   if (store.kind === "letStatement") return store;
-  const place = answers.at(nodeOf(answers, index, store))?.place;
-  const declaration =
-    place === null || place === undefined ? undefined : declaredAt(index, lets, store, place.id);
+  // (the place the store writes: a compound assignment's node is its operation, which `at` answers with no place)
+  const place = storePlace(answers, index, store);
+  const declaration = place === null ? undefined : declaredAt(index, lets, store, place.id);
   if (declaration === undefined)
     throw new Error("An assignment of the slice stores into no variable.");
   return declaration;

@@ -102,7 +102,8 @@ test("a long copied key's store check grows with its copy chain in every mode (#
  * 10,411 / 9,319 (10,413 reversed) before), and since #2764 they build the nesting index for the long key's first path
  * with two element steps (213, 218 and 238 `indexSteps` more in each analysis; the checks' work is unchanged), and since
  * #2667's step 4a-1 a check reads its store's place by `Answers.storedPlace`, which computes no items of the stored
- * value as `at` did (60, 274 / 236 and 64 before).
+ * value as `at` did (60, 274 / 236 and 64 before), and since #2816 so does the declaration lookup (58, 272 / 234
+ * and 62 before).
  */
 test("a long copied key's store check charges its positions' work, in every mode (#1605)", () => {
   const measured = COPY_CHAIN_FAMILIES.map((family) => {
@@ -116,22 +117,22 @@ test("a long copied key's store check charges its positions' work, in every mode
   });
   assert.deepEqual(measured, [
     [
-      [8208, 58],
-      [7294, 58],
-      [8208, 58],
-      [7294, 58],
+      [8208, 56],
+      [7294, 56],
+      [8208, 56],
+      [7294, 56],
     ],
     [
-      [8916, 272],
-      [8040, 234],
-      [8916, 272],
-      [8040, 234],
+      [8916, 270],
+      [8040, 232],
+      [8916, 270],
+      [8040, 232],
     ],
     [
-      [10658, 62],
-      [9565, 62],
-      [10660, 62],
-      [9565, 62],
+      [10658, 60],
+      [9565, 60],
+      [10660, 60],
+      [9565, 60],
     ],
   ]);
 });
