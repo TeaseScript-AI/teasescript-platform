@@ -244,7 +244,6 @@ test("the table refuses a value its position does not take at the operand, with 
   let judged = 0;
   for (const sample of SAMPLES) {
     const rule = ruleOf(sample)!;
-    // (a literal of a kind the position does not take: no earlier rule refuses it)
     if (sample.origin !== "literal" || rule.takes.some((tag) => tag === sample.kind)) continue;
     const source = `${sample.prelude}${CONTEXTS.straight!(sample.command)}`;
     const today = compileProject(filesOf(sample.row, source), { globals: ["hostValue"] });
