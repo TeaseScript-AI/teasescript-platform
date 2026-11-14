@@ -14,7 +14,8 @@ import { dictList } from "../method-categories.js";
 import { stepName } from "../program.js";
 import { FRONTIER_COPIES, FRONTIER_DEPTH } from "./model.js";
 import { readKey } from "./names.js";
-import { openness, prefixAt } from "./written-openness.js";
+import { openness } from "../contract/terms.js";
+import { prefixAt } from "./written-openness.js";
 
 /** A place's stored paths, as a trie of their steps: each node with the stores whose values stand at its path. */
 interface StoreNode {
