@@ -547,6 +547,16 @@ export class Runtime {
    * the live state; the next drive resumes here, runs the blocks dispatched meanwhile (a block that can wait is a
    * generator too) and yields again while the session still waits.
    */
+  /** Part F: a Debug stop; the drive ends here while `stopping` holds. */
+  *stop(pc) {
+    this.stops.push(pc);
+    if (this.stopping) yield;
+  }
+  /** A statement that a plain function reached in a debug program, where no stop is possible (the probe expects none). */
+  stopMissed(pc) {
+    this.stops.push(pc);
+    this.missedStops += 1;
+  }
   *waitHere() {
     const snapshot = this.snapshot;
     for (;;) {

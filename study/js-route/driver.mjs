@@ -20,14 +20,14 @@ const programs = new Map();
 
 /** The emitted program of a validated plan: its source, constants and the function that instantiates it. */
 /** `form`: false (replay), true (resumable) or "generators". */
-export function compileProgram(plan, resumable = false, runawayCheck = false, facts = null) {
-  const key = `${resumable}/${runawayCheck}/${facts === null ? "" : "typed"}`;
+export function compileProgram(plan, resumable = false, runawayCheck = false, facts = null, stops = false) {
+  const key = `${resumable}/${runawayCheck}/${facts === null ? "" : "typed"}/${stops}`;
   if (!programs.has(key)) programs.set(key, new WeakMap());
   const cache = programs.get(key);
   let program = cache.get(plan);
   if (program === undefined) {
     const t0 = performance.now();
-    const emitted = emitProgram(plan, { resumable: resumable === true, generators: resumable === "generators", runawayCheck, facts });
+    const emitted = emitProgram(plan, { resumable: resumable === true, generators: resumable === "generators", runawayCheck, facts, stops });
     const t1 = performance.now();
     const instantiate = new Function("rt", "K", emitted.source);
     // Part G: the time to emit, and to turn the text into a function (V8 compiles function bodies lazily, at first run).
@@ -318,11 +318,13 @@ export class GeneratorSession {
   #state;
   #rt = null;
   #main = null;
-  constructor(plan, fresh, { runawayCheck = false } = {}) {
+  /** Part F: `stops` emits a stop at every statement; `stopping` makes each one end the drive. */
+  constructor(plan, fresh, { runawayCheck = false, stops = false, stopping = false } = {}) {
     const captured = captureOrReuseInstructionPlan(plan);
     if (!captured.validation.valid || captured.plan === null) throw new TypeError("Malformed instruction plan.");
     this.#plan = captured.plan;
-    this.#program = compileProgram(this.#plan, "generators", runawayCheck);
+    this.#program = compileProgram(this.#plan, "generators", runawayCheck, null, stops);
+    this.stopping = stopping;
     this.#state = withFrozenTemporalCaptures(createFreshRuntimeSnapshotWithValidatedPlan(this.#plan, fresh));
   }
   get state() {
@@ -351,6 +353,7 @@ export class GeneratorSession {
     if (this.#main === null) {
       this.#rt = new Runtime(this.#plan, this.#state, this);
       this.#rt.fileEntries = this.#program.fileEntries;
+      Object.assign(this.#rt, { stops: [], missedStops: 0, stopping: this.stopping });
       this.#main = this.#program.instantiate(this.#rt, this.#program.constants)();
     }
     const rt = this.#rt;
@@ -368,6 +371,8 @@ export class GeneratorSession {
     this.#state = rt.snapshot;
     this.bridged = rt.bridged;
     this.bridgedInstructions = rt.bridgedInstructions;
+    this.stops = rt.stops;
+    this.missedStops = rt.missedStops;
     return { events: rt.events, instructionsExecuted: 0 };
   }
 }

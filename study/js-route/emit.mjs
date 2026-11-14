@@ -82,21 +82,26 @@ const EXPRESSION_KINDS = new Set(["literal", "regex", "duration", "calendarDurat
   "playerProfileField", "list", "object", "set", "dict", "group", "template", "property", "index", "call", "unary",
   "unit", "angleUnit", "binary", "range", "temporary", "preparedReference", "storageLoad", "tagQuery", "typeTest"]);
 
-/** Instruction kinds today's engine may leave waiting (an action with the host), besides a paced `say`. */
 /** A loop body longer than this many instructions is outlined even without an inner loop. */
 const OUTLINE_LENGTH = 50;
 /** A loop body that holds a loop is outlined from this many instructions (a small nest stays in one function). */
 const OUTLINE_WITH_LOOP = 30;
 /** A structured sequence longer than this many instructions is cut into functions between its constructs. */
 const CHUNK_LENGTH = 50;
+/** Instruction kinds today's engine may leave waiting (an action with the host), besides a paced `say`. */
 const WAITING_KINDS = new Set(["wait", "interaction", "capture", "fileStore", "lock", "storageWrite", "playMedia", "showImage"]);
+
+/** Kinds that become JavaScript control flow or bookkeeping, where Debug does not stop (part F's probe compares the rest). */
+export const STOP_EXCLUDED = new Set(["jump", "jumpIfFalse", "loopStart", "loopControl", "enterScope", "leaveScope",
+  "prepareParameterDefault", "beginFunctionDefaults", "enterFunctionBody", "clearTemporaries", "clearTemporary",
+  "bindSuppliedParameter", "bindDefaultParameter", "validateAssignmentTarget", "validateCallReceiver"]);
 
 /**
  * `resumable`: part C's way (2): every region that can reach a wait becomes resumable (a switch over its instructions,
  * its variables saved as plain data at a wait); everything else stays structured. Without it, a wait asks the session
  * (`rt.waited`), which way (1), replaying from the start, answers.
  */
-export function emitProgram(plan, { resumable = false, runawayCheck = false, generators = false, facts = null } = {}) {
+export function emitProgram(plan, { resumable = false, runawayCheck = false, generators = false, facts = null, stops = false } = {}) {
   // `facts`: the type analysis's `facts().values` (the typed probe, ruling 3): a plan expression finds its type by its
   // span and the AST kind it was lowered from; a guard is dropped where the types make it unneeded. `typeStats` counts
   // the sites that asked and those that found a type.
@@ -130,6 +135,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   const isBool = (e) => typeOf(e) === "boolean";
   const isList = (e) => typeOf(e)?.startsWith("list<") === true;
   if (resumable && generators) throw new Error("study emitter: resumable or generators, not both");
+  // `stops` (part F): Debug's stop at a statement is a resume point, so every function becomes a generator.
+  if (stops && !generators) throw new Error("study emitter: stops need the generator form");
   // `generators`: part C's third form: a function that can wait is a JavaScript generator that yields at a wait, kept
   // alive between drives (`GeneratorSession`); file regions are generators too. Elsewhere the code is as without it.
   const WAIT = generators ? "yield* rt.waitHere()" : "rt.waited()";
@@ -157,7 +164,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   }
   // Which instructions can wait, and which functions can: those that reach such an instruction or call one that can.
   const waitsHere = (ins) =>
-    (ins.kind === "say" && ins.pacing !== "instant") || WAITING_KINDS.has(ins.kind);
+    stops || (ins.kind === "say" && ins.pacing !== "instant") || WAITING_KINDS.has(ins.kind);
   const canWait = new Set();
   for (let changed = true; changed; ) {
     changed = false;
@@ -562,6 +569,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         const ins = plan.instructions[pc];
         scratch = 0;
         if (flat) line(`case ${pc}:`);
+        if (stops && !STOP_EXCLUDED.has(ins.kind)) line(`${(bodies.length > 0 ? bodies.at(-1).yields : regionYields) ? "yield* rt.stop" : "rt.stopMissed"}(${pc});`);
         switch (ins.kind) {
           case "prepareParameterDefault": {
             // A parameter the call did not supply arrives as `undefined`; its default's instructions run then.
