@@ -66,14 +66,7 @@ interface Owed {
 }
 
 /**
- * The checks the warnings owe (`runtimeChecks`), the published warnings' and then those a stop moved to the runtime. A
- * `written-target` warning's obligation is placed at its store later, with the kinds the store rule names (a stopped
- * analysis's store type where it decided none: a stop moves an undecided check to the runtime). One whose target names
- * the fallback that holds its site (`fallbackSteps`) goes instead by that fallback's owner; a load's `default:` goes
- * into neither list: the load's own type checks it where `Contracts.expected` gives the load one (`runtimeChecks`), and
- * where it gives none (a computed key among its cases) only a check of the load's value, such as its store's, reaches
- * its default. The stores `member-read` warnings name and the list `get` calls `integer-use` warnings name go into
- * `core`. Each site's owers are marked as it is reached (`owers`).
+ * The checks the warnings owe, the published warnings' and then those a stop moved to the runtime.
  */
 function warningChecks(
   answers: Answers,
@@ -97,9 +90,6 @@ function warningChecks(
       const expression = index.expressionAt(diagnostic.site);
       switch (diagnostic.kind) {
         case "written-target": {
-          // the fallback rule's obligation names the fallback as every obligation names its value (`xs.element` for
-          // `xs[0]`, `d.entry` for a dict's, its text where no place holds it), with the element steps of a nested
-          // literal's depth; the store rule's names a place
           const held = index.fallbackOf(expression);
           const steps =
             held === undefined
@@ -180,10 +170,7 @@ function movedChecks(
  * 6.5); and the new content only the core emits (`CoreRuntimeChecks`): a property store that needs the property (a
  * `member-read` warning), a list `get` that needs a whole number (an `integer-use` warning), the check of a selected
  * fallback or default (the fallback rule) and `fromJson`'s expected type. A boundary at a load or a `fromJson` that no
- * store takes is its own type's. It throws `OutsideContract`, declining the program, where the plan cannot place a
- * check or carry its contract exactly: a loop variable's check, a check no store takes, and the cases of
- * `Contracts.expected`, `Contracts.stored`, `Contracts.direct` and `fallbackPlan`. A question past the analysis's
- * allowance ends it with `BudgetExhausted`. Its `contracts` are those `Contracts.stored` recorded as it was asked.
+ * store takes is its own type's.
  */
 export function runtimeChecks(
   answers: Answers,
@@ -326,20 +313,14 @@ export function runtimeChecks(
 
 /**
  * #1526 decision 2, condition 1: while a required check is missing, the candidate publishes no plan that lets the
- * invalid value through unchecked. Every plan published after a stop is gated here, at the one seam `asked` publishes
- * through, against the capture its path has (`Answers.gated`): the receiving registry where a receiving completion ran
- * (#1526 phase C), its results; after a stop where none ran or it kept none, the registry's obligations without
- * results. Each obligation a store owes when the script runs, its destination-type check (a warning the walk made) or
- * its boundary (external data entering), is lost where the plan's check at its store does not carry its required
- * contract (`notLost`), a stopped decision's own marks among them (#2080): a stopped mark whose completion result was
- * lost, or that has none, is kept only by a complete store check. The first lost obligation, in the registry's source
- * order, declines the program at its store (`OutsideContract`): the stopped plan would otherwise run past a check the
- * natural plan makes (ADR 0021 §1.10 column (2)). A program the analysis rejects has no plan and is not asked. Where
- * admission did not settle there is no registry: each owed obligation against `unknown` is a check no completion
- * decided, and the first, in the owed order `runtimeChecks` reads, declines the program at its site (#2080, the owner's
- * decision: no inference after the stop). One visit per obligation, whose making charged each one. It returns nothing
- * and declines by throwing `OutsideContract`; it reads `runtimeChecks`'s result (`published`, `checks`, `core`), so it
- * runs after it.
+ * invalid value through unchecked. Each obligation a store owes when the script runs, its destination-type check (a
+ * warning the walk made) or its boundary (external data entering), is lost where the plan's check at its store does not
+ * carry its required contract (`notLost`), a stopped decision's own marks among them (#2080). The first lost
+ * obligation, in the registry's source order, declines the program at its store (`OutsideContract`): the stopped plan
+ * would otherwise run past a check the natural plan makes (ADR 0021 §1.10 column (2)). Where admission did not settle
+ * there is no registry: each owed obligation against `unknown` is a check no completion decided, and the first
+ * declines the program at its site (#2080, the owner's decision: no inference after the stop). One visit per
+ * obligation, whose making charged each one.
  */
 export function lostCheck(
   answers: Answers,
@@ -381,8 +362,7 @@ export function lostCheck(
         UNDECIDED_AT_BUDGET,
       );
     }
-  // (the stores the completion's own destination-type check owes a check at, each once: `notLost` never lets a stopped
-  // mark there owe nothing)
+  // (the stores the completion's own destination-type check owes a check at, each once)
   const warned = new Set<Store>();
   for (const warning of answers.completedWarnings()) {
     if (leftOutWarning(warning)) continue;
@@ -409,10 +389,9 @@ export function lostCheck(
  * After a settled stop, an owed obligation against exactly `unknown` that is not a store's declines the program at its
  * site (#2183): a fallback's (the fallback rule's) is the requirement the stop lost, which no `fallbackCheck` can carry
  * (`fallbackPlan`), so the default would run unchecked; any other rule's declines too, as an unestablished check. No
- * set shows one (#2257's census, sweep and natural sets: `store` and `fallback` only). A store's is the registry's,
- * which `notLost` decides. Not caught: a contract the stop left incomplete that a natural producer reads, where the
- * fallback rule owes nothing (#2257: measured 0, not shown impossible), and a store whose destination-type warning the
- * stop removed, where no obligation is owed (#2245). It returns nothing and declines by throwing `OutsideContract`.
+ * set shows one (#2257's census, sweep and natural sets: `store` and `fallback` only). Not caught: a contract the stop
+ * left incomplete that a natural producer reads, where the fallback rule owes nothing (#2257: measured 0, not shown
+ * impossible), and a store whose destination-type warning the stop removed, where no obligation is owed (#2245).
  */
 function settledOwed(answers: Answers, index: SliceIndex): void {
   const { budget } = answers;
