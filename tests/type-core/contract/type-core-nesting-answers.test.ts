@@ -244,7 +244,7 @@ test("a chain of a helper that wraps its argument demands no key below the cut, 
  */
 regressionCase(
   "a recursive function filling a written dict with its own result, read a level deeper on each turn, settles (#2771)",
-  { pr: 0, atBase: /a recursive loader into a written dict: the analysis settles in .+/ },
+  { pr: 2809, atBase: /a recursive loader into a written dict: the analysis settles in .+/ },
   () => {
     const source =
       "function loadValue(key) {\n  let value = load key, default: null\n  if value == null {\n" +
