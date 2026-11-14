@@ -5,8 +5,8 @@ import type { Instruction } from "./model.js";
  * `from` up to `to`; a sequence of constructs covers its range without gaps, in order.
  * - `run`: instructions that start no construct. Exits stand here: `goto`, `transfer`, `loopControl`, returns, `exit`,
  *   `end`, whose targets other checks hold.
- * - `if`: the `jumpIfFalse` at `at`, its true way `then`, and its false way `else` when the true way ends in the `jump`
- *   at `elseJump` past it; without one, the false way goes on after `to`.
+ * - `if`: the `jumpIfFalse` at `at`, its true way `whenTrue`, and its false way `whenFalse` when
+ *   the true way ends in the `jump` at `elseJump` past it; without one, the false way goes on after `to`.
  * - `loop`: the `loopStart` at `at`; `head`, the instructions before it that each round runs again (a `while`'s
  *   condition, from its `continueTarget`), and `body`, up to its target.
  * - `default`: the `prepareParameterDefault` at `at` and the default's instructions, which run when the argument is
@@ -20,9 +20,9 @@ export type Construct =
       readonly from: number;
       readonly to: number;
       readonly at: number;
-      readonly then: readonly Construct[];
+      readonly whenTrue: readonly Construct[];
       readonly elseJump: number | null;
-      readonly else: readonly Construct[] | null;
+      readonly whenFalse: readonly Construct[] | null;
     }
   | {
       readonly kind: "loop";
@@ -84,7 +84,7 @@ type Owner =
   | {
       readonly kind: "else";
       readonly at: number;
-      readonly then: readonly Construct[];
+      readonly whenTrue: readonly Construct[];
       readonly elseJump: number;
     }
   | { readonly kind: "loop"; readonly at: number; readonly head: readonly Construct[] }
@@ -137,7 +137,7 @@ function readStructure(
         parent.pc = join;
         open.push(
           sequence(
-            { kind: "else", at: owner.at, then: current.constructs, elseJump: current.elseJump },
+            { kind: "else", at: owner.at, whenTrue: current.constructs, elseJump: current.elseJump },
             current.to,
             join,
           ),
@@ -223,9 +223,9 @@ function ended(owner: Exclude<Owner, { kind: "region" | "scope" }>, done: Sequen
         from: owner.at,
         to: done.to,
         at: owner.at,
-        then: done.constructs,
+        whenTrue: done.constructs,
         elseJump: null,
-        else: null,
+        whenFalse: null,
       };
     case "else":
       return {
@@ -233,9 +233,9 @@ function ended(owner: Exclude<Owner, { kind: "region" | "scope" }>, done: Sequen
         from: owner.at,
         to: done.to,
         at: owner.at,
-        then: owner.then,
+        whenTrue: owner.whenTrue,
         elseJump: owner.elseJump,
-        else: done.constructs,
+        whenFalse: done.constructs,
       };
     case "loop":
       return {

@@ -14,8 +14,8 @@ function constructs(tree: readonly Construct[]): Construct[] {
     for (const construct of pending.pop()!) {
       all.push(construct);
       if (construct.kind === "if") {
-        pending.push(construct.then);
-        if (construct.else !== null) pending.push(construct.else);
+        pending.push(construct.whenTrue);
+        if (construct.whenFalse !== null) pending.push(construct.whenFalse);
       } else if (construct.kind === "loop") pending.push(construct.head, construct.body);
       else if (construct.kind !== "run") pending.push(construct.body);
     }
@@ -72,8 +72,8 @@ test("a lowered plan reads back as its source's constructs, each sequence coveri
     for (const construct of constructs(tree)) {
       all.push(construct);
       if (construct.kind === "if") {
-        covered(construct.then, construct.at + 1, construct.elseJump ?? construct.to);
-        if (construct.else !== null) covered(construct.else, construct.elseJump! + 1, construct.to);
+        covered(construct.whenTrue, construct.at + 1, construct.elseJump ?? construct.to);
+        if (construct.whenFalse !== null) covered(construct.whenFalse, construct.elseJump! + 1, construct.to);
       } else if (construct.kind === "loop") {
         covered(construct.head, construct.from, construct.at);
         covered(construct.body, construct.at + 1, construct.to);
@@ -87,7 +87,7 @@ test("a lowered plan reads back as its source's constructs, each sequence coveri
     all.filter(predicate).length;
   // pick's if, else if, else: two ifs with a false way; the switch's two cases with a false way; `or`'s right side.
   assert.equal(
-    count((c) => c.kind === "if" && c.else !== null),
+    count((c) => c.kind === "if" && c.whenFalse !== null),
     5,
   );
   // The while, the repeat and the for.
