@@ -198,6 +198,7 @@ import {
 } from "./evaluation/operators.js";
 import { findBindingLocation } from "./evaluation/bindings.js";
 import { operandLabel } from "../plan/operand-labels.js";
+import { speakerTemporaries } from "../plan/speaker-temporaries.js";
 import { copySpan } from "../plan/source-location.js";
 
 export interface RuntimeCapabilityCall {
@@ -1989,25 +1990,6 @@ function noSpeaker(span: SourceSpan): RuntimeFault {
     "This message has no speaker, so 'speaker' has no value: it names none with 'as', and no default speaker is set. Give it one with 'as name', or set a default speaker with 'speaker name' before it.",
     span,
   );
-}
-
-const speakerTemporaryIds = new WeakMap<InstructionPlan, ReadonlySet<number>>();
-
-/** The temporaries that hold the speaker of a prepared message for its `speaker` reads, collected once per plan. */
-function speakerTemporaries(plan: InstructionPlan): ReadonlySet<number> {
-  let ids = speakerTemporaryIds.get(plan);
-  if (ids === undefined) {
-    ids = new Set(
-      plan.instructions.flatMap((instruction) =>
-        instruction.kind === "prepareSayContextualSpeaker" ||
-        instruction.kind === "prepareInteractionSpeaker"
-          ? [instruction.destinationTemporary]
-          : [],
-      ),
-    );
-    speakerTemporaryIds.set(plan, ids);
-  }
-  return ids;
 }
 
 interface EvaluatedExpression {
