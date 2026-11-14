@@ -6,7 +6,7 @@ import type { PlayerNoticeLevel } from "../../../presentation/notices.js";
 import type { PlayerNotification } from "./usePlayerNotifications.js";
 import { usePlayerToasts } from "./usePlayerToasts.js";
 
-// Temporary toasts for new Player notices (PLAYER-UI "Player notices"); the notification panel keeps every notice.
+// Temporary toasts for new Player notices (PLAYER-UI "Playroom notices"); the notification panel keeps every notice.
 const props = defineProps<{
   notifications: readonly PlayerNotification[];
   /** Notifications up to this sequence were seen in the panel, which replaces their toasts. */

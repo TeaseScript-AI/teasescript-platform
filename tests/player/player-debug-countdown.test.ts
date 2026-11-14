@@ -14,7 +14,7 @@ import { debugCountdown } from "../helpers/debug-readers.js";
 import { type PlayerRuntimeDebugCountdown } from "../../player/runtime/runtime-view.js";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 
-// Player Debug countdowns (DEBUGGER.md "Player Debug") name the current foreground wait from canonical state: an
+// Player Debug countdowns (DEBUGGER.md "Playroom Debug") name the current foreground wait from canonical state: an
 // authored `wait`, a presented timed `showButton`, or a message's reading time. Expected deadlines follow from the
 // source's durations.
 

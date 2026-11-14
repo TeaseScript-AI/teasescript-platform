@@ -19,7 +19,7 @@ import {
 import { debugCalls, debugNow } from "../helpers/debug-readers.js";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 
-// Player Debug's Now view (DEBUGGER.md "Player Debug") locates the session from canonical state: package paths with
+// Player Debug's Now view (DEBUGGER.md "Playroom Debug") locates the session from canonical state: package paths with
 // every folder, one-based lines of the authored source, calls innermost first, and every timer, hidden ones included.
 
 function observe(session: PlayerRuntimeSession, atMs: number): PlayerRuntimeSession {

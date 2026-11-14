@@ -42,7 +42,7 @@ const sessionTrace = (session: PlayerRuntimeSession | null | undefined) =>
     : onHost((held: PlayerRuntimeSession) => held.debugTrace)(session);
 
 /*
- * The Player host runs Debug's value trace (DEBUGGER.md "Player Debug") while Debug is on: Start traces a new session
+ * The Player host runs Debug's value trace (DEBUGGER.md "Playroom Debug") while Debug is on: Start traces a new session
  * from its first statement, Continue of a restored session begins a new epoch, and off drops the trace and its history.
  */
 

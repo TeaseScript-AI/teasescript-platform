@@ -58,7 +58,7 @@ export function useDebugModeAndTrace({
   inspecting,
   activation,
 }: DebugModeAndTraceHost) {
-  // Debug's value trace (DEBUGGER.md "Player Debug"), while Debug runs: the host holds it, as the connection's state
+  // Debug's value trace (DEBUGGER.md "Playroom Debug"), while Debug runs: the host holds it, as the connection's state
   // (`debugTracing`), and every session operation there records into it. `traceId` names the host's trace now, once
   // the host answered.
   const debugTracing = ref(false);

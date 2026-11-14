@@ -24,7 +24,7 @@ export type ExternalStorageEditOutcome =
   | { readonly kind: "storageWritePending"; readonly actionId: number };
 
 /**
- * Changes one key of the session's script-storage view on behalf of a debugging tool (DEBUGGER.md "Player Debug"):
+ * Changes one key of the session's script-storage view on behalf of a debugging tool (DEBUGGER.md "Playroom Debug"):
  * `{ key, value }` stores a copy of a persistable value, and `{ key, value: null }` removes the key. The edit applies
  * at the current instruction boundary, also while scene time trails the observed time or a block is due, so the next
  * `load` the script evaluates returns it; values already loaded stay as they are. It runs no instruction, changes

@@ -18,7 +18,7 @@ import {
 } from "../../../src/index.js";
 import { compileValidPlan as plan } from "../../helpers/compile-valid-plan.js";
 
-// A debugging tool edits the session's script-storage view between engine calls (DEBUGGER.md "Player Debug"): the
+// A debugging tool edits the session's script-storage view between engine calls (DEBUGGER.md "Playroom Debug"): the
 // next `load` the script evaluates returns the edit, and values already loaded keep what they loaded.
 
 function binding(snapshot: RuntimeSnapshot, name: string): SerializableRuntimeValue | undefined {

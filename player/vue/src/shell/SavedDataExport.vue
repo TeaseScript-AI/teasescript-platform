@@ -31,7 +31,7 @@ import { gzipSupported } from "../../../persistence/transfer-encoding.js";
 import type { SessionExport } from "../session/persistence/useSessionTransfer";
 
 // Exports the saved data of every script this browser keeps, or of the scripts the player keeps ticked, or the session
-// the player plays, as one file or one text to copy (PLAYER-UI "Player Settings"). The list is read fresh when the dialog
+// the player plays, as one file or one text to copy (PLAYER-UI "Playroom Settings"). The list is read fresh when the dialog
 // opens, and the session each time it is chosen; the file and text are prepared for the current choice, so Download and
 // Copy stay direct player actions, and nothing leaves the browser until then.
 const props = defineProps<{
