@@ -17,7 +17,7 @@ package's images, and gives each file its header
 ([V30 §41](specifications/accepted-syntaxes-v30.md#41-headers-and-tags)) and diagnostics. The adapters under
 `src/editor/` map these to Monaco's shapes, register them as Monaco providers, and watch editor models for the project
 overview; they do not import Monaco, whose values the caller passes in, and are not a second correctness grammar. Token
-colours come from the compiler's classes (`classifyTokens`) as semantic tokens. The Player's palette
+colours come from the compiler's classes (`classifyTokens`) as semantic tokens. The Playroom's palette
 (`player/theme/palette.ts`) holds the code colours as contrast-checked roles, `syntax-keyword`, `syntax-name`,
 `syntax-string`, `syntax-number`, `syntax-comment`, and `syntax-operator`, which the
 [random draw picker](DEBUGGER.md#random-draws) applies to the same classes; the future editor should adopt these roles
@@ -32,22 +32,22 @@ and name the options of the parser's tables in `src/parser/`, which the parser a
 
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
-validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC
+validated checkpoint save/restore. Its Playroom panel provides the first Standard interaction and chat-pacing control POC
 through the DOM-free workspace controller. With a development package folder (see the repository `README.md`), it
 compiles with that folder's tagged images and shows the Stage image. With a root of packages, `?package=<id>` opens one
 package as a project at its `main.tease`: a file selector switches the file shown, a diagnostic names its file and opens
 it, and checkpoints are kept per package. It deliberately has no Monaco integration,
-package authoring, library-aware completion, or cross-origin production-player shell.
+package authoring, library-aware completion, or cross-origin production-Playroom shell.
 
 The technical workspace/controller implementation lives at `playground/workspace/controller.ts`; browser and server
-entrypoints use that controller directly. Player rendering remains in the browser presentation layer and does not create
+entrypoints use that controller directly. Playroom rendering remains in the browser presentation layer and does not create
 a second canonical runtime state model.
 
-The Player implementation lives under `player/vue/src/`. Its framework-independent `player/runtime/runtime-adapter.ts`
+The Playroom implementation lives under `player/vue/src/`. Its framework-independent `player/runtime/runtime-adapter.ts`
 translates canonical runtime state/events into presentation and typed input into runtime operations. The playground
 controller shares its action lookup/completion path without creating a second canonical runtime state model. See
 [`player/README.md`](../player/README.md) for local inspection; that route does not define the future cross-origin
-production Player/host protocol.
+production Playroom/host protocol.
 
 The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key; edits of an
 open package stay in the page and are not drafts. Drafts are separate from runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the
@@ -59,7 +59,7 @@ controls. Run, Step, checkpoint save/restore, and reset require a successfully c
 Reset recompiles the current source; restore accepts only a validated self-contained checkpoint whose plan matches the
 current runtime. Source text is not checkpoint identity.
 
-A production editor should build on the versioned parser/runtime interfaces after the host/player boundary is specified.
+A production editor should build on the versioned parser/runtime interfaces after the host/Playroom boundary is specified.
 The temporary TypeScript-export metadata POC has been removed; editor transport, `.tease` linkage, metadata format and
 validation, automatic export discovery, and library-aware completion remain future consumer-driven work.
 
@@ -103,9 +103,9 @@ The first implementation should provide:
 - source-span preservation from compact syntax through fully lowered plan instructions;
 - debugger/simulator inspection of pending interaction kind, requesting speaker, normalized completion, pacing deadline, action location, and skip policy;
 - diagnostics for concrete versioned technical limits selected by the implementation;
-- canonical parser/semantic/compiler errors and current technical-limit diagnostics; usability-warning thresholds remain deferred until representative authoring and Player evidence exists.
+- canonical parser/semantic/compiler errors and current technical-limit diagnostics; usability-warning thresholds remain deferred until representative authoring and Playroom evidence exists.
 
-The editor may preview the Player application's dynamic choice presentation, but button rows versus dropdown are not canonical runtime state. Buttons may use one or two rows; exact layout measurements and breakpoints remain Player UI work.
+The editor may preview the Playroom application's dynamic choice presentation, but button rows versus dropdown are not canonical runtime state. Buttons may use one or two rows; exact layout measurements and breakpoints remain Playroom UI work.
 
 Editor metadata must not imply that the first POC supports imports, package manifests, Standard Library replacement, or checkpoint migration.
 
