@@ -224,7 +224,7 @@ export interface OperandRule {
   readonly check: OperandCheck;
 }
 
-/** What shows as text (`fieldText`, today's `isShown`): the kinds `VALUE_KINDS` gives a shown form. */
+/** The kinds that show as text. */
 const SHOWS: readonly ItemTag[] = VALUE_KIND_NAMES.filter(
   (kind) => VALUE_KINDS[kind].shown !== null,
 );
@@ -234,7 +234,7 @@ const shown = (check: OperandCheck): OperandRule => ({
   check,
 });
 
-/** What a choice's button may return (V30 §19, today's `isChoiceValue`): the kinds `VALUE_KINDS` marks `choice`. */
+/** The kinds a choice's button may return (V30 §19). */
 const CHOICE_VALUES: readonly ItemTag[] = VALUE_KIND_NAMES.filter(
   (kind) => VALUE_KINDS[kind].choice,
 );
@@ -266,7 +266,7 @@ const choiceObjectShape =
         ))
     );
   };
-/** Today's rule on a known text (`staticText`), true where the text is not known. */
+/** A rule on a known text, true where the text is not known. */
 const knownText =
   (rule: (text: string) => boolean) =>
   (operand: Expression): boolean => {
@@ -274,11 +274,7 @@ const knownText =
     return text === undefined || rule(text);
   };
 
-/**
- * The command operand table: for each command of the slice and each operand position its rule names (the positions the
- * `pass` rows cite, a `say`'s pacing, a transfer's path), and for each ask (`interactionExpression`, positions as
- * `askText.question`), the operand's rule.
- */
+/** The command operand table, by row and position; an ask's positions read as `askText.question`. */
 export const COMMAND_OPERANDS = {
   showImageStatement: {
     image: {
