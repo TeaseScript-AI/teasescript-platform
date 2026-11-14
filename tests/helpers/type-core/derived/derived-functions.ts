@@ -32,9 +32,9 @@ import { fitsType } from "./type-core-derived-values.js";
  * never the plan. The calling file's run reads its own stores and content by offset, so a call of another file's
  * function is underivable where the body holds an entry of either file's (its checks are the other file's).
  *
- * Only a value stored into a place with a written type is a store here (`transferStore`): an obligation at an argument, a
- * default or a returned value of an untyped parameter or result is underivable, since the candidate route publishes no
- * check there.
+ * Only a value stored into a place with a written type is a store here (`transferStore`): an obligation into an untyped
+ * parameter or result, at an argument, a default, a returned value or a store in the function's body
+ * (`storedPlaceName`), is underivable, since the candidate route publishes no check there.
  */
 
 /** A value as `evaluate` reads it: the runtime value, and the host globals it came from. */
@@ -226,16 +226,22 @@ export function functionLandings(
 }
 
 /**
- * The name the analysis gives the place a store statement writes (`name`, the target's, as `o.a`): one of a parameter of
- * the function whose body holds the statement is prefixed with the function's, `<function>.<parameter>…`; any other
- * keeps its own.
+ * The name the analysis gives the place a checked store statement writes (`name`, the target's, as `o.a`): one of a
+ * parameter of the function whose body holds the statement is prefixed with the function's, `<function>.<parameter>…`;
+ * any other keeps its own. A check into a parameter without a written type is underivable, as at a transfer
+ * (`transferStore`).
  */
 export function storedPlaceName(statement: Statement, name: string, own: Syntax): string {
   const root = name.split(".")[0];
   for (const fn of own.statements) {
-    if (fn.kind !== "functionDeclaration") continue;
-    if (!fn.parameters.some((parameter) => parameter.name.name === root)) continue;
-    if (bodyOf(fn).includes(statement)) return `${fn.name.name}.${name}`;
+    if (fn.kind !== "functionDeclaration" || !bodyOf(fn).includes(statement)) continue;
+    const parameter = fn.parameters.find((each) => each.name.name === root);
+    if (parameter === undefined) continue;
+    if (parameter.typeAnnotation === null)
+      throw new Underivable(
+        `parameter '${root}' of '${fn.name.name}': a check into a parameter or result without a written type`,
+      );
+    return `${fn.name.name}.${name}`;
   }
   return name;
 }
