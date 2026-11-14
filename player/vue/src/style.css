@@ -517,7 +517,7 @@ html:fullscreen { background: var(--background); }
   scroll-padding-block: var(--focus-gutter);
 }
 
-/* Player notice levels (PLAYER-UI "Player notices") use the theme status colours: info blue, warning orange, error
+/* Player notice levels (PLAYER-UI "Playroom notices") use the theme status colours: info blue, warning orange, error
    red. Without a Player theme they fall back to the system canvas colours. */
 [data-notice-level="info"] {
   --notice-solid: var(--theme-status-info, CanvasText);

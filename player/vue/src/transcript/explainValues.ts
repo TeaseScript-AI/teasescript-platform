@@ -1,7 +1,7 @@
 import type { InjectionKey } from "vue";
 
 /**
- * Debug's **Explain values** entry point on chat messages (DEBUGGER.md "Player Debug"), which the Player provides to its
+ * Debug's **Explain values** entry point on chat messages (DEBUGGER.md "Playroom Debug"), which the Player provides to its
  * transcript while Debug runs. A message is identified by its transcript entry ID, never by its text.
  */
 export interface ExplainValues {

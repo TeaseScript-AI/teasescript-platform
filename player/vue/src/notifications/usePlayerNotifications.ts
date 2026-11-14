@@ -11,7 +11,7 @@ export interface PlayerNotification {
 const levelRank: Record<PlayerNoticeLevel, number> = { info: 0, warning: 1, error: 2 };
 
 /**
- * Presentation state for Player notices (PLAYER-UI "Player notices"): the notification list, newest first, numbered in
+ * Presentation state for Player notices (PLAYER-UI "Playroom notices"): the notification list, newest first, numbered in
  * publication order for its toasts; and whether the bell has something the player has not seen.
  */
 export function usePlayerNotifications(notices: Readonly<Ref<readonly PlayerNotice[]>>) {

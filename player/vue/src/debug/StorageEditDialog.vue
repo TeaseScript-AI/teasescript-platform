@@ -20,7 +20,7 @@ import { storageNotation } from "../../../persistence/storage-preview.js";
 import type { PlayerSessionHost } from "../session/usePlayerSession";
 import type { SavedDataEditResult } from "../session/persistence/useSavedValues";
 
-// Debug's editor for one saved value (DEBUGGER.md "Player Debug"): change it with its type, add a key, or delete one.
+// Debug's editor for one saved value (DEBUGGER.md "Playroom Debug"): change it with its type, add a key, or delete one.
 // The change is stored first; a running session's next `load` then returns it.
 export type StorageEdit =
   | { readonly kind: "edit"; readonly key: string; readonly value: SerializableRuntimeValue }

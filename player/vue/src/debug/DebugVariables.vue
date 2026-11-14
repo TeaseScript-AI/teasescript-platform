@@ -13,7 +13,7 @@ import DebugTraceRows from "./DebugTraceRows.vue";
 import type { PlayerDebugExplained } from "./usePlayerDebug";
 import type { PlayerSessionHost } from "../session/usePlayerSession";
 
-// Debug's Variables view (DEBUGGER.md "Player Debug"): why values have their values, from the session's value trace.
+// Debug's Variables view (DEBUGGER.md "Playroom Debug"): why values have their values, from the session's value trace.
 // A message chosen with Explain values comes first and stays until another is chosen; then recent chat messages, newest
 // first, each with the values it shows and their immediate causes; every live variable is under the collapsed
 // background section. Nothing here is computed while the tab is not shown.

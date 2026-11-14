@@ -36,7 +36,7 @@ export interface DebugExport {
   readonly package: DebugPackage;
   readonly incident: DebugIncident;
   /**
-   * Whether Debug's storage editor changed the session's saved values (DEBUGGER.md "Player Debug"), which makes it a
+   * Whether Debug's storage editor changed the session's saved values (DEBUGGER.md "Playroom Debug"), which makes it a
    * diagnostic fork: the scene time of the first edit and how many there were; `null` when none. An edit before the
    * replay anchor is not among the recorded calls, so only this says so.
    */

@@ -15,7 +15,7 @@ import type { DebugRandom, DebugRandomNext } from "./random/useDebugRandom";
 import type { PlayerDebugExplained } from "./usePlayerDebug";
 import type { PlayerSessionHost } from "../session/usePlayerSession";
 
-// The Debug panel (DEBUGGER.md "Player Debug"): its Debug switch and the debug export, and, while Debug is on, the time
+// The Debug panel (DEBUGGER.md "Playroom Debug"): its Debug switch and the debug export, and, while Debug is on, the time
 // controls (#615) and random draws above the tabs: Now, Variables, the Debug log, newest line first, and Storage when
 // the host persists script storage. Explanations open from their labels, by click, tap or keyboard, several at once.
 defineProps<{

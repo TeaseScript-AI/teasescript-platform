@@ -12,7 +12,7 @@ import { useDevelopmentTime, type DevelopmentTime } from "./useDevelopmentTime";
 import type { PlayerSessionHost } from "../session/usePlayerSession";
 
 /**
- * The Player's Debug feature (DEBUGGER.md "Player Debug"). Settings' **Debug menu** switch offers the Debug panel; it is
+ * The Player's Debug feature (DEBUGGER.md "Playroom Debug"). Settings' **Debug menu** switch offers the Debug panel; it is
  * not stored, so every load starts with it off in the normal room, unless the host starts it on (`?dev`), and on in the
  * debug room. The panel's own **Debug** switch, on whenever the menu is turned on, pauses the features without leaving
  * the panel.

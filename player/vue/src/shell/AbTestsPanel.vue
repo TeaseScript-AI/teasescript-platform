@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { PHOTO_FAMILIES, type PhotoFamily } from "../../../theme/photo-theme.js";
 import type { PhotoFadeTime } from "../stage/usePhotoColour";
 
-// The A/B tests panel (PLAYER-UI "Player Settings"): the presentation variants the owner approved for comparison, so
+// The A/B tests panel (PLAYER-UI "Playroom Settings"): the presentation variants the owner approved for comparison, so
 // they can be flipped while watching the Player. A radio button takes either option in one click; a dropdown test's
 // Next option steps to its following option and wraps around without opening the dropdown, and keeps focus, so Enter or
 // Space steps again. The choices are browser-local Player preferences.

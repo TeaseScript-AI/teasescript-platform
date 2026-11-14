@@ -12,7 +12,7 @@ import type { PlayerNoticeLevel } from "../../../presentation/notices.js";
 import { useFocusRecovery } from "./useFocusRecovery.js";
 import type { PlayerNotification } from "./usePlayerNotifications.js";
 
-// The Player's notification bell and panel (PLAYER-UI "Player notices"), part of the Player's own top controls.
+// The Player's notification bell and panel (PLAYER-UI "Playroom notices"), part of the Player's own top controls.
 const props = defineProps<{
   notifications: readonly PlayerNotification[];
   attentionLevel: PlayerNoticeLevel | null;

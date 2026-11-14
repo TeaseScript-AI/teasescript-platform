@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import type { PlayerDebugTraceRow } from "../../../debug/debug-variables.js";
 import type { DebugTreeState } from "../../../debug/debug-view.js";
 
-// Rows of Debug's derivation trees (DEBUGGER.md "Player Debug"): each root with its immediate causes, and further levels
+// Rows of Debug's derivation trees (DEBUGGER.md "Playroom Debug"): each root with its immediate causes, and further levels
 // as the player opens them, one row at a time. A record shown again in the same tree is a link to its first row. Every
 // text in a row wraps within the width its indentation leaves, so tags and text actions are plain elements that wrap,
 // not single-line Badges or Buttons.

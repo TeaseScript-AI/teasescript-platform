@@ -15,7 +15,7 @@ import {
 import { debugStageImage } from "./debugStageImage";
 import type { PlayerSessionHost } from "../session/usePlayerSession";
 
-// Debug's Now view (DEBUGGER.md "Player Debug"): where the script is, what the Stage and media show, and every timer,
+// Debug's Now view (DEBUGGER.md "Playroom Debug"): where the script is, what the Stage and media show, and every timer,
 // derived from canonical state and the Stage's own load reports while it is mounted. Paths are the authored ones, never
 // URLs; a captured or chosen image has no path.
 const props = defineProps<{
