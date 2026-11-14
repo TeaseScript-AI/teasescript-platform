@@ -508,8 +508,6 @@ export class DefinitionIndex {
           work.charge("indexSteps");
           append(this.byValue, d.value, d);
         }
-    // the owner sets: a live store by a callable other than its key's declaring activation that ordinary code may run;
-    // a helper only blocks run stores as their code does
     const ordinary = this.#ordinaryCallables();
     this.ordinary = ordinary;
     for (const d of this.storeDefs) {
@@ -1157,12 +1155,7 @@ export class DefinitionLists {
 
   /**
    * What the exact path's conditions read about a read of `source` at `node`, for every key at or below it at once, as
-   * one key: two reads with equal signatures have equal exact answers at every path below the source. The reaching
-   * definition over the source and its prefixes (D) and the nearest dominating definition below it (e*), whose
-   * dominating chain gives the reaching definition at any path below; the node's boundary, loops, liveness, block
-   * reachability and whether the source's declaration dominates it; and, in each event list the exact path reads for
-   * any of those keys (the source's own events with its descendants', each prefix's, the call sites), where the node's
-   * subtree begins and ends among its positions, which fixes the events of any span the node ends. A prefix's cut is
+   * one key: two reads with equal signatures have equal exact answers at every path below the source. A prefix's cut is
    * tagged by its depth and asked only of the prefixes with definitions (the trie's walk, #1822): one without has no
    * event, so its cut is the same for every read of the source, and every caller keys the signature with its
    * source; no prefix's text is made. The handlers' facts are the caller's. Without `calls` the call sites are left

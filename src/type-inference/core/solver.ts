@@ -31,8 +31,7 @@ import { retainedRecorder } from "./retained/retained.js";
  * unfinished demand outside the component, the component is part of a larger one and is solved with it. A component
  * being solved stays on the explicit stack too: its members' runs are frames above it, and a component one of them
  * closes is solved above that. So an answer depends on the final member set, never on the order the demands were
- * discovered in; the tests check that property (the component test re-solves every component from each member and in
- * the reverse order).
+ * discovered in; the tests check that property.
  * What a demand reads as part of itself (`inline`) runs on its frame's stack too, never the native one.
  *
  * That needs answers monotone in what they read. A choice that is not (a `Decision`: a load's or a parse's default
@@ -1020,10 +1019,7 @@ export class Solver {
     solving.next = new Set(solving.members.map((_, at) => at));
   }
 
-  /**
-   * The next step of solving a component canonically: a member's run, the choices once the open solve is
-   * stable, or the end.
-   */
+  /** The next step of solving a component canonically. */
   #step(solving: Solving): void {
     for (;;) {
       if (solving.now.size === 0) {

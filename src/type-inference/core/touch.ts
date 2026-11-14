@@ -1309,8 +1309,7 @@ export class Touches {
    * where the two differ:
    * below a path where they are one node, under the same payloads, nothing of the container's own stands, so it meets
    * the contained node there no more than a node merged with itself does (#1270: a shared node's meetings were owed again
-   * by every place or literal holding it beside a small part of its own). The walk enters the children the two do not
-   * share, found from the smaller of the meetings there and the two children maps' difference. Once per pair.
+   * by every place or literal holding it beside a small part of its own). Once per pair.
    */
   #containedOwes(outer: Touch, inner: Touch, mode: TouchMode): Found {
     const key = keptParts(this.host.work, mode, outer.id, inner.id);

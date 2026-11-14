@@ -1134,7 +1134,6 @@ export class ExactPath {
     program.work.charge("exactValues");
     if (d.kind === "const") return rest.length === 0 ? (d.items ?? []) : [];
     const writer = definitions.writerOf(d);
-    // a copy at a field is its chain's value there, with the marks of the copies' reads along the chain
     const copy = d.kind === "whole" && rest.length > 0 && !rest.includes("element");
     const forest = copy ? this.#forest() : null;
     const link = forest?.links.get(d.uid);
@@ -1190,9 +1189,7 @@ export class ExactPath {
     const listed = rest.length > 0 && dictList(rest[0]!) !== undefined ? 1 : 0;
     if (rest.length === listed) return before;
     const element = rest.length === listed + 1 && rest[listed] === "element";
-    // a clear: no element
     if (d.kind === "clear") return element ? [EMPTY] : [];
-    // a removal: every element possible, maybe none
     if (d.kind === "weaken")
       return element
         ? [...weaken(withoutEmpty(before), "member"), EMPTY]
@@ -1206,7 +1203,6 @@ export class ExactPath {
       ),
       writer,
     );
-    // the element read gathers the elements before and the added ones, several elements: `member`
     const several = withoutEmpty(before).length > 0 && withoutEmpty(own).length > 0;
     const worded = (items: readonly Item[]): readonly Item[] =>
       several
@@ -1216,7 +1212,6 @@ export class ExactPath {
               : { ...item, context: firstContext(item.context, "member") },
           )
         : items;
-    // an `add` makes the collection hold an element; an `addAll` leaves its emptiness unchanged, whatever its source
     if (rest.length > 1) return alternatives(worded([...before, ...own]), scope);
     const empty = d.how === "elements" && before.some((item) => item.tag === "empty");
     return alternatives(

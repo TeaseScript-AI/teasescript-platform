@@ -701,10 +701,7 @@ function listingOf(
 
 /**
  * The names of a value's known properties: those the keys below its sources store, and those the objects of
- * its literals and of the values its collections' adds insert have at its path. One worklist of sources, each once: a value read further at a path is followed
- * through its projections and the operations that pass a value on (the value side's transfers) to a copied key, a
- * call's result key or a literal; a key to its prefixes' stores and their sources' own stores; a literal to the
- * reads and calls standing at its path or above it. Each task it schedules, each prefix it visits and each key below a
+ * its literals and of the values its collections' adds insert have at its path. Each task it schedules, each prefix it visits and each key below a
  * key whose step it reads is charged, and every key, path, step and identity it keeps, through the kept helpers: no
  * key's text is split uncharged to read its steps (`keptStepBelow`, `keptPath`).
  *
