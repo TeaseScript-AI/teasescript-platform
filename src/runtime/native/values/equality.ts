@@ -1,10 +1,5 @@
 import { serializableEquals } from "../../values/serializable-values.js";
-import {
-  isNativeComposite,
-  NativeDict,
-  NativeObject,
-  type NativeValue,
-} from "./native-value.js";
+import { isNativeComposite, NativeDict, NativeObject, type NativeValue } from "./native-value.js";
 import { NativeSet } from "./native-set.js";
 
 /**
