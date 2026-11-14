@@ -22,8 +22,8 @@ import { compareKeys, contributionSite, OWN_ROLES, stopsOf, TYPED_ROLES } from "
 const MEASURED: ReadonlySet<ItemTag> = new Set(["string", "list", "set", "dict"]);
 
 /**
- * Every store, add and transfer landing that admission does not reject walked once (`stopsOf`, the walk admission's
- * deciders and the store checks' contributions read), then every operation's own read, as its own landing; each
+ * Every store, add and transfer landing that admission does not reject walked once (`stopsOf`), then every
+ * operation's own read, as its own landing; each
  * ingress stop recorded by the store that brings it, or as an own read. Built once per pass, at its first use. A store
  * in dead code and a dead call's argument for a written parameter are walked too: their boundaries are against the
  * destination's admitted type, as in live code (a written type is no flow fact). `keep`: the stops of the stores
@@ -235,9 +235,7 @@ export function leafIngress(admission: Admission, leaf: Writer): PlaceId | null 
   return admission.pass.definitions.ingressAt.get(writerKey(leaf)) ?? null;
 }
 
-/**
- * The ingresses an item's leaves name, once per provenance node and pass (the store checks' membership tests read it).
- */
+/** The ingresses an item's leaves name, once per provenance node and pass. */
 export function leafIngresses(admission: Admission, node: IngressNode): ReadonlySet<PlaceId> {
   const known = admission.nodeIngresses.get(node);
   if (known !== undefined) return known;

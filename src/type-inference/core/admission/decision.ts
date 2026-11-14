@@ -106,8 +106,7 @@ export function compareLanded(admission: Admission): void {
 
 /**
  * Deletes a key's published decision: `decided`, `nullable`, `permitsNull`, `inheritsWrittenKeys`, `unrestricted` and
- * `deciderSites` (which `deciderAt` also fills). `decisions`, `attempted` and `budgetUndecided` are its callers' to
- * keep or delete.
+ * `deciderSites`. `decisions`, `attempted` and `budgetUndecided` are its callers' to keep or delete.
  */
 function unrecord(admission: Admission, key: CanonicalKey): void {
   admission.decided.delete(key);
@@ -120,9 +119,8 @@ function unrecord(admission: Admission, key: CanonicalKey): void {
 
 /**
  * A decision that stopped at its demand allowance: what it had recorded of its key is taken back, so the key is
- * undecided, and its contract answers every read of it, or of a key below it, `unknown` with the reason `budget`
- * (`Contract.stop`). Its unrecorded decision (`decisions`) and `attempted` stay, so a store above it is still checked
- * against the type a copy decided it by (`Decided.copied`, `storeRequirement`).
+ * undecided. Its unrecorded decision (`decisions`) and `attempted` stay, so a store above it is still checked against
+ * the type a copy decided it by.
  */
 export function stopDecision(admission: Admission, at: DecidedAt): void {
   const { key } = atOf(admission, at);
@@ -193,8 +191,7 @@ function decidedAtOf(at: At): DecidedAt {
 }
 
 /**
- * The written type a copy decides a key by in this pass's decision of it, whole below it (`Decided.copied`), or `null`;
- * the key in its identity, as `decide` records it (a wrapper family's its cursor).
+ * The written type a copy decides a key by in this pass's decision of it, whole below it (`Decided.copied`), or `null`.
  */
 export function copiedAt(admission: Admission, asked: Key): TypeTerm | null {
   const key = admission.pass.contract.canonicalKey(asked);
@@ -218,9 +215,8 @@ export function kindsAt(admission: Admission, asked: Key): readonly ItemTag[] | 
 
 /**
  * The decision of one place at one path, or `null` where nothing is checked: no store reaches it, it lies below a
- * reference, a settled single-family contract needs no scan, or nothing decides. The decision is recorded for the
- * boundary checks' `against`. `lazily`: a path of a copy `groups` leaves to be decided where an answer asks for
- * it (`lazily`): recorded, its candidates owe nothing (`hotSets`) and are not taken.
+ * reference, a settled single-family contract needs no scan, or nothing decides. `lazily`: a path of a copy `groups`
+ * leaves to be decided where an answer asks for it: recorded, its candidates owe nothing (`hotSets`) and are not taken.
  */
 export function decide(admission: Admission, asked: DecidedAt, lazily = false): Decision | null {
   // (#1444: a decision's scans are its own, never the written-decider summary's, `Admission.deciding`)
@@ -232,10 +228,7 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
   }
 }
 
-/**
- * `decide`'s body, run as a decision (`Admission.deciding`): it records the place's decision in admission's maps and,
- * unless `lazily` or nothing is checked, takes the candidates it checks and returns the decision with its label.
- */
+/** `decide`'s body. */
 function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): Decision | null {
   const { program, definitions, lists, contract } = admission.pass;
   const work = program.work;
@@ -404,7 +397,6 @@ export function decided(
 
 /** `decided` of a decided path in its identity, its inputs found (`inputsAt`). */
 function decidedOf(admission: Admission, at: At, inputs: Inputs | null): Decided | null {
-  // (a text key made again, its text charged)
   const key = at.path === null ? at.key : keptKeyAt(admission.pass.contract, at.root, at.path);
   // (in a completion pass a decision is a cell of the receiving closure: its reads its own, a hit read, #1526)
   const closure = admission.pass.closure ?? null;
@@ -595,7 +587,6 @@ function compareMembers(
     marked(admission.valueAt(d, rest))
       .map((item) => itemText(item, writers))
       .sort();
-  // (a prefix's whole stores' classes and, below an element step, its adds')
   for (const { key: prefix, rest } of prefixes) {
     // (the oracle's rest made, its steps through the charged boundary for a span)
     const below = stepsArray(rest.steps());
@@ -640,7 +631,6 @@ function concreteSite(
   prefixes: readonly { readonly key: Key; readonly rest: PathRef }[],
 ): SourceSite | null {
   const { program, values } = admission.pass;
-  // (each its path's text: a span's its record's, `textOf`; an array's made plain)
   const tried: { readonly d: Definition; readonly text: string }[] = [
     ...direct.map(({ d, at }) => ({ d, text: stepsText(at) })),
     ...prefixes.flatMap(({ key, rest }) =>

@@ -52,15 +52,14 @@ const RESOLVED: ReadonlySet<string> = new Set([
  * kinds of every operand the join holds; each operand's domain by `joinedDomain` (an open one leaves the join open, one
  * holding only `null` decides nothing but at a strict written destination). A right operand whose elements there are of
  * one other family, none of whose kinds fits, is an error at its join, unless the written type the tree lands in
- * directly holds both, and is rejected from that join (`Admission.newlyRejected`, without `reject`): the join then
- * holds its left operand's elements alone. A right operand is compared at the paths of its own structure, a join's at
- * its list levels as a variable holding it is (`pathsBelow`); a join's paths are its operands', the smaller one's added
- * to the larger one's, so a chain of k joins, on either side, costs its operands' structures once. `error` hears of
- * each with the join, the path, the decided kinds there and the operand's, the tree's value, whose declaration a fix
- * may give the type (#1268), and the type it writes: `levels`, what the tree's elements hold at each list level down to
- * the path, its `null`s and numbers kept. `undecided`, before admission settled (`Consumers.#freshStores`): a join an
- * operand of which is read through a decision. `stopped`, after it settled: a join an operand of which a stop left
- * undecided (#2289: a literal's element), not compared.
+ * directly holds both, and is rejected from that join. A right operand is compared at the paths of its own structure,
+ * a join's at its list levels as a variable holding it is (`pathsBelow`); a join's paths are its operands', the
+ * smaller one's added to the larger one's, so a chain of k joins, on either side, costs its operands' structures once.
+ * `error` hears of each with the join, the path, the decided kinds there and the operand's, the tree's value, whose
+ * declaration a fix may give the type (#1268), and the type it writes: `levels`, what the tree's elements hold at each
+ * list level down to the path, its `null`s and numbers kept. `undecided`, before admission settled: a join an operand
+ * of which is read through a decision. `stopped`, after it settled: a join an operand of which a stop left undecided
+ * (#2289: a literal's element), not compared.
  */
 export function joinElements(
   admission: Admission,

@@ -15,8 +15,7 @@ import { landed } from "./landings/landed.js";
 import { permittedAt, unrestricted } from "./permitted.js";
 import { inputsAt, scanAt } from "./scan.js";
 
-// The admitted type at a path, the decision retained after a stop, and the deciding contribution's site; each path's
-// key in its identity (`keyAt`: a wrapper family's its cursor, as `decide` records it).
+// The admitted type at a path, the decision retained after a stop, and the deciding contribution's site.
 
 /**
  * A path copies land in a place that `groups` left out, decided where an answer asks for it (`decide`'s `lazily`):
@@ -37,10 +36,9 @@ function lazily(admission: Admission, place: PlaceId, path: readonly string[]): 
 }
 
 /**
- * #1526: a read of the decision at a path in a completion pass (`Consumers.#completeFor`, the receiving
- * closure's, which carries no frozen key): no admission walk runs there, so a decision admission makes at all (one of
- * its groups; a landed copy path is `lazily`'s) is made, as a lazily decided path, where a level first asks for it, a
- * scoped decision from what is left of the total (`Closure.decide`); then the reader reads its cell.
+ * #1526: a read of the decision at a path in a completion pass: no admission walk runs there, so a decision admission
+ * makes at all (one of its groups; a landed copy path is `lazily`'s) is made, as a lazily decided path, where a level
+ * first asks for it, a scoped decision from what is left of the total.
  */
 function pull(
   admission: Admission,
@@ -73,8 +71,9 @@ function groupKeys(admission: Admission): ReadonlySet<CanonicalKey> {
  * an integer widened by an admitted number; with `null` where a null contribution is admitted and the decision admits
  * one (a copy of a written type without it does not), and wherever a copy of a written type with it decided, whatever
  * is stored (`permitsNull`), a written `null` alone too (`[null]`, a decision like any other, never none); never the
- * raw union of contributions. Not only a read: where copies land a path `groups` left out (`lazily`), or in a
- * completion pass (`pull`), it first decides the path, recorded and charged as a decision.
+ * raw union of contributions. Not only a read: where copies land a path no decision has tried yet, before a stop
+ * (`lazily`), or, in a completion pass, at a group's path not yet tried (`pull`), it first decides the path, recorded
+ * and charged as a decision.
  */
 export function admitted(admission: Admission, place: PlaceId, path: readonly string[]): ItemTag[] {
   const { program, contract } = admission.pass;
@@ -273,7 +272,7 @@ function literalSeed(
 }
 
 /**
- * Whether, after a stop, a path is one `lazily` would decide now (copies land there, `groups` left it out): no
+ * Whether, after a stop, a path is one `lazily` would decide now (copies land there, no decision has tried it): no
  * decision is made after a stop, so it is answered from what admission retained.
  */
 function undecidedCopy(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
@@ -350,8 +349,7 @@ export function deciderAt(
  * (`admitted`), with the decider found where it is read and whether a copy of a written type decides it; after a stop
  * before admission settled nothing but the written type; after one where it had settled, a path admission retained
  * nothing for answered by what the stores' syntax decides (`cheap`, as the finishing read's last source before
- * `STOPPED`). The one
- * level reader of the answers (`CoreAnswers.place`) and of the contract capture (`Consumers`), so both read a level alike.
+ * `STOPPED`).
  */
 export function admittedLevel(
   admission: Admission,
