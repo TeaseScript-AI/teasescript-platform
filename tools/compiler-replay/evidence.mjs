@@ -22,7 +22,8 @@
 // a runner's own exception) and uncompared (no record a class can be read from); the sources whose class differs
 // between the trees, by name; the differences over sources completed on both trees, each with its first differing
 // part, and over those that threw on both, where the class or place of the throw differs; every source that threw
-// alike on both trees, by name, each time; and the heaviest share of the limit per tree, with every source above half
+// alike on both trees, by name, each time; each tree's packages whose files give no core request (they do not parse or
+// name: counted completed, their compile compared alone), by name; and the heaviest share of the limit per tree, with every source above half
 // of it, each as a share of the allowance the code gives it and of the fixed limit (`FIXED_LIMIT`). Exit 0 when every
 // part asked ran, each completed something and nothing differs, moves class, is incomplete or uncompared, and the
 // checks passed (a throw alike on both trees is listed, never a reason); 3 when a part asked did not run; else 1; 2 on
@@ -229,6 +230,7 @@ export function packageSources(records) {
         apart: null,
         share: [null, null],
         threw: [null, null],
+        unasked: [false, false],
         bound: r.incomplete,
       };
     const modes = r.modes ?? [];
@@ -249,13 +251,18 @@ export function packageSources(records) {
       apart: apart === undefined ? null : packageApart(apart),
       share,
       threw,
+      // (whether the package's files gave no core request on the tree: compared by their compile alone)
+      unasked: ["base", "head"].map((tree) =>
+        modes.some((m) => m[tree].analysis.request === false),
+      ),
     };
   });
 }
 
 /**
  * A part's summary: each tree's counts by class, the class moves, the differences over sources completed or thrown on
- * both trees (a throw of another class or place a difference), the sources that threw alike, the shares.
+ * both trees (a throw of another class or place a difference), the sources that threw alike, each tree's packages
+ * without a core request, the shares.
  */
 export function partSummary(sources) {
   const counts = { base: {}, head: {} };
@@ -265,6 +272,8 @@ export function partSummary(sources) {
   const apartElsewhere = [];
   // (the sources that threw alike on both trees: the checker's outcome, listed every time, never a reason)
   const threwAlike = [];
+  // (each tree's packages whose files gave no core request: not analysed, their compile compared alone)
+  const unasked = [0, 1].map((at) => sources.filter((s) => s.unasked?.[at]).map((s) => s.name));
   let completed = 0;
   let threwBoth = 0;
   for (const s of sources) {
@@ -306,6 +315,7 @@ export function partSummary(sources) {
     differences,
     apartElsewhere,
     threwAlike,
+    unasked,
     shares,
   };
 }
@@ -557,6 +567,12 @@ export function evidenceReportStep({ positional: [prefix], options }) {
       `${name}: ${p.differences.length} differences over ${p.completed} completed on both trees and ${p.threwBoth} that threw on both; ${p.moved.length} moved class`,
     );
     for (const t of p.threwAlike) out(`${name} threw alike on both trees: ${t}`);
+    p.unasked.forEach((names, at) => {
+      if (names.length > 0)
+        out(
+          `${name} ${at === 0 ? "base" : "head"}: ${names.length} without a core request (files that do not parse or name), their compile compared alone: ${names.join(", ")}`,
+        );
+    });
     p.shares.forEach((share, at) => {
       const tree = at === 0 ? "base" : "head";
       if (share.heaviest !== null) out(`${name} ${tree} heaviest: ${shareText(share.heaviest)}`);

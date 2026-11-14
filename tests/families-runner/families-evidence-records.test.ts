@@ -221,7 +221,8 @@ export const compileSourceWithBackend = (source) => compileProjectWithBackend([{
 
 /**
  * A built tree for the packages' runner: its analysis stops for a package whose main file says `stops`, never ends for
- * `hang`; its route refuses at a limit for `refused`; the head's answers differ for `apart`. Each answer names the
+ * `hang`; its files give no request for `unparsed`; its route refuses at a limit for `refused`; the head's answers
+ * differ for `apart`. Each answer names the
  * mode it ran in, so modes paired by position would differ.
  */
 const packageModules = (head: boolean): Record<string, string> => ({
@@ -260,7 +261,8 @@ export function analyseCore(request) {
   return new Answers(request, budget);
 }
 `,
-  "tests/helpers/type-core-analysis.js": "export const coreRequest = (files) => ({ files });\n",
+  "tests/helpers/type-core-analysis.js":
+    'export const coreRequest = (files) => (files[0].source.includes("unparsed") ? null : { files });\n',
   "tests/helpers/type-core-held-host.js": `export const HELD_MODES = ${JSON.stringify(head ? [...NAMES].reverse() : NAMES)}.map((name) => ({
   name,
   run: (f) => { globalThis.mode = name; try { return f(); } finally { globalThis.mode = undefined; } },
@@ -291,6 +293,7 @@ test("the packages' runner compares each package's analysis and route per mode b
   pack("refused", "refused");
   pack("apart", "apart");
   pack("hang", "hang");
+  pack("unparsed", "unparsed");
   const out = join(folder, "packages.jsonl");
   const ran = spawnSync(
     process.execPath,
@@ -300,7 +303,7 @@ test("the packages' runner compares each package's analysis and route per mode b
   assert.equal(ran.status, 1, ran.stderr);
   assert.deepEqual(jsonLines<Readonly<Record<string, string | number>>>(ran.stdout).at(-1), {
     packages: "0/1",
-    sources: 5,
+    sources: 6,
     differing: 1,
     incomplete: 1,
     timeout: 5,
@@ -338,6 +341,12 @@ test("the packages' runner compares each package's analysis and route per mode b
       records.get("refused")!.modes[0]!.base.route.error,
     ],
     ["limit", "CandidateOutsideSlice at coreOutcome (src/type-inference/core/backend.js)"],
+  );
+  // (no request: nothing analysed, the compile still compared)
+  const unparsed = records.get("unparsed")!.modes[0]!.base;
+  assert.deepEqual(
+    [unparsed.analysis, unparsed.route.error],
+    [{ request: false, error: null, stopped: null, units: 0, allowance: 0 }, null],
   );
   const apart = records.get("apart")!;
   assert.deepEqual([apart.differing, apart.modes.every((m) => !m.same)], [4, true]);

@@ -283,11 +283,25 @@ test("evidence: a package's class is its analysis's, its first difference by par
         packageMode(m, packageRun({ error: "TypeError at f (src/a.js)" })),
       ),
     },
+    {
+      name: "unparsed",
+      root: 0,
+      files: 1,
+      differing: 0,
+      modes: MODE_NAMES.map((m) =>
+        packageMode(m, {
+          ...packageRun(),
+          analysis: { request: false, error: null, stopped: null, units: 0, allowance: 0 },
+        }),
+      ),
+    },
     { name: "hang", root: 0, incomplete: "safety net 3600 s" },
   ]);
   const summary = partSummary(sources);
+  // (a package whose files give no core request completed, with its compile compared, and is named on each tree)
+  assert.deepEqual(summary.unasked, [["unparsed"], ["unparsed"]]);
   assert.deepEqual(summary.counts.base, {
-    completed: 2,
+    completed: 3,
     limit: 1,
     slice: 0,
     threw: 1,
