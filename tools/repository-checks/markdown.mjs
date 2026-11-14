@@ -25,17 +25,22 @@ export function headingText(node) {
 }
 
 /**
- * The anchors of a page's headings, as remark-validate-links makes them (`lib/index.js`, its heading ids): each heading in
- * document order slugged by `github-slugger` from `headingText`, one slugger per page, so a repeated heading's anchor
+ * A page's headings in document order, each with its anchor as remark-validate-links makes it (`lib/index.js`, its
+ * heading ids): slugged by `github-slugger` from `headingText`, one slugger per page, so a repeated heading's anchor
  * takes `-1`, `-2`. `tree` is the page's syntax tree from `markdownProcessor().parse`.
  */
-export function headingAnchors(tree) {
+export function anchoredHeadings(tree) {
   const slugger = new GithubSlugger();
-  const anchors = new Set();
+  const headings = [];
   const visit = (node) => {
-    if (node.type === "heading") anchors.add(slugger.slug(headingText(node)));
+    if (node.type === "heading") headings.push({ node, anchor: slugger.slug(headingText(node)) });
     for (const child of node.children ?? []) visit(child);
   };
   visit(tree);
-  return anchors;
+  return headings;
+}
+
+/** The anchors of a page's headings (`anchoredHeadings`). */
+export function headingAnchors(tree) {
+  return new Set(anchoredHeadings(tree).map(({ anchor }) => anchor));
 }
