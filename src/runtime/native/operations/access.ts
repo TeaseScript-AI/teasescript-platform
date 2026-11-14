@@ -1,17 +1,17 @@
 import type { ExpressionPlan, IndexExpressionPlan } from "../../../plan/model.js";
 import { stringLength, unknownTextMemberMessage } from "../../../text-operations.js";
 import type { EvaluationContext } from "../../evaluator.js";
-import {
-  assertIndexable,
-  dictKey,
-  listPosition,
-  missingKey,
-} from "../../evaluation/access.js";
+import { assertIndexable, dictKey, listPosition, missingKey } from "../../evaluation/access.js";
 import { fault } from "../../evaluation/support.js";
 import { listHasPosition } from "../../values/collection-operations.js";
 import type { SerializableRuntimeList } from "../../values/serializable-values.js";
 import { toCanonical } from "../values/codec.js";
-import { isNativeComposite, NativeDict, NativeSet, type NativeValue } from "../values/native-value.js";
+import {
+  isNativeComposite,
+  NativeDict,
+  NativeSet,
+  type NativeValue,
+} from "../values/native-value.js";
 import { NOT_NATIVE } from "./not-implemented.js";
 
 /**
@@ -65,7 +65,10 @@ export function assertNativeIndexable(
     assertIndexable(context, shown(object), receiver, span);
 }
 
-/** `.length` of a list, set, dict or text; a text's other members fail as today's; any other property gives `NOT_NATIVE`. */
+/**
+ * `.length` of a list, set, dict or text, and a non-empty list's `first` and `last`; a text's other members fail as
+ * today's; any other property gives `NOT_NATIVE`.
+ */
 export function nativeProperty(
   value: NativeValue,
   name: string,
@@ -74,6 +77,11 @@ export function nativeProperty(
   if (typeof value === "string") {
     if (name === "length") return stringLength(value);
     throw fault("TSR017", unknownTextMemberMessage(name, "property"), span);
+  }
+  // A non-empty list's first and last element; an empty list's fault is today's evaluator's to write.
+  if (Array.isArray(value) && value.length > 0) {
+    if (name === "first") return value[0]!;
+    if (name === "last") return value[value.length - 1]!;
   }
   if (name === "length") {
     if (Array.isArray(value)) return value.length;

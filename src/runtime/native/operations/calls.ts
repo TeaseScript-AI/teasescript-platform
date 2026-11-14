@@ -22,7 +22,9 @@ import type { SerializableRuntimeValue } from "../../values/serializable-values.
 import { callStringMethod } from "../../values/string-operations.js";
 import { assertValueType } from "../../values/value-types.js";
 import { fromCanonical } from "../values/codec.js";
-import type { NativeValue } from "../values/native-value.js";
+import { nativeEquals } from "../values/equality.js";
+import { nativeSetHas } from "../values/native-set.js";
+import { NativeSet, type NativeValue } from "../values/native-value.js";
 import { shown } from "./access.js";
 import { NOT_NATIVE } from "./not-implemented.js";
 
@@ -32,8 +34,8 @@ export const NEEDS_DEFAULT: unique symbol = Symbol("needs the default");
 /**
  * A call of a builtin or a method on native values whose arguments were evaluated and copied in written order, its lazy
  * `default:` left out: random, numeric and clock builtins, text methods, and a list's `add` and `get`, each through
- * today's helpers and checks, and conversions and list functions without a lazy `default:`. Every other
- * callee gives `NOT_NATIVE`.
+ * today's helpers and checks, conversions and list functions without a lazy `default:`, a non-empty list's
+ * `removeLast`, and a list's or set's `contains`. Every other callee gives `NOT_NATIVE`.
  */
 export function nativeCall(
   context: EvaluationContext,
@@ -63,11 +65,15 @@ export function nativeCall(
       return converted === undefined ? NOT_NATIVE : fromCanonical(converted);
     }
     if (isListFunction(name))
-      return fromCanonical(listFunctionValue(name, positional.map(shown), shownRecord(named), span));
+      return fromCanonical(
+        listFunctionValue(name, positional.map(shown), shownRecord(named), span),
+      );
     if (isClockFunction(name)) {
       const now = context.snapshot.currentSessionTimeMs;
       const capture = temporalCaptureAt(context.snapshot.temporalCaptures, now);
-      return fromCanonical(temporalNow(name, positional.map(shown), shownRecord(named), capture, now, span));
+      return fromCanonical(
+        temporalNow(name, positional.map(shown), shownRecord(named), capture, now, span),
+      );
     }
     return NOT_NATIVE;
   }
@@ -78,11 +84,14 @@ export function nativeCall(
   if (Array.isArray(receiver)) {
     switch (method) {
       case "add": {
-        if (positional.length !== 1 || Object.keys(named).length > 0)
-          return NOT_NATIVE;
+        if (positional.length !== 1 || Object.keys(named).length > 0) return NOT_NATIVE;
         const added = positional[0]!;
         if (expression.typeCheck !== undefined)
-          assertValueType(shown(added), expression.typeCheck, expression.arguments.at(-1)!.value.span);
+          assertValueType(
+            shown(added),
+            expression.typeCheck,
+            expression.arguments.at(-1)!.value.span,
+          );
         checkCollectionLength("list", receiver.length + 1, receiver.length, "add(...)", span);
         // The argument is the call's own copy, so the list takes it.
         receiver.push(added);
@@ -106,10 +115,23 @@ export function nativeCall(
           ? receiver[index]!
           : NEEDS_DEFAULT;
       }
+      case "removeLast":
+        // An empty list's fault is today's evaluator's to write.
+        return positional.length === 0 && Object.keys(named).length === 0 && receiver.length > 0
+          ? receiver.pop()!
+          : NOT_NATIVE;
+      case "contains":
+        return positional.length === 1 && Object.keys(named).length === 0
+          ? receiver.some((item) => nativeEquals(item, positional[0]!))
+          : NOT_NATIVE;
       default:
         return NOT_NATIVE;
     }
   }
+  if (receiver instanceof NativeSet && method === "contains")
+    return positional.length === 1 && Object.keys(named).length === 0
+      ? nativeSetHas(receiver, positional[0]!)
+      : NOT_NATIVE;
   return NOT_NATIVE;
 }
 

@@ -1,6 +1,15 @@
-import { lazyDefaultArgumentIndex, lazyDefaultCallOperation } from "../../../plan/expression-children.js";
+import {
+  lazyDefaultArgumentIndex,
+  lazyDefaultCallOperation,
+} from "../../../plan/expression-children.js";
 import type { ExpressionPlan, InstructionPlan, TemplatePartPlan } from "../../../plan/model.js";
-import { acceptedDefault, noSpeaker, rangeBound, templateText, unitDuration } from "../../evaluator.js";
+import {
+  acceptedDefault,
+  noSpeaker,
+  rangeBound,
+  templateText,
+  unitDuration,
+} from "../../evaluator.js";
 import { mayChangeValue } from "../../evaluation/effect-facts.js";
 import { notLogicalOperand } from "../../evaluation/operators.js";
 import { interpolationText } from "../../evaluation/speakers.js";
@@ -55,7 +64,10 @@ export function isFreshValue(expression: ExpressionPlan): boolean {
 }
 
 /** Compiles an expression; a kind outside the native engine's slice refuses the plan at preparation. */
-export function compileExpression(expression: ExpressionPlan, scope: ExpressionScope): NativeExpression {
+export function compileExpression(
+  expression: ExpressionPlan,
+  scope: ExpressionScope,
+): NativeExpression {
   switch (expression.kind) {
     case "literal": {
       const value = expression.value;
@@ -107,7 +119,8 @@ export function compileExpression(expression: ExpressionPlan, scope: ExpressionS
       const span = expression.span;
       return (machine) => {
         const value = nativeProperty(object(machine), name, span);
-        if (value === NOT_NATIVE) throw new NativeNotImplementedError(`the property '${name}' of this value`);
+        if (value === NOT_NATIVE)
+          throw new NativeNotImplementedError(`the property '${name}' of this value`);
         return value;
       };
     }
@@ -159,7 +172,9 @@ export function compileOwned(expression: ExpressionPlan, scope: ExpressionScope)
 
 function compileRead(name: string, scope: ExpressionScope): NativeExpression {
   if (name === "speaker")
-    throw new NativePreparationError("a read of 'speaker', which a contextual speaker can stand for");
+    throw new NativePreparationError(
+      "a read of 'speaker', which a contextual speaker can stand for",
+    );
   const location = scope.resolve(name);
   const missing = (): never => {
     throw new NativeNotImplementedError(`a read of '${name}' before it has a value`);
@@ -186,14 +201,20 @@ function compileTemplate(
   const compiled = parts.map((part) =>
     part.kind === "text"
       ? ({ kind: "text", value: part.value } as const)
-      : ({ kind: "expression", plan: part.expression, value: compileExpression(part.expression, scope) } as const),
+      : ({
+          kind: "expression",
+          plan: part.expression,
+          value: compileExpression(part.expression, scope),
+        } as const),
   );
   return (machine) => {
     let text = "";
     for (const part of compiled)
       text = templateText(
         text,
-        part.kind === "text" ? part.value : interpolationText(machine, shown(part.value(machine)), part.plan),
+        part.kind === "text"
+          ? part.value
+          : interpolationText(machine, shown(part.value(machine)), part.plan),
         span,
       );
     return text;
@@ -225,7 +246,8 @@ function compileBinary(
     // The fallback runs only for a null value.
     if (operator === "otherwise" && first !== null) return first;
     const value = nativeBinary(machine, expression, first, right(machine));
-    if (fallbackCheck !== undefined) assertFallbackType(shown(value), fallbackCheck, expression.right.span);
+    if (fallbackCheck !== undefined)
+      assertFallbackType(shown(value), fallbackCheck, expression.right.span);
     return value;
   };
 }
@@ -249,7 +271,8 @@ function compileCall(
   });
   const fallback = lazy === -1 ? null : compileOwned(expression.arguments[lazy]!.value, scope);
   // A list's `add` changes the list in place, which today's engine does after it freezes the references it reaches.
-  const changes = callee.kind === "property" && callee.name === "add";
+  const changes =
+    callee.kind === "property" && (callee.name === "add" || callee.name === "removeLast");
   const fallbackSpan = lazy === -1 ? null : expression.arguments[lazy]!.value.span;
   return (machine) => {
     const target = receiver === null ? null : receiver(machine);
@@ -258,14 +281,22 @@ function compileCall(
     const record: Record<string, NativeValue> = {};
     for (const [name, argument] of named) record[name] = argument(machine);
     if (changes && machine.liveReferences !== 0)
-      throw new NativeNotImplementedError("a change while a prepared reference it may reach is held");
+      throw new NativeNotImplementedError(
+        "a change while a prepared reference it may reach is held",
+      );
     const called = nativeCall(machine, expression, target, values, record, fallback !== null);
     if (called === NOT_NATIVE) throw new NativeNotImplementedError("this callee");
     if (called !== NEEDS_DEFAULT) return called;
     if (fallback === null || operation === null)
       throw new NativeNotImplementedError("a call that needs a default it does not have");
     const value = fallback(machine);
-    acceptedDefault(operation, shown(value), expression.typeCheck, fallbackSpan!, expression.fallbackCheck);
+    acceptedDefault(
+      operation,
+      shown(value),
+      expression.typeCheck,
+      fallbackSpan!,
+      expression.fallbackCheck,
+    );
     return value;
   };
 }
@@ -273,6 +304,7 @@ function compileCall(
 /** The prepared reference a temporary holds. */
 export function referenceIn(machine: NativeMachine, id: number): NativeReference {
   const held = machine.current.temps[id];
-  if (!isNativeReference(held)) throw new Error(`Temporary ${id} holds no prepared reference where the plan uses one.`);
+  if (!isNativeReference(held))
+    throw new Error(`Temporary ${id} holds no prepared reference where the plan uses one.`);
   return held;
 }
