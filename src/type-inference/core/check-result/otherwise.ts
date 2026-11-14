@@ -6,16 +6,21 @@ import type { StaticRule } from "../result.js";
 // V30 §18 (#1072): whether an `otherwise`'s fallback can run.
 
 /**
- * Whether a left read's answer proves it never `null`. An unknown kind (external, opaque, a stopped read's) proves
- * nothing, as a value of unknown type gets no warning (V30 §18). A possible kind proves as a
- * definite one does: the question is whether `null` can be there, not whether every kind is certain. `null` (no answer
- * at the read) proves nothing. (A function is outside the candidate's slice, so no left side here depends on a
- * parameter.)
+ * Whether a left read's answer proves it never `null` for the unused-fallback warning. An unknown kind (external,
+ * opaque, a stopped read's) proves nothing, and neither does a value that depends on a parameter without a written type
+ * (`untypedParameter`), as neither gets the warning (V30 §18). A possible kind proves as a definite one does: the
+ * question is whether `null` can be there, not whether every kind is certain. `null` (no answer at the read) proves
+ * nothing.
  */
 export function provesNonNull(items: readonly Item[] | null): boolean {
   if (items === null) return false;
   const kinds = items.filter((item) => item.tag !== "empty");
-  return kinds.length > 0 && kinds.every((item) => item.tag !== "null" && item.tag !== "unknown");
+  return (
+    kinds.length > 0 &&
+    kinds.every(
+      (item) => item.tag !== "null" && item.tag !== "unknown" && item.untypedParameter !== true,
+    )
+  );
 }
 
 /** Whether `expression` is an `otherwise`. */
