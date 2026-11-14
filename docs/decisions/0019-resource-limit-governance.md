@@ -82,7 +82,7 @@ input or execution.
 
 A **boundary** is the public or internal operation at which a limit is applied,
 such as source capture, parsing, semantic validation, lowering, plan capture,
-plan validation, snapshot creation, checkpoint creation, restore, Player
+plan validation, snapshot creation, checkpoint creation, restore, Playroom
 presentation, host-message validation, transport, rendering, storage, or a
 tooling command.
 
@@ -277,11 +277,11 @@ applicable stage of at least this minimum engine sequence:
 11. deterministic uninterrupted-versus-resumed equivalence.
 
 The numbered sequence is the minimum engine chain, not the entire public
-platform path. Evidence must also traverse every applicable Player application,
-parent/player or host-message, typed host integration, transport or API,
+platform path. Evidence must also traverse every applicable Playroom application,
+parent/Playroom or host-message, typed host integration, transport or API,
 rendering or Standard/custom UI, persistence or storage, and other platform
 boundary through which the accepted data must travel. An engine maximum is not
-`proven` when a required Player, message, transport, rendering, or storage
+`proven` when a required Playroom, message, transport, rendering, or storage
 boundary still rejects or cannot safely represent it.
 
 Resource use is multidimensional. The proof identifies every applicable
@@ -299,8 +299,8 @@ combinations.
 
 A layer or boundary may be marked not applicable only with a concrete reason.
 For example, a tooling-only metadata field that is never compiled, sent to the
-Player, placed in a runtime snapshot, or stored in a checkpoint does not require
-runtime, Player, or resume tests. It still requires focused tests for every
+Playroom, placed in a runtime snapshot, or stored in a checkpoint does not require
+runtime, Playroom, or resume tests. It still requires focused tests for every
 applicable tooling, capture, validation, serialization, transport, rendering,
 or storage boundary and must not be reported as engine capacity.
 
@@ -314,7 +314,7 @@ rejects the unsupported input with a focused structured diagnostic.
 
 The repository must not knowingly accept an upstream maximum that later fails
 incidentally in lowering, plan validation, snapshot creation, checkpointing,
-serialization, restore, resumed execution, Player presentation, host-message
+serialization, restore, resumed execution, Playroom presentation, host-message
 validation, transport, rendering, or storage.
 
 A downstream constraint may instead be repaired or structurally separated, but
@@ -549,7 +549,7 @@ Where applicable, limit tests cover:
 - static and dynamically expanded forms;
 - root-owned and function-owned forms;
 - fresh, waiting, completed, checkpointed, restored, and resumed states;
-- the minimum engine sequence and every applicable Player, host-message,
+- the minimum engine sequence and every applicable Playroom, host-message,
   transport, rendering, and storage boundary;
 - deterministic structured rejection and input-state immutability;
 - uninterrupted-versus-resumed equivalence.
