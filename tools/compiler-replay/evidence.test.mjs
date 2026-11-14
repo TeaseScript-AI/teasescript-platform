@@ -8,6 +8,7 @@ import { areasOf } from "./common.mjs";
 import {
   CLASSES,
   FIXED_LIMIT,
+  areaShortfall,
   areaSources,
   classOf,
   evidenceReport,
@@ -121,6 +122,24 @@ test("evidence: the set's sources by class on each tree, a class move apart from
       name: "crashes elsewhere",
       modes: MODE_NAMES.map((m) => setMode(m, threw("f (a.js)"), threw("g (b.js)"))),
     },
+    // (the same place on each tree, in another mode: the class and the places alike, the outcome in a mode moved)
+    {
+      name: "crashes swapped",
+      modes: MODE_NAMES.map((m, i) =>
+        setMode(
+          m,
+          i === 0 ? threw("f (a.js)") : compile(),
+          i === 1 ? threw("f (a.js)") : compile(),
+        ),
+      ),
+    },
+    // (a stop at another limit in the same mode)
+    {
+      name: "stops elsewhere",
+      modes: MODE_NAMES.map((m) => setMode(m, stopped, compile({ stopped: "read-depth" }))),
+    },
+    // (a record without all four modes was not compared in every mode)
+    { name: "three modes", modes: MODE_NAMES.slice(1).map((m) => setMode(m)) },
     { name: "unparsed", modes: MODE_NAMES.map((m) => setMode(m, unparsed())) },
     {
       name: "unparsed apart",
@@ -133,38 +152,34 @@ test("evidence: the set's sources by class on each tree, a class move apart from
   assert.deepEqual(summary.counts.base, {
     completed: 4,
     unanalysed: 3,
-    limit: 1,
+    limit: 2,
     slice: 1,
-    threw: 2,
+    threw: 3,
     incomplete: 1,
-    uncompared: 0,
+    uncompared: 1,
   });
   assert.deepEqual(summary.counts.head, {
     completed: 3,
     unanalysed: 4,
-    limit: 0,
+    limit: 1,
     slice: 1,
-    threw: 3,
+    threw: 4,
     incomplete: 1,
-    uncompared: 0,
+    uncompared: 1,
   });
-  // (a move is never one of the differences: a new throw is one, completed → threw; the differences are over sources
-  // completed on both trees and those that threw on both at another place; a throw alike is listed apart)
+  // (a move is never one of the differences: a new throw is one, completed → threw; so is, within one class, another
+  // outcome in a paired mode; the differences are over sources completed on both trees; a throw alike is listed apart)
   assert.deepEqual(summary.moved, [
     "repaired: refused at the limit → completed",
     "crashes now: completed → threw",
+    "crashes elsewhere: forward: threw TypeError at f (a.js) → threw TypeError at g (b.js)",
+    "crashes swapped: forward: threw TypeError at f (a.js) → completed",
+    "stops elsewhere: forward: refused at the limit (work) → refused at the limit (read-depth)",
     "unparsed now: completed → no analysis (compile errors before the checker)",
   ]);
   assert.deepEqual(
     [summary.completed, summary.threwBoth, summary.differences],
-    [
-      2,
-      2,
-      [
-        "apart: plan",
-        "crashes elsewhere: threw TypeError at f (a.js) on the base, TypeError at g (b.js) on the head",
-      ],
-    ],
+    [2, 1, ["apart: plan"]],
   );
   assert.deepEqual(
     [summary.threwAlike, summary.apartElsewhere],
@@ -241,7 +256,24 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
     { generator: "g", source: "apart", runs: [run([null, null])], counts: { differences: 1 } },
     { generator: "g", source: "throws", runs: [run([null, null])], counts: { exceptions: 1 } },
     { generator: "g", source: "runner", runs: [], counts: { exceptions: 1 } },
-    { area: "x", sources: 11 },
+    // (the base throws in one mode, the head at the same place in another: each tree threw, a mode moved)
+    {
+      generator: "g",
+      source: "swapped",
+      runs: [run([null, null]), { ...run([null, null]), mode: "rev-on" }],
+      counts: { exceptions: 2 },
+    },
+    // (both trees leave a run unanswered, their answered parts differing: a partial publication, never completed)
+    {
+      generator: "g",
+      source: "partial apart",
+      runs: [run([null, null])],
+      counts: { differences: 1 },
+      unanswered: [
+        { mode: "src-on", check: "publication", differs: true, by: { reason: "memory" } },
+      ],
+    },
+    { area: "x", sources: 13 },
   ];
   const differences = [
     {
@@ -263,6 +295,16 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
       thrown: { head: "TypeError: m\n    at walk (file:///t/head/dist/src/x.js:3:9)" },
     },
     { generator: "g", source: "runner", thrown: { runner: "Error: no MODES" } },
+    ...[
+      ["src-on", "base"],
+      ["rev-on", "head"],
+    ].map(([mode, tree]) => ({
+      generator: "g",
+      source: "swapped",
+      mode,
+      check: "publication",
+      thrown: { [tree]: `TypeError: m\n    at walk (file:///t/${tree}/dist/src/x.js:3:9)` },
+    })),
   ];
   const summary = partSummary(areaSources(work, differences));
   assert.deepEqual(summary.counts.base, {
@@ -270,8 +312,8 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
     unanalysed: 1,
     limit: 0,
     slice: 0,
-    threw: 0,
-    incomplete: 3,
+    threw: 1,
+    incomplete: 4,
     uncompared: 1,
   });
   assert.deepEqual(summary.counts.head, {
@@ -279,14 +321,22 @@ test("evidence: an area's sources by their own counts and each tree's stops, its
     unanalysed: 2,
     limit: 1,
     slice: 0,
-    threw: 1,
-    incomplete: 3,
+    threw: 2,
+    incomplete: 4,
     uncompared: 1,
   });
   assert.deepEqual(summary.moved, [
     "g regressed: completed → refused at the limit",
     "g unparsed now: completed → no analysis (compile errors before the checker)",
     "g throws: completed → threw",
+    "g swapped: src-on publication: threw TypeError at walk (src/x.js) → completed",
+  ]);
+  assert.deepEqual(summary.threwAlike, []);
+  // (each record the counts say the runner wrote is read, or the area did not run whole)
+  assert.deepEqual(areaShortfall(work, differences), ["1 of 2 differences records read"]);
+  assert.deepEqual(areaShortfall(work, []), [
+    "0 of 2 differences records read",
+    "0 of 4 exceptions records read",
   ]);
   assert.deepEqual(summary.differences, [
     "g heavier: src-on: publication charged work 1/2",
@@ -344,7 +394,10 @@ test("evidence: a package's class is its analysis's, its first difference by par
       root: 1,
       files: 1,
       differing: 1,
-      modes: [packageMode("forward", packageRun(), packageRun({ answers: "b", trace: "u" }))],
+      modes: [
+        packageMode("forward", packageRun(), packageRun({ answers: "b", trace: "u" })),
+        ...MODE_NAMES.slice(1).map((m) => packageMode(m)),
+      ],
     },
     {
       name: "stops",
@@ -422,19 +475,50 @@ test("evidence: a package's research route compared where it completed on both t
     pkg("refused alike", packageRun()),
     pkg("throws now", done, thrownAt("g (src/b.js)")),
     pkg("throws elsewhere", thrownAt("g (src/b.js)"), thrownAt("h (src/c.js)")),
+    // (refused at the same place, at the gate on the base and at the limit on the head)
+    pkg("refused otherwise", packageRun(), route({ outside: "limit" })),
+    // (the base's route throws in one mode, the head's at the same place in another)
+    {
+      name: "throws swapped",
+      root: 0,
+      files: 1,
+      differing: 0,
+      modes: MODE_NAMES.map((m, i) =>
+        packageMode(
+          m,
+          i === 0 ? thrownAt("g (src/b.js)") : done,
+          i === 1 ? thrownAt("g (src/b.js)") : done,
+        ),
+      ),
+    },
+    // (the base's analysis throws in one mode, the head's at the same place in another)
+    {
+      name: "analysis swapped",
+      root: 0,
+      files: 1,
+      differing: 0,
+      modes: MODE_NAMES.map((m, i) => {
+        const at = { ...done, analysis: { ...done.analysis, error: "TypeError at f (src/a.js)" } };
+        return packageMode(m, i === 0 ? at : done, i === 1 ? at : done);
+      }),
+    },
   ]);
   const summary = partSummary(sources);
-  assert.equal(summary.completed, 5);
+  assert.equal(summary.completed, 7);
   assert.deepEqual(summary.differences, ["compared: forward: route diagnostics"]);
   assert.deepEqual(summary.routeNotCompared, { threw: 1, refused: 1 });
   assert.deepEqual(summary.routeNotComparedList, [
     "threw alike: threw TypeError at g (src/b.js)",
-    "refused alike: refused CandidateOutsideSlice",
+    "refused alike: refused at the syntax gate CandidateOutsideSlice",
   ]);
-  // (a route outcome on one tree only, or at another place, is a move, listed with the class moves)
+  // (a route outcome in a mode on one tree only, at another place or of another kind, is a move, listed with the class
+  // moves; so is the analysis's outcome in a mode, the class alike)
   assert.deepEqual(summary.moved, [
-    "throws now: route completed → threw TypeError at g (src/b.js)",
-    "throws elsewhere: route threw TypeError at g (src/b.js) → threw TypeError at h (src/c.js)",
+    "throws now: route forward: completed → threw TypeError at g (src/b.js)",
+    "throws elsewhere: route forward: threw TypeError at g (src/b.js) → threw TypeError at h (src/c.js)",
+    "refused otherwise: route forward: refused at the syntax gate CandidateOutsideSlice → refused at the limit CandidateOutsideSlice",
+    "throws swapped: route forward: threw TypeError at g (src/b.js) → completed",
+    "analysis swapped: forward: threw TypeError at f (src/a.js) → completed",
   ]);
 });
 
@@ -442,7 +526,10 @@ test("evidence: a package's research route compared where it completed on both t
 function evidenceResults({
   setRecords,
   packages = [],
-  checks = [{ step: "check-changed", status: 0 }],
+  checks = [
+    { step: "check-changed", status: 0 },
+    { step: "pin-suites", status: 0 },
+  ],
   setShards = 16,
 }) {
   const root = mkdtempSync(join(tmpdir(), "compiler-replay-evidence-"));
@@ -570,7 +657,7 @@ test("evidence-report: equal only where every part asked ran and completed somet
           ]
         : fine(i);
     assert.deepEqual(report({ setRecords: fresh, packages: [pkg] }).reasons, [
-      "set: class moved: s2: completed → threw",
+      "set: moved: s2: completed → threw",
     ]);
     const gate = (i) => [
       {
@@ -595,14 +682,33 @@ test("evidence-report: equal only where every part asked ran and completed somet
     const regression = report({ setRecords: moved, packages: [pkg] });
     assert.deepEqual(
       [regression.status, regression.reasons],
-      [1, ["set: class moved: s3: completed → refused at the limit"]],
+      [1, ["set: moved: s3: completed → refused at the limit"]],
     );
+    // (a step that failed stops the job: the steps after it did not run, never passed)
     const failed = report({
       setRecords: fine,
       packages: [pkg],
       checks: [{ step: "check-changed", status: 1 }],
     });
-    assert.deepEqual([failed.status, failed.reasons], [1, ["checks: check-changed exited 1"]]);
+    assert.deepEqual(
+      [failed.status, failed.reasons],
+      [1, ["checks: pin-suites not run", "checks: check-changed exited 1"]],
+    );
+    // (the --tests step asked and not run)
+    const untested = report(
+      { setRecords: fine, packages: [pkg] },
+      manifest({ tests: ["dist/tests/a.test.js"] }),
+    );
+    assert.deepEqual([untested.status, untested.reasons], [1, ["checks: tests not run"]]);
+    // (a run that compared nothing, no area and no package, is never equal)
+    const none = report(
+      { setRecords: fine, packages: [pkg] },
+      manifest({ areas: { asked: [], left: [] }, packages: [] }),
+    );
+    assert.deepEqual(
+      [none.status, none.reasons],
+      [1, ["nothing compared: no area and no package"]],
+    );
   } finally {
     for (const folder of folders) rmSync(folder, { recursive: true, force: true });
   }
@@ -627,6 +733,14 @@ test("evidence queues only the areas asked, each package folder as data, and the
     );
     assert.equal(refused.status, 2);
     assert.match(refused.stderr, /--areas: no area nowhere/);
+    // (no area and no package: nothing to compare, refused)
+    const empty = spawnSync(
+      process.execPath,
+      [tool, "evidence", head, head, "--owner", "o", "--areas", "", "--dry"],
+      { encoding: "utf8", env },
+    );
+    assert.equal(empty.status, 2);
+    assert.match(empty.stderr, /nothing to compare/);
     const run = spawnSync(
       process.execPath,
       [
