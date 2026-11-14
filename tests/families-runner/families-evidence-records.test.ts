@@ -52,12 +52,50 @@ function tree(folder: string, modules: Record<string, string>): string {
   return folder;
 }
 
-const jsonLines = (text: string) =>
+/** The fields of a compile record the evidence command reads its class from. */
+interface Classed {
+  readonly allowance: number;
+  readonly stopped: string | null;
+  readonly outside: string | null;
+}
+interface AreaRecord {
+  readonly source: string;
+  readonly runs: readonly { readonly stopped: readonly (string | null)[] }[];
+}
+interface PlansRecord {
+  readonly name: string;
+  readonly modes: { base: Classed; head: Classed }[];
+}
+interface PackageRun {
+  readonly analysis: {
+    readonly error: string | null;
+    readonly codes: Readonly<Record<string, number>>;
+    readonly stopped: string | null;
+    readonly units: number;
+    readonly allowance: number;
+  };
+  readonly route: { readonly outside: string | null; readonly error: string | null };
+}
+interface PackageRecord {
+  readonly name: string;
+  readonly root: number;
+  readonly files?: number;
+  readonly differing?: number;
+  readonly incomplete?: string;
+  readonly modes: readonly {
+    readonly mode: string;
+    readonly same: boolean;
+    readonly base: PackageRun;
+  }[];
+}
+
+/** Each JSON line of a runner's output, as the record `T` that runner writes. */
+const jsonLines = <T>(text: string): T[] =>
   text
     .trim()
     .split("\n")
     .filter((line) => line.startsWith("{"))
-    .map((line): Record<string, any> => JSON.parse(line));
+    .map((line): T => JSON.parse(line));
 
 test("an area run records the limit each tree's ledger stopped at, null where none stopped (#2796)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-evidence-"));
@@ -89,14 +127,12 @@ export function publicationHashes(files) {
   });
   assert.equal(ran.status, 0, ran.stderr);
   const records = new Map(
-    jsonLines(readFileSync(work, "utf8"))
+    jsonLines<AreaRecord>(readFileSync(work, "utf8"))
       .slice(1, -1)
       .map((r) => [r.source, r]),
   );
   assert.deepEqual(
-    ["fine", "stops"].map((name) =>
-      records.get(name)!.runs.map((run: { stopped: unknown }) => run.stopped),
-    ),
+    ["fine", "stops"].map((name) => records.get(name)!.runs.map((run) => run.stopped)),
     [Array(4).fill([null, null]), Array(4).fill(["work", "work"])],
   );
 });
@@ -141,15 +177,18 @@ export const compileSourceWithBackend = (source) => compileProjectWithBackend([{
   });
   assert.equal(ran.status, 0, ran.stderr);
   const records = new Map(
-    jsonLines(readFileSync(out, "utf8")).map((r) => [r.name.replace("cases.mjs/", ""), r]),
+    jsonLines<PlansRecord>(readFileSync(out, "utf8")).map((r) => [
+      r.name.replace("cases.mjs/", ""),
+      r,
+    ]),
   );
   const fields = (name: string) =>
     records
       .get(name)!
-      .modes.map(({ base, head }: Record<string, any>) =>
+      .modes.map(({ base, head }) =>
         [base, head].map(({ allowance, stopped, outside }) => ({ allowance, stopped, outside })),
       );
-  const each = (one: object) => Array(4).fill([one, one]);
+  const each = (one: Classed) => Array(4).fill([one, one]);
   assert.deepEqual(fields("fine"), each({ allowance: 1000, stopped: null, outside: null }));
   assert.deepEqual(fields("stops"), each({ allowance: 1000, stopped: "work", outside: null }));
   assert.deepEqual(fields("limit"), each({ allowance: 1000, stopped: null, outside: "limit" }));
@@ -159,9 +198,15 @@ export const compileSourceWithBackend = (source) => compileProjectWithBackend([{
   const summary = spawnSync(process.execPath, [plansTool, "summary", out], { encoding: "utf8" });
   assert.equal(summary.status, 0, summary.stderr);
   const forged = join(folder, "forged.jsonl");
-  const [first] = jsonLines(readFileSync(out, "utf8"));
-  first!.modes[0].base.outside = "elsewhere";
-  writeFileSync(forged, `${JSON.stringify(first)}\n`);
+  const [first] = jsonLines<PlansRecord>(readFileSync(out, "utf8"));
+  const forgedMode = {
+    ...first!.modes[0]!,
+    base: { ...first!.modes[0]!.base, outside: "elsewhere" },
+  };
+  writeFileSync(
+    forged,
+    `${JSON.stringify({ ...first, modes: [forgedMode, ...first!.modes.slice(1)] })}\n`,
+  );
   const refused = spawnSync(process.execPath, [plansTool, "summary", forged], { encoding: "utf8" });
   assert.equal(refused.status, 2);
   assert.match(refused.stderr + refused.stdout, /refusal neither limit, slice nor null/);
@@ -246,7 +291,7 @@ test("the packages' runner compares each package's analysis and route per mode b
     { encoding: "utf8" },
   );
   assert.equal(ran.status, 1, ran.stderr);
-  assert.deepEqual(jsonLines(ran.stdout).at(-1), {
+  assert.deepEqual(jsonLines<Readonly<Record<string, string | number>>>(ran.stdout).at(-1), {
     packages: "0/1",
     sources: 5,
     differing: 1,
@@ -257,16 +302,16 @@ test("the packages' runner compares each package's analysis and route per mode b
   const text = readFileSync(out, "utf8");
   // (nothing of a package's text leaves its process)
   assert.doesNotMatch(text, /secret|plain/);
-  const records = new Map(jsonLines(text).map((r) => [r.name, r]));
+  const records = new Map(jsonLines<PackageRecord>(text).map((r) => [r.name, r]));
   assert.deepEqual(records.get("hang"), { name: "hang", root: 0, incomplete: "safety net 5 s" });
   const fine = records.get("fine one")!;
   assert.deepEqual([fine.files, fine.differing], [2, 0]);
   // (each base mode paired with the head's of its name, though their orders differ)
   assert.deepEqual(
-    fine.modes.map((m: Record<string, unknown>) => [m.mode, m.same]),
+    fine.modes.map((m) => [m.mode, m.same]),
     NAMES.map((name) => [name, true]),
   );
-  const { analysis, route } = fine.modes[0].base;
+  const { analysis, route } = fine.modes[0]!.base;
   assert.deepEqual(
     [
       analysis.error,
@@ -279,17 +324,14 @@ test("the packages' runner compares each package's analysis and route per mode b
     ],
     [null, { TSV043: 1 }, null, 500, 2000, null, null],
   );
-  assert.equal(records.get("stops")!.modes[0].base.analysis.stopped, "work");
+  assert.equal(records.get("stops")!.modes[0]!.base.analysis.stopped, "work");
   assert.deepEqual(
     [
-      records.get("refused")!.modes[0].base.route.outside,
-      records.get("refused")!.modes[0].base.route.error,
+      records.get("refused")!.modes[0]!.base.route.outside,
+      records.get("refused")!.modes[0]!.base.route.error,
     ],
     ["limit", "CandidateOutsideSlice"],
   );
   const apart = records.get("apart")!;
-  assert.deepEqual(
-    [apart.differing, apart.modes.every((m: Record<string, unknown>) => m.same === false)],
-    [4, true],
-  );
+  assert.deepEqual([apart.differing, apart.modes.every((m) => !m.same)], [4, true]);
 });
