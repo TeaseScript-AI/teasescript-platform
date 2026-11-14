@@ -1,4 +1,3 @@
-import { PlanControlFlow } from "../../src/plan/control-flow.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { planWaits, type PlanWaits } from "../../src/plan/waits.js";
 import type { InterpreterEvent } from "../../src/runtime/events.js";
@@ -10,14 +9,16 @@ import { createFreshRuntimeSession, type RuntimeSession } from "../../src/runtim
  * file call below it (`mayWaitAt` of its `call`). Each finding names a soundness defect of the analysis.
  *
  * Every wait counts, also one that catch-up settles inside the same operation: each foreground action the engine
- * requests is read from the operation's events, with the call frame it stands in (`ownerCallFrameId`). The frames below
- * it are those an instruction observer recorded when that frame ran its first instruction; a file call's frame is
- * checked at the instruction that completed last before it, its `call`.
+ * requests is read from the operation's events, with the call frame it stands in (`ownerCallFrameId`). An instruction
+ * observer records each frame, with the frames below it, when it is created, before it runs anything: after the
+ * `callFunction` or the file `call` that pushed it, at which a file call's frame is checked, or as a block is
+ * dispatched.
  *
  * The play answers what it can without a Player: a delay or a reading time by observing its deadline (which also starts
  * the blocks due by then), a media load as loaded and 5 s long, a storage write as stored, a button by pressing it, a
  * choice by its first option and a text or number ask by "1". Any other wait ends the play after it was checked, as
- * does `maxOperations`. Instruction budgets are not used, so a run always stops at a wait or an ending.
+ * does `maxOperations`. Runs use the engine's default instruction budget; a run that exhausts it fails, which ends the
+ * play.
  */
 
 export interface WaitCheck {
@@ -33,11 +34,11 @@ export interface WaitCheck {
 
 const FRESH = { seed: 1, wallClockMs: Date.UTC(2026, 0, 5, 9, 0, 0) };
 
-/** A call frame as the observer first met it: what runs in it, and the frames up to it, outermost first. */
+/** A call frame as it was created: what runs in it, and the frames up to it, outermost first. */
 interface Frame {
   /** The function or block, or `null` for a file call's activation. */
   readonly functionId: number | null;
-  /** For a file call's frame, the instruction that completed last before its first one: its `call`. */
+  /** For a file call's frame, the `call` that pushed it. */
   readonly callInstruction: number | null;
   readonly stack: readonly number[];
 }
@@ -48,25 +49,30 @@ export function checkWaitsAgainstEngine(
   maxOperations = 200,
   waits: PlanWaits = planWaits(plan),
 ): WaitCheck {
-  const flow = new PlanControlFlow(plan);
   const session = createFreshRuntimeSession(plan, FRESH);
   const frames = new Map<number, Frame>();
   const unmarked: string[] = [];
   const live = new Set<number>();
   let checked = 0;
-  let lastCompleted: number | null = null;
   const instructionObserver = {
-    before: (instruction: number, call: number): void => {
-      if (call === 0 || frames.has(call)) return;
-      const definition = flow.functionOf(instruction);
-      frames.set(call, {
-        functionId: definition?.id ?? null,
-        callInstruction: definition === null ? lastCompleted : null,
-        stack: session.callFrameIds(),
-      });
-    },
+    // Only a `callFunction` and a file `call` push a frame when they complete; a block's frame is pushed as it starts.
     after: (instruction: number): void => {
-      lastCompleted = instruction;
+      const stack = session.callFrameIds();
+      const top = stack.at(-1);
+      if (top === undefined || frames.has(top)) return;
+      const created = plan.instructions[instruction]!;
+      if (created.kind === "callFunction")
+        frames.set(top, { functionId: created.functionId, callInstruction: null, stack });
+      else if (created.kind === "transfer")
+        frames.set(top, { functionId: null, callInstruction: instruction, stack });
+      else unmarked.push(`call frame ${top} was pushed by a ${created.kind}`);
+    },
+    dispatch: (block: number, frame: number): void => {
+      frames.set(frame, {
+        functionId: block,
+        callInstruction: null,
+        stack: [...session.callFrameIds(), frame],
+      });
     },
   };
   const check = (events: readonly InterpreterEvent[]): void => {

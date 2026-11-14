@@ -12,7 +12,7 @@ import type { ExpressionPlan, Instruction, InstructionPlan } from "./model.js";
  * evaluates to `instant`, a lock that never blocks, a branch that never runs, or a store that only names a handle's
  * field still marks. A block's own waits are its own: the runtime starts a block at a wait, above frames that wait
  * already, or right after an instruction of the script that made it due, which can bring a wait into an activation
- * that does not wait otherwise.
+ * that does not wait otherwise: the one holding the instruction, and the one the instruction enters.
  */
 export interface PlanWaits {
   /** The instruction at `index` can leave the session waiting by itself. */
@@ -145,11 +145,12 @@ function positiveConstantDuration(
  * The least fixpoint over these facts, each a node that turns true once and never back:
  * - a region (an author function, a block, or a file's root region) may wait: one of its instructions waits by
  *   itself, or it calls a function that may wait, or it calls a file whose activation may wait, or it may start a
- *   block that may wait (`blocksItMayStart`);
+ *   block that may wait (`blocksItMayStart`), or an instruction that enters it may start one;
  * - a region's goto reaches a wait (`gotoNode`): a `goto` of a file that the region, or a function it calls, holds goes
  *   to a file whose activation may wait;
  * - a file's activation may wait: its root region may wait, or its root region's goto reaches a wait, as a `goto`
- *   replaces the running activation, whichever function it stands in.
+ *   replaces the running activation, whichever function it stands in, or a `call` or `goto` that enters it may start a
+ *   block that may wait.
  * A `goto` does not mark the region holding it, which it leaves. A block is entered by the runtime only, so its waits
  * are its own; as where a block runs is the runtime's decision, a `goto` in a block that reaches a waiting activation
  * marks every activation. A computed destination reaches every file. Work and memory are linear in instructions and
@@ -194,6 +195,19 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
     work.push(node);
   };
 
+  /**
+   * The activations the instruction at `index` enters: a called function, a file it calls or goes to, or every file
+   * for a computed destination. Only these push or replace an activation; a method or built-in never enters author code.
+   */
+  const enteredActivations = (index: number): number[] =>
+    flow.successors(index).flatMap(({ edge }) => {
+      if (edge.kind === "call") {
+        const callee = regionOfFunction.get(edge.functionId);
+        return callee === undefined ? [] : [callee];
+      }
+      if (edge.kind === "transfer") return [activationNode(edge.file)];
+      return edge.kind === "computed" ? [everyActivation] : [];
+    });
   /** The nodes that make an instruction that may start a block stand below a wait, by instruction. */
   const startedBlocks = new Map<number, readonly number[]>();
   const startNodes = (instruction: Instruction): readonly number[] => {
@@ -228,7 +242,13 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
       const starts = startNodes(instruction);
       if (starts.length > 0) {
         startedBlocks.set(index, starts);
-        for (const node of starts) depend(node, region);
+        // The block starts at the next boundary, which may be the first of the activation the instruction enters (a
+        // call evaluates its arguments, then pushes the callee's frame): that activation stands below it too.
+        const entered = enteredActivations(index);
+        for (const node of starts) {
+          depend(node, region);
+          for (const activation of entered) depend(node, activation);
+        }
       }
       if (instruction.kind !== "callFunction" && instruction.kind !== "transfer") continue;
       for (const { edge } of flow.successors(index)) {
