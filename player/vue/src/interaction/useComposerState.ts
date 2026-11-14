@@ -266,9 +266,10 @@ export function useComposerState(host: {
   });
 
   /**
-   * Drops what belongs to another session or to interactions that ended. A prefill's provenance is the chat's (decisions
-   * 1 and 3): what the player deleted stays deleted also after a lost connection, whose stop shows no session, and the
-   * recovery's Continue in the same chat; only another chat (`select`) or the question's end drops it.
+   * Drops what belongs to another session or to interactions that ended. A prefill's provenance is the chat's (PLAYER-UI
+   * "Composer and foreground interactions"): what the player deleted stays deleted also after a lost connection, whose
+   * stop shows no session, and the recovery's Continue in the same chat; only another chat (`select`) or the question's
+   * end drops it.
    */
   function prune(next: ComposerDescriptor) {
     if (next.session !== session) {
