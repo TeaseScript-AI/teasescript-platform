@@ -179,9 +179,8 @@ function outsideSlice(request: CoreAnalysisRequest, outside: Outside): Candidate
 
 /**
  * The kinds a call's arguments may have without the built-in signature check (C13, S9b) having anything to say, or
- * `null` for any: a conversion's value one of its kinds or text and its default one of its result's, also `null` where
- * it takes one (`fitsDefault`'s domain, which the core's C10 does not check yet); every other argument of a slice call
- * text; an unknown, which the runtime checks. A transfer's path is a command operand (`COMMAND_OPERANDS`).
+ * `null` for any. A conversion's default takes `null` where its fallback is optional (`fitsDefault`'s domain, which the
+ * core's C10 does not check yet). A transfer's path is a command operand (`COMMAND_OPERANDS`).
  */
 function argumentKinds(call: CallExpression, argument: CallArgument): readonly string[] | null {
   const kind = sliceCall(call);
