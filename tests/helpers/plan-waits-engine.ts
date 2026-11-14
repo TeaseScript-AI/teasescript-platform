@@ -64,7 +64,12 @@ export function checkWaitsAgainstEngine(
       if (top === undefined || frames.has(top)) return;
       const created = plan.instructions[instruction]!;
       if (created.kind === "callFunction")
-        frames.set(top, { functionId: created.functionId, callInstruction: null, file: null, stack });
+        frames.set(top, {
+          functionId: created.functionId,
+          callInstruction: null,
+          file: null,
+          stack,
+        });
       else if (created.kind === "transfer")
         frames.set(top, {
           functionId: null,
