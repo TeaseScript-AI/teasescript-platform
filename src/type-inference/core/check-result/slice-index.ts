@@ -605,7 +605,7 @@ const DECLARED: readonly ((
   (index, _lets, store) => {
     let root: Expression = store.target;
     while (root.kind === "propertyAccessExpression" || root.kind === "indexExpression")
-      root = root.object;
+      root = unwrap(root.object);
     if (root.kind !== "identifier") return undefined;
     const { name } = root;
     return index.statements.find(
