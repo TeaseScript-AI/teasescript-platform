@@ -244,10 +244,9 @@ test("the copied and direct nested stores owe their checks at every mode's stop"
  * an interpolation. The candidate route declines them, and the analysis is main's: no receiving obligation, no
  * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221
  * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1–6 units more on four rows; a regression oracle of this gate only), and the route rule's queries since #1073 PR 4 (AD-1: a possible null's route asked at its use, on the rows that have one), and its ways into the use since #2497 (r4-451: the program's jump index, made once, 11 to 44 units on three rows), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
- * then 64's).
+ * then 64's). The last three rows charge 542 to 594 units more at demand 16, and two or three times that at demand 64,
+ * since #2764: the nesting index each admission pass builds for `b.f`'s paths with two element steps, all `indexSteps`.
  */
-// (the last three rows: 542 to 594 units more at demand 16 and two or three times that at demand 64 since #2764, the
-// nesting index each admission pass builds for `b.f`'s paths with two element steps, all `indexSteps`)
 const frozen = `let a = {f: [[1]]}\nlet b = a\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\nb.f = hostValue`;
 const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
   ["the C-R1 chain", chain(16), [11837, 12196, 11837, 12196, 19438, 13621, 19459, 13621]],
