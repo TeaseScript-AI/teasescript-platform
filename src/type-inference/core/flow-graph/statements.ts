@@ -455,7 +455,7 @@ function* functionRegion(
   builder.functions.set(`${file}:${name}`, region);
   if (declaration.global && !builder.globalFunctions.has(name))
     builder.globalFunctions.set(name, region);
-  const inner = builder.context(id, file, context.fileRegion, null, region, null, []);
+  const inner = builder.context(id, file, context.fileRegion, region, null);
   let cursor: FlowNode = entry;
   for (const parameter of declaration.parameters) {
     const binding = builder.node("parameter", id, file, parameter.span, []);

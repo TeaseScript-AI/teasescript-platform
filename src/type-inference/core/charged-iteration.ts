@@ -134,9 +134,8 @@ export function* indexed<T>(
   work: WorkLedger,
   counter: WorkCounter,
   items: { readonly length: number; at(index: number): T | undefined },
-  from = 0,
 ): Generator<T> {
-  for (let i = from; i < items.length; i += 1) {
+  for (let i = 0; i < items.length; i += 1) {
     work.charge(counter);
     yield items.at(i)!;
   }

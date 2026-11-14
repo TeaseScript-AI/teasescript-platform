@@ -296,7 +296,7 @@ function enterStores(walk: Consumers, at: HostFrontier): void {
   const { program } = walk.pass;
   for (const { d, elements } of at.node?.stores ?? []) {
     program.work.charge("checks");
-    const value = [expand(walk.admission, d.value!, d.node, [])];
+    const value = [expand(walk.admission, d.value!, d.node)];
     if (!elements) enterValues(walk, at, value);
     else {
       // (each element whole: what the list's value holds at its element step, the copies standing there, and the copies
@@ -468,7 +468,7 @@ function ownFrontier(
   if (node === null) return NOTHING;
   const at = frontier(null, undefined, null, true);
   reads.set(value, at);
-  enterValues(walk, at, [expand(walk.admission, value, node, [])]);
+  enterValues(walk, at, [expand(walk.admission, value, node)]);
   return at;
 }
 
@@ -655,7 +655,7 @@ function placeEdges(
     nodes.push(...node.children.values());
     for (const { d } of node.stores) {
       program.work.charge("checks");
-      valueEdges(walk, expand(walk.admission, d.value!, d.node, []), edges);
+      valueEdges(walk, expand(walk.admission, d.value!, d.node), edges);
     }
   }
   return edges;
@@ -727,7 +727,7 @@ function ownIngress(walk: Consumers, value: PlaceId): IngressNode | undefined {
     const node = ownNode(walk, at);
     const edges: Edges = { host: undefined, places: [] };
     const operands: PlaceId[] = [];
-    if (node !== null) valueEdges(walk, expand(walk.admission, at, node, []), edges, operands);
+    if (node !== null) valueEdges(walk, expand(walk.admission, at, node), edges, operands);
     let host = edges.host;
     for (const read of edges.places) {
       program.work.charge("checks");
