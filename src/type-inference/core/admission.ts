@@ -264,9 +264,8 @@ export class Admission {
   /** The store walk's tasks by value, node, strip and whether a carrier's own (`expand`): each task's recipe once. */
   readonly expansions = new Map<string, Expansion>();
   /**
-   * The carriers' transfers over those recipes (`admission/transfers/`): the held input of the earliest contribution's
-   * scan per task and lane, the decider's groups by their members, and per operation link its answers and the kinds it
-   * holds at a path.
+   * The carriers' transfers over those recipes (`admission/transfers/`): the held view's input per task and lane, the
+   * decider's groups by their members, and per operation link its answers and the kinds it holds at a path.
    */
   readonly heldInputs = new Map<string, HeldInput>();
   readonly deciders = new Map<string, DeciderGroup>();
