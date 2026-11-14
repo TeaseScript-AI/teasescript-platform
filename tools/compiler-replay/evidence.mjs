@@ -27,14 +27,16 @@
 //   - the differences over sources completed on both trees, each with its first differing part (an area's charged
 //     work among them), and over those that threw on both, where the class or place of the throw differs;
 //   - every source that threw alike on both trees, by name, each time (what came before the throw is not compared);
-//     for the packages, every research-route compile that threw alike, by place;
+//   - for the packages, beside the completed count, how many of them had their research-route compile throw or refuse
+//     alike on both trees (route result not compared: the analysis's parts alone are), then each by name and place; a
+//     route outcome that differs between the trees is a move, listed with the class moves;
 //   - the sources with no analysis on both trees, by name with their count, and the differences over them (their
 //     diagnostics where the runner records them, and a plan where none may come out);
 //   - the heaviest share of the limit per tree, with every source above half of it, each as a share of the allowance
 //     the code gives it and of the fixed limit (`FIXED_LIMIT`).
 // Exit 0 when every part asked ran whole, each completed something and nothing differs, moves class, is incomplete or
-// uncompared, and the checks passed (a throw alike on both trees is listed, never a reason); 3 when a part asked did
-// not run whole; else 1; 2 on a usage error.
+// uncompared, and the checks passed (a throw alike on both trees is listed, never a reason), the verdict saying where
+// it covers the analysis's publication only; 3 when a part asked did not run whole; else 1; 2 on a usage error.
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -245,17 +247,29 @@ const PACKAGE_PARTS = {
     "questions",
   ],
 };
-function packageApart(m) {
-  for (const [run, parts] of Object.entries(PACKAGE_PARTS))
-    for (const key of parts)
+function packageApart(m, runs = Object.keys(PACKAGE_PARTS)) {
+  for (const run of runs)
+    for (const key of PACKAGE_PARTS[run])
       if (JSON.stringify(m.base[run][key]) !== JSON.stringify(m.head[run][key]))
         return `${m.mode}: ${run} ${key}`;
   return `${m.mode}: apart`;
 }
 
 /**
- * The packages from `packages.mjs` records: each tree's class is its analysis's (the core analysed it: completed); a
- * throw of its research-route compile is compared as a part, and `routeThrew` lists it; `share` its analysis's too.
+ * One tree's research-route outcome in a mode: `completed`, or `threw <place>` or `refused <place>` (a
+ * `CandidateOutsideSlice`, or a ledger's stop: `refused at <limit>`).
+ */
+function routeOutcome(route) {
+  if (route.outside != null) return `refused ${route.error}`;
+  if (route.stopped != null) return `refused at ${route.stopped}`;
+  return route.error == null ? "completed" : `threw ${route.error}`;
+}
+
+/**
+ * The packages from `packages.mjs` records: each tree's class is its analysis's (the core analysed it: completed);
+ * `share` its analysis's too. Its research-route compile's outcome (`routeOutcome`, each tree's over its modes) is
+ * compared beside it: another on each tree is a move (`routeMove`); the same throw or refusal on both leaves the
+ * route's result not compared (`routeNotCompared`: `threw` or `refused`), and only the analysis's parts are compared.
  */
 export function packageSources(records) {
   return records.map((r) => {
@@ -274,7 +288,16 @@ export function packageSources(records) {
     const modes = r.modes ?? [];
     const side = (tree) => sourceClass(modes.map((m) => classOf(m[tree].analysis)));
     const threw = ["base", "head"].map((tree) => threwAt(modes.map((m) => m[tree].analysis)));
-    const apart = modes.find((m) => !m.same);
+    const routes = ["base", "head"].map((tree) => {
+      const outcomes = [...new Set(modes.map((m) => routeOutcome(m[tree].route)))].sort();
+      return outcomes.length === 1 ? outcomes[0] : outcomes.join("; ");
+    });
+    const routeCompared = routes[0] === routes[1] && routes[0] === "completed";
+    const runs = routeCompared ? ["analysis", "route"] : ["analysis"];
+    // (a mode whose record differs only in the route's parts is not apart where the route's result is not compared)
+    const apart = modes.find(
+      (m) => !m.same && (routeCompared || packageApart(m, runs) !== `${m.mode}: apart`),
+    );
     const share = ["base", "head"].map((tree) =>
       modes.reduce(
         (heaviest, m) =>
@@ -286,15 +309,15 @@ export function packageSources(records) {
       name,
       base: side("base"),
       head: side("head"),
-      apart: apart === undefined ? null : packageApart(apart),
+      apart: apart === undefined ? null : packageApart(apart, runs),
       share,
       threw,
       planned: modes.some((m) => m.base.route.plan != null || m.head.route.plan != null),
-      // (where each tree's research-route compile threw, by place: compared as a part, and listed where alike)
-      routeThrew: ["base", "head"].map((tree) => {
-        const places = [...new Set(modes.map((m) => m[tree].route.error).filter((e) => e != null))];
-        return places.length === 0 ? null : places.sort().join("; ");
-      }),
+      routeMove: routes[0] === routes[1] ? null : `route ${routes[0]} → ${routes[1]}`,
+      routeNotCompared:
+        routes[0] !== routes[1] || routeCompared
+          ? null
+          : { kind: routes[0].includes("threw ") ? "threw" : "refused", at: routes[0] },
     };
   });
 }
@@ -315,18 +338,23 @@ export function partSummary(sources) {
   // (the sources the checker saw on neither tree, and what differs over them: never counted completed)
   const unanalysed = [];
   const unanalysedDifferences = [];
-  // (the packages whose research-route compile threw alike on both trees, by place)
-  const routeThrewAlike = sources
-    .filter((s) => s.routeThrew?.[0] != null && s.routeThrew[0] === s.routeThrew[1])
-    .map((s) => `${s.name}: ${s.routeThrew[0]}`);
+  // (of the packages completed on both trees, those whose research-route compile threw or refused alike: their
+  // route's result is not compared, by kind, and listed by name and place)
+  const routeNotCompared = { threw: 0, refused: 0 };
+  const routeNotComparedList = [];
   let completed = 0;
   let threwBoth = 0;
   for (const s of sources) {
     counts.base[s.base] += 1;
     counts.head[s.head] += 1;
+    if (s.routeMove != null) moved.push(`${s.name}: ${s.routeMove}`);
     if (s.base !== s.head) moved.push(`${s.name}: ${CLASS_NAMES[s.base]} → ${CLASS_NAMES[s.head]}`);
     else if (s.base === "completed") {
       completed += 1;
+      if (s.routeNotCompared != null) {
+        routeNotCompared[s.routeNotCompared.kind] += 1;
+        routeNotComparedList.push(`${s.name}: ${s.routeNotCompared.at}`);
+      }
       if (s.apart !== null) differences.push(`${s.name}: ${s.apart}`);
     } else if (s.base === "unanalysed") {
       unanalysed.push(s.name);
@@ -367,7 +395,8 @@ export function partSummary(sources) {
     threwAlike,
     unanalysed,
     unanalysedDifferences,
-    routeThrewAlike,
+    routeNotCompared,
+    routeNotComparedList,
     shares,
   };
 }
@@ -599,8 +628,26 @@ export function evidenceReport(manifest, results) {
   for (const step of ran ?? [])
     if (step.status !== 0) reasons.push(`checks: ${step.step} exited ${step.status}`);
   const status = notRun.length > 0 ? 3 : reasons.length > 0 ? 1 : 0;
-  return { manifest, notRun, parts, reached, checks: ran, reasons, status };
+  const notCompared = Object.values(parts).reduce(
+    (sum, p) => sum + p.routeNotCompared.threw + p.routeNotCompared.refused,
+    0,
+  );
+  const verdict =
+    status === 3
+      ? "incomplete: not every part asked ran"
+      : status === 1
+        ? "apart"
+        : notCompared === 0
+          ? "equal"
+          : `equal (for ${notCompared} ${notCompared === 1 ? "package" : "packages"} whose route result is not compared, over the analysis's publication only)`;
+  return { manifest, notRun, parts, reached, checks: ran, reasons, status, verdict };
 }
+
+/** Beside a part's completed count: how many of them had the research route's result not compared, by kind. */
+const notComparedText = ({ routeNotCompared: { threw, refused } }) =>
+  threw + refused === 0
+    ? ""
+    : ` (of these ${threw + refused} route result not compared: ${threw} threw alike, ${refused} refused alike)`;
 
 const percent = (x) => `${(100 * x).toFixed(1)} %`;
 const shareText = (s) =>
@@ -631,11 +678,10 @@ export function evidenceReportStep({ positional: [prefix], options }) {
     const row = (tree) => CLASSES.map((c) => `${p.counts[tree][c]} ${CLASS_NAMES[c]}`).join(", ");
     out(`${name}: ${p.sources} sources; base ${row("base")}; head ${row("head")}`);
     out(
-      `${name}: ${p.differences.length} differences over ${p.completed} completed on both trees and ${p.threwBoth} that threw on both; ${p.moved.length} moved class`,
+      `${name}: ${p.differences.length} differences over ${p.completed} completed on both trees${notComparedText(p)} and ${p.threwBoth} that threw on both; ${p.moved.length} moved class`,
     );
     for (const t of p.threwAlike) out(`${name} threw alike on both trees: ${t}`);
-    for (const t of p.routeThrewAlike)
-      out(`${name} research-route compile threw alike on both trees: ${t}`);
+    for (const t of p.routeNotComparedList) out(`${name} route result not compared: ${t}`);
     if (p.unanalysed.length > 0) {
       out(
         `${name}: ${p.unanalysedDifferences.length} differences over ${p.unanalysed.length} with no analysis on both trees (their diagnostics, and no plan)`,
@@ -652,7 +698,7 @@ export function evidenceReportStep({ positional: [prefix], options }) {
     `checks: ${r.checks === null ? "not run" : r.checks.map((s) => `${s.step} ${s.status === 0 ? "passed" : `exited ${s.status}`}`).join(", ")}`,
   );
   for (const reason of r.reasons) out(reason);
-  out(r.status === 0 ? "equal" : r.status === 3 ? "incomplete: not every part asked ran" : "apart");
+  out(r.verdict);
   if (options.json !== undefined) writeFileSync(options.json, `${JSON.stringify(r, null, 1)}\n`);
   return r.status;
 }
