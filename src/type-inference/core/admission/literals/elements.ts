@@ -149,7 +149,7 @@ function touchElements(
     const path = kept.get(text)!;
     if (path.length === 0) continue;
     // (landed in the place: by the place's trie, which lands every copy into it, not this literal's alone, a rejected
-    // one too, as the landing view has it and every pass decides the rejected store again)
+    // one too)
     if (!touches.landedAt(landed, keptSteps(admission.work, base, path))) continue;
     out.push({ path });
   }

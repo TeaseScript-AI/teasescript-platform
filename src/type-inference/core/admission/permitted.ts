@@ -50,7 +50,6 @@ export function unrestricted(term: TypeTerm): boolean {
  * list join, whose joined list follows a literal's element rule: an unrestricted type (`list`'s elements) leaves the
  * joined list open there and below, whichever operand came first, so no conflict is proved from it; a type that holds
  * only `null` decides nothing, its `null` making the joined list optional; any other type decides by its kinds.
- * `joinElements` reads its operands by it, and a place holding a join is decided by it (`earliestDecider`).
  */
 export function joinedDomain(tags: readonly ItemTag[]): "open" | "null" | "kinds" {
   if (tags.includes("unknown")) return "open";
