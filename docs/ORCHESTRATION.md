@@ -205,9 +205,9 @@ reviews a file's structure and changes.
   and the compiler's tests, helpers and fixtures (`tests/type-*`, `tests/helpers/type-core*`, `tests/fixtures/type-core/`,
   `tests/language-tooling/probe-tool.test.ts`, `tests/runtime/language/otherwise-fallback.test.ts`). Also
   `tools/oxlint/*`, `tools/probe.mjs`, the compiler-differential tool, the families runner (`tests/families/run.mjs`,
-  `area.sh`, `stalls.mjs`, `baselines.mjs`, the baseline store's format), and the two language specification documents
-  (`docs/TEASESCRIPT-REFERENCE.md`, `docs/specifications/accepted-syntaxes-v30.md`): the compiler's canonical text;
-  new syntax still needs the owner's acceptance.
+  `tests/families/stalls.mjs`, `tests/families/baselines.mjs`, the baseline store's format), and the two language
+  specification documents (`docs/TEASESCRIPT-REFERENCE.md`, `docs/specifications/accepted-syntaxes-v30.md`): the compiler's
+  canonical text; new syntax still needs the owner's acceptance.
 - **The runtime and Player coordinator owns runtime, Player and everything general:** `src/runtime/`, `player/`, the
   bridge, their tests; `tools/` as repo-wide tooling (`check-changed`, `measure-test-files`, the costly table,
   `pin-suites.mjs`, `check-shas`, the test runners, the browser tools, `tools/local-agent/*`,

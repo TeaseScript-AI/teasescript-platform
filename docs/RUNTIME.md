@@ -2354,6 +2354,10 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Runtime snapshot history
 
+- Revision 92: Exact fields (#1779): the RNG state, globals, bindings, speakers and their properties, the failure,
+  loop frames, temporaries, function call frames with their arguments and prologue state, and source spans and
+  positions have exactly the fields their revision defines; validation previously accepted others, an own `__proto__`
+  included, which the trusted export dropped.
 - Revision 91: Form presentation (#1153): a form settlement carries `temporalPresentation`, the date and time
   presentation its answers were shown in, from which the Player rebuilds the summary; previously it used the
   presentation in force when the session was restored.
@@ -2524,6 +2528,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 131: The exact-fields snapshot contract.
 - Revision 130: The plan contract of a check of a part of a stored value.
 - Revision 129: The plan contract of a typed reading into a written `object`.
 - Revision 128: The form-presentation snapshot contract.
