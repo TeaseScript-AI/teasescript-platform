@@ -127,6 +127,8 @@ export interface TopologyBridge {
   readonly topology: Topology;
   readonly bridge: PlayerBridge;
   readonly posts: readonly Posted[];
+  /** Posted requests whose replies have not reached the client, including held or delayed replies. */
+  unanswered(): number;
   lose(): Promise<void>;
   hold(op: string): void;
   held(later?: string): Promise<void>;
@@ -370,6 +372,7 @@ export type TopologyConnections = Awaited<ReturnType<typeof topologyConnections>
  */
 function gatedPort(port: Client.ClientPort) {
   const posts: Posted[] = [];
+  const unanswered = new Set<number>();
   const gate: {
     target: string | null;
     id: number | null;
@@ -385,6 +388,7 @@ function gatedPort(port: Client.ClientPort) {
       const request = decoded(message);
       if (request?.kind === "request") {
         posts.push(postOf(request));
+        unanswered.add(request.id);
         if (gate.target !== null && request.op === gate.target && gate.id === null) {
           gate.id = request.id;
           gate.holding = true;
@@ -393,9 +397,13 @@ function gatedPort(port: Client.ClientPort) {
       port.post(message);
     },
     listen: (listener) => {
-      deliver = listener;
+      deliver = (data) => {
+        const reply = decoded(data);
+        if (reply?.kind === "reply") unanswered.delete(reply.id);
+        listener(data);
+      };
       port.listen((data) => {
-        if (!gate.holding) return listener(data);
+        if (!gate.holding) return deliver(data);
         if (decoded(data)?.id === gate.id) gate.heldTarget = true;
         buffered.push(data);
       });
@@ -404,6 +412,7 @@ function gatedPort(port: Client.ClientPort) {
   return {
     port: gated,
     posts,
+    unanswered: () => unanswered.size,
     hold: (op: string) =>
       void Object.assign(gate, { target: op, id: null, heldTarget: false, from: posts.length }),
     held: (later?: string) =>
@@ -436,11 +445,12 @@ function inProcess(
   });
   const gated = wrapped.gated;
   assert.ok(gated !== undefined, "the backend took the gated port");
-  const { posts, hold, held, release } = gated;
+  const { posts, unanswered, hold, held, release } = gated;
   const lose = inProcessLoss(bridge, client!.BridgeLostError);
   return {
     bridge,
     posts,
+    unanswered,
     exited: null,
     thread: null,
     lose: async () => lose(),
@@ -460,7 +470,7 @@ async function onWorker(
   // A failure takes its place in the same order as the messages: a reply the Worker sent before it ended reaches the
   // client before the loss does. This holds by construction (`onFailure` goes through `delivery.run`); no test
   // asserts it.
-  const { port, posts, hold, held, release } = gatedPort({
+  const { port, posts, unanswered, hold, held, release } = gatedPort({
     post: (message) => worker.postMessage(message),
     listen: (listener) =>
       void worker.on("message", (data: unknown) => {
@@ -479,6 +489,7 @@ async function onWorker(
   return {
     bridge,
     posts,
+    unanswered,
     exited,
     thread: { id: worker.threadId, messages: () => messages },
     lose: () =>

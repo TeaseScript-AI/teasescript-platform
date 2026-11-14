@@ -142,7 +142,7 @@ async function mount(context: TestContext, topology: Topology, delayMs: number) 
     await player.activate();
   };
   const reports = () => posted.filter((request) => request.op === "reportMediaLoad");
-  return { player, elements, start, reports, posted, queued };
+  return { player, elements, start, reports, posted, queued, unanswered: transport.unanswered };
 }
 
 const transcript = (player: MediaHost) =>
@@ -395,6 +395,15 @@ for (const delay of [0, 50, 250] as const)
       );
       const advance = async (ms: number) => {
         for (let i = 0; i < ms; i++) {
+          if (topology === "worker") {
+            // Real Worker latency must not advance scene time while requests or their queued sections are outstanding.
+            const within = withinHostTime();
+            await drainTasks();
+            while (player.unanswered() > 0 || player.queued.current > 0) {
+              assert.ok(within(), "the Worker answers before the mocked clock advances");
+              await drainTasks();
+            }
+          }
           now++;
           for (const audio of player.elements) if (!audio.paused) audio.currentTime += 0.001;
           context.mock.timers.tick(1);
