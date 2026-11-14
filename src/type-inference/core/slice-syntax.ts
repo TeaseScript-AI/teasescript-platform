@@ -609,7 +609,6 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   ifStatement: modelled((node) => [node.condition, node.thenBlock, node.elseBlock]),
   switchStatement: {
     row: "modelled",
-    // (a type test's written type is judged as a `let`'s, refused where it stands in source order)
     visit: (node) =>
       walk([
         node.subject,
@@ -996,7 +995,7 @@ function describe(kind: string): string {
   return kind.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`);
 }
 
-/** The names a file's `let` statements and `for` loops declare, at any depth. */
+/** The names a file's `let` statements and `for` loops declare, in its statements and the blocks they run. */
 function letNames(program: Program): Set<string> {
   const names = new Set<string>();
   const pending: Statement[] = [...program.statements];
