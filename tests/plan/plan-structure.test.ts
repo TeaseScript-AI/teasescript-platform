@@ -141,6 +141,23 @@ test("plan validation accepts a lowered plan and refuses one whose jumps do not 
   );
 });
 
+test("a plan that fails an earlier check gets no nesting error on top", () => {
+  const plan = compileValidPlan("let a = true\nif a { a = false }\nexit");
+  const at = plan.instructions.findIndex((instruction) => instruction.kind === "jumpIfFalse");
+  const instructions = plan.instructions.map(
+    (instruction, index): Instruction =>
+      index === at && instruction.kind === "jumpIfFalse"
+        ? { ...instruction, target: plan.instructions.length + 5 }
+        : instruction,
+  );
+  const messages = validateInstructionPlan({ ...plan, instructions }).errors.map((error) => error.message);
+  assert.notDeepEqual(messages, []);
+  assert.deepEqual(
+    messages.filter((message) => message.startsWith("Jumps must nest")),
+    [],
+  );
+});
+
 // Fixtures over a small list of instructions, one for each way jumps can fail to nest. Every target lies inside the
 // region, as the other plan checks require.
 const SPAN: PlanSourceLocation = { so: 0, sl: 0, sc: 0, eo: 0, el: 0, ec: 0 };
@@ -220,6 +237,12 @@ test("each way jumps can fail to nest is refused at the instruction that breaks 
       "a loop whose rounds start inside another construct",
       [ifFalse(2), step, step, loop(1, 5), step, step],
       3,
+      "this loop's rounds start outside its sequence or inside another construct",
+    ],
+    [
+      "a loop whose rounds start after it",
+      [step, loop(3, 4), step, step, step],
+      1,
       "this loop's rounds start outside its sequence or inside another construct",
     ],
     [
