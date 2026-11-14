@@ -49,8 +49,8 @@ function random(seed: number): (bound: number) => number {
 }
 
 /**
- * Every leaf kind as separate objects: each kind with fields as two records that differ, the camera view (which has
- * none) once, and a duration twice more as an equal pair.
+ * Every leaf kind as separate objects: an unequal pair for each kind with fields, one camera view, and an extra
+ * duration record forming an equal pair.
  */
 const LEAVES: readonly SerializableRuntimeValue[] = [
   { kind: "duration", milliseconds: 2000 },
