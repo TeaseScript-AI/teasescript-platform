@@ -8,8 +8,8 @@ Start with [`README-FIRST.md`](README-FIRST.md).
 
 The repository contains the parser/core language, semantic validation, a versioned serializable instruction runtime,
 explicit loop and call frames, checkpoint save/restore, deterministic control flow and random built-ins, user-defined
-functions, source-order/checkpoint hardening, a standalone browser playground, and the production-direction Vue Player
-foundation. The Player uses Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual while
+functions, source-order/checkpoint hardening, a standalone browser playground, and the production-direction Vue Playroom
+foundation. The Playroom uses Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual while
 keeping engine and shared domain contracts framework-independent.
 
 The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are documented in [`docs/RUNTIME.md`](docs/RUNTIME.md). Non-current revisions are rejected. The wider V30 language and complete static type checking remain out of scope.
@@ -41,7 +41,7 @@ HOST=0.0.0.0 PORT=4173 npm run playground
 
 Binding to `0.0.0.0` exposes this development server to every network that can reach the container. The playground is not production-ready and is not a public Node backend; Laravel remains the only eventual public backend.
 
-Browsers allow the Player's camera only in a secure context: HTTPS, or `localhost` on the same machine. To use the
+Browsers allow the Playroom's camera only in a secure context: HTTPS, or `localhost` on the same machine. To use the
 camera from another machine of the local network, serve HTTPS with a self-signed development certificate:
 
 ```shell
@@ -80,7 +80,7 @@ playground. All its `.tease` files compile as one project that starts at `main.t
 package that does not compile lists each diagnostic with its file and line. A file or folder the server cannot read, and
 an image whose tags it cannot read, is a diagnostic of that compilation too. Edits in the playground stay in the page.
 Hidden folders and links are not packages. A package's images and its MP3, WAV, Ogg, MP4, and WebM files are served only
-from that package, and the Player plays its audio; browser video playback is not implemented yet.
+from that package, and the Playroom plays its audio; browser video playback is not implemented yet.
 
 Fresh playground runs use the fixed unsigned seed `0x6d2b79f5` (`1831565813`) with the versioned `xorshift32-v1` runtime RNG. It is deterministic and serializable, not cryptographically secure and not a permanent syntax guarantee.
 
