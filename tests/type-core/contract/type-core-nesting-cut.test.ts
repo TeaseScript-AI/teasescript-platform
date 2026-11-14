@@ -8,9 +8,9 @@ import type { PlaceId } from "../../../src/type-inference/graph.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
 
 /*
- * #2764 (B): the nesting cut. A cycle of copies, arguments, results and list literals that nests a value a level deeper
- * on each turn is cut at a depth the program fixes (`M + G`); a cycle that nests nothing deeper, and a place a written
- * type decides, are never cut.
+ * #2764 (B): the nesting cut. A cycle of copies, arguments, results and list literals that nests a value deeper on each
+ * turn is followed one level deeper than what enters it (`M + 1`); a cycle that nests nothing deeper, and a place a
+ * written type decides, are never cut.
  */
 
 const PART = `function part(value) {
@@ -65,11 +65,54 @@ test("a function that returns its argument in a list, called on its own result, 
   assert.equal(cut("wrap.result"), 1);
 });
 
-test("a list joined with itself in a list is known below its literal's own levels and one turn", () => {
-  // #2763's reproduction: `[[]]` enters with one element level (M = 1), the literal `[a]` adds one (G = 1)
+test("a list joined with itself in a list is known one level below its literal's own levels", () => {
+  // #2763's reproduction: `[[]]` enters with one element level (M = 1); its cell holds nothing, so no second
   assert.equal(indexOf("let a = [[]]\na = a + [a]\n").cut("a"), 2);
   // a deeper literal keeps its levels known: M = 3
   assert.equal(indexOf("let a = [[[1]]]\na = a + [a]\n").cut("a"), 4);
+});
+
+test("#2763's variants are cut one level below what enters them", () => {
+  const cases: readonly (readonly [string, string, number | null])[] = [
+    ["let a = []\nrepeat 3 {\n  a = a + [a]\n}\n", "a", 1],
+    ["let a = [[]]\na += [a]\n", "a", 2],
+    ["let a = [[]]\na = [a] + a\n", "a", 2],
+    ["let a = []\nrepeat 3 {\n  a = [a]\n}\nlet b = a + a\n", "a", 1],
+    // (only reads the cycle)
+    ["let a = []\nrepeat 3 {\n  a = [a]\n}\nlet b = a + a\n", "b", null],
+    // (an identity function's call is its argument, #2493)
+    ["function f(d) {\n  return d\n}\nlet a = [f([])]\na = a + [f(a)]\n", "a", 2],
+    // (a function that calls itself before every return never returns: no route into its result)
+    ["function g(x) {\n  return x + [g(x)]\n}\nlet a = g([[]])\n", "g.result", null],
+    [
+      "function g(x, n) {\n  if n == 0 {\n    return x\n  }\n  return x + [g(x, n - 1)]\n}\nlet a = g([[]], 2)\n",
+      "g.result",
+      2,
+    ],
+    ['let a = [[1]]\na = a + [a]\na = a + [["x"]]\n', "a", 3],
+    ['let u: list[][][] = []\nlet r = u + [[[[1]]], [[["x"]]]]\n', "u", null],
+  ];
+  for (const [source, name, cut] of cases) assert.equal(indexOf(source).cut(name), cut, source);
+});
+
+test("a cycle that gains two levels a turn turns unknown within its first turn", () => {
+  // M = 1: known to level 2, where one turn would reach level 3
+  assert.equal(indexOf("let a = [1]\na = [[a]]\n").cut("a"), 2);
+});
+
+test("`otherwise` passes a value on at its own level, from both sides", () => {
+  assert.equal(indexOf("let a = [1]\na = [a otherwise 1]\n").cut("a"), 2);
+  assert.equal(indexOf("let a = [1]\na = [null otherwise a]\n").cut("a"), 2);
+});
+
+test("a `get` with a default takes its receiver's element and its default at its own level", () => {
+  // the element taken out of the list it was wrapped in: +1 and -1
+  assert.equal(
+    indexOf("let xs = [[1]]\nlet p = xs.get(0, default: [])\nxs = [p]\n").cut("xs"),
+    null,
+  );
+  // the default wrapped again: +1
+  assert.equal(indexOf("let a = [1]\nlet b = [[2]]\na = [b.get(0, default: a)]\n").cut("a"), 2);
 });
 
 test("a cycle that nests nothing deeper is never cut", () => {
