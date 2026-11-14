@@ -28,3 +28,4 @@ Folders:
 - `random/`: the generator and controlled randomness.
 - `host-data/`: the player profile, the player's clock, script storage, and the file store.
 - `debug/`: the debug trace, inspection, and the instruction trace.
+- `native/`: values for code generated from a Tease, which no production path uses yet (#1694, `native/README.md`).
