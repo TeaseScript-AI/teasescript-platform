@@ -271,7 +271,7 @@ export class Values {
   /**
    * The narrowing a read takes, `null` for none. A read of a stable path at its own path (a binding's occurrence, or a
    * chain of its properties and indexes), stored or read by a consumer (#1073), takes the nearest narrowing definition
-   * its node finds (`NarrowingIndex.nearestAt`: one walk of its steps down the tested paths). A selection at any step
+   * its node finds. A selection at any step
    * (`xs.first`, `rows[0].random`, `rs.first.f`, `rows.first.last`) reads its element's (#1073: an element's narrowing
    * proves its kinds, never its emptiness, which a selection's check asks of the owner), each selected owner's own
    * selection beside it (`#narrowedChain`); an iteration, a length or a member step answers by itself (a narrowing
@@ -308,8 +308,7 @@ export class Values {
 
   /**
    * A consumer's read of a value at a path (#1073): a descendant demand (`${xs}` asks its element, `['element']`) takes
-   * the narrowing of its whole path (`#narrowingBelow`), as a read takes its own (`#narrowingOf`); anything else is
-   * `valueItems`.
+   * the narrowing of its whole path, as a read takes its own.
    */
   public *consumerItems(value: PlaceId, node: FlowNode | null, asked: Rest): Work<readonly Item[]> {
     if (!isSteps(asked) || asked.length === 0) return yield* this.valueItems(value, node, asked);
@@ -331,9 +330,9 @@ export class Values {
   }
 
   /**
-   * The narrowing a consumer's descendant demand of a read takes (`consumerItems`): the nearest narrowing definition of
-   * the read's path and the steps below it (`nearestAt` with them), asked only where a test names the read's binding,
-   * once per read and path, its key made kept.
+   * The narrowing a consumer's descendant demand of a read takes: the nearest narrowing definition of the read's path
+   * and the steps below it, asked only where a test names the read's binding, once per read and path, its key made
+   * kept.
    */
   #narrowingBelow(value: PlaceId, rest: Steps): NarrowedRead | null {
     const { program, guards } = this.pass;
@@ -361,10 +360,7 @@ export class Values {
     return found;
   }
 
-  /**
-   * A read's chain of projections down to its root: its steps from the root as the exact path keys them, the root,
-   * and the node `#valueAt` passes down.
-   */
+  /** A read's chain of projections down to its root. */
   #chainOf(value: PlaceId): {
     readonly steps: string[];
     readonly root: PlaceId;
@@ -386,8 +382,8 @@ export class Values {
 
   /**
    * The binding of a place's chain of projections where every step is stable (no iteration, length or member step),
-   * `null` for none: one memo per place, each projection step walked charged once, so the prefixes of one chain, each a read of
-   * its own (`#narrowedChain`'s owners), walk it once together, never once each (#1742).
+   * `null` for none: one memo per place, each projection step walked charged once, so the prefixes of one chain, each a
+   * read of its own (`#narrowedChain`'s owners), walk it once together, never once each (#1742).
    */
   #stableBinding(value: PlaceId): PlaceId | null {
     const { program } = this.pass;
@@ -476,11 +472,11 @@ export class Values {
   }
 
   /**
-   * A narrowing definition G's items: its key read at its input, as `#keyRead` reads it (the exact path's definition
-   * value at the test, else the contract; unmarked, no other narrowing), filtered by its form; a definition inside a
+   * A narrowing definition G's items: its key read at its input (the exact path's definition value at the test, else
+   * the contract; unmarked, no other narrowing), filtered by its form; a definition inside a
    * loop around the test is read as the contract, since its value may read the loop's own narrowings (through a store
    * of the loop, by copies), so G's kinds never wait on the component they decide, and a read the definition still
-   * reaches filters its value itself (`#narrowedRead`). A demand per G.
+   * reaches filters its value itself (`#narrowedRead`).
    */
   public *narrowingValue(g: Narrowing): Work<readonly Item[]> {
     return yield {
@@ -525,13 +521,11 @@ export class Values {
 
   /**
    * The route the value of a place at a node took at a path, read from the routes recorded as it was answered (its
-   * items are asked first): a read's own, through projections, a call's result read, a literal's; a length's, its
-   * owner's own field's where the owner is an object (a computed length is `exact`); an operation's value is
-   * computed, `exact`.
+   * items are asked first).
    */
   public valueRoute(value: PlaceId, node: FlowNode | null, rest: readonly string[]): ReadRoute {
     const { program, contract } = this.pass;
-    // (a key in its identity, as `#keyRead` records it: a wrapper family's text read as its cursor)
+    // (a key in its identity: a wrapper family's text read as its cursor)
     const recorded = (key: Key, at: FlowNode | null): ReadRoute =>
       this.#routes.get(joinParts(contract.canonicalKey(key), at?.id ?? "-", 0)) ?? "exact";
     let path = rest;
@@ -714,8 +708,7 @@ export class Values {
   }
 
   /**
-   * A value at a node and a path of property steps as a demand that proves its position (`positions.ts`): its
-   * parent's (one step up, at its root its own) advanced one step (`#advance`).
+   * A value at a node and a path of property steps as a demand that proves its position (`positions.ts`).
    */
   #position(value: PlaceId, node: FlowNode | null, path: number): ProofDemand<Proof> {
     const { contract, program } = this.pass;
@@ -1049,12 +1042,10 @@ export class Values {
   }
 
   /**
-   * A narrowed read's value (`#valueAt`, #1073): its narrowing's read of the whole path (`#narrowedRead`: the
-   * narrowing's items, the nearest definition's value, or where the narrowing fails the read without it, marked),
-   * rebuilt as the ordinary route nests its links: at each selection, innermost first, the selected owner's own
-   * selection beside it, read at that link's node, so where the narrowing holds and where it fails each owner that may
-   * be an object keeps its own selection.
-   * The links are one charged walk of the chain (`selectionLinks`); each owner's read is its own demand.
+   * A narrowed read's value (#1073): its narrowing's read of the whole path, rebuilt as the ordinary route nests its
+   * links: at each selection, innermost first, the selected owner's own selection beside it, read at that link's node,
+   * so where the narrowing holds and where it fails each owner that may be an object keeps its own selection. The links
+   * are one charged walk of the chain (`selectionLinks`); each owner's read is its own demand.
    */
   *#narrowedChain(
     value: PlaceId,
@@ -1205,14 +1196,14 @@ export class Values {
   }
 
   /**
-   * The demand of `#operationItems` for a method that gives a copy of its receiver's elements (`copyMethod`): as
-   * `#operationValue` answers it, its path read as steps (#1857).
+   * The demand of `#operationItems` for a method that gives a copy of its receiver's elements (`copyMethod`), its path
+   * read as steps (#1857).
    */
   *#copyValue(c: CopyOperation, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
     const { program, contract } = this.pass;
     const at = program.exprAt(c.site) ?? node;
     // a reference's method is opaque, by the receiver's contract before its exact value
-    // (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44), as `#operation`
+    // (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44)
     if (heldReference(yield* contract.valueReceiver(c.receiver)))
       return alternatives([OPAQUE_MEMBER], program.scope);
     const gives = methodCategory(c.contract.name)?.gives;
@@ -1279,7 +1270,6 @@ export class Values {
       ];
     } else if (c.kind === "load" && c.key === null) {
       // a computed key is host data
-      // (below the root one answer for every path, `#operationItems`, which marks an element step)
       if (rest.length > 0) out = external();
       else {
         const nullDefault =
@@ -1514,10 +1504,7 @@ export class Values {
     };
   }
 
-  /**
-   * An operation's value at a node and a path, by its family. The contract answers the same families flow-insensitively
-   * (`contractOfOp`); a new family is answered in both.
-   */
+  /** An operation's value at a node and a path, by its family. */
   *#operation(
     c: Extract<ValueConstraint, { readonly kind: "operation" }>,
     at: FlowNode | null,

@@ -18,10 +18,7 @@ import { amend, Retained } from "./retained/retained.js";
 
 /*
  * The definitions of the coarse core: every store, add, clear, removal, binding and return as a definition of a key at
- * its node, and the indexes the exact path asks of them: per key the definitions in dominator order with a lifting
- * table (the nearest dominating definition), per key the own events of the key and the keys below it, the owner sets
- * and the one global list of call sites, and the receiver rule (`DefinitionLists.certain`). Nothing here evaluates a
- * value.
+ * its node, and the indexes the exact path asks of them. Nothing here evaluates a value.
  */
 
 /**
@@ -384,10 +381,7 @@ function lowerBound(work: WorkLedger, positions: readonly number[], target: numb
 /** A range of dominator positions, both ends included. */
 export type PositionRange = readonly [number, number];
 
-/**
- * The definitions of a program, made once: per key the definitions, the stores and transfers the ingress checks and
- * admission index, the literal cells' stores, the owner sets and the global site list (definitions + sites).
- */
+/** The definitions of a program, made once. */
 export class DefinitionIndex {
   readonly byKey = Retained.map<Key, Definition[]>("DefinitionIndex.byKey");
   /** The stores into a literal's own cells and properties, by the cell or property place. */
@@ -404,7 +398,7 @@ export class DefinitionIndex {
   readonly deadArguments = Retained.map<Key, Definition[]>("DefinitionIndex.deadArguments");
   /** A binding's declaration: its initializer or its loop binding. */
   readonly declOf = Retained.map<PlaceId, Definition>("DefinitionIndex.declOf");
-  /** A loop's exit definition per collection key (`#loopAdds`). */
+  /** A loop's exit definition per collection key. */
   readonly loopAdds = Retained.map<Key, Definition[]>("DefinitionIndex.loopAdds");
   /** The definitions storing each value, literal cells included. */
   readonly byValue = Retained.map<PlaceId, Definition[]>("DefinitionIndex.byValue");
@@ -414,7 +408,7 @@ export class DefinitionIndex {
   readonly ingress = Retained.set<PlaceId>("DefinitionIndex.ingress");
   /** Each ingress by the key of its leaf (`ingressLeaf`): the value its own expression's writer names. */
   readonly ingressAt = Retained.map<string, PlaceId>("DefinitionIndex.ingressAt");
-  /** The keys below each key that have definitions (`keysBelow`). */
+  /** The keys below each key that have definitions. */
   readonly #keysBelow = Retained.map<Key, Key[]>("DefinitionIndex.#keysBelow");
   readonly #foreignAt = Retained.set<Key>("DefinitionIndex.#foreignAt");
   readonly #foreignBelow = Retained.set<Key>("DefinitionIndex.#foreignBelow");
@@ -428,9 +422,8 @@ export class DefinitionIndex {
   /** The dominator positions of every live call site's call-in and call-out outside block code, sorted. */
   readonly sitePositions: readonly number[];
   /**
-   * The callables ordinary code may run (the owner sets count only their stores; a helper only blocks run stores as
-   * their code does), for the narrowings' owner rule (a callable holding an invalidation of a collection joins its
-   * owner set).
+   * The callables ordinary code may run, for the narrowings' owner rule (a callable holding an invalidation of a
+   * collection joins its owner set).
    */
   readonly ordinary: ReadonlySet<Callable>;
   /**
@@ -821,8 +814,7 @@ export class DefinitionIndex {
    * A `for` loop whose body holds no `break` and no `goto` runs its body to the end at least once on every
    * run that reaches its exit when its iterable is held. An add of the loop's own body (not of an inner loop) that
    * lies on every way back to the head, with no clear, removal or whole store of its key or a prefix after it in the
-   * body, is also a definition at the loop's exit; the read asks whether the iterable is held and whether an own event
-   * of the collection lies between the add and a way back.
+   * body, is also a definition at the loop's exit.
    */
   #loopAdds(): void {
     const program = this.program;
@@ -976,7 +968,6 @@ export class DefinitionIndex {
   /** Whether some callable other than the key's declaring one stores the key, a prefix or a key below it. */
   public ownedAway(key: Key): boolean {
     if (this.#foreignBelow.has(key)) return true;
-    // (the foreign stores at a prefix, by one walk of the key's steps)
     return this.foreign.any(key, false);
   }
 
@@ -1059,11 +1050,7 @@ export function joinedOperand(operand: PlaceId): number {
   return -1 - operand;
 }
 
-/**
- * The definition lists of one pass: per key its live definitions sorted in dominator order with a lifting table, the
- * nearest dominating definition over a key and its prefixes, the own-event lists, the first own event between two
- * nodes, and the receiver rule (`certain`).
- */
+/** The definition lists of one pass. */
 export class DefinitionLists {
   readonly #sorted = Retained.map<Key, SortedDefinitions>("DefinitionLists.#sorted");
   readonly #below = Retained.map<Key, SortedDefinitions>("DefinitionLists.#below");
@@ -1274,8 +1261,6 @@ export class DefinitionLists {
   public reachingDef(key: Key, node: FlowNode, before = false): Reaching | null {
     const program = this.#program;
     program.work.charge("rdQueries");
-    // (the key and its prefixes with definitions, the longest first, by one walk of its steps; a prefix with
-    // none has no nearest definition)
     let best: { def: Definition; length: number } | null = null;
     for (const prefix of this.index.stored.above(key, true)) {
       const d = this.#nearest(this.definitionsOf(prefix), node, before);
@@ -1291,10 +1276,7 @@ export class DefinitionLists {
     return best === null ? null : { def: best.def, rest: keyPath(key).slice(best.length) };
   }
 
-  /**
-   * The own events of a key, as the exact path reads them: its own and its descendants' live definitions outside block
-   * code, sorted, once per key.
-   */
+  /** The own events of a key, once per key. */
   public eventList(key: Key): readonly number[] {
     return this.#eventList(key);
   }
@@ -1357,7 +1339,7 @@ export class DefinitionLists {
     };
     if (this.index.ownedAway(key)) see(this.index.sitePositions, "call");
     see(this.#eventList(key), "branch");
-    // (the prefixes with definitions, by one walk of the key's steps; a prefix with none has no event)
+    // (a prefix with no definitions has no event)
     for (const prefix of this.index.stored.above(key, false))
       see(this.definitionsOf(prefix).eventPositions, "branch");
     return word;

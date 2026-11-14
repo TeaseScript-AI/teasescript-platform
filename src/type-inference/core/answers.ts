@@ -110,10 +110,8 @@ import { Retained, retainedModule } from "./retained/retained.js";
 import type { IdentityView } from "./identity-view.js";
 
 /*
- * The answers of the coarse core: `analyseCore` runs once per compile and publishes, after its last pass, the frozen
- * surface (`Answers`): per source occurrence its items, route, place and obligations; per place its admitted type,
- * contract, ingresses and definitions; the projections and properties of a value; the bridge to the adapters' operand
- * views; and the whole program's diagnostics, checks, graph, budget counters and deferred bindings.
+ * The answers of the coarse core: the frozen surface (`Answers`) that `analyseCore` publishes once per compile, after
+ * its last pass.
  */
 
 /** The parts of one pass of the analysis: each reads the others through it. */
@@ -210,8 +208,6 @@ function createPass(
   // (#1526: no decision of a completion pass stops at its allowance, so nothing #1599 keeps for one is kept,
   // from before anything of the pass solves)
   if (completion) contract.closeDecisions();
-  // (the lanes of the families reads start are chosen first, before anything is built; demands holding a cursor order
-  // by their logical texts)
   selectLanes(contract);
   parts.solver.names = (a, b) => compareDemandNames(contract, a, b);
   parts.solver.replayOf = (names) => exportNames(contract, names);
@@ -291,11 +287,8 @@ interface SelectingStore {
 
 /**
  * The targets of `stores` (`selectingStores`) by a pass's admission: such a step above the stored place is an object's
- * own property where the receiver holds only objects (and null), the receiver's own steps settled first: by admission's
- * kinds there where it admits any (its earliest deciding store decides it: an unknown or a rejected store after them
- * takes nothing back), else by the earliest deciding value that one of the shallower of these stores sets there by its
- * target settled here, which this pass's definitions still key as an element; a list's or a set's element otherwise, as
- * a read takes it. Each receiver is decided lazily through the consumers (`decide`), so its decision is the pass's own
+ * own property where the receiver holds only objects (and null), else a list's or a set's element, as a read takes it.
+ * Each receiver is decided lazily through the consumers (`decide`), so its decision is the pass's own
  * and bounded by the demand allowance, and a stopped one decides nothing there. #2378: a store into or below a list a
  * `values` or `keys` gives, and a removal from it, goes into nothing (`null`) where an owner above such a step holds
  * only dicts (and null): no definition is made, so it decides nothing and nothing reads it.
@@ -356,9 +349,8 @@ function storeTargets(
 }
 
 /**
- * #1275 in a receiving completion pass (#1526): the selecting stores whose target the completion's admission
- * gives (`storeTargets`, each receiver decided there where first asked, as every completion decision is) is another
- * than the settled pass's (`targets`): their receivers' keys, each once, and whether any moved.
+ * #1275 in a receiving completion pass (#1526): the selecting stores whose target the completion's admission gives is
+ * another than the settled pass's (`targets`): their receivers' keys, each once, and whether any moved.
  */
 function retargeted(
   program: CoreProgram,
@@ -602,7 +594,7 @@ export interface Answers {
   /**
    * The store warnings the receiving completion's own store checks made, the natural walk's obligations of its
    * decisions on the settled pass's inputs (#1682), in the published order (`bySite`, at the stores consumer's rank);
-   * none where the completion lost a result, reached its allowance or left the slice. A store's part checks read them.
+   * none where the completion lost a result, reached its allowance or left the slice.
    */
   completedWarnings(): readonly CompletedWarning[];
   /**
@@ -632,9 +624,7 @@ export interface Answers {
       }[]
     | null;
   /**
-   * `callback` as finishing work counted apart (`WorkLedger.apart`), in the budget's `apart` and never its total: the
-   * settled pass's publication asked once more where the receiving completion kept no result, so its gate reads the
-   * registry (#1526, `asked`).
+   * `callback` as finishing work counted apart (`WorkLedger.apart`), in the budget's `apart` and never its total.
    */
   apart<T>(callback: () => T): T;
   at(node: FlowNode): OccurrenceAnswer | null;
@@ -682,7 +672,7 @@ export interface Answers {
   valueAt(node: FlowNode, path: readonly string[]): ValueAnswer;
   /**
    * The name an obligation gives the value at a node (`keyLabel`): its key path, else its text; `null`
-   * where the node holds no value. The plan side reads an obligation's target by it, never by a name of its own.
+   * where the node holds no value.
    */
   targetName(node: FlowNode): string | null;
   view(node: FlowNode): CoreView;
@@ -695,9 +685,7 @@ export interface Answers {
 
 /**
  * The analysis of a project by the coarse core: its answers, published after its last pass. A stop is no compile error:
- * past the work allowance or a read chain's depth the analysis stops proving, and statements nested past the nesting
- * limit are not proved at all; what a pass whose admission had settled found stays (else every unit is finished from a
- * fresh pass), every check it did not decide runs when the script runs, and one warning says so (`finished`).
+ * every check the analysis did not decide runs when the script runs, and one warning says so.
  */
 export function analyseCore(request: CoreAnalysisRequest): Answers {
   const program = new CoreProgram(request);
@@ -826,11 +814,8 @@ export function analyseCore(request: CoreAnalysisRequest): Answers {
 }
 
 /**
- * The finishing path of an analysis that stopped at `limit`: only cheap work, no further proving. The
- * setup the stop cut is finished; a pass whose admission settled keeps what its walk found and walks the units the stop
- * left, and the units nested past the nesting limit; any other walks every unit from a fresh pass, none of its findings
- * standing (a later pass could still change them). Each unit reads its values through the finishing read
- * (`finishingRead`), with no further proof; a read it leaves `STOPPED` owes its check when the script runs.
+ * The finishing path of an analysis that stopped at `limit`: only cheap work, no further proving. Where admission had
+ * not settled, none of the stopped pass's findings stand: a later pass could still change them.
  */
 function finished(
   program: CoreProgram,
@@ -907,13 +892,13 @@ export function solveDemands(
   });
 }
 
-/** Test-only (`demandWork`): a proof demand asked for its answer alone. */
+/** Test-only: a proof demand asked for its answer alone. */
 function* asked(demand: ProofDemand<Proof>): Work<readonly Item[]> {
   return yield demand;
 }
 
 /**
- * Test-only (`solveDemands`): the computation a demand's key names, rebuilt from the key (`protoLayer|`, `c|`, `ob|`,
+ * Test-only: the computation a demand's key names, rebuilt from the key (`protoLayer|`, `c|`, `ob|`,
  * `obk|`, `a4|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`,
  * `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them). The analysis makes its demands directly; a kind
  * missing here fails only these replays.
@@ -1061,7 +1046,7 @@ function sameSet(a: ReadonlyMap<number, unknown>, b: ReadonlyMap<number, unknown
   return a.size === b.size && [...a.keys()].every((uid) => b.has(uid));
 }
 
-/** Test-only (`demandWork`): the pass's definition numbered `uid`, by key, of a cell, or a loop's exit add. */
+/** Test-only: the pass's definition numbered `uid`, by key, of a cell, or a loop's exit add. */
 function definitionByUid(pass: CorePass, uid: number): Definition {
   for (const list of [
     ...pass.definitions.byKey.values(),
@@ -1082,7 +1067,7 @@ function dynamicWhy(reasons: number): DynamicWhy {
 /**
  * Each warning with the value's other known kinds that its site's other diagnostics of the same rule report (`besides`):
  * one consumer reports one diagnostic per offending kind of the value at its use, so a warning's fix names no code
- * that leaves the use invalid beside them (#1268). One pass over the diagnostics.
+ * that leaves the use invalid beside them (#1268).
  */
 function withBesides(diagnostics: readonly CoreDiagnostic[]): CoreDiagnostic[] {
   const key = (site: SourceSite, rule: string): string =>
@@ -1351,9 +1336,8 @@ class CoreAnswers implements Answers {
   }
 
   /**
-   * A question of a value's items. After a stop the solver computes nothing and answers what it had finished (its memo)
-   * or as the demand stopped (`Solver.run`); where admission had not settled even those may change, so every value is
-   * `STOPPED`.
+   * A question of a value's items. After a stop where admission had not settled, every value is `STOPPED`: even what
+   * had finished may change.
    */
   #run(work: Work<readonly Item[]>): readonly Item[] {
     return this.#stopped && !this.#consumers.settled ? STOPPED : this.#pass.solver.run(work);
@@ -1383,11 +1367,10 @@ class CoreAnswers implements Answers {
   }
 
   /**
-   * After a stop where admission had settled, the type admission gives a read's place at a path, as `place` answers it:
-   * its written type, its decision, or its key's finished contract where admission decides a path lazily (a lazily
-   * decided path is a source). A domain (a collection's element possibly absent); `null` where the read has no place or
-   * nothing decides it. One check unit, no new walk: after a stop admission decides nothing more, it reads what had
-   * finished.
+   * After a stop where admission had settled, the type admission gives a read's place at a path: its written type, its
+   * decision, or its key's finished contract where admission decides a path lazily (a lazily decided path is a source).
+   * A domain (a collection's element possibly absent); `null` where the read has no place or nothing decides it. One
+   * check unit, no new walk: after a stop admission decides nothing more, it reads what had finished.
    */
   #lazilyDecided(value: PlaceId, path: readonly string[]): readonly Item[] | null {
     const { program } = this.#pass;
@@ -1429,13 +1412,7 @@ class CoreAnswers implements Answers {
   }
 
   /**
-   * After a stop, what a value's own syntax gives at a path, with no proof: its items and its objects' property
-   * names. A literal gives its own kind, and below it its children's items as their own questions answer them (`#items`)
-   * beside its children's own names (`#literalShape`: the descent follows the literal's syntax, so it ends); a typed
-   * parse's or load's expected type is its written destination's (`landsIn`), else its default's as a typed
-   * default reads it (`typedDefault`: a `null` there leaves its level open), at every depth, a literal's child included;
-   * any other value `STOPPED`. Each typed call and path once, every link of a chain of typed defaults sharing it; a
-   * literal's own shape is kept apart from what a typed call makes of it.
+   * After a stop, what a value's own syntax gives at a path, with no proof: its items and its objects' property names.
    */
   #stoppedShape(value: PlaceId, path: readonly string[]): StoppedShape {
     const { program, contract } = this.#pass;
@@ -1650,7 +1627,6 @@ class CoreAnswers implements Answers {
     const items = this.#items(value, node, []);
     // a read of a binding or of a path below one; a projection of a literal, a call or an operation is no place
     const target = this.#readPlace(value);
-    // the route the read's answer took, recorded as it was answered
     const route: Route =
       target === null
         ? "value"

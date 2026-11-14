@@ -961,9 +961,6 @@ export function propertyNames(
         continue;
       }
     }
-    // (a key's path and place through its walk, `keptKeyWalk`: a text's kept, a cursor's steps through the charged
-    // boundary and copied out once)
-    // (or the parts of its step a listing's classification made, each taken once in place of its own: `Contribution`)
     const prepaid = "key" in task ? (listings()?.contributions.get(id) ?? null) : null;
     const walked = prepaid?.walked === true;
     if (walked) prepaid!.walked = false;
@@ -1059,8 +1056,6 @@ export function propertyNames(
         schedule({ literal: at, path: keptArray(work, record.path) }, record.kept);
         continue;
       }
-      // the carrier table's operands, after the value side's decisions (`carriers.ts` lists them); nothing through an
-      // operation that keeps its own value
       // (a carrier reads its path's first two steps at most, and keeps the rest)
       if (follows)
         for (const [operand, rest] of carried(program, at, path, dispatch))

@@ -910,8 +910,7 @@ export class ExactPath {
 
   /**
    * Whether a test of its source at the path, or at a prefix of it, guards the read of a copy from `link` up to
-   * `stop` (excluded): per prefix one search of the spans of the copies a branch holds, and one of those an operand region
-   * holds; a choice's selection step as the record key it reads.
+   * `stop` (excluded); a choice's selection step as the record key it reads.
    */
   #markedAlong(
     forest: CopyForest,
