@@ -10,7 +10,7 @@ import type { Reads } from "../inherited/reads.js";
 
 /**
  * Whether one operation gives the operand the walk took (`chosen`'s rule for a link), or `surely` gives it; its value
- * read a read (`Read`, #1072: a read inside an inherited proof is yielded, never run).
+ * read a read (`Read`, #1072).
  */
 export function* chooses(
   admission: Admission,

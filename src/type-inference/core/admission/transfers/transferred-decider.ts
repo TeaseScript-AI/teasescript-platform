@@ -303,10 +303,8 @@ function* firstValue(
 
 /**
  * The earliest value that decides a stored value's path (`earliestDecider`), read from its carriers' transfers:
- * `undefined` where a written copy on the path asks a type (its type may wait on another decision, `inheritedInto`):
- * outside every decision and into no decision's place the written-decider summary then answers (`writtenDecider`),
- * else the scan of the stops (`earliestDecider`). Else the first value that decides, with the kinds it decides by,
- * `null` for none.
+ * `undefined` where a written copy on the path asks a type (its type may wait on another decision, `inheritedInto`);
+ * else the first value that decides, with the kinds it decides by, `null` for none.
  * The value's own task and the literals it holds, by path, then each carrier's operands, their roles merged at each
  * common operand in their keys' order, each group's answer once per pass for its rest of the path, whatever value
  * walks to it (`groupOf`).
@@ -338,8 +336,7 @@ export function* transferredDecider(
 }
 
 /**
- * A stored value's root group and asked path with its rests' ids, made once per `earliestDecider` call (`deciderRoot`)
- * and read by `literalRoute`, `transferredDecider` and `writtenDecider`.
+ * A stored value's root group and asked path with its rests' ids, made once per `earliestDecider` call (`deciderRoot`).
  */
 export interface DeciderRoot {
   readonly root: DeciderGroup;

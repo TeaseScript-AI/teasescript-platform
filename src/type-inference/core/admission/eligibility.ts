@@ -40,7 +40,7 @@ export function wholeOf(admission: Admission, key: Key, add: boolean): Definitio
   return readNow(wholeOfRead(admission, key, add));
 }
 
-/** `wholeOf` with its classes' reads (`Read`, #1072: a read inside an inherited proof is yielded, never run). */
+/** `wholeOf` with its classes' reads (`Read`, #1072). */
 function* wholeOfRead(admission: Admission, key: Key, add: boolean): Reads<Definition[]> {
   const memoKey = joinParts(key, add);
   let list = admission.whole.get(memoKey);
@@ -406,7 +406,6 @@ function demandsOf(admission: Admission, asked: Key): readonly Demand[] {
     }
     admission.demands = demands;
   }
-  // (a prefix in its identity, as the groups' prefixes hold it)
   return admission.demands.get(canonicalKey(admission.pass.contract, asked)) ?? [];
 }
 

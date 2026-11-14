@@ -28,8 +28,7 @@ import { compareKeys, contributionSite, RECEIVER_ROLES, stopsOf } from "./walk.j
 /**
  * A store's contributions at `at`, in evaluation order: the stops of the one walk (`stopsOf`, the carrier table's)
  * standing at the path or above it, each with the rest of the path to read into it, the ones its operations may give
- * (`chosen`, a live read), each snapshot once (`distinctStops`). The obligations come from these, as the decider's
- * answers do.
+ * (`chosen`, a live read), each snapshot once (`distinctStops`).
  */
 function contributions(
   admission: Admission,

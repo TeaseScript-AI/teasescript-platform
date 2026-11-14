@@ -30,12 +30,8 @@ import type {
 } from "../model.js";
 import { levelsOf } from "../permitted.js";
 
-// Landings through copies: where copies of written types land in each place and the copies into it, cycles of copies
-// (`inheritance`); the copy forest places answer through (`copyForest`, `nearest`); the paths copies land at or below a
-// prefix (`landedBelow`, its walk `walkLandings`, the walk's `LandingTape` and the listings it keeps); a place's copies
-// along a path and their next-step index (`copiesAlong`, `nextStepCopies`, #1948); and the walk's test counters
-// (`withLandingOps`, `withLandingComparison`, whose state the three module-level `let`s hold). `inheritance` lists a
-// cycle's landings with `landedBelow`, whose walk asks `inheritance` again: one cycle of calls.
+// Landings through copies: where copies of written types land in each place, the copy forest places answer through,
+// cycles of copies. `inheritance` and `landedBelow` call each other: one cycle of calls.
 
 const NO_PATHS: ByPath<never> = { under: new Map(), at: new Map() };
 
