@@ -6,8 +6,8 @@
 //   - `analysis`: the core's own analysis of its request (`analyseCore`), past the candidate route's syntax gate: a hash
 //     of every answer (`everyAnswer`), of its diagnostics, its checks and its checked result (`checkedResult`), its
 //     diagnostics' codes with counts, its counters, the limit a ledger stopped at (`stopped`), an error it threw (its
-//     class and place, `throwPlace`); `request: false` alone where the package's files do not parse or name (the
-//     test helper's `coreRequest` gives no request);
+//     class and place, `throwPlace`); `analysed: false` and no digest where the package's files do not parse or
+//     name (the test helper's `coreRequest` gives no request: compile errors before the checker);
 //   - `route`: the compile with `coreOutcome(request, "past")` as its analysis: hashes of the plan, the diagnostics, the
 //     checked result and the settled facts (`facts()`), an error and, for a `CandidateOutsideSlice`, whether it was a
 //     limit's (`outside`).
@@ -244,7 +244,7 @@ function analysed(tree, mode, files) {
   const request = tree.analysis.coreRequest(files, GLOBALS);
   // (no request where the package's files do not parse or name: nothing to analyse, its compile compared alone)
   if (request === null)
-    return { request: false, error: null, stopped: null, units: 0, allowance: 0 };
+    return { analysed: false, error: null, stopped: null, units: 0, allowance: 0 };
   const made = {};
   let units = 0;
   const { error, kept } = observed(tree, () =>
@@ -261,7 +261,13 @@ function analysed(tree, mode, files) {
       });
     }),
   );
-  return { error: errorText(error), ...made, ...kept, units: error === null ? units : kept.units };
+  return {
+    analysed: true,
+    error: errorText(error),
+    ...made,
+    ...kept,
+    units: error === null ? units : kept.units,
+  };
 }
 
 /**

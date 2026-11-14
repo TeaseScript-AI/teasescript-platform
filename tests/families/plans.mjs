@@ -432,15 +432,21 @@ if (isMainThread && process.argv[2] === "summary") {
     tree.trace = { n: 0, units: 0, a: 2166136261, b: 3266489917 };
     tree.questions = { n: 0, a: 2166136261, b: 3266489917 };
     tree.stopped = null;
+    // (whether the compile reached the checker: its errors before it, parse or names, give the core no request)
+    let analysed = false;
+    const core = tree.backend.CORE_BACKEND;
+    const backend = {
+      ...core,
+      analyze(request) {
+        analysed = true;
+        return core.analyze(request);
+      },
+    };
     const options = { globals: unit.globals };
     const make = () =>
       unit.single
-        ? tree.compiler.compileSourceWithBackend(
-            unit.files[0].source,
-            options,
-            tree.backend.CORE_BACKEND,
-          )
-        : tree.compiler.compileProjectWithBackend(unit.files, options, tree.backend.CORE_BACKEND);
+        ? tree.compiler.compileSourceWithBackend(unit.files[0].source, options, backend)
+        : tree.compiler.compileProjectWithBackend(unit.files, options, backend);
     let result = null;
     let error = null;
     let outside = null;
@@ -480,6 +486,7 @@ if (isMainThread && process.argv[2] === "summary") {
       stopped: tree.stopped,
       outside,
       thrown,
+      analysed,
     };
   }
 

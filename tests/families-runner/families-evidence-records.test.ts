@@ -58,6 +58,7 @@ interface Classed {
   readonly stopped: string | null;
   readonly outside: string | null;
   readonly thrown: string | null;
+  readonly analysed: boolean;
 }
 interface AreaRecord {
   readonly source: string;
@@ -145,8 +146,10 @@ test("the plans comparison records each compile's allowance, the limit a ledger 
     "src/type-inference/core/budget.js": LEDGER,
     "src/compiler.js": `import { ledger } from "./type-inference/core/budget.js";
 ${OUTSIDE}
-export function compileProjectWithBackend(files) {
+export function compileProjectWithBackend(files, options, backend) {
   const source = files[0].source;
+  if (source === "unparsed") return { plan: null, diagnostics: [{ code: "TSV001" }] };
+  backend.analyze({ files });
   const work = ledger();
   work.charge("frames", 300);
   if (source === "stops") work.stop("work");
@@ -154,9 +157,11 @@ export function compileProjectWithBackend(files) {
   if (source === "throws") throw new Error("thrown");
   return { plan: { instructions: [] }, diagnostics: [] };
 }
-export const compileSourceWithBackend = (source) => compileProjectWithBackend([{ source }]);
+export const compileSourceWithBackend = (source, options, backend) =>
+  compileProjectWithBackend([{ source }], options, backend);
 `,
-    "src/type-inference/core/backend.js": "export const CORE_BACKEND = {};\n",
+    "src/type-inference/core/backend.js":
+      'export const CORE_BACKEND = { name: "core", analyze: () => ({}) };\n',
     "src/type-inference/core/answers.js":
       "class Answers {}\nexport const analyseCore = () => new Answers();\n",
     "tests/helpers/type-core-analysis.js": "export const coreRequest = (files) => ({ files });\n",
@@ -168,7 +173,7 @@ export const compileSourceWithBackend = (source) => compileProjectWithBackend([{
     cpSync(resolve("tests/families/sources.mjs"), join(root, "tests/families/sources.mjs"));
     writeFileSync(
       join(root, "tests/families/area/cases.mjs"),
-      `export const cases = ${JSON.stringify(["fine", "stops", "limit", "slice", "throws"].map((s) => [s, s]))};\n`,
+      `export const cases = ${JSON.stringify(["fine", "stops", "limit", "slice", "throws", "unparsed"].map((s) => [s, s]))};\n`,
     );
     return root;
   });
@@ -189,12 +194,19 @@ export const compileSourceWithBackend = (source) => compileProjectWithBackend([{
       .modes.map(({ base, head }) =>
         [base, head].map(({ allowance, stopped, outside }) => ({ allowance, stopped, outside })),
       );
-  const each = (one: Omit<Classed, "thrown">) => Array(4).fill([one, one]);
+  const each = (one: Omit<Classed, "thrown" | "analysed">) => Array(4).fill([one, one]);
   assert.deepEqual(fields("fine"), each({ allowance: 1000, stopped: null, outside: null }));
   assert.deepEqual(fields("stops"), each({ allowance: 1000, stopped: "work", outside: null }));
   assert.deepEqual(fields("limit"), each({ allowance: 1000, stopped: null, outside: "limit" }));
   assert.deepEqual(fields("slice"), each({ allowance: 1000, stopped: null, outside: "slice" }));
   assert.deepEqual(fields("throws"), each({ allowance: 1000, stopped: null, outside: null }));
+  // (whether the checker saw the compile: not where errors before it gave the core no request)
+  const analysed = (name: string) =>
+    records.get(name)!.modes.flatMap(({ base, head }) => [base.analysed, head.analysed]);
+  assert.deepEqual(
+    [analysed("fine"), analysed("unparsed")],
+    [Array(8).fill(true), Array(8).fill(false)],
+  );
   // (a throw by its class and the function and file it is thrown from, no message; a refusal is no throw)
   const thrown = (name: string) => records.get(name)!.modes[0]!.base.thrown;
   assert.deepEqual(
@@ -346,7 +358,7 @@ test("the packages' runner compares each package's analysis and route per mode b
   const unparsed = records.get("unparsed")!.modes[0]!.base;
   assert.deepEqual(
     [unparsed.analysis, unparsed.route.error],
-    [{ request: false, error: null, stopped: null, units: 0, allowance: 0 }, null],
+    [{ analysed: false, error: null, stopped: null, units: 0, allowance: 0 }, null],
   );
   const apart = records.get("apart")!;
   assert.deepEqual([apart.differing, apart.modes.every((m) => !m.same)], [4, true]);
