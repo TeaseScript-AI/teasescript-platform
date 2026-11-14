@@ -110,7 +110,7 @@ test("a join of a cut operand with a deeper literal answers as one with an open 
  */
 regressionCase(
   "a cycle that nests a value deeper on each turn compiles with no stop, alike in every order and sharing (#2764)",
-  { pr: 0, atBase: /nesting cycle .*: compiles with no diagnostic/ },
+  { pr: 2794, atBase: /nesting cycle .*: compiles with no diagnostic/ },
   () => {
     const part = PART;
     const shapes: Record<string, string> = {

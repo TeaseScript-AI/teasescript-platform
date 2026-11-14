@@ -411,7 +411,7 @@ test("lists of one set of choices in many orders site their host data without wa
  */
 regressionCase(
   "a join with a list that holds itself ends far below the allowance, accepted (#2763)",
-  { pr: 0, atBase: /self-holding join .*: the join check ends below the allowance/ },
+  { pr: 2794, atBase: /self-holding join .*: the join check ends below the allowance/ },
   () => {
     const shapes: Record<string, string> = {
       once: "let a = [[]]\na = a + [a]\nexit\n",
