@@ -163,11 +163,10 @@ export function syntaxRead(
  * where every store into the key or a key above it gives a value its syntax tells there: a literal (its own types
  * there, a `null` deciding nothing but admitting `null`), a copy of a place with a written type (that type there), a
  * typed parse or load by its default, or a host value (external, deciding nothing). Integers beside numbers decide
- * numbers (ADR 1.2); `null` where any other store, or only `null`s, reach it, or where
- * object literals with other properties or a store of another kind meet it. Asks no demand; made once per key and path
- * from each key's shape, which each store's syntax enters once. A path admission left undecided is one it decides
- * lazily; a decision that stopped at its allowance, at the key or above it, is undecided by the stop, and syntax
- * decides nothing there (every read of it has the reason `budget`).
+ * numbers (ADR 1.2); `null` where any other store, or only `null`s, reach it, or where object literals with other
+ * properties or a store of another kind meet it. A path admission left undecided is one it decides lazily; a decision
+ * that stopped at its allowance, at the key or above it, is undecided by the stop, and syntax decides nothing there
+ * (every read of it has the reason `budget`).
  */
 export function cheapDecided(
   walk: Consumers,
@@ -303,8 +302,8 @@ function levelBelow(
     frontier: CheapFrontier;
   }[] = [];
   // (each shape, written type and copied source once a level, a type and a source given by the earliest store that
-  // brings it, as the decider is: copies of one source through several stores or levels bring the same again, #1653;
-  // a source's frontier is linked, never copied into this one)
+  // brings it: copies of one source through several stores or levels bring the same again, #1653; a source's frontier
+  // is linked, never copied into this one)
   const entered = new Set<CheapShape>();
   const enter = (shape: CheapShape): void => {
     if (entered.has(shape)) return;
@@ -463,9 +462,8 @@ function joinProperties(a: number | null, b: number | null): number | null {
 const kindsByTerm = new WeakMap<Consumers, WeakMap<TypeTerm, readonly ItemTag[]>>();
 
 /**
- * A written type's kinds, each once in the order first written (`spelledBy` reads them so): made once a type and walk,
- * each member of its unions looked at then and charged, so a wide type read through many frontiers is looked at once
- * (#1653).
+ * A written type's kinds, each once in the order first written: made once a type and walk, each member of its unions
+ * looked at then and charged, so a wide type read through many frontiers is looked at once (#1653).
  */
 function termKinds(walk: Consumers, term: TypeTerm): readonly ItemTag[] {
   let terms = kindsByTerm.get(walk);
@@ -703,8 +701,6 @@ function cheapShapeOf(walk: Consumers, key: Key): CheapShape {
       }
       continue;
     }
-    // a typed parse or load: what its default's syntax gives (a written
-    // destination's type is the store's own); none without a default
     const fallback = typedFallback(walk, value);
     if (fallback !== null) {
       if (fallback === undefined) at.opaque = true;

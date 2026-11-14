@@ -12,8 +12,7 @@ export interface StoreOrigin {
 
 /**
  * Each proved store rule's origin, by the rule object the consumers made for its one warning: beside the published
- * diagnostic, never in it, so a record holds nothing its message does not show. A rule copied or rebuilt has none,
- * and its fix is the words.
+ * diagnostic, never in it, so a record holds nothing its message does not show. A rule copied or rebuilt has none.
  */
 const origins = new WeakMap<DiagnosticRule, StoreOrigin>();
 

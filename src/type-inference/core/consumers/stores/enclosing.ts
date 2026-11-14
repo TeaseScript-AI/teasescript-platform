@@ -17,10 +17,7 @@ import { storeWarning } from "../reports/warnings.js";
  * A decision that stopped stands for its obligations, the stores' above its key among them: a whole store, an
  * argument or an add into the same place at a path above the key, whose value holds it, and whose own path's decision
  * checks nothing below that path. Each such store owes its check when the script runs, at its own site with the stop's
- * context, as `requiredStores` resolves it. A store at or below a stopped key is that key's own (#1275,
- * `stoppedStores`, resolved alike), a sibling's path no store of the stop's. Found by one walk down each stopped path
- * that no other stop lies above (`outermost`), through the stored keys' trie (`Admission.stored`), each destination
- * resolved once a pass whatever number of stops lie below it.
+ * context. A store at or below a stopped key is that key's own (#1275), a sibling's path no store of the stop's.
  */
 export function enclosingStores(walk: Consumers): void {
   const { program, definitions, contract } = walk.pass;

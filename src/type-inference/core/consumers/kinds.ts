@@ -201,10 +201,8 @@ export function anyRecorded(walk: Consumers): boolean {
  * What a new variable keeping a warning's subject declares (#1352, the kept-value fix of every warning), a proof in
  * three values whose only source of "no union" is a settled read (#1660): the union a settled read showed (`let value:
  * <union> = …`); none (`[]`, the plain `let`) where a settled read showed one type, or no answer reaches the subject;
- * `null` (unproved, the fix in words, never a plain `let`) where every read on the path stopped. The walk's record
- * first (a read after the walk alone answers nothing where a finishing walk ran); where it is `stopped`, the read made
- * again at publication, the proof only where it settles (a local demand stop leaves the facts asked). Asked only where
- * the subject's value is found.
+ * `null` (unproved, the fix in words, never a plain `let`) where every read on the path stopped. Asked only where the
+ * subject's value is found.
  */
 export function keptTypes(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
   const recorded = ANSWERED.get(walk)?.get(value);

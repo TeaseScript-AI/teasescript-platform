@@ -191,7 +191,6 @@ function* consumerTakesTask(walk: Consumers, consumer: Consumption): CompileTask
     case "operand": {
       const c = consumer.operation;
       const { family } = c.contract;
-      // (its result's own site: an interpolation's is its text's, not the interpolated value's)
       const outer = yield* compileChild(expectedTask(walk, program.place(c.result).site ?? c.site));
       if (family === "interpolation") return computed(SHOWN_KINDS, "whole", outer);
       if (family === "logic") return computed(["boolean"], "operand", outer);
@@ -199,8 +198,6 @@ function* consumerTakesTask(walk: Consumers, consumer: Consumption): CompileTask
       if (family === "range") return computed(["integer"], "operand", outer);
       const operator = operatorOf(c);
       const node = program.exprAt(c.site);
-      // (an operation the table does not hold, or whose operands have no flow point, as a compound assignment's have
-      // not: nothing proved of what it takes)
       if (operator === null || node === null) return computed([], "operand", outer);
       const operands = c.arguments.map((argument) => kindsOf(walk, argument, node));
       const rows = OPERATOR_ROWS.filter((row) => row.operator === operator);

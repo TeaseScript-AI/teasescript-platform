@@ -15,17 +15,9 @@ import { placeText, storeRoot, storeSteps, storeWarning } from "../reports/warni
 // The fresh pass: the stores' obligations where admission had not settled, and the marks it leaves.
 
 /**
- * The stores' obligations in the finishing path where admission had not settled, reading no decision (a later
- * admission pass may admit a store this one rejected, so its decisions may be narrower than the settled ones). It runs
- * every derivation of admission's that creates an obligation (`OBLIGATION_SITES`, with each one's exits), reading what
- * the stop retained, in this order: every store and
- * transfer into a place with no written type at its path marked at its site, its type undecided, a mark standing for
- * its records within its value; ADR 0021 1.3's mixed literal elements (`literalElements`), a literal whose element
- * needs a decision marked through its holders or itself (`markHolder`), and a list join's mixed operands
- * (`joinElements`, #1272) where its operands' own kinds decide them, a join with an operand read through a decision
- * marked as a literal is (`markValue`); the stores against a written type at their path (`admittedStores`); the ingress
- * stores' boundaries against written types (`publish`); the typed calls no store takes in (`ingressStores`). No syntax
- * decision is made here: admission decides an inferred place from its contract, which a fresh pass has not solved.
+ * The stores' obligations in the finishing path where admission had not settled, reading no decision (a later admission
+ * pass may admit a store this one rejected, so its decisions may be narrower than the settled ones). No syntax decision
+ * is made here: admission decides an inferred place from its contract, which a fresh pass has not solved.
  */
 export function freshStores(walk: Consumers): void {
   const { program, definitions } = walk.pass;
@@ -66,7 +58,7 @@ export function freshStores(walk: Consumers): void {
 
 /**
  * Whether a literal's element stands (ADR 0021 1.3): no pass's admission rejected it, nor this fresh pass's mixed
- * elements whole, as the unstopped values read it.
+ * elements whole.
  */
 export function stands(walk: Consumers, d: Definition): boolean {
   if (!walk.pass.lists.live(d)) return false;

@@ -60,8 +60,6 @@ export function methodReceiver(
   }
   const kinds = receiverKinds(walk, receiver, node);
   const label = shownLabel(walk, keyLabel(walk, receiver));
-  // the receiver's external data brings its boundary checks, whichever member check follows; a domain's those the
-  // member check's warning owns
   const send = walk.boundariesBefore(kinds, () => {
     const text = label();
     return obligation(
@@ -90,14 +88,10 @@ export function methodReceiver(
 }
 
 /**
- * A member access's receiver kinds at the whole access's span. An error when every kind is definite and null, or
- * definite and without the member; else one warning and member obligation per offending kind: a possible null, each
- * kind without the member, each reference, an unknown receiver (its `on` names the kinds that have the member), and the
- * `extra` ones (an object without the property, an object's own selection). An `extra` one is the property's own answer
- * at the access and explains its unknown kind, which an unknown receiver is too: that receiver owes no second warning
- * there, and its own absence is its own access's (#1469). Gives which receiver items a stop's discharge left out with
- * their owners (`leftOutBy`, #1448): the receiver's unknown items are owned by its one unknown warning, or by the
- * `extra` one that stands for it.
+ * A member access's receiver kinds at the whole access's span; `extra` are its further offending items (an object
+ * without the property, an object's own selection). An `extra` one is the property's own answer at the access and
+ * explains its unknown kind, which an unknown receiver is too: that receiver owes no second warning there, and its own
+ * absence is its own access's (#1469).
  */
 export function memberChecks(
   walk: Consumers,
@@ -278,7 +272,6 @@ export function receivers(walk: Consumers): void {
             labelRoot(walk.pass.contract, d.place),
           ),
     );
-    // the receiver's external data brings its boundary checks, whichever member check follows
     for (const item of receiver)
       walk.admission.boundaryFor(item, () => {
         const text = label();

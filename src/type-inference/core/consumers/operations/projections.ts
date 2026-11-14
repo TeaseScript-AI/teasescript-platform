@@ -41,8 +41,6 @@ export function projection(
 ): void {
   const { contract } = walk.pass;
   if (c.step === "iteration" || c.step === "entry") {
-    // an operand of the loop, at the iterable, against the domain it tests, which the runtime's
-    // own check of the loop's source applies
     const domain = c.step === "entry" ? DICT : ITERABLE;
     consume(
       walk,
@@ -99,8 +97,6 @@ export function projection(
     )
   )
     selection(walk, c.owner, node, c.site, `.${property}`);
-  // the receiver's external data brings its boundary checks, whichever member check follows; a domain's those the
-  // member check's warning owns
   const send = walk.boundariesBefore(owners, () => {
     const text = label();
     return obligation(

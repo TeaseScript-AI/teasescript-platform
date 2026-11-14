@@ -75,14 +75,13 @@ export function warning(
 }
 
 /**
- * The route rule's one required-check decision (#1073; V30 §13, "a use that needs a check has three outcomes"), asked
- * of every warning before it is made, after the quiet path and the exact answers: a possible `null` owing its
- * null-check, or a member of the read's written union that the use does not take (#1073: the written domain proves it),
- * brought to the use by a route without a check (`NarrowingRoutes.required`), is a compile error naming the route's
- * writer (or the block it starts in) and the missing tests (`requiredCheck`) in place of that warning and its
- * obligation; every other warning and check at the site stays. No route proved, the warning stays: a check on every
- * route that the compiler cannot keep, a stopped or an external value, a member a receiver may lack. Whether the error
- * was made.
+ * The route rule's one required-check decision (#1073; V30 §13, "a use that needs a check has three outcomes"): a
+ * possible `null` owing its null-check, or a member of the read's written union that the use does not take (#1073: the
+ * written domain proves it), brought to the use by a route without a check (`NarrowingRoutes.required`), is a compile
+ * error naming the route's writer (or the block it starts in) and the missing tests (`requiredCheck`) in place of that
+ * warning and its obligation; every other warning and check at the site stays. No route proved, the warning stays: a
+ * check on every route that the compiler cannot keep, a stopped or an external value, a member a receiver may lack.
+ * Whether the error was made.
  */
 function required(
   walk: Consumers,
@@ -114,7 +113,6 @@ function required(
   // (a written union's other kinds the use does not take, null among them: each certifies the route, #1073)
   let others: readonly ItemTag[] = [];
   if (item.tag === "null") {
-    // (a null owes its null-check, or at a store its destination's check: a store's or a fallback's)
     if (
       obligation.kind !== "null-check" &&
       !(kind === "written-target" && obligation.kind === "copy-type")
@@ -535,10 +533,9 @@ function loadOrigin(
 export type Owner = readonly [made: boolean, items: () => readonly Item[]];
 
 /**
- * Which items a stop's discharge left out with their owners (`withoutRecords`): what a domain's item's boundary requests
- * ask (#1448). An item is left out when its owner was: each item has one owner per request. Several live owners stand
- * across consumers, each sending its own request: a caller that would declare overlapping owners needs every one of
- * them left out. Each owner looked at once and a left-out owner's items, charged.
+ * Which items a stop's discharge left out with their owners (#1448). An item is left out when its owner was: each item
+ * has one owner per request. Several live owners stand across consumers, each sending its own request: a caller that
+ * would declare overlapping owners needs every one of them left out.
  */
 export function leftOutBy(walk: Consumers, owners: readonly Owner[]): (item: Item) => boolean {
   if (owners.length === 0) return () => false;
@@ -654,8 +651,7 @@ export function storeRoot(walk: Consumers, root: PlaceId): StoreRoot | null {
 }
 
 /**
- * The names of the properties a value's or a key's objects have, in the order the search finds them: once per
- * place a value copies, so every read of one place asks once.
+ * The names of the properties a value's or a key's objects have, in the order the search finds them.
  */
 export function propertiesOf(
   walk: Consumers,

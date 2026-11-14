@@ -18,8 +18,7 @@ import { placeText, storeRoot, storeSteps } from "../reports/warnings.js";
 /**
  * Where a literal lands: the place and the key path that a whole store, an add (an added list as the collection
  * itself, an added element one step below), or the literals around it (a collection's cell as `element`, an object's
- * property by name) put it at; `null` where nothing stores it. Each literal is placed once, from the nearest literal
- * above it already placed.
+ * property by name) put it at; `null` where nothing stores it.
  */
 function landingOf(walk: Consumers, literal: PlaceId): Landing | null {
   const { program, definitions } = walk.pass;
@@ -421,12 +420,9 @@ function mixedChoice(
 }
 
 /**
- * The mixed choices' check (#1352): `mixedChoice` of every `askChoice` outside the units past the nesting limit, in the
- * consumers' order, each read with its choice's demand allowance and each its own unit (a stop takes back the running
- * choice's findings alone, #1660); run after every other
- * consumer's read and the publication, so no read of the pass that can stop at its demand allowance comes after its
- * reads.
- * A choice past the nesting limit has no published warning that reads its record (TSV076 defers them).
+ * The mixed choices' check (#1352), each choice its own unit (a stop takes back the running choice's findings alone,
+ * #1660); run after every other consumer's read and the publication, so no read of the pass that can stop at its
+ * demand allowance comes after its reads.
  */
 export function mixedChoices(walk: Consumers): void {
   const { program } = walk.pass;

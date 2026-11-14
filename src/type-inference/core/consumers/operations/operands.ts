@@ -15,17 +15,15 @@ import { TEXT } from "../kinds.js";
 import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel, writtenNumber } from "../names.js";
 import { obligation, warnGroups, warning } from "../reports/warnings.js";
 
-// An operand's items against the kinds its use takes (`consume`: conditions and logical operands, shown values, dict
-// keys, built-in arguments, a `for`'s iterable), a whole-number use (`integerOnly`, `writtenNumberUse`), an index or a
-// key by its receiver (`indexUse`).
+// An operand's items against the kinds its use takes.
 
 const INTEGER: ReadonlySet<ItemTag> = new Set(["integer"]);
 
 /**
- * An operand's items against the kinds that fit: all definite and none fits is an error; an item that does not fit,
- * or an unmodelled unknown, a warning with its obligation; the quiet path first. One obligation per offending kind: a
- * possible null owes its null-check, any other offending item the operand's own obligation. `soft`: never an error
- * (true), or the possible receiver's item whose key obligation is owed whether or not the key fits (`indexUse`).
+ * An operand's items against the kinds that fit: all definite and none fits is an error; an item that does not fit, or
+ * an unmodelled unknown, a warning with its obligation. One obligation per offending kind: a possible null owes its
+ * null-check, any other offending item the operand's own obligation. `soft`: never an error (true), or the possible
+ * receiver's item whose key obligation is owed whether or not the key fits (`indexUse`).
  */
 export function consume(
   walk: Consumers,
@@ -107,8 +105,6 @@ export function consume(
     (rule.rule === "argument" || rule.rule === "key" || rule.rule === "iterable")
       ? knownMisfits
       : offending;
-  // the operand's external data brings its boundary checks, a domain's those its group's warning owns (a soft owner's
-  // one warning, every offending item's)
   walk.boundariesAt(
     items,
     () => {
@@ -226,8 +222,6 @@ export function integerOnly(
     );
   const nullItem = offending.find((item) => item.tag === "null");
   if (nullItem !== undefined) owe(nullItem, "null-check", "not null");
-  // the count's or index's external data brings its boundary checks, a domain's those its group's warning owns (a soft
-  // owner's one warning, every offending item's)
   walk.boundariesAt(
     items,
     () =>

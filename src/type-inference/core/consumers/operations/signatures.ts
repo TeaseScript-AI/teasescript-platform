@@ -38,8 +38,8 @@ const TEXT_TAKES: Readonly<Record<TextParameterKind, Takes | null>> = {
 };
 
 /**
- * What a list's or set's method's parameter takes, by its kind (`ListParameter`): any value (`value`), and an index or
- * a count, whose whole number the whole-number use checks (`integerOnly`), are no argument check's.
+ * What a list's or set's method's parameter takes, by its kind (`ListParameter`): any value (`value`), an index and a
+ * count are no argument check's.
  */
 const LIST_TAKES: Readonly<Record<ListParameterKind, Takes | null>> = {
   value: null,
@@ -80,7 +80,6 @@ function takes(kind: ValueKind, name: string, position: number): Takes | null | 
     const parameter = method.parameters[position];
     return parameter === undefined ? undefined : LIST_TAKES[parameter.kind];
   }
-  // (a dict's key is the dict-key check's, `operations.ts`)
   if (kind === "dict")
     return dictMethod(name)?.parameters[position] === undefined ? undefined : null;
   return undefined;
@@ -96,11 +95,7 @@ function parameterName(kind: ValueKind, name: string, position: number): string 
 /**
  * Each argument of a method against what its contract takes on every kind its receiver may be, an unknown receiver
  * any kind that has the method (only text has `startsWith`): an argument is checked where every such kind takes only
- * some kinds; one that a kind takes whatever it is, or that a reference's runtime members take, is quiet. An argument
- * every such kind takes only as a whole number is first held to the rule for a place written `number`
- * (`writtenNumberUse`), which may make it an error even where all its items fit; otherwise `consume` decides: all fit,
- * quiet; none fits and all definite, an error at the argument; else a warning whose check is the method's own check
- * of its argument when it runs.
+ * some kinds; one that a kind takes whatever it is, or that a reference's runtime members take, is quiet.
  */
 export function methodArguments(
   walk: Consumers,
@@ -172,11 +167,8 @@ function families(tags: readonly ItemTag[]): ItemTag[] {
 }
 
 /**
- * The elements a list's `join` or `sort` reads, at the call: `join` shows each (TSV042), `sort` orders
- * them, all of one ordered type. The ordered predicate over the elements the receiver's lists may hold: all fit, quiet;
- * none fits, or two ordered types, and all definite, an error; else a warning whose check is the method's own check of
- * its elements when it runs. A receiver that may be no list is the member check's (`methodReceiver`), and one the core
- * cannot know reads no elements here.
+ * The elements a list's `join` or `sort` reads, at the call: `join` shows each (TSV042), `sort` orders them, all of one
+ * ordered type.
  */
 export function methodElements(
   walk: Consumers,

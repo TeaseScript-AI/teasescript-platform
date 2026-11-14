@@ -108,11 +108,9 @@ export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decis
 }
 
 /**
- * The places and paths admission decides by a written type: the roots `Admission.groups` starts from (every key with a
- * definition or a candidate: a store, add, argument or return, a multi-site or dead call's argument among them, which
- * decides nothing but is checked against its destination, ADR 0021 1.5), the written ones, each at every path of its
- * written type, which is as large as the source that writes it. The fresh pass's store checks decide these alone
- * (`groups` would group every key and walk every store's landings again, unbounded after a stop).
+ * The places and paths admission decides by a written type, each at every path of its written type, which is as large
+ * as the source that writes it. The fresh pass's store checks decide these alone (`groups` would group every key and
+ * walk every store's landings again, unbounded after a stop).
  */
 function writtenGroups(
   walk: Consumers,
@@ -180,18 +178,9 @@ function declaredRead(walk: Consumers): BindingRead {
 }
 
 /**
- * Stores and arguments against their place's admitted type, written or decided by admission: every candidate store
- * admission names is checked against the decided type, the store's value at its node. A definite contribution that
- * does not fit, where no kind of the value fits, is an error at the innermost offending expression and the store is
- * rejected, so the next admission pass leaves it out; a store of a rejection cycle a warning; a definite element of a
- * collection literal none of whose kinds fits a written element type an error at that element; a value none of whose
- * kinds fits a written type or one decided earlier in the source an error even when every item is possible (ADR 1.7),
- * never under a guard; otherwise one `copy-type` per offending kind, whatever its certainty, a copy made before its
- * decider with context `later`, and a `null-check` for a possible null. The store's external data brings its boundary
- * checks at its ingress. `writtenOnly`: the places whose written type reaches the path alone, the finishing path's
- * store check before admission settled (one derivation, the written type final at every stop). `completed`: one
- * decision a receiving completion made (#1526), checked as admission makes it there, so the completion hears the
- * rejections it makes (`Admission.hearingRejections`).
+ * Stores and arguments against their place's admitted type, written or decided by admission. `writtenOnly`: the places
+ * whose written type reaches the path alone, the finishing path's store check before admission settled (one derivation,
+ * the written type final at every stop). `completed`: one decision a receiving completion made (#1526).
  */
 export function admittedStores(
   walk: Consumers,
@@ -244,9 +233,6 @@ export function admittedStores(
       if (written && !decision.own) readsBindings(made, binding);
       return made;
     };
-    // a place published with its contract's kinds owes the check of external data another store brought, at each
-    // candidate carrying it, against those kinds; data a store brings inline has its boundary there, an opaque value
-    // its member obligation at its access
     if (decision.published) {
       for (const candidate of decision.candidates)
         // (its members by reference, read one by one only while each owes: no per-path member list)
@@ -457,8 +443,6 @@ export function admittedStores(
           rule(),
           items.filter(fitting),
         );
-      // the boundary check at the ingress store (an addAll's at its elements' destination); and each external item's,
-      // so named data a typed default holds keeps its own boundary
       if (
         d.value !== undefined &&
         definitions.ingress.has(d.value) &&

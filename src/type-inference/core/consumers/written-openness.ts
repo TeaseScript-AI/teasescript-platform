@@ -27,7 +27,7 @@ function partsOfTerm(term: TypeTerm): readonly TypeTerm[] {
 /**
  * A written type node's openness, made once per node from its parts' (#1487): `open` is admission's `unrestricted`
  * (`typeTags`' `unknown`: a part the core leaves open; a union's where one of its members is), `below` also where any
- * part is, or an `object`'s properties are unwritten. An explicit stack, parts first; each node charged once.
+ * part is, or an `object`'s properties are unwritten.
  */
 export function openness(work: WorkLedger, term: TypeTerm): Openness {
   const known = opennessByTerm.get(term);

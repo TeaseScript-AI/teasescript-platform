@@ -64,8 +64,7 @@ export function ownSpan(walk: Consumers, value: PlaceId, fallback: SourceSite): 
 /**
  * An obligation's target as a label's recipe (`contract/labels.ts`): the key path a value reads in the
  * contract's vocabulary (`box.n`, every selection or index `xs.element`, a dict's `d.entry`, a parameter `use.data`, a
- * result `f.result`), else its text. One recipe per value, kept, each one step below its owner's with the step spelled
- * here, as `Admission.labelOf` spells it; its text is made only where a check or a diagnostic shows it (`shownLabel`).
+ * result `f.result`), else its text. One recipe per value, kept, each one step below its owner's.
  */
 export function keyLabel(walk: Consumers, value: PlaceId): Label {
   const { program, contract } = walk.pass;

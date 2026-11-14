@@ -220,11 +220,9 @@ function frontiersOf(walk: Consumers): HostFrontiers {
 }
 
 /**
- * Enters values standing at a frontier's path: each with the carriers' operands and own contributions at the same path
- * (`expand`'s parts without a step), a host read's ingress its host data, a copy as a copy task; those with cells a
- * step enters kept for the steps. In a value's own frontier (`own`) an operand no place holds is linked as a copy at its
- * strip, its own frontier made once, on every path that enters it: the value's root or a literal's cell (#1559: nested
- * defaults entered again below each literal cell would make k levels k² tasks).
+ * Enters values standing at a frontier's path. In a value's own frontier (`own`) an operand no place holds gets its own
+ * frontier once, on every path that enters it (#1559: nested defaults entered again below each literal cell would make
+ * k levels k² tasks).
  */
 function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[]): void {
   const { program } = walk.pass;
@@ -509,10 +507,9 @@ function eachCopy(walk: Consumers, at: HostFrontier, visit: (copy: HostFrontier)
 }
 
 /**
- * A copy standing above a frontier, stepped down to its path: the `index`th of its owner's own copies and then of those
- * above its owner, each one step below the owner's. Each frontier's entry is made once, from its owner's, so the reads
- * along one path share every step of the climb and each read's is bounded by the copies it meets (#1559: a copy at a
- * deep path's root, climbed and replayed again for each read below it, would make k reads k² steps).
+ * A copy standing above a frontier, stepped down to its path. Each frontier's entry is made once, from its owner's, so
+ * the reads along one path share every step of the climb (#1559: a copy at a deep path's root, climbed and replayed
+ * again for each read below it, would make k reads k² steps).
  */
 function inheritedAt(walk: Consumers, at: HostFrontier, index: number): HostFrontier {
   const { program } = walk.pass;

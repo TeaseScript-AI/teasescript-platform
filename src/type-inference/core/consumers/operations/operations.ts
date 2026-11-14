@@ -25,13 +25,7 @@ import { projection, selection } from "./projections.js";
 import { methodReceiver } from "./receivers.js";
 import { leftOutBy, obligation, shownProperty, warning, type Owner } from "../reports/warnings.js";
 
-/**
- * The operation and projection consumers, in the walk's first stage: whole-number positions and counts, `get`'s and
- * dict methods' keys, logical operands, operator operands, method receivers and member reads (each with ADR 1.5's null
- * default), element selections, shown values, built-in methods' arguments and elements, a choice's button values, what
- * `toJson` writes, a `for`'s iterable, and the defaults of `get`, `otherwise`, typed loads, parses, conversions and the
- * built-ins that select one.
- */
+/** The operation and projection consumers, in the walk's first stage. */
 export function operations(walk: Consumers): void {
   const { program } = walk.pass;
   const { contract } = walk.pass;
@@ -162,8 +156,6 @@ function operation(
   // TSV029: what a choice's buttons return (TSV044's mixed answer is its own last stage, `mixedChoices`)
   if (family === "interaction" && c.evidence?.kind === "choice") choiceValues(walk, c, node);
   if (c.receiver !== null && family !== "operator") {
-    // a position or a count is a whole number, where the receiver may have the method (any other's is its member
-    // check's)
     if (
       (name === "removeAt" || name === "take" || name === "takeLast") &&
       c.arguments.length > 0 &&
@@ -180,9 +172,6 @@ function operation(
         name,
       );
     if (c.arguments.length > 0 && dictMethod(name)?.parameters[0]?.name === "key") {
-      // a dict method's key is text (`contains`, `remove`; `get`'s is its own constraint's); where the receiver may
-      // also be a list, a set or text (or unknown), whose method takes another value, only a check, as an index use
-      // owes one
       const kinds = kindsOf(walk, c.receiver, node);
       if (kinds.some((item) => item.tag === "dict"))
         consume(
@@ -200,7 +189,6 @@ function operation(
           kinds.some((item) => item.tag !== "dict" && item.tag !== "null"),
         );
     }
-    // a removal of the first or last element is an element selection
     if (name === "removeFirst" || name === "removeLast")
       selection(walk, c.receiver, node, c.site, `.${name}()`);
     methodReceiver(walk, c.site, node, c.receiver, name);
@@ -305,8 +293,6 @@ function operatorUse(
   const matches = (row: (typeof rows)[number], index: number, tag: ItemTag): boolean =>
     row.operands[index] === tag;
   const domain = (index: number): RequiredKind[] => operandDomain(rows, operands, index);
-  // an operand's rule names the kinds its place takes; the operation's, none
-  // an operand's diagnostic sits on its own span, its `operand` obligation names its text
   const operandSite = (index: number): SourceSite => ownSpan(walk, c.arguments[index]!, c.site);
   const rule = (
     index: number | null,
@@ -333,8 +319,6 @@ function operatorUse(
     return operands[index]!.filter((item) => kinds.some((kind) => kind === item.tag));
   };
   const operandText = (index: number): string => program.textAt(operandSite(index));
-  // external data at an operand is validated where it came in (host data at the operand); a domain's, what the
-  // operand's own warning owns, once it was asked for
   const sends = operands.map((items, index) =>
     walk.boundariesBefore(
       items,
@@ -415,11 +399,6 @@ function operatorUse(
       rule(index, pair),
       taken(index),
     );
-  // the kind obligations (one per offending kind of an operand; every operand that may be null owes its own
-  // null-check below). In each failing combination without a null, an operand whose kind no
-  // row takes at its place, or else the one operand whose kind no row takes beside the other operands' kinds, owes
-  // the obligation at its span; where no single operand offends (the pair has no row; a value predicate of the row
-  // decides) the operation owes it once, at its span, its text the target. An unknown operand owes its own
   const fitsBeside = (index: number, tag: ItemTag): boolean =>
     rows.some(
       (row) =>
