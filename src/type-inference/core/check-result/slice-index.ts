@@ -19,6 +19,7 @@ import type {
   FunctionDeclaration,
   FunctionParameter,
   TypeAnnotation,
+  GlobalStatement,
 } from "../../../ast.js";
 import { authorCallee, authorFunctions } from "../slice-syntax.js";
 import { type SourceSpan } from "../../../source.js";
@@ -52,11 +53,11 @@ export function isTransfer(store: Store): store is Transfer {
 }
 
 /**
- * What a store's check reads of the declaration of the place it writes: its kind (a `let`, a function's parameter or its
- * result), its name and its written type.
+ * What a store's check reads of the declaration of the place it writes: its kind (a `let`, a `global`, a function's
+ * parameter or its result), its name and its written type.
  */
 export interface Declaration {
-  readonly kind: "letStatement" | "functionParameter" | "functionResult";
+  readonly kind: "letStatement" | "globalStatement" | "functionParameter" | "functionResult";
   readonly name: Identifier;
   readonly typeAnnotation: TypeAnnotation | null;
 }
@@ -598,6 +599,19 @@ const DECLARED: readonly ((
     return fn === undefined || target.kind !== "identifier"
       ? undefined
       : fn.parameters.find((parameter) => parameter.name.name === target.name);
+  },
+  // a `global`, found by the name the target's root reads: a global's name is unique in the project and nothing shadows
+  // it (V30, "Global variables")
+  (index, _lets, store) => {
+    let root: Expression = store.target;
+    while (root.kind === "propertyAccessExpression" || root.kind === "indexExpression")
+      root = root.object;
+    if (root.kind !== "identifier") return undefined;
+    const { name } = root;
+    return index.statements.find(
+      (statement): statement is GlobalStatement =>
+        statement.kind === "globalStatement" && statement.name.name === name,
+    );
   },
 ];
 
