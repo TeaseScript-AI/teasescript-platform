@@ -394,7 +394,7 @@ test("a parse or a load stored by a function reads its own scope's written type,
 const ORDER_MARKERS =
   "function mark(x: integer): integer {\n  say x\n  return x\n}\n" +
   'function pick(x: integer): integer | string {\n  say x\n  if hostValue == null {\n    return "no"\n  }\n  return x\n}\n';
-const PARAMETERS = ["a", "b", "c"] as const;
+const PARAMETERS: readonly string[] = ["a", "b", "c"];
 const orders = (names: readonly string[]): string[][] =>
   names.length === 0
     ? [[]]
