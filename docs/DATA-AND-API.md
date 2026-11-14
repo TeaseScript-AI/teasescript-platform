@@ -2,7 +2,7 @@
 
 Laravel owns accounts, forum, catalog, publishing, moderation, persistent state, media metadata, and public platform APIs. PostgreSQL is the primary database.
 
-The player receives only selected validated data across the parent/player and server boundaries. Main-site cookies are host-only and unavailable to the player iframe. Package code may not access forum state, internal site data, or unrestricted external network endpoints.
+The Playroom receives only selected validated data across the parent/Playroom and server boundaries. Main-site cookies are host-only and unavailable to the Playroom iframe. Package code may not access forum state, internal site data, or unrestricted external network endpoints.
 
 ## Current TypeScript POC surfaces
 
@@ -48,7 +48,7 @@ source
     -> executeInstruction, stepToEvent, or run
 ```
 
-The engine-owned session, which keeps the plan and the canonical snapshot itself, as the Player runs it
+The engine-owned session, which keeps the plan and the canonical snapshot itself, as the Playroom runs it
 ([Runtime sessions](RUNTIME.md#runtime-sessions)):
 
 ```text
@@ -72,7 +72,7 @@ See [`docs/RUNTIME.md`](RUNTIME.md) for current execution behavior, structured e
 
 ## Accepted pending-action boundary
 
-ADR 0016 defines one canonical runtime-owned contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities.
+ADR 0016 defines one canonical runtime-owned contract for waits, timers, choices, input, buttons, media completion, and future typed Playroom capabilities.
 
 The runtime owns:
 
@@ -87,7 +87,7 @@ The runtime owns:
 - state transitions and idempotency;
 - snapshot, checkpoint, time-observation, and completion validation.
 
-The player/controller owns:
+The Playroom/controller owns:
 
 - Standard UI rendering and reconstruction;
 - browser capability invocation;
@@ -97,7 +97,7 @@ The player/controller owns:
 - checkpoint transport and save acknowledgement;
 - browser-resource cleanup requested by canonical runtime transitions.
 
-The future host/player protocol must expose typed operations equivalent to observing time and completing, cancelling, or reporting a capability outcome for one action ID. The host supplies observations but may not directly mutate `currentSessionTimeMs`, arbitrary snapshot fields, or continuation state.
+The future host/Playroom protocol must expose typed operations equivalent to observing time and completing, cancelling, or reporting a capability outcome for one action ID. The host supplies observations but may not directly mutate `currentSessionTimeMs`, arbitrary snapshot fields, or continuation state.
 
 Time observation is one atomic runtime transition: validate the supplied coordinate, persist `max(observedSessionTimeMs, suppliedNow)` as the observed time, then, unless the session has failed, settle due work in order while `currentSessionTimeMs` advances toward it; see [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time).
 
@@ -121,11 +121,11 @@ and ownership model is in [`SECURITY.md`](SECURITY.md).
 Follow-ups are recorded in
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
-## Player session persistence modes
+## Playroom session persistence modes
 
 Browser-local persistence is a permanent product capability, not a disposable POC convenience. An accountless player
 may keep supported session/runtime state locally. A signed-in player may also choose local-only storage for privacy;
-signing in does not by itself require sensitive Player/session state to be uploaded. Server-backed persistence remains
+signing in does not by itself require sensitive Playroom/session state to be uploaded. Server-backed persistence remains
 the complementary mode for capabilities such as cross-device continuation.
 
 Both modes use the same canonical engine/checkpoint model. Storage location does not create a second runtime or save
@@ -134,14 +134,14 @@ the exact records, encryption, retention, synchronization, conflict, and migrati
 
 ### Script storage in the browser
 
-The Player persists TeaseScript `save`/`load`/`delete` values ([§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys))
+The Playroom persists TeaseScript `save`/`load`/`delete` values ([§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys))
 through a host-owned, asynchronous `ScriptStorageProvider` for one storage scope (`player/persistence/script-storage.ts`); the
 runtime boundary is [Runtime script storage](RUNTIME.md#script-storage). The host chooses a stable, opaque scope per
-script and player. Before each Start the Player loads the scope; during the session it persists every pending write
+script and player. Before each Start the Playroom loads the scope; during the session it persists every pending write
 through the provider and then reports it to the runtime, which keeps the previous value when the write failed. When
 loading fails, for example because the browser denies storage, the session plays session-local and nothing is kept for
 a later run. In the [debug room](DEBUGGER.md#debug-room) the session uses the debug room's own saved values instead,
-which an export never takes. Script storage is separate from the session the Player keeps for a reload
+which an export never takes. Script storage is separate from the session the Playroom keeps for a reload
 ([Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation)) and from durable checkpoint
 persistence (#469).
 
@@ -161,7 +161,7 @@ layer such as durable captured media wraps a provider instead and stores the med
 reference before persisting them. Clearing or replacing a scope affects only that script's stored values, never a
 running session's own view. Debug's storage editor writes one key through the same provider and captured-media layer,
 as a script `save` does; only once that write succeeded does it change a running session's view
-([DEBUGGER.md](DEBUGGER.md#player-debug)). Adopting a state Debug's rewind restored replaces the scope's values with
+([DEBUGGER.md](DEBUGGER.md#playroom-debug)). Adopting a state Debug's rewind restored replaces the scope's values with
 that state's view through the same provider and layer; the rewind history itself is temporary diagnostic data in an
 IndexedDB database of its own, deleted with the history ([DEBUGGER.md](DEBUGGER.md#rewind)). Storage quotas are not enforced yet; all writes pass through the provider, so quota policy
 can be added there.
@@ -169,8 +169,8 @@ can be added there.
 ### Saved-data transfer
 
 A player moves the saved data of every script this browser has played, or of the scripts they tick, with its saved
-photos, by hand and offline to another browser or device through Player Settings
-([Player UI](ui/PLAYER-UI.md#player-settings)); `player/persistence/storage-transfer.ts` owns the format and `player/persistence/saved-data.ts`
+photos, by hand and offline to another browser or device through Playroom Settings
+([Playroom UI](ui/PLAYER-UI.md#playroom-settings)); `player/persistence/storage-transfer.ts` owns the format and `player/persistence/saved-data.ts`
 lists and opens the scopes. It is not a session checkpoint and carries no session position, timers, transcript, or RNG
 state; a session moves with the [session transfer](#session-transfer). The document is UTF-8 JSON with exactly these fields:
 
@@ -182,7 +182,7 @@ state; a session moves with the [session transfer](#session-transfer). The docum
 ```
 
 Each script's `entries` are its stored values in their `SerializableRuntimeValue` representation, one per line; its
-`name` is the title of its `main.tease` header when a Player showed it, remembered in browser storage, or `null`; its
+`name` is the title of its `main.tease` header when a Playroom showed it, remembered in browser storage, or `null`; its
 `photos` are the references in its values that resolved to its own stored photos. `images` holds the original bytes of
 each such photo, once per reference, also when scripts share it. Any other reference, including one naming another
 script's photo, stays ordinary text and is only counted. An export reads each scope
@@ -206,8 +206,8 @@ for `askImage(...)`: its type is read from its bytes and the browser must decode
 session of the shown script ends when that script is ticked. For each script, each of its `photos` becomes new media of its
 scope with a fresh reference, and every value that held that exported reference, as text, list or set item, object
 property name or value, or dict key or value, gets the new one. The values then replace the scope's saved data all at
-once, with key order kept; the photos are stored first, under the scope's live lock as a Player of it holds, so a
-failure leaves that scope's previous data. Before its values are replaced, a script loses the session the Player kept
+once, with key order kept; the photos are stored first, under the scope's live lock as a Playroom of it holds, so a
+failure leaves that scope's previous data. Before its values are replaced, a script loses the session the Playroom kept
 for it ([Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation)), so its next session
 starts with the imported values; when that session cannot be discarded, the script keeps its previous data. Scripts
 replace one after another, and a failure of one
@@ -217,7 +217,7 @@ later.
 ### Session transfer
 
 A player moves the session they play by hand and offline to another browser or device, where Continue goes on with it
-as after a reload, through Player Settings ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/persistence/session-transfer.ts`
+as after a reload, through Playroom Settings ([Playroom UI](ui/PLAYER-UI.md#playroom-settings)); `player/persistence/session-transfer.ts`
 owns the format, and the engine host reads it (`player/persistence/session-transfer-read.ts`). The session travels as its canonical checkpoint, which the runtime exports and restores
 (`createPlayerRuntimeRestorePoint` and `restorePlayerRuntimeSession`), not in a second save format. The document is
 UTF-8 JSON with exactly these fields:
@@ -246,21 +246,21 @@ Reading treats the data as external input: the decoding of saved data, the exact
 kept session's are (`interpreterEventProblem`, increasing sequence), the storage-entry validation, each medium's
 reference shape and `byteLength`, a medium's kind agreeing with its type and valid dimensions or duration, as for a
 stored record, and each medium being used detect damage; the checkpoint is then restored as the runtime restores
-checkpoint JSON, which validates its plan and snapshot. Only the Player of the script of `scope` that keeps sessions
+checkpoint JSON, which validates its plan and snapshot. Only the Playroom of the script of `scope` that keeps sessions
 takes it, outside the debug room, and only when the checkpoint's plan is the script's plan, as a kept session's must
 be. Another script, another checkpoint revision, another plan, a damaged state, a session that has ended, and a medium
 whose reference this browser already holds with other contents are refused with that reason before anything changes.
 
 After the player confirms, a session of the script in progress ends. Each medium is held under its own reference, so
 nothing in the checkpoint changes. The values then replace the script's saved data at once, their media stored first,
-as a save stores them, and the session replaces the one the Player keeps for the script, with the media only it uses,
+as a save stores them, and the session replaces the one the Playroom keeps for the script, with the media only it uses,
 so the start page and a later reload offer Continue ([Session start and user
 activation](ui/PLAYER-UI.md#session-start-and-user-activation)). The session is kept only with every medium it uses.
 When the values cannot be saved, nothing is imported. When the session kept before cannot be replaced, the values stay
 imported and Continue goes on with that earlier session; when the imported session or one of its media cannot be kept,
 the values stay imported and Start begins a new session with them.
 
-Ordinary Player use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Player
+Ordinary Playroom use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Playroom
 creates and restores supported checkpoints according to the session lifecycle. Developer/debug tooling may expose
 manual checkpoint and restore operations because those runs are explicitly diagnostic rather than ordinary canonical
 play.
@@ -274,7 +274,7 @@ and APIs remain open.
 
 ## Stability and future contracts
 
-The current TypeScript exports and internal instruction-plan, runtime-snapshot, and checkpoint formats are POC implementation surfaces. The current numeric revisions are documented in [`RUNTIME.md`](RUNTIME.md). Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/player protocol.
+The current TypeScript exports and internal instruction-plan, runtime-snapshot, and checkpoint formats are POC implementation surfaces. The current numeric revisions are documented in [`RUNTIME.md`](RUNTIME.md). Their current use does not establish permanent third-party API stability, a production wire-format guarantee, or a final Laravel/Playroom protocol.
 
 Implementation of ADR 0016 introduced revision-4 instruction plans and pending-action state. Revision-5 plans and revision-6 runtime snapshots/checkpoints added the generic interaction instruction/action/settlement family and canonical player-transcript event data. Revision-6 plans introduced the local canonical result consume/transfer boundary, and revision-8 runtime snapshots/checkpoints introduced one nullable single-use result handoff that remains authoritative until the first canonical consume, transfer, return, discard, or exit succeeds. That handoff preserves destination/result consistency independently of `lastSettlement`, which remains bounded replay data only. These are historical internal format revisions, not product release numbers.
 
