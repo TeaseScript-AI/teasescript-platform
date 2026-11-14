@@ -1,5 +1,6 @@
-// A written type's openness and the nearest written prefix of a path (#1450), each made once per type node: what
-// the finishing read (`finishing.ts`) and its host frontier (`host-frontier.ts`) ask of a written type.
+// The nearest written prefix of a path (#1450) and a written type's kinds, each made once per type node from its
+// openness (`contract/terms.ts`): what the finishing read (`finishing.ts`) and its host frontier (`host-frontier.ts`)
+// ask of a written type.
 
 import type { TypeTerm } from "../../graph.js";
 import type { WorkLedger } from "../budget.js";
