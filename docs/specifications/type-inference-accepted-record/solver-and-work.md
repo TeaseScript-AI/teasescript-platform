@@ -535,3 +535,16 @@ family; an existing exponent gate does not cover families it never runs.
 even while charged capture work was linear.
 
 **Source.** The lead's #1734 ruling after Sol's #1078 growth map and merged PR #1754, 2026-11-05.
+
+### r4-456
+
+**Cursors order only through their demands' logical names.**
+
+**Rule.** No comparator orders two key cursors directly: a component's members order by `compareDemandNames`, which
+spells each cursor's key text through [r4.204](#r4-204)'s charged boundary, once per name. This replaces r4.204's
+clause on `compareKeyIds`, which nothing but its tests called; the rest of r4.204 stands.
+
+**Reason.** An ordering implementation that production never calls has no work to bound and no behaviour to keep.
+
+**Source.** PR #2790 for #2787, the owner's decision that the new checker is finished by removing what nothing calls,
+2026-11-14.

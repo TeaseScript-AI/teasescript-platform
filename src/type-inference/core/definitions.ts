@@ -187,9 +187,9 @@ export class KeyTrie {
     return found;
   }
 
-  /** Whether a key of the set stands at or above `key`. */
-  public any(key: Key, self: boolean): boolean {
-    return this.above(key, self).length > 0;
+  /** Whether a key of the set stands above `key`. */
+  public any(key: Key): boolean {
+    return this.above(key, false).length > 0;
   }
 
   #build(): Map<PlaceId, TrieNode> {
@@ -971,7 +971,7 @@ export class DefinitionIndex {
   /** Whether some callable other than the key's declaring one stores the key, a prefix or a key below it. */
   public ownedAway(key: Key): boolean {
     if (this.#foreignBelow.has(key)) return true;
-    return this.foreign.any(key, false);
+    return this.foreign.any(key);
   }
 
   /** The writer of a whole store or an add: its kind and the site its diagnostics sit at. */
