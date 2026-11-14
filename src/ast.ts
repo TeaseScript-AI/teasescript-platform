@@ -181,7 +181,7 @@ export interface HideImageStatement {
   readonly span: SourceSpan;
 }
 
-/** Where a camera view is shown: the Player's floating window, or over the Stage image, which stays underneath. */
+/** Where a camera view is shown: the Playroom's floating window, or over the Stage image, which stays underneath. */
 export type CameraPlacement = "window" | "stage";
 
 /** `showCamera [stage]` whose camera view handle is ignored. */

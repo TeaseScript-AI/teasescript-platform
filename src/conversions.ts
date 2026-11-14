@@ -55,7 +55,7 @@ export type ConversionResult =
 /**
  * A conversion built-in (V30 §8, §13, §35): how it is called, what its argument may be, what it gives, and its help.
  * Every conversion only reads copies of its arguments, and to show a date or time the player's presentation, and gives
- * a new value. One that takes `files:` may instead wait for the Player's file store, unless a written `files: false`
+ * a new value. One that takes `files:` may instead wait for the Playroom's file store, unless a written `files: false`
  * keeps files out (`conversionWaitsForFiles`); it then runs as a file store instruction. The evaluator runs each one
  * as its `CONVERSION_RUNS` entry says.
  */
@@ -258,7 +258,7 @@ export type DefaultedConversion = Exclude<
   ConversionName,
   ConversionsWith<{ readonly fallback: null }>
 >;
-/** The conversions that take `files:`, which may wait for the Player's file store. */
+/** The conversions that take `files:`, which may wait for the Playroom's file store. */
 export type FileConversion = ConversionsWith<{ readonly files: true }>;
 
 /** Whether the conversion takes a `default:`. */
@@ -276,7 +276,7 @@ export function isConversion(name: string): name is ConversionName {
 }
 
 /**
- * Whether a call of the conversion may wait for the Player's file store (V30 §13): one that takes `files:`, unless a
+ * Whether a call of the conversion may wait for the Playroom's file store (V30 §13): one that takes `files:`, unless a
  * written `files: false` keeps files out. Any other call of a conversion only reads (see `Conversion`).
  */
 export function conversionWaitsForFiles(name: ConversionName, filesKeptOut: boolean): boolean {

@@ -218,7 +218,7 @@ export function validateProjectSemantics(
 /**
  * The names that a host may not configure, as a global or a built-in, because the language gives them a meaning of its
  * own: the grammar keywords, such as `if` and `load`, and `wait`, which the lexer reads as a token of its own; the
- * commands and asks, which the parser reads by name; `takePhoto` and `askImage`, whose calls wait for the Player;
+ * commands and asks, which the parser reads by name; `takePhoto` and `askImage`, whose calls wait for the Playroom;
  * `pi`, which the parser reads as the number it names; and `debugMode`, which the engine reads from the session.
  */
 const UNCONFIGURABLE_NAMES: ReadonlySet<string> = new Set([

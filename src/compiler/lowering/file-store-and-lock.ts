@@ -13,9 +13,9 @@ import { planSpan, repairedBy, withFallbackCheck } from "./expression-plans.js";
 // File store and lock calls: their operands wait in temporaries, so every run of the instruction reads the same values.
 
 /**
- * A call that may use the Player's file store (V30 §13 and §33). Its arguments are evaluated in written order into
+ * A call that may use the Playroom's file store (V30 §13 and §33). Its arguments are evaluated in written order into
  * temporaries, unless they are literals, so that the instruction reads the same values when it runs again with the
- * Player's answer; they are cleared once it gave its result. Its `default:` runs after it, only when it is used.
+ * Playroom's answer; they are cleared once it gave its result. Its `default:` runs after it, only when it is used.
  */
 export function* lowerFileStoreTask(
   compiler: InstructionCompiler,

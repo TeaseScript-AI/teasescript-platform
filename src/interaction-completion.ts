@@ -1,7 +1,7 @@
 /**
- * The answer rules of the interactions the Player answers: what each payload answers, its result and its transcript
+ * The answer rules of the interactions the Playroom answers: what each payload answers, its result and its transcript
  * text (`resolveAnswer`, which the runtime settles an answer with), and where the composer's text goes
- * (`routeComposerText`, which the Player's adapter routes it with). Every import is one the Player's page may load.
+ * (`routeComposerText`, which the Playroom's adapter routes it with). Every import is one the Playroom's page may load.
  * Request shape, identity, time, settlement and events stay with the runtime (`runtime/actions/interaction.ts`,
  * `runtime/operations/complete-action.ts`), and so does the check of a password answer's hash. Apart from the test-only
  * work counter, every function here reads only its arguments.
@@ -91,13 +91,13 @@ export function resolveAnswer(
       ? { ok: true, result: null, transcriptText: null }
       : { ok: false, message: "Popup completion requires { kind: 'activate' } only." };
   }
-  // The Player reports that it opened the address in a new tab.
+  // The Playroom reports that it opened the address in a new tab.
   if (action.interactionKind === "url") {
     return payload.kind === "opened" && Object.keys(payload).length === 1
       ? { ok: true, result: null, transcriptText: null }
       : { ok: false, message: "openUrl completion requires { kind: 'opened' } only." };
   }
-  // Copying and downloading are the Player's own; only closing the dialog completes it.
+  // Copying and downloading are the Playroom's own; only closing the dialog completes it.
   if (action.interactionKind === "export") {
     return payload.kind === "close" && Object.keys(payload).length === 1
       ? { ok: true, result: null, transcriptText: null }

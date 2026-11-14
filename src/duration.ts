@@ -276,8 +276,8 @@ function familyAmount(parts: DurationParts, family: "exact" | "days" | "months")
  * Deterministic visible text for a duration (ADR 0026), with unit words in full, singular only for exactly 1: an exact
  * one in days, hours, minutes, and seconds, such as `2 days 6 hours` or `1 minute 3.5 seconds`, and `250 milliseconds`
  * below a second; a calendar one names each calendar part, with 12 months as a year, before any exact offset, such as
- * `1 calendar month 16 calendar days`. Each part keeps its own sign. Locale-aware duration presentation is later Player
- * work.
+ * `1 calendar month 16 calendar days`. Each part keeps its own sign. Locale-aware duration presentation is later
+ * Playroom work.
  */
 export function formatDuration(duration: number | AnyDuration): string {
   if (typeof duration === "number" || !isCalendar(duration))

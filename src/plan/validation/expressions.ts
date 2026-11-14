@@ -305,7 +305,7 @@ function validateExpressionNode(
       pending.push({ value: value.object, path: `${path}.object`, assignmentTarget: false });
       return;
     case "call":
-      // `takePhoto()` waits for the Player; it lowers to a capture instruction and is never an ordinary call.
+      // `takePhoto()` waits for the Playroom; it lowers to a capture instruction and is never an ordinary call.
       if (
         isRecord(value.callee) &&
         value.callee.kind === "identifier" &&
@@ -316,7 +316,7 @@ function validateExpressionNode(
         );
       }
       // The file functions, and a conversion that takes `files:` unless a literal `files: false` keeps files out, may
-      // wait for the Player's file store; they lower to a file store instruction.
+      // wait for the Playroom's file store; they lower to a file store instruction.
       if (
         isRecord(value.callee) &&
         value.callee.kind === "identifier" &&
@@ -335,7 +335,7 @@ function validateExpressionNode(
           ),
         );
       }
-      // The encrypt and decrypt calls wait for the Player; they lower to a lock instruction.
+      // The encrypt and decrypt calls wait for the Playroom; they lower to a lock instruction.
       if (
         isRecord(value.callee) &&
         value.callee.kind === "identifier" &&

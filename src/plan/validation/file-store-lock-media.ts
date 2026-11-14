@@ -13,7 +13,7 @@ import { validateExpression } from "./expressions.js";
 import { validateTypePlan } from "./type-plans.js";
 
 /**
- * A `fileStore` instruction runs again once the Player answered, so each operand is a temporary or a literal, which
+ * A `fileStore` instruction runs again once the Playroom answered, so each operand is a temporary or a literal, which
  * reads the same both times; `default:` belongs to the reading calls and `files:` to the JSON ones.
  */
 export function validateFileStoreInstruction(
@@ -87,7 +87,7 @@ export function validateFileStoreInstruction(
 }
 
 /**
- * A `lock` instruction runs again with each answer of the Player, so each operand is a temporary or a literal, which
+ * A `lock` instruction runs again with each answer of the Playroom, so each operand is a temporary or a literal, which
  * reads the same every time. An encrypt call writes each of `password:`, also as a password field, `publicKey:`, and
  * `timeLock:`, or none; a decrypt call has its required `default:`, which follows it, and may have `key:`, which an
  * encrypt call has not.

@@ -4,7 +4,7 @@
  * `case`, and dict keys do with it. The type checker, the runtime, and the editor read these facts here; each kind's
  * own behaviour (its notation, its JSON, its order) is implemented where the operation is, by kind.
  *
- * A text that the Player's file store issued for a file is a text like any other (V30 §13), and a choice value is a
+ * A text that the Playroom's file store issued for a file is a text like any other (V30 §13), and a choice value is a
  * value of one of the kinds whose `choice` is set, so neither is a kind of its own.
  */
 

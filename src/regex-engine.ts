@@ -9,7 +9,7 @@ import { REGEX_CASE_PAIR_RUNS } from "./regex-case-pairs.js";
  * or data, or runs a session that may hold a regex, and no instruction ever waits for it.
  *
  * Every search runs re2js's NFA and counts its work (V30 §8): one instruction cannot be interrupted, so a regex
- * operation that needs more than its limit stops with an error instead of freezing the Player. The units count what
+ * operation that needs more than its limit stops with an error instead of freezing the Playroom. The units count what
  * the NFA does, never time, so a limit stops the same operation at the same point on every host.
  */
 
