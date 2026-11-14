@@ -27,7 +27,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { packagesOf } from "../../tests/families/packages.mjs";
-import { ROOT, SHARDS, Usage, areasOf, git, inTemporaryFolder, queue, quoted } from "./common.mjs";
+import { ROOT, Usage, areasOf, git, inTemporaryFolder, queue, quoted } from "./common.mjs";
 import { apartText, areaRecordForm, report, setDifference } from "./collect.mjs";
 import { jobsOf, lines, shardsOf, shardsRead } from "./results.mjs";
 import { splitOf, submissions, batchOf } from "./submit.mjs";
