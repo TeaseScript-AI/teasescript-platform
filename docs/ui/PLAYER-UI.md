@@ -949,15 +949,15 @@ height instead of being capped again by a potentially stale dynamic-viewport uni
 usable bottom edge includes its reported top offset rather than treating its height alone as a document coordinate.
 
 The composer receives focus by default, except on touch-only devices, where automatic focus would raise the software
-keyboard; there the user taps the input to start typing. Non-interactive Playroom clicks should not arbitrarily steal
-typing focus. A click on a permanent button, the theme or fullscreen control, or a camera view button gives typing focus
-back to the composer where it has default focus, unless text is selected; while the composer has nothing to answer,
-such as while a permanent button's block runs, it takes focus once it can. An explicitly focused tool/input/control,
-such as one of these controls focused from the keyboard, naturally owns keyboard input while it is active.
-Submitting with `Send` keeps editing focus and preserves the software keyboard's current state: a visible keyboard stays
-open, while a dismissed keyboard is not reopened. A hardware keyboard can continue typing after Send; tapping the input
-explicitly opens the software keyboard again. Submitting with `Enter` from the input keeps editing focus for a retry or
-the next interaction.
+keyboard; there the user taps the input to start typing. Clicks on non-interactive parts of the Playroom should not
+arbitrarily steal typing focus. A click on a permanent button, the theme or fullscreen control, or a camera view button
+gives typing focus back to the composer where it has default focus, unless text is selected; while the composer has
+nothing to answer, such as while a permanent button's block runs, it takes focus once it can. An explicitly focused
+tool/input/control, such as one of these controls focused from the keyboard, naturally owns keyboard input while it is
+active. Submitting with `Send` keeps editing focus and preserves the software keyboard's current state: a visible
+keyboard stays open, while a dismissed keyboard is not reopened. A hardware keyboard can continue typing after Send;
+tapping the input explicitly opens the software keyboard again. Submitting with `Enter` from the input keeps editing
+focus for a retry or the next interaction.
 
 Focus indication distinguishes navigation from text editing. Clicking or touching the composer and then typing does
 not add a focus outline. Keyboard navigation into its input marks the integrated composer shell; Tab to Send removes

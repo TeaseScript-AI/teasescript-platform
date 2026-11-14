@@ -769,10 +769,10 @@ button as it stops a non-persistent timer, settle the action with an `actionComp
 retained as `lastSettlement` and drop its queued click; removing a removed button does nothing. `exit` clears every
 button without events.
 
-The Playroom clicks a button with `pressPermanentButton(plan, snapshot, buttonId)`; `completeAction` cannot target it. A
-click is host input at the observed time while the session waits. It is `executionPending` while the script runs,
-scene time is behind the observed time, or a due block can run; `busy` while the button's click is queued or its block
-runs; `removedButton` for an issued ID that is no longer shown; `unknownButton` for an unissued one; and
+The Playroom reports a click on a button with `pressPermanentButton(plan, snapshot, buttonId)`; `completeAction` cannot
+target it. A click is host input at the observed time while the session waits. It is `executionPending` while the script
+runs, scene time is behind the observed time, or a due block can run; `busy` while the button's click is queued or its
+block runs; `removedButton` for an issued ID that is no longer shown; `unknownButton` for an unissued one; and
 `invalidPayload` for a malformed ID or a failed session. These change nothing. A `pressed` click publishes
 `permanentButtonPressed` and joins the end of `pendingTimerHandlers` due at the current scene time
 (`{ buttonId, handlerFunctionId, rootScopeId, dueAtMs, count: 1 }`). It then starts like a timer expiry block, under the
