@@ -1,21 +1,21 @@
 # Runtime
 
-## Player and playground execution adapters
+## Playroom and playground execution adapters
 
-`player/runtime/runtime-adapter.ts` is the framework-independent Player adapter shared by the Player and the
-playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,
+`player/runtime/runtime-adapter.ts` is the framework-independent Playroom adapter shared by the Playroom and the
+playground's action lookup/completion path. It maps validated pending actions and runtime events to Playroom presentation,
 submits typed interactions, pacing/time observations, media load reports, and media progress, projects the Stage and
-active media for playback, and uses the canonical runtime checkpoint operations. The Player plays the
+active media for playback, and uses the canonical runtime checkpoint operations. The Playroom plays the
 projected audio through `player/media/media-device.ts` and shows the Stage image; browser video playback remains deferred.
 `playground/workspace/controller.ts` retains the DOM-free compiler/execution and development-automation workspace
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
 independent action lifecycle.
 
-The Player's sessions live in the engine's host behind the bridge (`player/engine-bridge/`): the main realm holds a
+The Playroom's sessions live in the engine's host behind the bridge (`player/engine-bridge/`): the main realm holds a
 `PlayerSession`, the published state with its transcript, which it builds from each reply's publication; until the
 Worker is activated, the host runs in the page. A lost connection is replaced only from the player's click
-([Player UI](ui/PLAYER-UI.md#session-end-and-failure)). Work that completes after a reply shows only while the session that
-issued it still owns the UI, and the player's input is posted only then. The Player runs each session on one
+([Playroom UI](ui/PLAYER-UI.md#session-end-and-failure)). Work that completes after a reply shows only while the session that
+issued it still owns the UI, and the player's input is posted only then. The Playroom runs each session on one
 [runtime session](#runtime-sessions). A `PlayerRuntimeSession` is one publication of it, as the host holds it: `state` holds the view, projections, active calls, and date and time presentation it shows. Each reply publishes the critical view: that state without its active calls, and the file, line and kind of the instructions its readers name (`instructions`). The active calls, with the instructions they name, come only while the main side views the session's calls (`viewCalls`, while Debug's Now view or the error dialog shows them), and with a stop's acknowledgement. The complete state
 is exported only where one is kept: checked for a restore point, a debug export, or a saved-data adoption, such as by
 `playerRuntimeSnapshot`; and as the trusted export (Boundaries below) for the kept session, a rewind point, and the
@@ -26,9 +26,9 @@ and posts them as text. The host holds the plan's JSON for the page's current pl
 open (`player/persistence/plan-json-lease.ts`). Continue and a rewind restore with
 `restoreRuntimeSession`, a restore point with `deserializeRuntimeSession`, each checking the state once (Boundaries
 below). An operation goes through a publication that shows the current state; once an operation changed the state, one
-made from an earlier publication throws. When an operation throws, the error reaches the Player, and the next use
+made from an earlier publication throws. When an operation throws, the error reaches the Playroom, and the next use
 rebuilds the state of the latest publication from the calls the session's [debug recorder](DEBUGGER.md#debug-export)
-logged, so play continues from the state the Player showed. An operation's events reach the transcript only once the
+logged, so play continues from the state the Playroom showed. An operation's events reach the transcript only once the
 run that follows it has finished, so the transcript stays as shown too.
 
 A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neither a completed timer nor a halted runtime. Action completion, warnings, runtime failures, exit, and plan completion remain technical events.
@@ -37,13 +37,13 @@ A blocking `wait` therefore reports `actionRequested` and `waiting`; it is neith
 
 ADR 0015 requires the AST to remain compile-time data and the runtime to execute a validated, versioned, JSON-safe instruction plan using explicit versioned state. Checkpoints, event sequence numbers, RNG state, scopes, speakers, loop frames, call frames, temporaries, prepared references, and structured failure information must be serializable without a suspended JavaScript call stack.
 
-ADR 0016 accepts the resumable pending-action contract for waits, timers, choices, input, buttons, media completion, and future typed player capabilities.
+ADR 0016 accepts the resumable pending-action contract for waits, timers, choices, input, buttons, media completion, and future typed Playroom capabilities.
 
 ## Implemented runtime ownership
 
 Shared serializable action and settlement contracts are owned by
 `src/runtime/actions/model.ts`. Interaction answer normalization and matching live in
-`src/interaction-completion.ts`, whose value imports the Player's page may already load;
+`src/interaction-completion.ts`, whose value imports the Playroom's page may already load;
 `actions/interaction.ts` keeps the plain-record guard and the password-hash check. Delay helpers and replay classification remain
 action-specific. Canonical completion and time-observation transitions are
 implemented in `src/runtime/operations/complete-action.ts` and
@@ -67,7 +67,7 @@ The engine remains responsible for:
 - opaque engine-managed references;
 - checkpoint, restore, cleanup, and resume equivalence;
 - stable speaker/output provenance needed by runtime history;
-- validated host/player data and concrete security/resource boundaries.
+- validated host/Playroom data and concrete security/resource boundaries.
 
 Candidate Standard Library responsibilities include `say` policy, standard output targets, visible timer presentation,
 common input wrappers, validation/retry helpers, and friendly lifecycle APIs. ADR 0018 accepts the first concrete
@@ -77,7 +77,7 @@ text/output slice described below; the current compiler/runtime implements that 
 
 ADR 0018 selects one generic foreground interaction family for `showButton`, `askText`, `askNumber`, and `askChoice`,
 followed by a separate `say` smart-autoplay slice. The engine/compiler slices, local playground controls, and Vue
-reference adapter are implemented. The production cross-origin player/host integration remains separate work.
+reference adapter are implemented. The production cross-origin Playroom/host integration remains separate work.
 
 ### Generic foreground interactions
 
@@ -154,13 +154,13 @@ Completion semantics are:
 - `askInteger` is a `number` interaction whose UI carries `integer: true`: it accepts one line with only an optional sign and digits within the safe integer range, rejects anything else with "That is wrong. I asked for a whole number.", and requires a whole-number prefill;
 - `askDate`, `askTime`, and `askDateTime` are a `temporal` interaction whose UI carries `temporalKind` (`date`, `time`, or `datetime`): the answer is trimmed strict ISO text ([V30 §35](specifications/accepted-syntaxes-v30.md#35-date-time-and-durations)), a local time that the player's zone skips is valid, and anything else is rejected with "That is wrong. I asked for a date." (a time, a date and time). The result is the `date`, `time`, or `datetime` value; the transcript shows it in the presentation in force at completion, as `say` would, and a prefill fills in its ISO text;
 - a wrong answer to one of these asks or to a typed form field, and typed text that matches no `askChoice` button or
-  more than one, is `invalidPayload` with a message the Player shows the player, such as those above
+  more than one, is `invalidPayload` with a message the Playroom shows the player, such as those above
   ([V30 §20](specifications/accepted-syntaxes-v30.md#invalid-input-handling)); a payload of the wrong shape or over the
   byte limit gets a message for the host instead;
 - `askPassword` is a `password` interaction, without a prefill: the host answers `{ kind: "submittedPassword", hash }`
   with the SHA-256 of the typed text as 64 lowercase hexadecimal digits, which it returns as `string`, never the text,
   and the completion adds nothing to the transcript. Each return after an interrupting block adds one to the action's
-  `resumes`, present once positive, so the Player shows the field anew, also after a block that returned at once;
+  `resumes`, present once positive, so the Playroom shows the field anew, also after a block that returned at once;
 - `askImage(...)` is an `image` interaction whose answer is an image the trusted host stored; see
   [Image input](#image-input);
 - a form is a `form` interaction whose fields the player edits before submitting; see [Forms](#forms);
@@ -185,19 +185,19 @@ Completion semantics are:
   `https:` URL with a host (the rule of message links); a written one is checked by the compiler, and any other fails
   with `TSR050` as the request opens, as does an `alwaysButton:` that is not `true` or `false`. A computed request
   evaluates its arguments once, in written order. The canonical form, in the URL standard's serialization, is what the
-  Player opens. It has no result, and only `{ kind: "opened" }`, the Player's report that it opened the address in a new
-  tab, completes it, as for a popup without a transcript. The Player opens the address at once only for a request
+  Playroom opens. It has no result, and only `{ kind: "opened" }`, the Playroom's report that it opened the address in a new
+  tab, completes it, as for a popup without a transcript. The Playroom opens the address at once only for a request
   that its own run of the session requested while the player's activation lasts, without `alwaysButton: true`, and
   settles it; otherwise, and for a request that a restore, a rewind, or a reload brought back, it shows the button,
   whose click opens the address
-  ([Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation));
+  ([Playroom UI](ui/PLAYER-UI.md#foreground-interaction-presentation));
 - `exportText` ([V30 §31](specifications/accepted-syntaxes-v30.md#export-text)) is an `export` interaction, always
   prepared, whose UI holds the text, the title (shown text, "Copy or download" without `title:`), and the file name
   (text, "text.txt" without `fileName:`), which it evaluates once, in written order, before the dialog opens. A text or
   file name that is not text fails with `TSR050` as the dialog opens. The text counts toward no interaction byte limit,
   so it may be as long as any text; the title and file name do. It has no result, and only `{ kind: "close" }`, the
   player closing the dialog, completes it, as for a popup without a transcript. Copying and downloading are the
-  Player's alone and leave the dialog open.
+  Playroom's alone and leave the dialog open.
 
 A rendered choice control supplies the position of its button (`{ kind: "selectedOption", optionIndex }`), because several buttons may return the same value. The engine derives the returned value and the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
@@ -233,9 +233,9 @@ continuation change. Continuation execution remains eligible only through a late
 
 ### Standard composer and dynamic choice presentation
 
-The Standard Player application uses one fixed composer. During a foreground interaction it remains enabled, becomes the answer field, and receives focus by default. Choice and button controls appear immediately above it. Only a completion valid for the active deterministic interaction advances that interaction; non-matching composer text leaves the same mandatory action active. Future LLM clarification or interpretation is outside this first POC.
+The Standard Playroom application uses one fixed composer. During a foreground interaction it remains enabled, becomes the answer field, and receives focus by default. Choice and button controls appear immediately above it. Only a completion valid for the active deterministic interaction advances that interaction; non-matching composer text leaves the same mandatory action active. Future LLM clarification or interpretation is outside this first POC.
 
-Choice buttons may occupy one or two rows. The Player application may render the same choice group as a dropdown when
+Choice buttons may occupy one or two rows. The Playroom application may render the same choice group as a dropdown when
 viewport, text, font, zoom, accessibility, or other layout constraints make buttons impractical. Button-versus-dropdown
 presentation is not canonical runtime/checkpoint state and does not change values, visible text, completion validation,
 transcript output, or return values. Exact unambiguous visible option text may activate `askChoice`. The one-option
@@ -341,7 +341,7 @@ A primary click, touch activation, or eligible Space key submits a typed complet
 - a duplicate matching current `lastSettlement` returns `alreadySettled` without another event, output, RNG change, or continuation.
 
 Skip settles only the reading time. It does not skip arbitrary instructions, complete `wait`, cancel an interaction,
-or create a player transcript message. The playground Player routes primary pointer/touch input and eligible composer
+or create a player transcript message. The playground Playroom routes primary pointer/touch input and eligible composer
 Space through this engine completion path. Interactive controls consume their own activation first and therefore cannot
 also trigger pacing skip.
 
@@ -349,8 +349,8 @@ Player-authored messages do not create gates. No compiler lookahead across branc
 
 Message presentation follows the accepted [speaker inheritance and override contract](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
 The runtime resolves mode/style into `MessagePresentation` while preparing output and emits it with the canonical `say`
-event. The Player adapter forwards these values; the
-Player renders them under the observable contract in [Player UI](ui/PLAYER-UI.md). Invalid colour values fall
+event. The Playroom adapter forwards these values; the
+Playroom renders them under the observable contract in [Playroom UI](ui/PLAYER-UI.md). Invalid colour values fall
 back without a new warning policy; general diagnostic/recovery design is tracked separately in #427.
 
 ### Skippable gate completion
@@ -359,16 +359,16 @@ Effective skip policy comes from explicit `skippable`/`unskippable`, then the ef
 
 A skippable gate may complete through:
 
-- a primary click or tap on a message, its speaker avatar, Player background, or other unused Player space;
+- a primary click or tap on a message, its speaker avatar, Playroom background, or other unused Playroom space;
 - Space while the focused Standard composer is empty.
 
 A real interactive control has priority and must not also trigger viewport-wide gate completion. Ordinary keys type into the focused composer. Space is normal input when text is already present and does not skip during text composition, a relevant selection, or focus on another interactive control. Unskippable gates reject click, tap, and Space completion.
 
 ### Player and developer controls
 
-The normal Player application has no player-facing pause control and ADR 0018 adds no author-facing pause command. Developer mode may expose Pause alongside Run, Step, checkpoint, restore, and debugger controls. Developer pause is tooling and does not establish player-initiated pause semantics.
+The normal Playroom application has no player-facing pause control and ADR 0018 adds no author-facing pause command. Developer mode may expose Pause alongside Run, Step, checkpoint, restore, and debugger controls. Developer pause is tooling and does not establish player-initiated pause semantics.
 
-Visibility changes are not a Player pause, and a closed Player's absence does not consume scene time; see
+Visibility changes are not a Playroom pause, and a closed Playroom's absence does not consume scene time; see
 [Timers and scene time](#timers-and-scene-time).
 
 ### Checkpoint and event requirements
@@ -378,7 +378,7 @@ Implementation must preserve ADR 0015 and ADR 0016:
 - plans, pending interaction data, captured pacing settings, deadlines, and skip policy are JSON-safe;
 - source expressions and deterministic RNG choices are not reevaluated after waiting or restore;
 - restore reads no clock and silently completes nothing;
-- the Player application submits explicit time observations and typed completions;
+- the Playroom application submits explicit time observations and typed completions;
 - action/output events remain typed and sequenced;
 - duplicate delivery is idempotent through bounded settlement replay;
 - settlement and continuation remain separate inspectable runtime boundaries;
@@ -417,13 +417,13 @@ The current internal instruction-plan, runtime-snapshot, and checkpoint format r
 
 The current runtime implements blocking `wait`/`timer`, asynchronous timers, permanent buttons, compact foreground
 interactions, ADR 0018 `say` pacing, and the Stage image and audio/video playback state. Timer lifecycle, interrupts,
-and Player clock recovery are defined under [Timers and scene time](#timers-and-scene-time); permanent buttons under
+and Playroom clock recovery are defined under [Timers and scene time](#timers-and-scene-time); permanent buttons under
 [Permanent buttons](#permanent-buttons); media under [Stage image and media playback](#stage-image-and-media-playback);
 script storage under [Script storage](#script-storage).
 
 Runtime state retains persisted scene time, at most one active foreground action, background timers, media, and
 permanent buttons, the Stage image, monotonic identities, bounded settlement replay, and explicit
-time/completion operations. The Player reconstructs presentation from canonical state. Production cross-origin host wiring,
+time/completion operations. The Playroom reconstructs presentation from canonical state. Production cross-origin host wiring,
 server time integrity, and server persistence remain deferred.
 
 `items += more` appends copies of the elements of `more` in place, as `.addAll(more)` does, on a variable, a property
@@ -437,12 +437,12 @@ that the same variable holds, or, for a list in a speaker's properties, any list
 
 ## Owner-resolved future runtime semantics
 
-These owner decisions are independent of final Player visual tuning but are not implemented capability or accepted
+These owner decisions are independent of final Playroom visual tuning but are not implemented capability or accepted
 author-facing syntax. Exact schemas and APIs remain future work.
 
 ### Long-lived Standard controls
 
-The later long-lived Standard control family uses these runtime semantics independently of final Player presentation:
+The later long-lived Standard control family uses these runtime semantics independently of final Playroom presentation:
 
 - a stateful toggle/select owns one authoritative serializable control value; script polling and programmatic updates
   use that same value rather than an automatically synchronized second ordinary variable;
@@ -455,10 +455,10 @@ The later long-lived Standard control family uses these runtime semantics indepe
 - queued control events are revalidated before execution; an event from a removed, disabled/inert, or otherwise
   invalidated originating control is stale and is discarded rather than executed; and
 - canonical event/history provenance distinguishes user control actions from programmatic control updates. Visible
-  transcript/history presentation is Player-owned.
+  transcript/history presentation is Playroom-owned.
 
 Controls persist until explicit removal or owning-lifecycle cleanup. Exact action/schema representation, persistence
-binding, Standard Library API names, author syntax, and Player busy/history presentation remain open or owned elsewhere.
+binding, Standard Library API names, author syntax, and Playroom busy/history presentation remain open or owned elsewhere.
 This section does not supersede accepted V30 permanent-button syntax or presentation semantics; any conflict with that
 accepted language baseline requires an accepted syntax/ADR update.
 
@@ -500,7 +500,7 @@ Blocking `wait` and `timer` use the foreground-delay path. `wait` is hidden; `ti
 delay starts, and restore preserves the draw.
 
 Delay timing is validated on the persisted scene coordinate. Due and suspended delays follow the ordering and
-preempt-and-resume rules under [Timers and scene time](#timers-and-scene-time). Players present visible and mystery
+preempt-and-resume rules under [Timers and scene time](#timers-and-scene-time). Playrooms present visible and mystery
 delays.
 
 An interaction retains its kind, ownership depths, call-frame identity,
@@ -536,7 +536,7 @@ without mutation. Otherwise, an inactive ID matching `lastSettlement` is `alread
 
 Running countdown actions store an absolute deadline on the scene-time coordinate; paused timers retain remaining
 round time instead. Media playback uses progress observations instead; see
-[Stage image and media playback](#stage-image-and-media-playback). The runtime does not read browser or operating-system clocks directly. The player maps monotonic elapsed
+[Stage image and media playback](#stage-image-and-media-playback). The runtime does not read browser or operating-system clocks directly. The Playroom maps monotonic elapsed
 deltas onto the session coordinate, schedules wake-ups, and submits validated observations; tests use a fake clock and
 never sleep in real time.
 
@@ -631,39 +631,39 @@ be named by a live list.
 
 ## Timers and scene time
 
-Timers and `wait` measure Player-executed scene time on the persisted session coordinate. The engine never reads a
-clock. A live Player maps a monotonic clock onto the session coordinate and submits explicit observations at the
+Timers and `wait` measure Playroom-executed scene time on the persisted session coordinate. The engine never reads a
+clock. A live Playroom maps a monotonic clock onto the session coordinate and submits explicit observations at the
 next deadline, before input continues the script, when the page's visibility changes, and on `pagehide`. Callbacks
 are only observation opportunities, so a throttled background callback catches up rather than losing elapsed time,
-and visibility changes never pause time. The Player catches up a late observation without media progress on a copy
+and visibility changes never pause time. The Playroom catches up a late observation without media progress on a copy
 of the session, in ordinary observations at each next timed event and then at the observed time, and gives the browser
 a turn after each task of them. The session shows nothing of it until it adopts the copy in one publication, with the
 result of one observation; any operation on the session meanwhile, such as input, drops the copy, and the session
 observes in one go. An observation close to its next event, and every observation while Debug runs, is one
-observation. When restored execution resumes, the Player rebases its clock on the saved
+observation. When restored execution resumes, the Playroom rebases its clock on the saved
 `observedSessionTimeMs`: new observations are `savedObservedSessionTimeMs + monotonicDeltaSinceResume`, while held
 catch-up continues from the saved `currentSessionTimeMs`. After a page reload, the explicit Continue of
 [Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation) precedes that resumption, so
-waiting for Continue does not consume scene or playback time. The gap while no Player ran, including a device handoff,
+waiting for Continue does not consume scene or playback time. The gap while no Playroom ran, including a device handoff,
 therefore does not consume timer time; a timer continues with its saved remaining time. Extreme platform suspension without any lifecycle opportunity is not covered. Absolute
 wall-clock deadlines belong to future scheduled events, not to timers.
 Presentation refresh cadence does not impose a minimum timer duration.
 
-The development Player (`?dev`, see [`player/README.md`](../player/README.md#development-only-behavior)) can jump
+The development Playroom (`?dev`, see [`player/README.md`](../player/README.md#development-only-behavior)) can jump
 scene time forward without an engine mode. A jump first observes the time that really elapsed, then submits one
-ordinary observation at each next timed event up to its target: the earliest Player deadline or media timeline event,
+ordinary observation at each next timed event up to its target: the earliest Playroom deadline or media timeline event,
 with running loaded media reported as playing on at 1× from their last sample. Rounds of a repeating timer without an
 expiry block and passes of repeating media without cues run nothing, so they are passed within one observation, as
 silent catch-up passes them; such media stop a jump only at their end. Blocks, timeouts, and continuations
 therefore run in scene-time order, and a block's change to playback or its `save`, `delete`, or `takePhoto()` applies
-before later events; the jump waits while such a host answer is pending. The Player then seeks its media elements to
+before later events; the jump waits while such a host answer is pending. The Playroom then seeks its media elements to
 the reported playhead and rebases its clock on the new observed time. A session with jumps is an ordinary session:
 `getAbsoluteDateTime()` differences and elapsed results include the jumped time, and checkpoints record no jump.
 
 A blocking `timer` is a foreground `delay` like `wait`, with its presentation (`visible`, `mystery`, or `hidden`) and
 evaluated label. An asynchronous timer is a background action of kind `timer`: it allocates an action ID and emits
 `actionRequested` when started and `actionCompleted` when it finishes naturally or through `stop()`; script-end and
-`exit` cleanup stop remaining timers without individual completion events. No Player completion can target
+`exit` cleanup stop remaining timers without individual completion events. No Playroom completion can target
 it, so its settlement is not retained as `lastSettlement`. The action holds the timer record: state, presentation,
 label, repeat configuration, current-round length, and either its deadline (running) or remaining time (paused), plus
 accumulated elapsed time. A finished or stopped timer moves to `settledTimers` with only what a handle still reads (its
@@ -699,13 +699,13 @@ happened: a time-driven settlement records its deadline, and a skipped reading t
 late observation therefore gives the same output, events, and snapshot as observing every deadline on time: a block
 can `stop()` a later timer before it expires, and a timer it starts orders by its own deadline.
 
-Time reaches waits and timers only through `observeTime`; a Player cannot complete them. Host input (an interaction
+Time reaches waits and timers only through `observeTime`; a Playroom cannot complete them. Host input (an interaction
 answer or a pacing skip) happens at the observed time, so `completeAction` returns `executionPending` without changing
 anything while scene time is behind the observed time or a due expiry block can run. A storage write acknowledgement
 is the exception: it is accepted at the current scene time (see [Script storage](#script-storage)), as is a debugging tool's
-storage edit. The Player then runs the engine
+storage edit. The Playroom then runs the engine
 and retries with the same action ID; if a block ended or replaced that action, the retry reports it as no longer
-active. A failed session accepts no host input: such a request is `invalidPayload`, and Players schedule no further
+active. A failed session accepts no host input: such a request is `invalidPayload`, and Playrooms schedule no further
 observation for it.
 
 Expiry blocks compile to parameterless handler regions. A runtime entry starts the first queued block before executing
@@ -769,7 +769,7 @@ button as it stops a non-persistent timer, settle the action with an `actionComp
 retained as `lastSettlement` and drop its queued click; removing a removed button does nothing. `exit` clears every
 button without events.
 
-The Player clicks a button with `pressPermanentButton(plan, snapshot, buttonId)`; `completeAction` cannot target it. A
+The Playroom clicks a button with `pressPermanentButton(plan, snapshot, buttonId)`; `completeAction` cannot target it. A
 click is host input at the observed time while the session waits. It is `executionPending` while the script runs,
 scene time is behind the observed time, or a due block can run; `busy` while the button's click is queued or its block
 runs; `removedButton` for an issued ID that is no longer shown; `unknownButton` for an unissued one; and
@@ -789,7 +789,7 @@ button block to belong to its button while that is shown.
 
 Author-facing behavior is defined in specification
 [§22](specifications/accepted-syntaxes-v30.md#22-stage-image-audio-and-video). This section defines the runtime
-contract that Players and hosts rely on.
+contract that Playrooms and hosts rely on.
 
 **State.** `stageImage` holds the persistent Stage image reference or `null`. Each play creates a background `media`
 action (ADR 0016 identity, request event, creation time) holding a media record; the script-visible handle
@@ -805,22 +805,22 @@ unrelated roots, or lies deep in a large value, costs that walk on every operati
 issues IDs. A media settlement publishes `actionCompleted` and, like a timer settlement, is not retained as
 `lastSettlement`. At most one video is active; a new video, `showImage`, or `hideImage` stops it.
 
-**Waiting and load.** A play first waits in a foreground `mediaPlayback` action: an async play until the Player's load
+**Waiting and load.** A play first waits in a foreground `mediaPlayback` action: an async play until the Playroom's load
 report, a blocking play until the media finishes, stops, or fails. The wait settles through runtime work, never
 through `completeAction`; its settlement is retained like a delay's, it may be a terminal action, and an interrupt
-block may suspend it. A `null` file plays nothing and creates no wait. The Player reports the initial load result of
+block may suspend it. A `null` file plays nothing and creates no wait. The Playroom reports the initial load result of
 each active unloaded media with `reportMediaLoad(plan, snapshot, mediaId, report)`: `{ kind: "loaded", durationMs }`
 records the source duration and starts the first playback segment when the effective range is non-empty; an empty
 range reports `TSW013` and stops without cues or `finish`, keeping the duration readable. `{ kind: "failed",
 message? }` reports `TSW013`, stops the media without cues or `finish`, and releases any wait; its handle reads `null`
-for `duration` and `remaining`. After a `loaded` report, the Player reports at most one more: `{ kind: "failed" }` when
+for `duration` and `remaining`. After a `loaded` report, the Playroom reports at most one more: `{ kind: "failed" }` when
 playback fails, as when the browser's audio output errors. It reports `TSW013` and stops the active media as a stop
 does: events due before the observed time commit, cue blocks not yet started are dropped, a cue block already running
 completes, the media and a blocking wait settle `stopped`, and its handle keeps the duration and reads `0` for
 `remaining`. Like host input, a load result applies at the observed time: while scene time is behind it or a due block
-can run, the report is `executionPending` without changing anything, and the Player runs the engine and retries. A
+can run, the report is `executionPending` without changing anything, and the Playroom runs the engine and retries. A
 second `loaded` report, a report for settled media, and a second failure are `ignored`; unissued IDs are
-`unknownMedia`, and malformed input is `invalidReport`. The runtime defines no load timeout; a Player that gives up
+`unknownMedia`, and malformed input is `invalidReport`. The runtime defines no load timeout; a Playroom that gives up
 before loading reports `failed`.
 
 **Progress observations.** Playback progress enters only through validated observations:
@@ -830,15 +830,15 @@ samples must increase in time and must not decrease in progress, and reports for
 or unloaded media are ignored, as are reports with non-increasing times or decreasing progress; a malformed report
 batch rejects the whole observation as `invalidObservation`. A running media without a report in an observation has
 made no known progress, so
-Players report every running media on every observation. The engine interpolates only between reported samples and
+Playrooms report every running media on every observation. The engine interpolates only between reported samples and
 never extrapolates past the latest one: a gap between reports usually means buffering, a throttled or suspended
 background tab, or blocked playback, so assumed progress could fire cues for content that never played, and a
 committed cue cannot be withdrawn. A late report instead places each crossing at its canonical scene time, so waiting
-costs only latency. A Player may extrapolate for display, such as a progress bar, but reports only measured progress; only a development
-time jump (see [Timers and scene time](#timers-and-scene-time)) reports 1× progress, after which the Player seeks its
+costs only latency. A Playroom may extrapolate for display, such as a progress bar, but reports only measured progress; only a development
+time jump (see [Timers and scene time](#timers-and-scene-time)) reports 1× progress, after which the Playroom seeks its
 elements to it. Every canonical timeline change starts a new segment
 anchored at `(scene time, 0)`: load, pause, resume from pause, seek, stop, and Stage replacement; lifecycle no-ops and
-volume changes do not. A Player acknowledges a new segment by reporting progress `0` when it applies it.
+volume changes do not. A Playroom acknowledges a new segment by reporting progress `0` when it applies it.
 
 **Timeline events.** The engine owns passes, repeat limits, cue order, and settlement. Between samples, progress is
 interpolated linearly using the exact values of the reported samples. Nonzero-progress arrivals are due at their exact
@@ -859,7 +859,7 @@ arrival queues every cue exactly at its point in source order and, at the end of
 atomically: the next pass restarts at `startAt` with its start cues pending, or the media finishes and queues `finish`.
 A repeat duration that ends mid-pass queues the cues reached there, then finishes. Every event's segment progress is
 calculated from the segment's anchor — its start position, completed passes, and total playback — rather than
-accumulated, so the same events produce the same values however the Player's samples are spaced, and the final arrival
+accumulated, so the same events produce the same values however the Playroom's samples are spaced, and the final arrival
 equals `terminalProgressMs` exactly, also for fractional ranges.
 As for timers, catch-up pauses whenever the script or a cue block can execute, so both behave as if every sample had
 arrived on time, and every media settlement records the scene time at which it happened.
@@ -894,15 +894,15 @@ playback reached it. Later segments follow controls whose history is not retaine
 progress is identical in double precision, which needs extreme source ranges, cannot be told apart. Cross-device handoff
 is not part of this contract.
 
-**Player projection.** `mediaPlaybackProjection(snapshot)` exposes each active media's identity, source, `loaded`,
+**Playroom projection.** `mediaPlaybackProjection(snapshot)` exposes each active media's identity, source, `loaded`,
 state, `segment`, active range, `volume`, `playheadMs` (the source position that the reported progress reaches),
 `reportedProgressMs`, and `terminalProgressMs` (segment progress at which playback ends; `null` before loading or when
-repeating indefinitely); `stageProjection(snapshot)` gives the Stage image and active video. The Player reports the load
+repeating indefinitely); `stageProjection(snapshot)` gives the Stage image and active video. The Playroom reports the load
 result of unloaded media and keeps paused media silent. For running media, on a new segment it repositions to
 `playheadMs` (rewinding any overshoot), reports progress `0`, plays and wraps the range natively until
 `terminalProgressMs`, and keeps counting progress across wraps. A restored running media continues from `playheadMs`
 and `reportedProgressMs` after Continue. Browser `ended` or `timeupdate` callbacks are observation opportunities, not
-settlement. Reported progress is the natural playback of the current segment only: the Player never seeks, pauses,
+settlement. Reported progress is the natural playback of the current segment only: the Playroom never seeks, pauses,
 or skips a media on its own, and a browser-forced pause or buffering appears as a stall. Any future user control of
 media playback enters the runtime as typed host input and changes segments like the script's own controls; it is an
 open decision in [`OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
@@ -1100,7 +1100,7 @@ The low-level `RuntimeCapabilities.random` hook is a compatibility/testing overr
 
 The override's own state is external to the runtime snapshot. A checkpoint is therefore not self-contained with respect to an arbitrary injected random source. Canonical checkpoint-equivalence guarantees use the serialized runtime RNG; tests that use the override must explicitly recreate an equivalent deterministic external source.
 
-Future player capabilities must return typed, validated, JSON-safe outcomes correlated to one action ID and obey
+Future Playroom capabilities must return typed, validated, JSON-safe outcomes correlated to one action ID and obey
 any separately justified capability/interaction boundary. Raw DOM exceptions, browser handles, streams, callbacks, and
 mutable host objects do not enter the snapshot.
 
@@ -1221,7 +1221,7 @@ new context may be omitted to keep the earlier one. Restore itself records nothi
 - A capture replaces the previous one only when nothing happened in between. Recording a capture drops captures no
   open interaction, current execution, or saved catch-up can use any more.
 
-The Player resolves the host's account setting, else the browser's zone and language, and then reads `Date.now()`,
+The Playroom resolves the host's account setting, else the browser's zone and language, and then reads `Date.now()`,
 when Start creates a session and again at Continue.
 
 ## Script storage
@@ -1270,11 +1270,11 @@ due time before catch-up continues. A pending write survives checkpoint and rest
 Restoring an older checkpoint carries its older storage view. A later read-modify-write can overwrite newer durable
 data; reconciliation belongs to #469 and is not implemented here. Later durable-store changes do not update a session's
 view by themselves. Replacing the durable store, as a saved-data import does
-([transfer](DATA-AND-API.md#saved-data-transfer)), never changes it: the Player ends a session in progress first, and
+([transfer](DATA-AND-API.md#saved-data-transfer)), never changes it: the Playroom ends a session in progress first, and
 the next fresh session loads the replaced values.
 
 A debugging tool changes the view only through `applyExternalStorageEdit(plan, snapshot, { key, value })`
-([DEBUGGER.md](DEBUGGER.md#player-debug)): a host input, not author syntax. The request is captured as external data
+([DEBUGGER.md](DEBUGGER.md#playroom-debug)): a host input, not author syntax. The request is captured as external data
 and must be exactly `{ key, value }` with a string key, any string, and a value that `validateScriptStorageEntries`
 accepts, or `null` to remove the key; otherwise the outcome is `invalidEdit`. An ended or failed session refuses it
 (`invalidState`), and so does a pending `storageWrite` (`storageWritePending`): the host acknowledges that write with
@@ -1305,10 +1305,10 @@ The built-in speaker `player` ([V30 §37](specifications/accepted-syntaxes-v30.m
 when a file of the project names `player`, the startup prefix begins with a `declareSpeaker` of `player` without
 properties, which no script declares, so the speakers and the script's globals begin with it. Only code that names it
 can reach it, so another plan leaves it out. A message of `player` emits a speaker with identifier `player`, an
-empty `displayName`, no avatar, and no `TSW001`; the Player adapter shows it as the player's own message, as an answer.
+empty `displayName`, no avatar, and no `TSW001`; the Playroom adapter shows it as the player's own message, as an answer.
 A `playerTranscript` event carries `presentation`, that of `player` when the answer completed, resolved as for its
 message without options. A completion cannot fail, so options that would fail that message with `TSR050` give the
-answer the Player's defaults.
+answer the Playroom's defaults.
 
 `FreshRuntimeOptions.playerProfile` gives the person fields of the player profile: `title`, `shortTitle`, `firstName`,
 `lastName`, `displayName`, `alias`, `gender`, the terms, and the name lists, each text or, for a name list, a list of at
@@ -1360,7 +1360,7 @@ with `prepareSayText` and `field: true`, after the arguments and before the requ
 unlowered call.
 
 It is a mandatory `image` interaction with result domain `string`. Its UI carries `question`, `hint`, `allowCamera`,
-`allowFile`, `allowSkip`, `types`, and `mime` (`null` without a filter); the Player shows the hint as the composer's help
+`allowFile`, `allowSkip`, `types`, and `mime` (`null` without a filter); the Playroom shows the hint as the composer's help
 and its own controls under the question ([PLAYER-UI](ui/PLAYER-UI.md)); while it waits, its request temporary keeps that
 request, so restore
 checks the pending action against it. The host answers through `completeAction`:
@@ -1375,19 +1375,19 @@ waiting. The host applies `types` and `mime` before it stores an image; the engi
 is the reference, with the player transcript `Image`, or `null` for a skip, with the transcript `Skip`; the settlement
 and a result handoff of `null` are valid only for a request that allowed skipping. Like other interactions the request
 may be interrupted by a timer expiry block,
-survives checkpoint and restore, and replays a repeated completion as `alreadySettled`. The Player stores a chosen
+survives checkpoint and restore, and replays a repeated completion as `alreadySettled`. The Playroom stores a chosen
 image or a photo taken for the request as session media with the lifecycle of a `takePhoto()` photo; see
-[Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation) for its file and camera routes.
+[Playroom UI](ui/PLAYER-UI.md#foreground-interaction-presentation) for its file and camera routes.
 
-The Player opens the session camera from the activating Start or Continue click, before ordinary script execution, when
+The Playroom opens the session camera from the activating Start or Continue click, before ordinary script execution, when
 the trusted host grants the camera capability; a camera failure does not stop the start. It answers each capture
 once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session media; a
 save stores the photos its value references durably before the value is persisted
 (`player/media/captured-media-persistence.ts`); when that fails, the host acknowledges the `storageWrite` as `failed`, so the
-previous value is kept as for any failed persistent write. Media no saved value references, nor a session the Player
+previous value is kept as for any failed persistent write. Media no saved value references, nor a session the Playroom
 keeps for a reload ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), is reclaimed opportunistically
-when a Player opens while no Player of the same scope is live in any tab (Web Locks) and the saved values can be read (a
-value its store cannot read counts as gone, with its media); without Web Locks it is not reclaimed, and while a Player
+when a Playroom opens while no Playroom of the same scope is live in any tab (Web Locks) and the saved values can be read (a
+value its store cannot read counts as gone, with its media); without Web Locks it is not reclaimed, and while a Playroom
 lives nothing is deleted. The technical playground has no camera and answers a pending capture as `unconfigured` when
 execution continues.
 
@@ -1442,7 +1442,7 @@ Every edit is absolute, so a repeat changes nothing and returns `unchanged`. Ope
 field first commits the text being edited; invalid text, also blank text for a required field, refuses the edit. A
 refused or malformed edit returns `invalidPayload` with a message and changes nothing. An edit keeps the
 action, its continuation, and its destination; it publishes no event, records no settlement, uses no randomness, and
-does not run the script. The Player sends the composer's text as `draft` shortly after typing pauses and before any
+does not run the script. The Playroom sends the composer's text as `draft` shortly after typing pauses and before any
 other edit of the form, so a checkpoint keeps the text being typed. A suspended form returns `suspendedAction`; otherwise the outcomes are those of
 `completeAction`. Focus, caret, and other browser state stay outside canonical
 state.
@@ -1455,7 +1455,7 @@ completion, as a date or time ask's line is; answers too long for one transcript
 from the form's state, which tells cycle options with the same value apart. The settlement records that too, as
 `shownOptions`: for each field the position of the option a cycle showed, else `null`, and `null` as a whole for a form
 that returned `null`; and, as `temporalPresentation`, the presentation the answers were shown in, `null` for a form that
-sent none. The Player rebuilds the per-line summary from the settlement's definition, result, shown options, and
+sent none. The Playroom rebuilds the per-line summary from the settlement's definition, result, shown options, and
 presentation, so a later capture does not change it. A refusal leaves the form open.
 The settlement records the definition, and validation checks its result and shown options against it (each shown
 option has its field's answer as value) and its transcript against the summary in its presentation; the result
@@ -1476,7 +1476,7 @@ Executing them changes `RuntimeSnapshot.cameraView`
 at once: the instruction never waits for the host, and the runtime does not know whether a camera exists. The snapshot
 keeps one record for the default camera from the first `showCamera` on, so handles stay readable after `hideCamera`;
 `exit` sets it hidden. A handle is `{ kind: "cameraView" }`; snapshot validation requires the record wherever a handle
-is held. The Player shows the view whenever the restored or current snapshot says so and it has an open session camera.
+is held. The Playroom shows the view whenever the restored or current snapshot says so and it has an open session camera.
 
 ## Message handles
 
@@ -1581,7 +1581,7 @@ formatted again after restore. List text follows
 
 The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 defines the
 accepted deterministic first-POC smart-autoplay and pacing-action contract. The current engine/compiler and playground
-Player POC implement that contract; production host lifecycle and cross-origin wiring remain separate.
+Playroom POC implement that contract; production host lifecycle and cross-origin wiring remain separate.
 
 ## JSON and Base64 text
 
@@ -1697,14 +1697,14 @@ WebM signatures are read as they intend, Ogg is audio, and an M4A major brand is
 | `video/webm`               | an EBML header whose document type is `webm`                                      |
 | `application/octet-stream` | anything else, such as SVG, HTML, BMP, AVIF, or text                              |
 
-The Player (`player/media/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
+The Playroom (`player/media/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
 as session media of its kind, with the lifecycle of a photo, durable while a saved value or a kept session uses it, and
 reads stored files' bytes, from durable storage when needed, and hashes them with `crypto.subtle.digest`. When it cannot
 decode, keep, read, or hash them, as outside a secure context, where the browser has no `crypto.subtle`, it answers
 `failed`.
 At Start it names the references in the saved values that its store holds, or had stored when it read them, so saved
 text that only has the shape of a reference stays text. Its media store resolves a reference only for
-its own kind and the Player asks only for images, so only an image is ever shown, and stored audio and video are not
+its own kind and the Playroom asks only for images, so only an image is ever shown, and stored audio and video are not
 played. A save whose files cannot be stored durably, as when the browser's storage is full, fails like any failed
 persistent write, with `TSW014` and the previous value, and the files stay usable for the session. The technical
 playground answers each file store as `failed`.
@@ -1740,14 +1740,14 @@ stored file), the written `password` text or `null`, the written `publicKeys`, e
 the written `key` or `null` (decrypt only), the written time lock's `timeLockMs` (encrypt only), the `choices`, and a
 `phase`, and waits with the instruction itself as its continuation:
 
-- `work`: the Player locks or opens with what it has. Nothing interrupts it: a due block runs once it settles.
-- `ask`: the Player's dialog asks the player first. An encrypt call with `choices` starts here, with `timeLockMs` the
+- `work`: the Playroom locks or opens with what it has. Nothing interrupts it: a due block runs once it settles.
+- `ask`: the Playroom's dialog asks the player first. An encrypt call with `choices` starts here, with `timeLockMs` the
   moment the dialog suggests for a chosen time lock; a decrypt call without `password:` and `key:` comes here when its
   `work` step answers `ask`, with an optional `notice`. A call with a password field starts here too, its field asking
   before an encrypt call's lock dialog: every step of it has `passwordField`, `{ hint }` with the hint as field text or
   `null` (`null` for other calls). Like an interaction, a due expiry block interrupts it, also through a late time
   observation, and once the block returns the dialog asks again: the step's `resumes` counts these returns, so the
-  Player shows the dialog anew, without what was typed, also after a block that returned at once.
+  Playroom shows the dialog anew, without what was typed, also after a block that returned at once.
 
 The host answers through `completeAction`:
 
@@ -1765,9 +1765,9 @@ The host answers through `completeAction`:
 
 A locked file is accepted only when `ActionCompletionOptions.capturedMedia.holds(file, "file")` vouches for it, and an
 opened file when it holds it with the kind of its type; both join `storedFiles`. `ask` comes only from a decrypt step
-without a written password or key, its `notice` `"unreachable"` (a passed time lock whose relays the Player cannot
+without a written password or key, its `notice` `"unreachable"` (a passed time lock whose relays the Playroom cannot
 reach) or, after a dialog, `"wrongPassword"` or `"wrongKey"`; from an encrypt step, and from a step after a password
-field, it comes only after a dialog or field whose typed answer the Player no longer has, as after a reload, and without
+field, it comes only after a dialog or field whose typed answer the Playroom no longer has, as after a reload, and without
 a notice. A password field's `ask` step takes no `cancelled`. The completion retains the settlement, with its `outcome`
 and the stored file, as `lastSettlement`, and hands the answer off, a list of the outcome and its text, file, or notice.
 The instruction then runs again with it, before any block: it gives the lock or the opened text or file (`TSR084` for a
@@ -1775,13 +1775,13 @@ text too long), the default for `notOpened` or `cancelled`, fails with `TSR085` 
 `failed`, or waits again in an `ask` step, or, after `submitted`, in a `work` step whose `dialogActionId` names the
 dialog or field, which locks with the call's own openers and, for its password field and `choices`, what the player
 gave; a password field's decrypt call opens with the typed password and its written key only, a wrong one giving the
-default. The player's typed password stays in the Player and never reaches the engine; the engine records only each
+default. The player's typed password stays in the Playroom and never reaches the engine; the engine records only each
 step's outcome and result, so a restore or a replay of recorded completions needs neither the network, the store, nor a
 secret.
 
-The Player (`player/encryption/lock-service.ts`) answers each `work` step once and offers the answer until it settles, as for a
+The Playroom (`player/encryption/lock-service.ts`) answers each `work` step once and offers the answer until it settles, as for a
 file store, and shows each `ask` step's dialog, or the composer's password field for a call with a password field
-([Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation)); what the player typed it keeps in memory for the
+([Playroom UI](ui/PLAYER-UI.md#foreground-interaction-presentation)); what the player typed it keeps in memory for the
 step after the dialog or field. A step it cannot do, as outside a secure context,
 where the browser has no `crypto.subtle`, it answers `failed`; a stored file it cannot read, `unreadable`. The technical
 playground answers each lock step as `failed`.
@@ -1951,8 +1951,8 @@ compiler code and its text; this table lists the runtime's own codes.
 | `TSR082` | No file or image has the tags of a query.                                                                                                                                                                                                                                                                                                                                                          | Relax the query, or add files with those tags.                                                           |
 | `TSR083` | `takePhoto(tags:)` with something other than tags, or with two numbers for one tag.                                                                                                                                                                                                                                                                                                                | Pass tags such as `"bedroom"` or `"punishment: 4"`, with one number per tag.                             |
 | `TSR084` | A text longer than the maximum text length.                                                                                                                                                                                                                                                                                                                                                        | Build a shorter text.                                                                                    |
-| `TSR085` | A stored file that `fileToBase64`, `toJson`, `encryptFile`, or `decryptFile` needs, which the Player could not read.                                                                                                                                                                                                                                                                               | Take, choose, or store the file again.                                                                   |
-| `TSR086` | A lock the browser could not make or open at all, as on a Player page without https, or whose result it could not keep.                                                                                                                                                                                                                                                                            | Open the Player over https, with room to store files.                                                    |
+| `TSR085` | A stored file that `fileToBase64`, `toJson`, `encryptFile`, or `decryptFile` needs, which the Playroom could not read.                                                                                                                                                                                                                                                                               | Take, choose, or store the file again.                                                                   |
+| `TSR086` | A lock the browser could not make or open at all, as on a Playroom page without https, or whose result it could not keep.                                                                                                                                                                                                                                                                            | Open the Playroom over https, with room to store files.                                                    |
 | `TSR087` | A text operation with a regex that needs more work than the regex work limit allows.                                                                                                                                                                                                                                                                                                               | Use a simpler pattern or a shorter text.                                                                 |
 | `TSR088` | A list of more than 1,000,000 elements, a set of more than 1,000,000 members, or a dict of more than 1,000,000 keys ([`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)), or one larger than the host can hold where no check foresaw it: in V8, more than 134,217,728 elements in an array or 16,777,216 entries in a `Set` or `Map`.                                                                     | Build a shorter list, set, or dict.                                                                      |
 | `TSR100` | Instruction-plan data that fails validation.                                                                                                                                                                                                                                                                                                                                                       | Compile the script again.                                                                                |
@@ -1980,9 +1980,9 @@ The zero-state rule prevents the absorbing xorshift32 state in which every futur
 they have. A host passes the same context as `debugTrace` to each operation on a session's successive results: in the
 options of `run`, `stepToEvent`, `executeInstruction`, `runValidatedState`, `completeAction`, `observeTime`,
 `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, `applyExternalStorageEdit`, `setDebugMode`, and
-`updateInteraction`, and of the matching [runtime session](#runtime-sessions) methods. A Player session
+`updateInteraction`, and of the matching [runtime session](#runtime-sessions) methods. A Playroom session
 carries it as `debugTrace`, like its debug recorder: `createPlayerRuntimeSession` and `restorePlayerRuntimeSession`
-take it, `withPlayerRuntimeDebugTrace` turns it on or off, and every session operation passes it on. The Player's
+take it, `withPlayerRuntimeDebugTrace` turns it on or off, and every session operation passes it on. The Playroom's
 engine host keeps one trace per connection while Debug runs, which every session it holds runs with from its next
 operation on. The trace is not
 part of plans, snapshots, events, checkpoints, restore points, or recorded calls and changes no format: an operation
@@ -2091,13 +2091,13 @@ A checkpoint that restore rejects throws `CheckpointError` with `TSK001` for an 
 for a malformed checkpoint, or `TSK003` for text that is not JSON. A state whose checkpoint text would be longer than a
 text can be fails with `TSK004` when it is saved or exported ([`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)).
 
-Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. After the restored-session activation gate, the Player application submits an explicit observation; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
+Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. After the restored-session activation gate, the Playroom application submits an explicit observation; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
 
-Without host builtins or a random source, as the Player runs it, execution reads no clock, randomness, or host state
+Without host builtins or a random source, as the Playroom runs it, execution reads no clock, randomness, or host state
 outside the snapshot and the arguments of each operation, except a media store's answer whether it holds a
 captured-media or stored-file reference. Running the same operations with the same arguments
 and store answers from a restored snapshot therefore reaches the same state and events; a debug export's replay relies
-on this ([`DEBUGGER.md`](DEBUGGER.md#debug-export)). The Player records its operations beside the session, outside
+on this ([`DEBUGGER.md`](DEBUGGER.md#debug-export)). The Playroom records its operations beside the session, outside
 runtime state, and recording never changes them.
 
 ## Format evolution
@@ -2359,7 +2359,7 @@ a new revision moves the reason it replaces to the top of its format's list.
   positions have exactly the fields their revision defines; validation previously accepted others, an own `__proto__`
   included, which the trusted export dropped.
 - Revision 91: Form presentation (#1153): a form settlement carries `temporalPresentation`, the date and time
-  presentation its answers were shown in, from which the Player rebuilds the summary; previously it used the
+  presentation its answers were shown in, from which the Playroom rebuilds the summary; previously it used the
   presentation in force when the session was restored.
 - Revision 90: Player profile (owner decision, 2026-10-23): the person fields the host gave at the start are kept as
   `playerProfile`; previously they were kept as `account`.
@@ -2392,7 +2392,7 @@ a new revision moves the reason it replaces to the top of its format's list.
   compiles within the regex limits, which validation previously rejected.
 - Revision 80: Stored files (owner decisions, 2026-10-13): `storedFiles`, the stored file references the session knows
   in ascending order; a foreground `fileStore` action with its files to store or references to read, its settlement with
-  the stored files' references, and a result handoff of kind `fileStore` that holds the Player's answer while the
+  the stored files' references, and a result handoff of kind `fileStore` that holds the Playroom's answer while the
   instruction's destination is still empty; previously validation rejected all of them.
 - Revision 79: `exportText` (owner decision, 2026-10-13): a foreground interaction may be an `export` with its text,
   title, and file name, whose text counts toward no interaction byte limit, and its settlement has no result, transcript
@@ -2521,7 +2521,7 @@ a new revision moves the reason it replaces to the top of its format's list.
   prepared temporaries, which a later run of the same instruction may fill anew.
 - Revision 26: the validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground
   `storageWrite` actions and settlements.
-- Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned.
+- Revision 25: captured bubble presentations require null position and alignment; placement is Playroom-owned.
 - Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits
   and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles.
 - Revision 22 added timer state.
