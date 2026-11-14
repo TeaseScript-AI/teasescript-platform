@@ -246,6 +246,38 @@ decided, from an assignment file kept with the move's evidence; `node tools/move
 moved test files' tests, by title and result, in two built checkouts. The coordinator schedules it between packages, so
 that no open pull request's hunks collide. A feature pull request never moves files another open pull request changes.
 
+**Checks that read where a file is.** `move-sweep` finds a moved file's old path written out. It does not find a check
+keyed on part of a path, a folder's depth or a stack frame's file name, which a move can narrow while it still passes.
+A move keeps the reach of each such check whose keyed paths it changes, and shows it by a mutant the check catches at
+the base and at the head, or as its row says where no test reads the check; a pull request that adds such a keying adds
+its row here.
+
+| Check | Keyed by | A move must |
+| --- | --- | --- |
+| `tools/oxlint/type-core/check-obligation-inventory.mjs` (`admissionFiles`, `consumersFiles`) | folders read one level deep, each subfolder listed by hand | list a new subfolder |
+| `tests/type-core/stop/type-core-stop-words.test.ts` (the drift guard) | a path containing `core/consumers`, or ending `core/check-result/otherwise.ts` | add a condition for a file moved out |
+| `tests/type-core/contract/type-core-pushed-reads.test.ts`, `tests/type-core/narrowing/type-core-narrowing-events.test.ts` | a stack frame's file name (`frontier`, `positions.js`; `narrowing/narrowings.js`, `narrowing/events.js`) | rename the pattern with the module |
+| `tests/type-core/type-core-property-names.test.ts` | stack frames by `src/` path (`core/definitions`, `core/budget`, `core/contract/key-ids`, `core/property-names`) | the same |
+| `tests/type-core/contract/type-core-key-ids.test.ts` | a stack frame containing `key-ids.` | the same |
+| `tests/helpers/retained-instrument.ts`, `retained-instrument-preload.ts` | frames and sites containing `retained-instrument` or `retained/retained` | the same |
+| `tools/oxlint/type-core/check-retained-state.mjs` | `OUTSIDE` (paths under `core/`), `HELPERS` and `RETAINED_API` path prefixes | rename the prefix |
+| `tests/type-core/candidate/type-core-candidate-route.test.ts` (no production code selects the core) | the prefix `src/type-inference/core/`; `core/backend.js` in a file's text | keep the core's files under it; rename the pattern with the module |
+| `tests/type-core/candidate/type-core-candidate-route.test.ts` (the same test) | the prefix `tools/runtime-oracle/`, left out as test tooling | keep only the oracle's tooling under it: a file moved there leaves the check |
+| `tests/player/playback-entry.test.ts`, `tests/bridge/player-engine-bridge-protocol.test.ts` (no compiler module is loaded) | the compiler's and language tools' modules by their path under `dist/src/` (`compiler`, `parser`, …, `type-inference/`, `editor/`); the Worker's test also `player/runtime/compile-project` and `script-identity` | rename the pattern with the module |
+| `tests/player/player-random-control.test.ts` (one reader of a session's publication) | `player/engine-bridge/` and its `ops/`, each read one level deep | read the subfolder a file moves into |
+| `tests/helpers/retained-instrument-preload.ts`, `tools/retained-survey.mjs`, `tests/helpers/retained-subset.ts` | a test of `tests/type-core/` or one folder down; the subset by base name | keep a type-core test at most one folder down, its base name unchanged; no test reads the preload's regex, so show the frozen and the instrumented sets equal at base and head (the regex and `FROZEN_IN_CI` applied to the suite's test files, under the move's renames) |
+| `tools/test-runner/test-shards.mjs` (`isSuiteTestPath`, `isTypeCoreTestFile`) | a test at most two folders under `tests/`, not in `fixtures/` or `helpers/`; a `type-core-` base name | keep a test at most two folders under `tests/`, outside `fixtures/` and `helpers/`, and a type-core test's `type-core-` name; a deeper test file is not run |
+| `tools/repository-checks/pin-suites.mjs` (`FORM_SCOPES`) | the `tests/type-core/` prefix or a `type-core-` base name | keep a type-core test under `tests/type-core/` or its `type-core-` name |
+| `tools/check-changed.mjs` (`PROJECTS`) | path prefixes (`tests/families/`, `tests/fixtures/`, …) choosing the checks a change runs | keep a file under its project's prefix |
+| `tools/oxlint/type-core/check-site-keys.mjs`, `tools/oxlint/comments/check-comment-forecasts.mjs` | scope globs and prefixes (`tests/helpers/**`, `tests/families/**`, `src/`) | keep a file under its scope |
+
+Checks that fail on their own when a move breaks them need no row. Among them are the lists keyed by a whole path
+(`.oxlintrc.json`'s waiting lists; `comment-citations.json`, `comment-declarations-waiting.json` and
+`comment-forecasts-allowed.json` in `tools/oxlint/comments/`; `tools/test-runner/costly-test-files.mjs`; the marks and
+`PAIRS` of `pin-suites`; `LISTED` and `STORED` of `tests/type-core/type-core-kept.test.ts`), whose keys a move renames,
+and `tools/oxlint/type-core/check-question-sources.mjs`, whose ownership by folder depth reports what a move takes out
+of it.
+
 Report a structure concern as [friction](#report-what-cost-a-wrong-turn), class `structure`. Each pull request can be
 reasonable while the whole drifts, so the coordinator also checks the whole
 ([`ORCHESTRATION.md`](../ORCHESTRATION.md#structure-and-friction)).
