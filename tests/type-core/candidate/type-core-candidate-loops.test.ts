@@ -137,7 +137,6 @@ function check(rows: readonly Row[], context: { after: (fn: () => void) => void 
 test("`while`, `break` and `continue` answer as today's compiler, the false TSV052 on `while true` gone", (t) => {
   check(
     [
-      // (the ways: a literal condition runs its body never, or until a `break`; `while true` without one never ends)
       one("while true, exit", "while true {\n  exit\n}\n"),
       one(
         "while true, a let in the body",
@@ -153,7 +152,6 @@ test("`while`, `break` and `continue` answer as today's compiler, the false TSV0
         "nested, break in the inner loop",
         "while true {\n  for x in [1] {\n    break\n  }\n  exit\n}\n",
       ),
-      // (R7 and its control: a body that breaks the guard, and one that keeps it)
       one(
         "R7",
         "let n: integer? = 1\nwhile n != null {\n  let w: integer = n\n  n = null\n}\nexit\n",
@@ -162,7 +160,6 @@ test("`while`, `break` and `continue` answer as today's compiler, the false TSV0
         "R7's control",
         "let n: integer? = 1\nwhile n != null {\n  let w: integer = n\n  n = 2\n  exit\n}\nexit\n",
       ),
-      // (a typed store in a body, left by `break`, in each loop; `continue` in each loop)
       one(
         "while, break after a store",
         "let i: integer = 0\nwhile true {\n  i = hostValue\n  break\n}\nsay i\nexit\n",
@@ -252,7 +249,6 @@ test("`switch` answers as today's compiler: each literal kind, a range, a type t
         'let b = hostValue == null\nswitch b {\n  case true {\n    exit\n  }\n  case false {\n    exit\n  }\n}\nsay "after"\nexit\n',
         "unreached",
       ),
-      // (R8 and its control: a join of the cases' stores)
       one(
         "R8",
         "let n: integer? = 1\nswitch hostValue {\n  case 1 {\n    n = null\n  }\n  default {\n    n = 2\n  }\n}\nlet w: integer = n\nexit\n",
@@ -261,7 +257,6 @@ test("`switch` answers as today's compiler: each literal kind, a range, a type t
         "R8's control",
         "let n: integer? = 1\nswitch hostValue {\n  case 1 {\n    n = null\n  }\n  default {\n    n = 2\n  }\n}\nif n != null {\n  let w: integer = n\n}\nexit\n",
       ),
-      // (a `let` in a case's body and the default's, read there; a typed store in a case)
       one(
         "a let in a case",
         "switch hostValue {\n  case 1 {\n    let y: integer = hostValue\n    say y\n  }\n}\nexit\n",
@@ -290,13 +285,11 @@ test("`switch` answers as today's compiler: each literal kind, a range, a type t
         ],
         expect: "equal",
       },
-      // (today's name pass on a case value: no literal, and an overlap)
       one("TSV047", "let a = 1\nswitch hostValue {\n  case a {\n    exit\n  }\n}\nexit\n"),
       one(
         "TSV048",
         "switch hostValue {\n  case 1 {\n    exit\n  }\n  case 1 {\n    exit\n  }\n}\nexit\n",
       ),
-      // (a case's written type as a `let`'s: a union and one only `null` fills refused, an optional admitted)
       one(
         "a union in a type test",
         "switch hostValue {\n  case is integer | string {\n    exit\n  }\n}\nexit\n",
@@ -356,7 +349,6 @@ const UNDER_OFFERED: ReadonlySet<string> = new Set([
   "a parse, case null",
 ]);
 
-/** The case values of the family: each literal kind, a range, a parenthesised literal. */
 const VALUES: readonly string[] = ["1", "2.5", '"a"', "true", "null", "1..3", "(1)"];
 
 test("a case value that may never match is refused where today's checker gives TSV049, and admitted alike elsewhere", (t) => {
@@ -367,7 +359,6 @@ test("a case value that may never match is refused where today's checker gives T
       const body = `${before}switch ${subject} {\n  case ${value} {\n    say "in"\n  }\n}\n${inLoop ? "}\n" : ""}`;
       rows.push(one(`${name}, case ${value}`, `${body}say "after"\nexit\n`));
     }
-  // a value beside one that may match, in a later case, and after a type case
   rows.push(
     one(
       "beside a matching value",
@@ -392,8 +383,6 @@ test("a case value that may never match is refused where today's checker gives T
     rows.map((row) => ({ name: row.name, files: row.files })),
     folder,
   );
-  // where today's checker gives TSV049 the route refuses the case, and where it declines one today plans
-  // (`UNDER_OFFERED`); everywhere else the row answers as today
   const failures = rows.flatMap((row, index) => {
     const record = found[index]!;
     const never = (record.checker.diagnostics ?? []).some((each) => each.code === "TSV049");
@@ -401,7 +390,6 @@ test("a case value that may never match is refused where today's checker gives T
     return judge({ ...row, expect: refused ? { refused: "this case" } : row.expect }, record);
   });
   assert.deepEqual(failures, []);
-  // the family reaches both sides
   const refusedRows = found.filter((record) =>
     (record.checker.diagnostics ?? []).some((each) => each.code === "TSV049"),
   ).length;
@@ -410,7 +398,7 @@ test("a case value that may never match is refused where today's checker gives T
 
 test("a case value that may never match stays refused where the analysis's budget stops it before its subject's kind", () => {
   // (a stop leaves the subject an unknown of the budget's reason, which the admitted set does not hold: refused, never
-  // published, R33's form; never a throw of another kind)
+  // published, never a throw of another kind)
   for (const source of [
     'let s = 1\nswitch s {\n  case "a" {\n    say "a"\n  }\n}\nexit\n',
     'let s = "a"\nlet t = s\nswitch t {\n  case 1..3 {\n    say "r"\n  }\n}\nexit\n',
