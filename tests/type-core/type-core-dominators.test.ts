@@ -17,12 +17,6 @@ import {
 import { filesOf } from "../helpers/type-core/type-core-flow-oracle.js";
 import { FLOW_PROGRAMS, HOST_GLOBALS } from "../helpers/type-core/type-core-flow-programs.js";
 
-/*
- * The dominators of the type core's flow graph: Lengauer and Tarjan's algorithm against the iterative one on every
- * graph of the corpus, and the shapes the exact path depends on: literal loops (P7), labels and boundaries (X4),
- * computed transfers (L11), blocks, early leaves (F5a), and calls that cannot return (L10).
- */
-
 /**
  * A node by its id. Assertions compare ids, never nodes: a failing assertion prints its values in full, and a node reaches
  * the whole graph through its edges, once per way through it.
@@ -189,7 +183,6 @@ test("a literal count of one or more runs the body before the loop is left (P7)"
   assert.equal(forever.dom.dominates(forever.at("B"), forever.at("R")), true);
   const maybe = analyse('while hostFlag {\n  say "B"\n}\nsay "R"\nexit');
   assert.equal(maybe.dom.dominates(maybe.at("B"), maybe.at("R")), false);
-  // A `for` over a literal collection: an empty one never runs its body, a non-empty one runs it first.
   const filled = analyse('for item in [1, 2] {\n  say "D"\n}\nsay "R"\nexit');
   assert.equal(filled.dom.dominates(filled.at("D"), filled.at("R")), true);
   const empty = analyse('for item in [] {\n  say "B"\n}\nsay "R"\nexit');
@@ -233,17 +226,14 @@ test("a condition its literals decide has a dead way, as the type check reads co
 });
 
 test("a label that some `goto` enters is a boundary, one that only the code before it reaches is not (X4)", () => {
-  // L2: the label before both, the `goto` after both: the same boundary.
   const before = analyse('label again\nsay "D"\nsay "N"\nif hostFlag { goto again }\nexit');
   assert.equal(id(before.dom.edom(before.at("D"))), id(before.dom.edom(before.at("N"))));
   assert.equal(before.dom.edom(before.at("N"))?.statement?.kind, "labelStatement");
-  // L3, L4: the label between them, entered by a `goto`, also behind another label.
   for (const labels of ["label again", "label again\nlabel next"]) {
     const between = analyse(`say "D"\n${labels}\nsay "N"\nif hostFlag { goto again }\nexit`);
     assert.equal(id(between.dom.edom(between.at("D"))), null, labels);
     assert.notEqual(id(between.dom.edom(between.at("N"))), null, labels);
   }
-  // L5: a label that no `goto` enters.
   const unused = analyse('say "D"\nlabel again\nsay "N"\nexit');
   assert.equal(id(unused.dom.edom(unused.at("N"))), null);
 });

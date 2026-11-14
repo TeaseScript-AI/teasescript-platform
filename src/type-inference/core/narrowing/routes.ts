@@ -322,7 +322,6 @@ export class NarrowingRoutes extends RouteEntries {
           ? joinParts(key, node.id, tag, "")
           : joinParts(key, node.id, tag, "", "entered");
     }
-    // each copy is certified exactly when its source's read is
     for (const _ of steps(this.#work, "exactQueries", () => waiting.length > 0)) {
       const { memo: waited, found } = waiting.pop()!;
       answer = answer === null ? null : found.def;

@@ -14,8 +14,6 @@ import type {
 import type { SourceSpan } from "../../../source.js";
 import type { SourceSite } from "../../graph.js";
 
-// The flow graph's shape: its nodes, regions, call sites, jumps, loops and the operand uses it records.
-
 export type FlowNodeKind =
   | "program-entry"
   | "program-end"

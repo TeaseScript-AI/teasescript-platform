@@ -3,8 +3,6 @@ import { compileChild, runCompileTask, type CompileTask } from "../../../compile
 import { isEmptyLiteral, isNonEmptyLiteral, staticNumber } from "../../../static-evaluation.js";
 import { conditionShape } from "../../narrowing-shapes.js";
 
-// What literals decide: a condition's value, a non-null operand, a count or index, and how often a body runs.
-
 export const NON_NULL_LITERALS: ReadonlySet<Expression["kind"]> = new Set([
   "numberLiteral",
   "stringLiteral",

@@ -1,8 +1,3 @@
-/*
- * The route rule's condition tests: the closed set of tests the tested-producer rule reads (`checked`), arm feasibility
- * by entry narrowing and the program default (`defaultHolds`), and where a node's statement stands in the statement
- * tree (`chainOf`).
- */
 import type { Expression, Statement } from "../../../ast.js";
 import type { SourceSite } from "../../graph.js";
 import type { CorePass } from "../answers.js";
@@ -87,10 +82,8 @@ const ENDING: ReadonlySet<string> = new Set([
 /**
  * Whether a statement of each kind may stand before a promoting route's use, or after its writer within its arm, in a
  * program the default holds (#1938): one entry per kind, so a kind the language gains fails the type check until it is
- * classified. Not passable: a loop, a label or a `goto`, a statement that ends or leaves (`exit`, `end`, `return`,
- * `break`, `continue`), a file's `call`, and a statement that declares a timer, button or media block. A compound
- * statement passes where every statement it holds does, and a statement holding a call of a function or a file, or a
- * handler's declaration, never does (`feasibility`).
+ * classified. A compound statement passes where every statement it holds does, and a statement holding a call of a
+ * function or a file, or a handler's declaration, never does (`feasibility`).
  */
 const PASSABLE: Readonly<Record<Statement["kind"], boolean>> = {
   speakerDeclaration: true,
@@ -726,7 +719,6 @@ export class RouteTests {
     return this.#up(statement);
   }
 
-  /** A statement's places from its callable's body down to it. */
   #up(statement: TreeStatement): Place[] {
     this.#work.charge("eventSteps");
     const upward: Place[] = [];

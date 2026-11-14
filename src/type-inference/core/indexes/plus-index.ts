@@ -17,8 +17,6 @@ import { Retained } from "../retained/retained.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
 
-// #1384: a run of `+`'s terms by the properties their objects hold, read below its elements one property at a time.
-
 /** A closed term's objects (`shapeOf`): their first properties, borrowed, and the earliest of them. */
 interface Shape {
   readonly names: readonly string[];
@@ -91,7 +89,6 @@ export interface PlusIndex {
 /** The steps the index's queries took so far in this process (`visit`), each charged before it is taken (#1562). */
 let visits = 0;
 
-/** The steps the index's queries took so far in this process (`visit`). */
 export function plusIndexVisits(): number {
   return visits;
 }

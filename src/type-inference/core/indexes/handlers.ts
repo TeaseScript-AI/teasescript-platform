@@ -5,10 +5,8 @@ import { Retained } from "../retained/retained.js";
 
 /*
  * The handler index of the type core: which keys a timer, media or button block may store (its own code and every
- * callable it may run), and for each callable whether a block may have been registered before a node runs: a
- * registration in the callable earlier in its text, a call or file transfer into a callable that registers, the
- * callable entered where a block may have run, a callable a block may run, a file with a label, or a loop that holds a
- * registration. Two worklists over the call sites and file transfers, each edge once.
+ * callable it may run), and for each callable whether a block may have been registered before a node runs. Two
+ * worklists over the call sites and file transfers, each edge once.
  */
 
 /** A callable's registration facts. */

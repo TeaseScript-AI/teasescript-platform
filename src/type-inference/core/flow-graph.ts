@@ -58,12 +58,8 @@ export { literalRounds, literalTruth, type LiteralRounds } from "./flow-graph/li
  * Calls are summarized: a call's `call-in` node enters the callee's entry, and a summary edge from it to its `call-out`
  * node stands for the return; no edge leads from a callee's exit back. The session starts at the program's entry, runs
  * the session-start values of every global and speaker (the startup region, which dominates every file), and enters the
- * first file. What the graph proves from literals is a dead edge: a literal condition, `switch` subject or lazy
- * operand, a literal `repeat` count (`0`: the body is dead; `1`: no second round; `1` or more: the body runs before the
- * loop is left), a `for` over a literal collection (empty: the body is dead; not empty: the body runs before the loop
- * is left), a `get` on a list literal with a literal index, and a parameter default that every call supplies or none
- * does. A call that cannot return has a dead summary edge. Dead code keeps its nodes, joined to the live code before it
- * by dead edges, so every node has a dominator.
+ * first file. What the graph proves from literals is a dead edge, as a call that cannot return has a dead summary edge.
+ * Dead code keeps its nodes, joined to the live code before it by dead edges, so every node has a dominator.
  */
 
 /**
@@ -299,8 +295,7 @@ export class FlowGraphBuilder {
    * The node whose state each default's node reads: its outermost typed call's, since a nested typed call's default
    * runs at its call, which no event separates from the outer call. The ranges nest and each is recorded after those
    * inside it, so taken last first an outer range comes before its own: an inner one, whose first node the outer has
-   * set, is skipped, and each node is set once. The same walk notes the calls whose default reads a variable or
-   * computes.
+   * set, is skipped, and each node is set once.
    */
   #snapshotsOf(): Map<FlowNode, FlowNode> {
     const snapshots = new Map<FlowNode, FlowNode>();
@@ -339,8 +334,6 @@ export class FlowGraphBuilder {
     }
     return snapshots;
   }
-
-  // ------------------------------------------------------------------------------------------- nodes and regions
 
   public node(
     kind: FlowNodeKind,

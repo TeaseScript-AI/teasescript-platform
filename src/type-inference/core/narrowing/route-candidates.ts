@@ -1,7 +1,3 @@
-/*
- * The route rule's candidate lists: definitions by callable body, each with the reach of its writer side over the
- * closed statements of its layers, the nearest one whose writer side reaches a read, and a prefix's whole stores.
- */
 import { joinParts, keepText, type WorkLedger } from "../budget.js";
 import type { Definition, Key } from "../definitions.js";
 import { each, mapped, passing, sorted, steps } from "../charged-iteration.js";

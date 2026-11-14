@@ -26,11 +26,9 @@ import type { Work } from "../solver.js";
  * narrowing is never an event. Every event is counted in intervals of the dominator walk by binary search in those
  * existing lists, never in a copy per (key × node). For a read inside a loop that does not enclose G, and between G and
  * the read, a **preserving store** to the refined location itself is no event (r4-129): a store whose value keeps its
- * kinds within G's filtered kinds. The stores whose values depend on one another are one component of the solver,
- * solved from bottom (no items: every store preserving) to its greatest fixpoint and published only when stable. A
- * location's stores (its candidates, sorted) carry one tree of union demands, each node the kinds of its range's
- * values, whatever kind set asks: a query over a range checks O(log c) nodes, and a lost fact re-runs only the nodes
- * above its store and their readers.
+ * kinds within G's filtered kinds. A location's stores (its candidates, sorted) carry one tree of union demands, each
+ * node the kinds of its range's values, whatever kind set asks: a query over a range checks O(log c) nodes, and a lost
+ * fact re-runs only the nodes above its store and their readers.
  */
 
 /** An event list of G with the word a first event in it gives. */

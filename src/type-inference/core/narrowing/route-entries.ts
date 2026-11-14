@@ -67,7 +67,7 @@ interface Jumps {
   readonly begun: ReadonlyMap<Entry, readonly { readonly jump: Jump; readonly level: number }[]>;
 }
 
-/** The entry side of the route query: entries, jumps, the carried relation and the segment rule. */
+/** The entry side of the route query. */
 export abstract class RouteEntries extends RouteCandidates {
   /** Per loop statement, label statement and file body, its entry. */
   readonly #entries = new Map<TreeStatement | TreeBlock, Entry>();

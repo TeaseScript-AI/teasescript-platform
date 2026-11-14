@@ -7,7 +7,7 @@ import type { FlowGraph, FlowNode } from "./model.js";
  *
  * Dead code has dominators too: an edge counts unless it leads from dead code, or is dead, into live code. So a dead
  * edge never changes what dominates live code, and every node, dead or live, hangs in one tree below the program's
- * entry (the flow graph joins code that nothing reaches by dead edges).
+ * entry.
  */
 
 export interface Dominators {

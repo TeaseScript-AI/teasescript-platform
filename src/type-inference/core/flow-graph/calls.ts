@@ -2,8 +2,6 @@ import { isPathGlob } from "../../../project-paths.js";
 import type { FlowGraphBuilder } from "../flow-graph.js";
 import type { CallSite, FileRegion, FlowNode } from "./model.js";
 
-// Calls and jumps, resolved once every file is walked: the call sites, the targets of `goto` and `call`, their edges.
-
 function addSite(builder: FlowGraphBuilder, site: Omit<CallSite, "id">): CallSite {
   const added: CallSite = { id: builder.sites.length, ...site };
   builder.sites.push(added);

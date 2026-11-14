@@ -30,8 +30,8 @@ import { amend, Retained } from "../retained/retained.js";
  * tests k or a path holding k (a null comparison, a type test or a comparison `<`, `<=`, `>`, `>=`, at a truth
  * position: through `and`, `or` and `not`; a `switch` on it), in the code after a branch that tests it and always
  * leaves (the way past the test is a branch entry of its own), and in the right operand of an `and` or `or` whose left
- * operand tests it. Guards are indexed per tested key, as definitions are: a read asks its key and each prefix, a
- * binary search each, never a root's other keys and never an `and` chain's other tests.
+ * operand tests it. Guards are indexed per tested key: a read asks its key and each prefix, a binary search each, never
+ * a root's other keys and never an `and` chain's other tests.
  */
 
 /** A list of guard regions sorted by where they start, with the running maximum of where they end. */
@@ -192,10 +192,7 @@ export class GuardIndex {
     return (this.#narrowing ??= this.program.work.shared(() => NarrowingIndex.of(this.program)));
   }
 
-  /**
-   * The narrowing queries of the pass this index belongs to: the events that end a narrowing, with the stores that
-   * preserve it, and the routes.
-   */
+  /** The narrowing queries of the pass this index belongs to. */
   public narrowings(pass: CorePass): {
     readonly events: NarrowingEvents;
     readonly routes: NarrowingRoutes;
@@ -655,7 +652,7 @@ export class GuardIndex {
     );
   }
 
-  /** Whether no test names a key of `place`, at any path (so `narrowed` answers no for every key of it). */
+  /** Whether no test names a key of `place`, at any path. */
   public untested(place: PlaceId): boolean {
     const root = keyOf(place, []);
     return !this.belowTested.has(root) && !this.#branches.has(root) && !this.#operands.has(root);
