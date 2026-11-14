@@ -41,25 +41,39 @@ const PROGRAMS: readonly Readonly<Record<string, string>>[] = [
   },
 ];
 
+/** A generated module's program, as the frame defines it. */
+interface LoadedProgram {
+  default(rt: object): {
+    files: (() => object)[];
+    functions: Record<number, () => number>;
+    blocks: Record<number, () => number>;
+  };
+}
+
+async function loadProgram(module: string): Promise<LoadedProgram> {
+  // EVIDENCE: `programModule` writes `export default function program(rt)` returning files, functions and blocks.
+  return (await import(`data:text/javascript,${encodeURIComponent(module)}`)) as LoadedProgram;
+}
+
 /**
  * The plan of `guards/30000` of the families' builtin-value spreads, whose 30,000-term `and` chain nests 30,008 deep
  * in the plan: deeper than native `JSON.stringify` reaches.
  */
 async function deepPlan(): Promise<InstructionPlan> {
-  const load = async (path: string): Promise<unknown> =>
-    import(pathToFileURL(resolve(process.cwd(), path)).href);
-  // EVIDENCE: `tests/families/sources.mjs` exports `sourcesOf` (the families' source identity).
-  const { sourcesOf } = (await load("tests/families/sources.mjs")) as {
+  const load = async <T>(path: string): Promise<T> =>
+    // EVIDENCE: the families' modules: `sources.mjs` exports `sourcesOf`, a generator module its cases (their contract).
+    (await import(pathToFileURL(resolve(process.cwd(), path)).href)) as T;
+  const { sourcesOf } = await load<{
     sourcesOf(
-      generator: unknown,
+      generator: object,
     ): {
       readonly name: string;
       readonly files: readonly { readonly path: string; readonly source: string }[];
       readonly globals: readonly string[];
     }[];
-  };
+  }>("tests/families/sources.mjs");
   const source = sourcesOf(
-    await load(
+    await load<object>(
       "tests/families/copies/builtin-values/wide-builtin-value-and-spread-source-forms.mjs",
     ),
   ).find((candidate) => candidate.name === "guards/30000")!;
@@ -100,16 +114,15 @@ test("a plan nested deeper than native JSON reaches is refused, and its table an
   const deepest = plan.instructions.reduce((longest, instruction) =>
     writeJson(instruction).length > writeJson(longest).length ? instruction : longest,
   );
-  const module = programModule(table, [deepest], "const file0 = () => K[0];");
-  const loaded = (await import(`data:text/javascript,${encodeURIComponent(module)}`)) as {
-    default(rt: unknown): { files: (() => unknown)[] };
-  };
+  const module = programModule(table, [deepest], "  const file0 = () => K[0];");
+  const loaded = await loadProgram(module);
   assert.equal(writeJson(loaded.default({}).files[0]!()), writeJson(deepest));
 });
 
 test("the same plan gives the same table, names and module, also after its JSON round trip", () => {
   for (const files of PROGRAMS) {
     const plan = compiled(files);
+    // EVIDENCE: the JSON text of a valid plan, parsed back: the same plan as data.
     const again = JSON.parse(writeJson(plan)) as InstructionPlan;
     const output = (from: InstructionPlan) => {
       const table = new ProgramTable(from, validatedPlanSha256(from));
@@ -156,13 +169,7 @@ test("the module's frame returns the program's files, functions and blocks from 
   assert.ok(
     module.startsWith(`// TeaseScript program. Generator 1. Plan sha256 ${table.planSha256}.\n`),
   );
-  const loaded = (await import(`data:text/javascript,${encodeURIComponent(module)}`)) as {
-    default(rt: unknown): {
-      files: (() => unknown)[];
-      functions: Record<number, () => number>;
-      blocks: Record<number, () => number>;
-    };
-  };
+  const loaded = await loadProgram(module);
   const rt = {};
   const first = loaded.default(rt);
   const second = loaded.default(rt);

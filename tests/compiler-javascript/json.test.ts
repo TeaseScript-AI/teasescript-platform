@@ -6,7 +6,8 @@ import { writeJson } from "../../src/compiler/javascript/json.js";
 // The generator writes plan data with `writeJson`, which must give native JSON's bytes without its recursion.
 
 test("JSON data is written as JSON.stringify writes it", () => {
-  const nullPrototype = Object.assign(Object.create(null) as Record<string, unknown>, { a: 1 });
+  // EVIDENCE: `Object.create(null)` makes an empty object, which `Object.assign` fills.
+  const nullPrototype = Object.assign(Object.create(null) as Record<string, number>, { a: 1 });
   const values: unknown[] = [
     null,
     true,
@@ -30,8 +31,10 @@ test("JSON data is written as JSON.stringify writes it", () => {
 
 // Native JSON's depth depends on the data's shape: plain objects pass far deeper than the plan data in generate.test.ts,
 // so here it is the oracle.
+type Nested = string | Nested[] | { readonly kind: string; readonly expression: Nested };
+
 test("a value nested 100,000 deep is written", () => {
-  let deep: unknown = "leaf";
+  let deep: Nested = "leaf";
   for (let level = 0; level < 100_000; level += 1)
     deep = level % 2 === 0 ? [deep] : { kind: "group", expression: deep };
   assert.equal(writeJson(deep), JSON.stringify(deep));
