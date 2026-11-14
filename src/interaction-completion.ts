@@ -97,7 +97,7 @@ export function resolveAnswer(
       ? { ok: true, result: null, transcriptText: null }
       : { ok: false, message: "openUrl completion requires { kind: 'opened' } only." };
   }
-  // Copying and downloading are the Playroom's own; only closing the dialog completes it.
+  // Copying and downloading are the player's own actions; only closing the dialog completes it.
   if (action.interactionKind === "export") {
     return payload.kind === "close" && Object.keys(payload).length === 1
       ? { ok: true, result: null, transcriptText: null }
