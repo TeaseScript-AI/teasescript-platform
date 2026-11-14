@@ -8,7 +8,7 @@
 - `main.tease` is the package entry point.
 - `.tease` modules are executable content; `.ts` libraries provide reusable programming logic.
 - One engine, state model, and save/checkpoint format support sessions and persistent personalities.
-- The final player and package code run inside a sandboxed cross-origin iframe.
+- The final Playroom and package code run inside a sandboxed cross-origin iframe.
 - Package code has no unrestricted external network access.
 - Production browser UI uses Vue 3; deterministic engine and shared domain code remain framework-independent.
 
@@ -26,12 +26,12 @@ Public Platform Standard Library
     └── documented typed engine primitives
 
 Privileged platform adapters
-    └── internal engine/player capabilities
+    └── internal engine/Playroom capabilities
         (not importable through the public Standard Library surface)
 
 Typed engine primitives
     └── deterministic runtime state, pending actions, events,
-        checkpoint/restore, and player boundary
+        checkpoint/restore, and Playroom boundary
 ```
 
 The engine owns canonical execution behavior: validation, identities, typed events, pending actions, deterministic time, opaque references, checkpointing, restore, cleanup, and security boundaries.
@@ -40,7 +40,7 @@ The Standard Library owns reusable author-facing composition when that behavior 
 
 Package libraries may import the public, capability-safe Standard Library surface. They should build on shared behavior rather than directly recreating every feature from low-level primitives. Package-library-to-package-library dependencies remain a separate open decision.
 
-Ordinary TypeScript execution may remain synchronous, but it may not suspend invisibly as resume state across a pending-action or checkpoint boundary; Player-local awaits inside the sandbox are not resume state. Resumable library behavior must be lowered into an explicit serializable plan or represented by an engine-managed serializable continuation.
+Ordinary TypeScript execution may remain synchronous, but it may not suspend invisibly as resume state across a pending-action or checkpoint boundary; Playroom-local awaits inside the sandbox are not resume state. Resumable library behavior must be lowered into an explicit serializable plan or represented by an engine-managed serializable continuation.
 
 A plan/checkpoint must either contain the lowered library behavior or bind to an exact compatible Standard Library identity/version. Restore against an implicit latest implementation is not permitted.
 
@@ -77,8 +77,8 @@ main.tease
     -> versioned JSON-safe instruction plan
     -> explicit versioned runtime state and typed sequenced events
         -> standalone browser playground
-        -> framework-independent Player adapter
-            -> Vue Player
+        -> framework-independent Playroom adapter
+            -> Vue Playroom
 ```
 
 ADR 0015 defines the current runtime direction. The AST is compile-time data. Runtime execution uses validated instruction plans and explicit scopes, loop frames, call frames, temporaries, RNG state, event sequence state, prepared references, and structured failures. It does not depend on suspended JavaScript functions, generators, closures, or an implicit JavaScript call stack.
@@ -188,11 +188,11 @@ No `src/standard-library/` shell exists yet because the implemented ADR 0018 POC
 parser/compiler/runtime; linked reusable Standard Library modules remain future work.
 
 The technical playground workspace controller lives at `playground/workspace/controller.ts`. The framework-independent
-runtime-to-Player translation and shared action lookup/completion seam lives at `player/runtime/runtime-adapter.ts`. The Player
+runtime-to-Playroom translation and shared action lookup/completion seam lives at `player/runtime/runtime-adapter.ts`. The Playroom
 implementation is under `player/vue/src/`, using the accepted Vue/Tailwind/shadcn-vue/Reka foundation and
 TanStack Vue Virtual for transcript windowing and scroll anchoring. It presents supported interactions and pacing from
 canonical runtime state and events; browser-native CSS owns geometry. The Vue/toolchain boundary is accepted in ADR 0020. See [`player/README.md`](../player/README.md) for implementation seams, local inspection and the
-development-preview boundary. Presentation fixtures do not define an engine/Player protocol or the production
+development-preview boundary. Presentation fixtures do not define an engine/Playroom protocol or the production
 cross-origin host contract.
 
 `src/index.ts` is the intentional public package/root API. Canonical internal
