@@ -91,7 +91,6 @@ export function plannedStores(plan: InstructionPlan): string[] {
             instruction.typeCheck.type,
           ),
         ];
-      // (a value stored into a function's place, an argument, a default or a returned value, by the place's words)
       if (instruction.kind === "callFunction")
         return instruction.arguments.flatMap((argument) =>
           argument.typeCheck === undefined
