@@ -39,7 +39,7 @@ export function dayWaitWarnings(program: Program, source: string): readonly Diag
           createDiagnostic(
             DiagnosticSeverity.Warning,
             DAY_WAIT_CODE,
-            `'${keyword} ${length}' counts only time while the Player is open, so closing the Player pauses it.`,
+            `'${keyword} ${length}' counts only time while the Playroom is open, so closing the Playroom pauses it.`,
             waiting.lengthSpan,
           ),
         );
