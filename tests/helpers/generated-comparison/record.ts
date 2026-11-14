@@ -129,7 +129,8 @@ function shell(
  * `Object.prototype` or `null`. An object's prototype is judged by the depth of its chain, not by identity: a
  * snapshot's arrays and objects need not have this realm's prototypes.
  */
-function isPlainContainer(value: object): boolean {
+function isPlainContainer(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
   if (Array.isArray(value)) {
     if (Reflect.ownKeys(value).length !== value.length + 1) return false;
     for (let index = 0; index < value.length; index += 1)
@@ -140,7 +141,7 @@ function isPlainContainer(value: object): boolean {
 }
 
 /** How many prototypes stand between `value` and the end of its chain: 1 for a plain object, more for a class's. */
-function prototypeDepth(value: object): number {
+function prototypeDepth(value: unknown): number {
   let depth = 0;
   for (
     let at: object | null = Object.getPrototypeOf(value);
