@@ -418,17 +418,12 @@ watch(
       ?.focus({ preventScroll: true });
   },
 );
-// On the click, not the press: the notice's room in the conversation goes with it, which would move a control away from
-// under a press still held on it.
+// The player's next press dismisses the notice, which takes no room: a press on a control it covers reaches the control.
 useEventListener(
   document,
-  "click",
-  (event) => {
-    if (!feedback.value || !(event.target instanceof Node)) return;
-    const notice = root.value?.querySelector(".composer-notice");
-    const arrow = root.value?.querySelector(".composer-notice-arrow");
-    if (notice?.contains(event.target) || arrow?.contains(event.target)) return;
-    clearFeedback();
+  "pointerdown",
+  () => {
+    if (feedback.value) clearFeedback();
   },
   { capture: true },
 );
@@ -929,6 +924,7 @@ function escape() {
                       : 'text'
           "
           :feedback="feedback"
+          :notice-anchor="() => root?.querySelector('[data-foreground-controls]') ?? null"
           @edit="composerState.edit"
           @submit="sendFromComposer"
           @skip="skipPacing(true)"

@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="Request">
-import { computed, nextTick, ref, useId, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
 import { ArrowLeft, Eye, EyeOff, Paperclip } from "@lucide/vue";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,6 +37,8 @@ const props = withDefaults(
      */
     repeated?: boolean;
     feedback?: string;
+    /** The question's answer controls, if it shows any: the notice floats above them, not over them. */
+    noticeAnchor?: () => Element | null;
     /** A skippable pacing gate is waiting; Space in the empty input settles it. */
     pacing?: boolean;
     /** A preselected button waits; Space in the empty input activates it. */
@@ -70,6 +72,7 @@ const props = withDefaults(
     password: false,
     repeated: false,
     feedback: "",
+    noticeAnchor: () => null,
     pacing: false,
     preselected: false,
     inertSpace: false,
@@ -113,6 +116,41 @@ function reportEdit(event: Event): void {
 }
 
 const feedbackId = useId();
+const container = ref<HTMLElement | null>(null);
+const noticeSlot = ref<HTMLElement | null>(null);
+/**
+ * How far above its place over the field the notice floats: to the top edge of the question's answer controls, so it
+ * covers none of them, but never past the top of the session's area (the conversation and the Stage); with no room
+ * there it stops at that top and may cover the upper controls. Placed each frame while it shows, as the conversation scrolls, resizes, or brings its controls back.
+ */
+const noticeLift = ref(0);
+let noticeFrame = 0;
+function placeNotice() {
+  const slot = noticeSlot.value;
+  const shell = container.value;
+  const anchor = props.noticeAnchor();
+  noticeFrame = slot ? requestAnimationFrame(placeNotice) : 0;
+  if (!slot || !shell || !anchor) {
+    noticeLift.value = 0;
+    return;
+  }
+  const shellTop = shell.getBoundingClientRect().top;
+  const ceiling = Math.max(
+    0,
+    shell.closest(".player-composition")?.getBoundingClientRect().top ?? 0,
+  );
+  const room = shellTop - 8 - slot.offsetHeight - (ceiling + 8);
+  noticeLift.value = Math.max(0, Math.min(shellTop - anchor.getBoundingClientRect().top, room));
+}
+watch(
+  () => props.feedback,
+  () => {
+    cancelAnimationFrame(noticeFrame);
+    placeNotice();
+  },
+  { flush: "post" },
+);
+onUnmounted(() => cancelAnimationFrame(noticeFrame));
 const capsLockId = useId();
 useTextareaAutosize({ element: textareaElement, input: value });
 const conditions = usePlayerConditions();
@@ -345,13 +383,19 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
 
 <template>
   <div
+    ref="container"
     class="composer-container"
     @compositionstart.capture="composing = true"
     @compositionend.capture="composing = false"
   >
-    <!-- In the composer's own height, which the conversation makes room for: never over a question's controls while
-    the conversation shows its end. -->
-    <div v-if="feedback" class="composer-notice-slot">
+    <!-- Floats above the field, or above the question's controls, and takes no room: nothing moves when it shows or
+    goes. A press passes through it. -->
+    <div
+      v-if="feedback"
+      ref="noticeSlot"
+      class="composer-notice-slot"
+      :style="{ bottom: `calc(100% + 8px + ${noticeLift}px)` }"
+    >
       <p :id="feedbackId" class="composer-notice" role="status" aria-live="polite">
         {{ feedback }}
       </p>
@@ -673,16 +717,14 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
 }
 
 .composer-notice-slot {
-  position: relative;
-  margin-block-end: 8px;
-  padding-inline-start: 12px;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  inset-inline: 12px 0;
+  z-index: 1;
 }
 .composer-notice {
-  pointer-events: auto;
   inline-size: fit-content;
   max-inline-size: 100%;
-  max-block-size: min(12rem, 35dvh);
-  overflow-y: auto;
   margin: 0;
   padding: 8px 12px;
   border: 1px solid var(--composer-notice-border);
@@ -693,7 +735,6 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
   font-size: 0.875rem;
 }
 .composer-notice-arrow {
-  pointer-events: auto;
   position: absolute;
   bottom: -6px;
   z-index: 1;
