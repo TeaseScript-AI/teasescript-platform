@@ -337,10 +337,7 @@ interface WrittenSource {
   readonly strip: readonly string[];
 }
 
-/**
- * `writtenSource` with the receivers' decisions reads (`Read`, #1072: a read inside an inherited proof is yielded,
- * never run).
- */
+/** `writtenSource` with the receivers' decisions reads (`Read`, #1072). */
 export function* writtenSourceRead(
   admission: Admission,
   value: PlaceId,
@@ -752,7 +749,7 @@ function* buildView(admission: Admission, start: Expansion): Reads<View> {
       else list.push(inherits);
     }
     const own = task.stop;
-    // (one stop per source identity at a path, as `stopsOfRead`'s)
+    // (one stop per source identity at a path)
     const map = own === null ? null : view[own.list];
     const pathKey = own === null ? "" : keptText(admission.work, path);
     let kept = own !== null;

@@ -39,10 +39,9 @@ interface StepPositions<T> {
 }
 
 /**
- * #2065: a prefix's contributions to the decisions of paths below it, once per admission's settled snapshot of them
- * (`ReceivingDomain.holders`, cleared by its `reset()`): its whole stores as the decider's scan lists them (`wholeOf`)
- * and its settled stores as the candidates' offending scan reads them (`PrefixStores.list`), each indexed by the first
- * steps it can hold (`wholePositions`, `entrySupport`), built only where the reads it saves pay for it (`holdersOf`).
+ * #2065: a prefix's contributions to the decisions of paths below it, once per admission's settled snapshot of them:
+ * its whole stores as the decider's scan lists them and its settled stores as the candidates' offending scan reads
+ * them, each indexed by the first steps it can hold, built only where the reads it saves pay for it (`holdersOf`).
  */
 export interface PrefixHolders {
   list: readonly Definition[] | null;

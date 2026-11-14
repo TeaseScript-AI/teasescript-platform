@@ -36,15 +36,11 @@ export function sourceOf(admission: Admission, value: PlaceId): CanonicalKey | n
   return readNow(sourceOfRead(admission, value));
 }
 
-/**
- * `sourceOf` with its dict owners' contracts reads (`Read`, #1072: a read inside an inherited proof is yielded, never
- * run).
- */
+/** `sourceOf` with its dict owners' contracts reads (`Read`, #1072). */
 export function* sourceOfRead(admission: Admission, value: PlaceId): Reads<CanonicalKey | null> {
   const { contract } = admission.pass;
   const found = contract.copiedKey(value) ?? contract.resultKey(value);
   if (found === null) return null;
-  // (the source in its identity, as the structures and depths hold it)
   const key = canonicalKey(contract, found);
   // (a cursor with no built-in member on its path holds no dict's list step: itself, never walked)
   if (isKeyId(key) && contract.pathMembers[keyIdPath(key)] === 0) return key;
@@ -513,7 +509,6 @@ function longestKey(admission: Admission): number {
  */
 export function depthOf(admission: Admission, asked: Key): number {
   const { program, contract } = admission.pass;
-  // (a key in its identity, as the depths hold it)
   const key = canonicalKey(contract, asked);
   const known = admission.depths.get(key);
   if (known !== undefined) return known;
@@ -687,7 +682,6 @@ function decidedBelow(admission: Admission, asked: Key): readonly Steps[] {
       }
     }
   }
-  // (a key in its identity, as the groups' prefixes hold it)
   return admission.below.get(canonicalKey(admission.pass.contract, asked)) ?? [];
 }
 

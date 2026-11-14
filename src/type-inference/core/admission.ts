@@ -127,16 +127,8 @@ export { concrete, contributes, deciding, fits, isExternal, isOpaque } from "./a
 export type { DecidedAt, Decision } from "./admission/model.js";
 
 /*
- * Admission and the boundary checks of external data. A place's type is decided once, in source order, at a destination
- * store, from the value that store transfers at its own node: a written type decides; a copy of a written binding is
- * decided by that binding's type; otherwise the earliest definite contribution in source order, where a settled
- * single-family contract needs no scan; the candidates a decided type is checked against are the direct stores and the
- * whole stores of a prefix whose source holds an offending kind. A definite contribution that does not fit is an error
- * at the store, which is rejected: its rejection takes effect in the next pass, and the passes repeat until the
- * rejected set is stable (`analyseCore`). The consumers check each candidate against the decided type; here: the
- * decision, the rejections, a literal's elements of one type (ADR 0021 1.3) and where each boundary check of external
- * data stands (one per ingress store at its ingress expression, against the destination's own admitted type; host data
- * no store brought is checked at the consumer that reads it). The rules and their reasons:
+ * Admission and the boundary checks of external data: each place's decided type, the rejections, a literal's elements
+ * of one type (ADR 0021 1.3) and where each boundary check of external data stands. The rules and their reasons:
  * `docs/specifications/type-inference-accepted-record/admission.md`.
  */
 
@@ -151,9 +143,8 @@ export interface AdmissionHost {
   run<T>(work: Work<T>): T;
   /**
    * After a stop, a value's items at a node and a path as the finishing read answers them (the leaf's own kind, the
-   * finished answer and contract, the retained type), else `null`: admission's store checks and its
-   * boundaries read as every consumer does (one derivation). The path as asked: a cursor's span is made
-   * steps only where the finishing read answers.
+   * finished answer and contract, the retained type), else `null`, so that admission reads as every consumer does. The
+   * path as asked: a cursor's span is made steps only where the finishing read answers.
    */
   read?(value: PlaceId, node: FlowNode, at: Rest): readonly Item[] | null;
   /** After a program stop, a key's kinds as the finishing path's domains give them, else `null` (a label's step, #1595). */
@@ -168,10 +159,7 @@ function packetPath(packet: KeyPacketMaking, index: number): readonly string[] {
   return steps.reverse();
 }
 
-/**
- * The runs `Admission.run` refused inside a solver run (#1072: a read inside an inherited proof is yielded, never run):
- * none over the corpora.
- */
+/** The runs `Admission.run` refused inside a solver run (#1072): none over the corpora. */
 let runsInsideSolverRuns = 0;
 
 /** `runsInsideSolverRuns`, for the tests that count them over a corpus. */
@@ -180,43 +168,32 @@ export function admissionRunsInsideSolverRuns(): number {
 }
 
 /**
- * Admission's per-pass state and its entry points. Most public methods delegate to the function of the same name in
- * `admission/`; `decisionStopped` delegates to `decisionStoppedAt`; `carriersOf`, `carriersBy` and `carriersOfRead` to
- * `carried`, `carriedBy` and `carriedByRead` in `carriers.ts`, and `arrayStrip` and `keepsOwnRead` to theirs there. The
- * modules in `admission/` also call one another through these methods, and through `scanView` where a direct import
- * would close a cycle. The fields are public for those modules; outside them, the consumers and the answers read the
- * rejections (`newlyRejected`, `refused`, `retaken`, `rejections`), the boundary checks (`boundaries`, `readChecks`),
- * `budgetUndecided`, `cycling`, `keyLabels` and `stored`, and `inherited/` reads `members`. The getters and setters
- * but `dirty`, `stored` and `work` forward to the pass's `ReceivingDomain` (the state of the written domain copies
- * inherit), which `inherited/` also reads through them; `dirty` and `stored` are admission's own tries, made at first
- * use, and `work` is the program's ledger.
+ * Admission's per-pass state and its entry points. The fields are public because the modules in `admission/` read and
+ * write them.
  */
 export class Admission {
   /** The decider's kinds per key. */
   readonly decided = new Map<CanonicalKey, readonly ItemTag[]>();
   /**
-   * The stores rejected in this pass (`reject`), by their definitions' order, and a list `+`'s right operands rejected
-   * from their joins (`joinElements`, by `joinedOperand`, without `reject`: no `refused`, no hearer), each with the
-   * places and paths it is rejected at: the next pass leaves them out there.
+   * The stores rejected in this pass, by their definitions' order, and a list `+`'s right operands rejected from their
+   * joins, each with the places and paths it is rejected at.
    */
   readonly newlyRejected = new Map<number, Set<Key>>();
   /**
    * Every store and argument the store check rejected in this pass, by their definitions' order: its error stands for
    * its value, so a stop below it owes no mark there (`enclosingStores`); an argument's rejection takes no effect in
-   * the next pass (the parameter is its callee's, `reject`).
+   * the next pass (the parameter is its callee's).
    */
   readonly refused = new Set<number>();
   /** The boundary checks of the ingress stores, by the key each enters, published after the consumers ran. */
   readonly boundaries = new Map<CanonicalKey, Obligation[]>();
   /**
    * The boundary checks no store into a place owes: an ingress read no store brought, host data read where it is
-   * consumed, and a typed `load`'s or `fromJson`'s result against its expected type (`boundaries.ts`).
+   * consumed, and a typed `load`'s or `fromJson`'s result against its expected type.
    */
   readonly readChecks: Obligation[] = [];
   readonly rejectedKeys = new Set<Key>();
-  /**
-   * The previous pass's rejected stores by the place and path each was rejected at: this pass leaves them out there.
-   */
+  /** The previous pass's rejected stores by the place and path each was rejected at, candidates there again. */
   readonly retaken = new Map<Key, Definition[]>();
   get copyLandingKeys(): ReceivingDomain["copyLandingKeys"] {
     return this.pass.receivingDomain.copyLandingKeys;
@@ -516,8 +493,6 @@ export class Admission {
     readonly rejected: ReadonlyMap<number, ReadonlySet<Key>>,
     readonly cycling: ReadonlySet<number>,
   ) {
-    // (the state of the written domain copies inherit is the pass's: `reset` makes it afresh but for the proofs'
-    // findings, which stay with the solver that holds the proofs)
     pass.receivingDomain.reset();
     pass.receivingDomain.replayProof = (key) => inheritedProofOf(this, key);
     const { definitions, program } = pass;
@@ -543,10 +518,7 @@ export class Admission {
     }
     for (const d of definitions.transferDefs)
       if (d.how === "parameter default") this.#defaulted.add(d.place);
-    // The copies of written bindings the stores, adds, returns, parameter defaults and single-site arguments bring (a
-    // multi-site argument decides nothing), where they land; and the copies of the unwritten places that may
-    // inherit a written type through them, at any chain length, each decided by the type that place's own
-    // decision copies at the path (`inheritedAt`)
+    // (a multi-site argument decides nothing)
     copyGraph(this);
     for (const d of [...definitions.storeDefs, ...definitions.transferDefs])
       if (
@@ -597,12 +569,7 @@ export class Admission {
     for (const { path } of this.inheritingCopyLandings) this.reach += path.length;
   }
 
-  /**
-   * The keys a store was rejected at or a copy of a written or inheriting binding lands at (`copyLandingKeys`), which
-   * `isClean` asks along a path; and
-   * the keys whole stores or adds (or dead arguments) reach, `inputsOf`'s prefixes: as tries, each walked down a
-   * decision's path as far as it holds it.
-   */
+  /** The keys a store was rejected at or a copy of a written or inheriting binding lands at, as a trie. */
   public get dirty(): KeyTrie {
     return (this.#dirty ??= new KeyTrie(
       this.work,
@@ -612,6 +579,7 @@ export class Admission {
     ));
   }
 
+  /** The keys whole stores or adds, or dead arguments, reach, as a trie. */
   public get stored(): KeyTrie {
     const { definitions } = this.pass;
     return (this.#stored ??= new KeyTrie(
@@ -649,7 +617,7 @@ export class Admission {
     return yield* read(() => this.run(work()), work);
   }
 
-  /** The rejections made in this pass, counted (the store check asks whether a candidate left one). */
+  /** The rejections made in this pass, counted. */
   public rejections = 0;
 
   /** Hears each store rejected for the next pass while set (`hearingRejections`). */
@@ -668,8 +636,7 @@ export class Admission {
 
   /**
    * A definite contribution that does not fit at a place's path is rejected, a return against its own result's decision
-   * too, so it leaves the result's contract (an argument stays: the parameter is its callee's); in the next pass it is
-   * decided again there.
+   * too, so it leaves the result's contract (an argument stays: the parameter is its callee's).
    */
   public reject(d: Definition, root: PlaceId, path: readonly string[]): void {
     this.rejections += 1;
@@ -879,9 +846,8 @@ export class Admission {
   }
 
   /**
-   * A decision's work record (`consumers/stores/stores.ts`): a cursor's path not made but named by its key, its
-   * steps appended to the pass's one packet of cursor decisions' paths (`decisionPacket`) and read only from it
-   * (`packetPath`).
+   * A decision's work record: a cursor's path not made but named by its key, its steps kept in the pass's one packet of
+   * cursor decisions' paths (`decisionPacket`).
    */
   public decisionWork(
     at: DecidedAt,
@@ -988,10 +954,7 @@ export class Admission {
     return keepsOwn(this.pass.program, value, this.#dispatch);
   }
 
-  /**
-   * Whether the receiver's or the key's decision leaves a value's operation its own value (`keepsOwnRead`), the
-   * receiver's decision a read (`Read`, #1072).
-   */
+  /** `keepsOwn` with the receiver's decision a read (`Read`, #1072). */
   public keepsOwnRead(value: PlaceId): Reads<boolean> {
     return keepsOwnRead(this.pass.program, value, (receiver) =>
       this.#dispatchReads.reference(receiver),
