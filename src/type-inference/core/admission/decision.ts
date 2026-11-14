@@ -226,7 +226,7 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
   // (#1444: a decision's scans are its own, never the written-decider summary's, `Admission.deciding`)
   admission.deciding += 1;
   try {
-    return recordDecision(admission, asked, lazily);
+    return decisionOf(admission, asked, lazily);
   } finally {
     admission.deciding -= 1;
   }
@@ -236,7 +236,7 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
  * `decide`'s body, run as a decision (`Admission.deciding`): it records the place's decision in admission's maps and,
  * unless `lazily` or nothing is checked, takes the candidates it checks and returns the decision with its label.
  */
-function recordDecision(admission: Admission, asked: DecidedAt, lazily: boolean): Decision | null {
+function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): Decision | null {
   const { program, definitions, lists, contract } = admission.pass;
   const work = program.work;
   const at = atOf(admission, asked);
