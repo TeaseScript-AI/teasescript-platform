@@ -69,10 +69,7 @@ interface Landing {
   readonly path: readonly string[];
 }
 
-/**
- * The contracts the plan content of one program carries, each read from the core's answers, never rebuilt from the
- * source. Built on one task stack, so deep values do not deepen the native stack.
- */
+/** The contracts the plan content of one program carries. */
 export class Contracts {
   readonly #landings = new Map<Expression, Landing | null>();
   readonly #literals = new Map<Expression, Expression | null>();
