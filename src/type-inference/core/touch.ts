@@ -23,7 +23,7 @@ export interface TouchRef {
   readonly text: string;
   /** A literal element's own contribution: its value, whose contents at the path are asked. */
   readonly value?: PlaceId;
-  /** A landing alone (a rejected copy's, Sol's review r3 F1): its written type lands here, no contents are asked. */
+  /** A landing alone (a rejected copy's): its written type lands here, no contents are asked. */
   readonly bare?: boolean;
 }
 
@@ -59,7 +59,7 @@ export interface Touch {
   readonly anchors: IdSet | null;
   /**
    * The meetings found in making it (`meet`), below it: a merge that finds it containing the other node owes them where
-   * it differs from the other, as the other's landed types may decide the place merging them (§2.4 (d)).
+   * it differs from the other, as the other's landed types may decide the place merging them.
    */
   readonly met: Found;
   /** Whether a ring node stands in it at any depth (`Touches.#rings` defines the mark). */
@@ -83,7 +83,7 @@ interface Hop {
 }
 
 /**
- * Opaque contributors, shared by reference (B1 of Astra's review): a contributor once (`leaf`, one per ref text), the
+ * Opaque contributors, shared by reference: a contributor once (`leaf`, one per ref text), the
  * union of two payloads (once per pair), or a payload below a path (once per payload and path). Nothing is copied or
  * listed when payloads are merged or projected; what a test needs of them is asked once per payload node.
  */
@@ -146,7 +146,7 @@ interface FoundBranch {
 
 /**
  * What a merge owes: `meet` (a place's landed types against its contents), `elements` (a literal's elements standing
- * together with two kinds), or `copies` (A2: as `elements`, over what the stores into one place or a literal's elements
+ * together with two kinds), or `copies` (as `elements`, over what the stores into one place or a literal's elements
  * definitely hold, `heldOf` (`admission/held.ts`); a contributor holding anything decides nothing there).
  */
 export type TouchMode = "meet" | "elements" | "copies";
@@ -295,15 +295,15 @@ export class Touches {
   readonly #owes = new Map<string, Found>();
   readonly #metOwes = new Map<number, Found>();
   /**
-   * The ring mark (#1270; Astra's reviews B1 and B2), defined here once. A whole-copy ring's members share one trie, each
-   * deciding by its own first store, so two elements copying different members may offend each other where their nodes
-   * are one node; a containment over such a node owes as the accepted design has it. A node is a *ring node* where a
-   * ring's trie stands at its own level: the trie itself (`ring`, a live group of two or more members), a node one of
-   * whose parts is a ring node (a copy's landed top, a merge), or a projection whose walk steps through a ring node
-   * (`sub`). A projection that steps only through nodes holding a ring at another path (a ring-free sibling of a ring) is
-   * no ring node. A node *holds* a ring where a ring node stands in it at any depth (`Touch.ring`). Both flags are set
-   * when a node is made: a ring marked later is seen only on its own node and on the projections taken of it after.
-   * This set holds the ring tries and the ring projections, both marked after they were made.
+   * The ring mark (#1270), defined here once. A whole-copy ring's members share one trie, each deciding by its own
+   * first store, so two elements copying different members may offend each other where their nodes are one node. A
+   * node is a *ring node* where a ring's trie stands at its own level: the trie itself (`ring`, a live group of two or
+   * more members), a node one of whose parts is a ring node (a copy's landed top, a merge), or a projection whose walk
+   * steps through a ring node (`sub`). A projection that steps only through nodes holding a ring at another path (a
+   * ring-free sibling of a ring) is no ring node. A node *holds* a ring where a ring node stands in it at any depth
+   * (`Touch.ring`). Both flags are set when a node is made: a ring marked later is seen only on its own node and on the
+   * projections taken of it after. This set holds the ring tries and the ring projections, both marked after they were
+   * made.
    */
   readonly #rings = new Set<number>();
   readonly #summaries: Readonly<Record<TouchMode, Map<number, Summary>>> = {
@@ -1288,7 +1288,7 @@ export class Touches {
   /**
    * For `elements`, what a node holding a ring owes where it contains the other (or is merged with itself): its meetings
    * found in making it where its contents hold two kinds or more, as an element standing in the other's stead may offend
-   * there (§2.2). Once per node.
+   * there. Once per node.
    */
   #metOwed(node: Touch): Found {
     const known = this.#metOwes.get(node.id);
@@ -1303,14 +1303,13 @@ export class Touches {
   }
 
   /**
-   * What a node containing another owes where a merge ends at it, no ring standing in it (§2.2 step 3, §2.4 (d)): its
+   * What a node containing another owes where a merge ends at it, no ring standing in it: its
    * meetings found in making it, as the contained node's landed types may decide the place merging them; for `elements`
    * only where its contents hold two kinds or more, as an element standing in the other's stead may offend there. Only
    * where the two differ:
    * below a path where they are one node, under the same payloads, nothing of the container's own stands, so it meets
    * the contained node there no more than a node merged with itself does (#1270: a shared node's meetings were owed again
-   * by every place or literal holding it beside a small part of its own). The walk enters the children the two do not
-   * share, found from the smaller of the meetings there and the two children maps' difference. Once per pair.
+   * by every place or literal holding it beside a small part of its own). Once per pair.
    */
   #containedOwes(outer: Touch, inner: Touch, mode: TouchMode): Found {
     const key = keptParts(this.host.work, mode, outer.id, inner.id);
@@ -1383,7 +1382,7 @@ export class Touches {
 
   /**
    * What a node merged with itself owes: nothing it did not meet in its making, but for `elements` a node holding a ring
-   * owes its meetings with two kinds or more, as elements copying different members of the ring stand on it (§2.2).
+   * owes its meetings with two kinds or more, as elements copying different members of the ring stand on it.
    */
   #selfOwes(node: Touch, mode: TouchMode): Found {
     return mode === "elements" && this.#isRing(node) ? this.#metOwed(node) : NONE;
@@ -1549,8 +1548,7 @@ export class Touches {
 
   /**
    * The paths of `where` at which `node` stands (contributors at its node there), as a found trie: at each level the
-   * smaller side's steps looked up in the other's, memoized by the two, so a node many places take is asked once (A2:
-   * where a store's own contribution stands at a live group's meetings, `groupHeld` in `admission/held.ts`).
+   * smaller side's steps looked up in the other's, memoized by the two, so a node many places take is asked once.
    */
   public standsAt(node: Touch | null, where: Found): Found {
     if (node === null || where === NONE) return NONE;

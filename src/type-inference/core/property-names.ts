@@ -162,7 +162,7 @@ function keptStepBelow(work: WorkLedger, key: Key, below: Key): string {
 }
 
 /**
- * What a search does at a key task other than its first (#1526 phase C step 4, `propertyNames`' `completed`): takes a
+ * What a search does at a key task other than its first (#1526, `propertyNames`' `completed`): takes a
  * completed listing of that key whole (its names, its sources not followed), follows the key as any task, or defers it:
  * its names are another listing's to find, and this search's own names are then incomplete (its caller lists that key
  * first, and searches again).
@@ -336,7 +336,7 @@ function listingMemo(pass: CorePass): ListingMemo {
   return memo;
 }
 
-/** A key task's names (S3 §1): the steps of the keys below it, each read charged (`keptStepBelow`). */
+/** A key task's names: the steps of the keys below it, each read charged (`keptStepBelow`). */
 function keyNames(pass: CorePass, key: CanonicalKey, name: (name: string) => void): void {
   const work = pass.program.work;
   for (const below of isKeyId(key) ? [] : pass.definitions.keysBelow(key)) {
@@ -346,7 +346,7 @@ function keyNames(pass: CorePass, key: CanonicalKey, name: (name: string) => voi
 }
 
 /**
- * A key task's step as it follows (S3 §1): at each stored key along its path (`definitions.stored`: any other prefix's
+ * A key task's step as it follows: at each stored key along its path (`definitions.stored`: any other prefix's
  * frame holds no definition and its stores are empty), the prefix's listing of its sources and its stores' tasks, in the
  * order the search schedules them. One step of the trie each, charged, the stored key's own text, and the rest of the
  * path below it kept and charged; no prefix key or path half is rebuilt.
@@ -700,54 +700,51 @@ function listingOf(
 }
 
 /**
- * The names of a value's known properties (S3 §1): those the keys below its sources store, and those the objects of
- * its literals and of the values its collections' adds insert have at its path. One worklist of sources, each once: a value read further at a path is followed
- * through its projections and the operations that pass a value on (the value side's transfers) to a copied key, a
- * call's result key or a literal; a key to its prefixes' stores and their sources' own stores; a literal to the
- * reads and calls standing at its path or above it. Each task it schedules, each prefix it visits and each key below a
- * key whose step it reads is charged, and every key, path, step and identity it keeps, through the kept helpers: no
- * key's text is split uncharged to read its steps (`keptStepBelow`, `keptPath`).
+ * The names of a value's known properties: those the keys below its sources store, and those the objects of its
+ * literals and of the values its collections' adds insert have at its path. Each task it schedules, each prefix it
+ * visits and each key below a key whose step it reads is charged, and every key, path, step and identity it keeps,
+ * through the kept helpers: no key's text is split uncharged to read its steps (`keptStepBelow`, `keptPath`).
  *
- * #1493, the pump bound: each task has the task that scheduled it (`from`) and records how many of that one's last steps
- * its path keeps untouched (`kept`): a key's step at a stored prefix keeps the rest below it (an add's one step less), a
- * literal's at a depth the rest below that depth, a carrier's all but the two steps it reads, and a record path the
- * steps it leaves unchanged. A task pumps an earlier one on its chain where both are of one kind and place, its path is
- * longer, and it starts with that one's head: that one's path without the last steps no task between them touched (the
- * least `kept` on the way). Its own names are taken; its sources are not followed. Since every step reads and cuts a
- * bounded front of its path and pushes a bounded head, a chain of tasks that never ends holds such a pair, and from it
- * the same steps repeat forever, each turn longer (a feedback copy `w = r.z`: `w|`, `w|z`, `w|z.z`, ...); a search that
- * ends without the bound meets none, so its names are as before, whatever the answer at a key is, stopped or not. The
- * check walks only the new task's own kind and place's visits above it, one charge per visit, until none with a shorter
- * path is left, and compares heads only with those, one charge per step of the head. The worklist is a stack, so a
- * task's chain is the current depth-first path, its scheduling visit last (checked at each task taken up): the search
- * keeps that path, each kind and place's positions on it, and on each visit the least `kept` of the last 2, 4, 8, ...
- * visits down to it, so a visit finds its place's nearest visit above it and the least `kept` since in two reads. Each
- * visit is added once, removed at most once and makes at most ⌈log₂ D⌉ such entries on a chain of D visits, each
- * charged. The check's total: at most the new tasks times (2 + ⌈log₂ D⌉), plus their place's earlier tasks walked, plus
- * head steps each no longer than the earlier task's path.
+ * #1493, the pump bound: each task has the task that scheduled it (`from`) and records how many of that one's last
+ * steps its path keeps untouched (`kept`): a key's step at a stored prefix keeps the rest below it (an add's one step
+ * less), a literal's at a depth the rest below that depth, a carrier's all but the two steps it reads, and a record
+ * path the steps it leaves unchanged. A task pumps an earlier one on its chain where both are of one kind and place,
+ * its path is longer, and it starts with that one's head: that one's path without the last steps no task between them
+ * touched (the least `kept` on the way). Its own names are taken; its sources are not followed. Since every step reads
+ * and cuts a bounded front of its path and pushes a bounded head, a chain of tasks that never ends holds such a pair,
+ * and from it the same steps repeat forever, each turn longer (a feedback copy `w = r.z`: `w|`, `w|z`, `w|z.z`, ...); a
+ * search that ends without the bound meets none, so its names are as without the bound, whatever the answer at a key
+ * is, stopped or not. The check walks only the new task's own kind and place's visits above it, one charge per visit,
+ * until none with a shorter path is left, and compares heads only with those, one charge per step of the head. The
+ * worklist is a stack, so a task's chain is the current depth-first path, its scheduling visit last (checked at each
+ * task taken up): the search keeps that path, each kind and place's positions on it, and on each visit the least `kept`
+ * of the last 2, 4, 8, ... visits down to it, so a visit finds its place's nearest visit above it and the least `kept`
+ * since in two reads. Each visit is added once, removed at most once and makes at most ⌈log₂ D⌉ such entries on a chain
+ * of D visits, each charged. The check's total: at most the new tasks times (2 + ⌈log₂ D⌉), plus their place's earlier
+ * tasks walked, plus head steps each no longer than the earlier task's path.
  *
- * #1610, the listings: a stored prefix lists its sources' own stores (`subSources`, every layer below it), and in a chain
- * of copies each source's own prefix lists those below it again, so a stack of k copies cost its i-th decided object i
- * sources and each of those its own again (k³ over the stack). The rule, stated here alone, in three conditions:
- * (i) a listing schedules only its effective sources: those `subSources` lists that, taken up in the search's order (the
- * last first), add a name of their keys below, a task, or a listing that no source before them did; any other source is
- * a no-op there on the flat listing, its names already present and everything it schedules taken up by an earlier
- * sibling, whose subtree ends first. A source scheduled among a run's effective sources whose own listing is a prefix of
- * that run, no longer than its position there, schedules nothing: those sources were taken up before it. (ii) Where an
- * effective source could pump (a visit of its place's key on the chain has a path shorter than the rest, the pump
- * check's own entry) or is on the chain, the listing schedules every source, as before. (iii) A layer's or stores
- * object's effective sources at a rest are made from the definitions and the prefix index, a layer's from its parent's
- * (`layerListing`), each source as the flat search takes it up below the listing visit (`classify`): one this search
- * took up already, or whose take-up there pumps, is kept as effective with its followers unmade, so the names the
- * listings give are one whichever question makes them; they are forgotten once a decision or the work stopped
+ * #1610, the listings: a stored prefix lists its sources' own stores (`subSources`, every layer below it), and in a
+ * chain of copies each source's own prefix lists those below it again, so a stack of k copies cost its i-th decided
+ * object i sources and each of those its own again (k³ over the stack). The rule, stated here alone, in three
+ * conditions: (i) a listing schedules only its effective sources: those `subSources` lists that, taken up in the
+ * search's order (the last first), add a name of their keys below, a task, or a listing that no source before them did;
+ * any other source is a no-op there on the flat listing, its names already present and everything it schedules taken up
+ * by an earlier sibling, whose subtree ends first. A source scheduled among a run's effective sources whose own listing
+ * is a prefix of that run, no longer than its position there, schedules nothing: those sources were taken up before it.
+ * (ii) Where an effective source could pump (a visit of its place's key on the chain has a path shorter than the rest,
+ * the pump check's own entry) or is on the chain, the listing schedules every source, as the flat search does. (iii) A
+ * layer's or stores object's effective sources at a rest are made from the definitions and the prefix index, a layer's
+ * from its parent's (`layerListing`), each source as the flat search takes it up below the listing visit (`classify`):
+ * one this search took up already, or whose take-up there pumps, is kept as effective with its followers unmade, so the
+ * names the listings give are one whichever question makes them; they are forgotten once a decision or the work stopped
  * (`listingMemo`). In a demand's work, charges move, never add: a classification charges each source as the flat search
  * charges its take-up at that listing (its key and identity, its walk, its pump check and names, and its listings and
  * tasks only where it follows), and the visit that takes it up there, or the first later, takes those parts in place of
  * making them again (`Contribution`); an effective source is charged as a scheduled task. The analysis alone carries
  * one charge more: a stores object's single top, a charge per jump, a shared build no demand's allowance counts
  * (`singleTop`); a completed one is kept for the pass, and a walk the work stop interrupts may be walked again as
- * finishing work. A decided object's names then cost its own prefixes' stores and its effective sources: for a stack
- * of diamonds, one.
+ * finishing work. A decided object's names then cost its own prefixes' stores and its effective sources: for a stack of
+ * diamonds, one.
  */
 export function propertyNames(
   pass: CorePass,
@@ -756,7 +753,7 @@ export function propertyNames(
   /** Each object of a literal the value holds, with its names in the literal's order (a first property's question). */
   objects?: (literal: PlaceId, names: ReadonlySet<string>) => void,
   /**
-   * #1526 phase C step 4: at each key task but the first, a completed listing of that key to take, or whether to follow
+   * At each key task but the first (#1526), a completed listing of that key to take, or whether to follow
    * or defer it (`ListedKey`); without it every key is followed. A key's listing holds every name its tasks reach, so
    * taking it gives the names following it would (the pump bound cuts only a chain that never ends).
    */
@@ -961,9 +958,6 @@ export function propertyNames(
         continue;
       }
     }
-    // (a key's path and place through its walk, `keptKeyWalk`: a text's kept, a cursor's steps through the charged
-    // boundary and copied out once, G3 stage 1)
-    // (or the parts of its step a listing's classification made, each taken once in place of its own: `Contribution`)
     const prepaid = "key" in task ? (listings()?.contributions.get(id) ?? null) : null;
     const walked = prepaid?.walked === true;
     if (walked) prepaid!.walked = false;
@@ -1042,7 +1036,7 @@ export function propertyNames(
       const source = contract.copiedKey(at) ?? contract.resultKey(at);
       // through a dict's `values` the projections are followed (a dict's values are its elements)
       // (a choice's selected value is read as its record's `value` or `text`, as the literal's records say: V30 §19)
-      // (a cursor's path holds no dict's list where it holds no built-in member: the arena's, G3 stage 1)
+      // (a cursor's path holds no dict's list where it holds no built-in member: the arena's)
       if (
         source !== null &&
         !(isKeyId(source)
@@ -1059,8 +1053,6 @@ export function propertyNames(
         schedule({ literal: at, path: keptArray(work, record.path) }, record.kept);
         continue;
       }
-      // the carrier table's operands, after the value side's decisions (`carriers.ts`: F12, F27, F17b, C10, F10, F7,
-      // a list's `+`, V30 §19's choice; nothing through an operation that keeps its own value, F19a)
       // (a carrier reads its path's first two steps at most, and keeps the rest)
       if (follows)
         for (const [operand, rest] of carried(program, at, path, dispatch))

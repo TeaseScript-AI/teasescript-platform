@@ -109,20 +109,6 @@ import { stopDiagnostics } from "./stop-diagnostics.js";
 import { Retained, retainedModule } from "./retained/retained.js";
 import type { IdentityView } from "./identity-view.js";
 
-// (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
-export { closedType };
-
-/*
- * The answer contract of the coarse core (checkpoint 9; the port plan's S3 note §1): `analyseCore` runs once per
- * compile and publishes, after its last pass, the frozen surface the consumer, the extracted checks, storage and the
- * backend read: per source occurrence its items, route, place and obligations; per place its admitted type, contract,
- * ingresses and definitions; the projections and properties of a value; the bridge to the adapters' operand views;
- * and the whole program's diagnostics, checks, graph, budget counters and deferred bindings. The analysis runs in
- * admission's passes (A6): each pass is a fresh analysis with the stores the previous pass rejected left out, until the
- * rejected set is stable; a set that repeats is a cycle, whose changing stores stay possibilities. Narrowing (§13) joins
- * in its step, and the field it owns says so.
- */
-
 /** The parts of one pass of the analysis: each reads the others through it. */
 export interface CorePass {
   readonly program: CoreProgram;
@@ -134,11 +120,14 @@ export interface CorePass {
   readonly contract: Contract;
   readonly values: Values;
   readonly solver: Solver;
-  /** A4's receiving domain state (`ReceivingDomain`): one per pass, made empty with its parts. */
+  /**
+   * The state of the written types copies of written bindings bring into unwritten places (`ReceivingDomain`): one
+   * per pass, made empty with its parts.
+   */
   readonly receivingDomain: ReceivingDomain;
   /** The program facts the typed defaults' written types read (`writtenDefault`), built before anything solves. */
   readonly writtenDefaults: WrittenDefaults;
-  /** The receiving closure of a completion pass (#1526 phase C, `Consumers.#completeFor`), absent in any other pass. */
+  /** The receiving closure of a completion pass (#1526, `Consumers.#completeFor`), absent in any other pass. */
   readonly closure?: Closure | null;
 }
 
@@ -146,9 +135,9 @@ export interface CorePass {
 type StoreTargets = ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]> | null>;
 
 /**
- * One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6), the keys of
- * `stopped` stopped from its start, a store below an object's own `first`, `last` or `random` at its
- * target in `targets` (#1275).
+ * One pass over an indexed program: the stores of `rejected` (by their definitions' order) left out, the keys of
+ * `stopped` stopped from its start, and each selecting store (`selectingStores`) at its target in `targets`: an
+ * object's own property or an element (#1275), or `null`, into nothing (#2378).
  */
 function createPass(
   program: CoreProgram,
@@ -171,7 +160,6 @@ function createPass(
   } = {
     program,
     definitions,
-    // admission's rejections take effect in the next pass (A6)
     lists: new DefinitionLists(
       definitions,
       // (#1072 R26: captures `rejected`, the pass's own, never written after it is given)
@@ -187,7 +175,7 @@ function createPass(
     solver: new Solver(program.scope),
     receivingDomain: new ReceivingDomain(),
     writtenDefaults: new WrittenDefaults(program, definitions),
-    // (#1526 phase C: a completion pass keeps its cells for the receiving closure from its start, the completion lease)
+    // (#1526: a completion pass keeps its cells for the receiving closure from its start, the completion lease)
     closure: completion ? new Closure(program.work) : null,
   };
   const pass: CorePass = {
@@ -211,11 +199,9 @@ function createPass(
     contract: made.contract,
     values: made.values,
   }));
-  // (#1526 phase C: no decision of a completion pass stops at its allowance, so nothing #1599 keeps for one is kept,
+  // (#1526: no decision of a completion pass stops at its allowance, so nothing #1599 keeps for one is kept,
   // from before anything of the pass solves)
   if (completion) contract.closeDecisions();
-  // (G3 stage 1: the families reads start choose their keys' lane first, before anything is built; demands holding a
-  // cursor order by their logical texts)
   selectLanes(contract);
   parts.solver.names = (a, b) => compareDemandNames(contract, a, b);
   parts.solver.replayOf = (names) => exportNames(contract, names);
@@ -226,7 +212,7 @@ function createPass(
 }
 
 /**
- * #1275 (ADR 0021 §1.1, §1.4, F11): the stores whose receivers select a `first`, `last` or `random` above the stored
+ * #1275 (ADR 0021 §1.1, §1.4): the stores whose receivers select a `first`, `last` or `random` above the stored
  * place (`box.first.n = 2`), by their places. The runtime reads such a receiver as an object's own property or as a
  * list's or a set's element, so these stores' targets follow what admission admits there (`storeTargets`). #2378: so
  * do the stores into or below a list a `values` or `keys` gives (`d.values.add(x)`, `d.values[0].add(x)`), and the
@@ -295,14 +281,11 @@ interface SelectingStore {
 
 /**
  * The targets of `stores` (`selectingStores`) by a pass's admission: such a step above the stored place is an object's
- * own property where the receiver holds only objects (and null), the receiver's own steps settled first: by admission's
- * kinds there where it admits any (A2: an unknown or a rejected store after them takes nothing back), else by the
- * earliest deciding value that one of the shallower of these stores sets there by its target settled here, which this
- * pass's definitions still key as an element; a list's or a set's element otherwise, as a read takes it (F11). Each
- * receiver is decided lazily through the consumers (`decide`), so its decision is the pass's own and bounded by the
- * demand allowance, and a stopped one decides nothing there (S3 §5). #2378: a store into or below a list a `values` or
- * `keys` gives, and a removal from it, goes into nothing (`null`) where an owner above such a step holds only dicts
- * (and null): no definition is made, so it decides nothing and nothing reads it.
+ * own property where the receiver holds only objects (and null), else a list's or a set's element, as a read takes it.
+ * Each receiver is decided lazily through the consumers (`decide`), so its decision is the pass's own
+ * and bounded by the demand allowance, and a stopped one decides nothing there. #2378: a store into or below a list a
+ * `values` or `keys` gives, and a removal from it, goes into nothing (`null`) where an owner above such a step holds
+ * only dicts (and null): no definition is made, so it decides nothing and nothing reads it.
  */
 function storeTargets(
   program: CoreProgram,
@@ -360,9 +343,8 @@ function storeTargets(
 }
 
 /**
- * #1275 in a receiving completion pass (#1526 phase C): the selecting stores whose target the completion's admission
- * gives (`storeTargets`, each receiver decided there where first asked, as every completion decision is) is another
- * than the settled pass's (`targets`): their receivers' keys, each once, and whether any moved.
+ * #1275 in a receiving completion pass (#1526): the selecting stores whose target the completion's admission gives is
+ * another than the settled pass's (`targets`): their receivers' keys, each once, and whether any moved.
  */
 function retargeted(
   program: CoreProgram,
@@ -411,26 +393,28 @@ function targetsText(targets: StoreTargets): string {
     .join("|");
 }
 
-/** Which path answered a read (§3.3, §3.1, §3.2); a value that is no read: `value`. */
+/** Which path answered a read; a value that is no read: `value`. */
 export type Route = "quiet" | "exact" | "contract" | "value";
 
 export interface OccurrenceAnswer {
   readonly items: readonly Item[];
+  /**
+   * Which path answered the read; after a stop, a read of a place the consumers did not answer quietly is `contract`,
+   * whatever source answered it.
+   */
   readonly route: Route;
   /** The place the occurrence reads, with its path: the collector's place and the steps below it. */
   readonly place: { readonly id: PlaceId; readonly path: readonly string[] } | null;
-  /** The obligations this occurrence owes as a consumer, one per offending kind (§4). */
+  /** The obligations this occurrence owes as a consumer, one per offending kind. */
   readonly obligations: readonly Obligation[];
-  /** The narrowing that answered the read (§13 N1–N2): `null` until stage 3b joins. */
-  readonly narrowing: null;
 }
 
 /**
- * A place's admitted type (A1–A9): its written type; else the kinds admission decided it by, or its contract's kinds
- * where admission found nothing to check (one family, A3), with the site of the contribution that decided (S3 §1: A2's
- * earliest definite one, A4's copy; `null` where no store decides), `null` among the kinds where a `null` contribution
- * is admitted (C9): the type its boundary checks are against; `undecided` where it has no kind (an unknown only,
- * or no store).
+ * A place's admitted type: its written type; else the kinds admission decided it by, or its contract's kinds where
+ * admission found nothing to check (one family), with the site of the contribution that decided (the earliest definite
+ * store, or the copy of a written type; `null` where no store decides), `null` among the kinds where a `null`
+ * contribution is admitted: the type its boundary checks are against; `undecided` where it has no kind (an unknown
+ * only, or no store).
  */
 export type AdmittedType =
   | { readonly by: "written"; readonly kinds: readonly ItemTag[] }
@@ -438,25 +422,29 @@ export type AdmittedType =
       readonly by: "decided";
       readonly kinds: readonly ItemTag[];
       readonly decider: SourceSite | null;
-      /** Whether a copy of a written type decides it (A4 through copies): a written domain, not its own. */
+      /** Whether a copy of a written type decides it: a written domain, not its own. */
       readonly inherited: boolean;
     }
   | { readonly by: "undecided" };
 
 export interface PlaceAnswer {
   readonly admitted: AdmittedType;
-  /** K: the kinds, `null` among them for a nullable place; E: the elements' kinds; M: whether it holds an element. */
+  /**
+   * `kinds`: the kinds, `null` among them for a nullable place; `elements`: the elements' kinds; `emptiness`: whether
+   * it holds an element (`held`) or may be empty (`open`).
+   */
   readonly contract: {
     readonly kinds: readonly Item[];
     readonly elements: readonly Item[];
     readonly emptiness: "held" | "open";
   };
-  /** The boundary checks of the ingress stores into the place (C9), against its admitted type. */
+  /** The boundary checks of the ingress stores into the place, against its admitted type. */
   readonly ingresses: readonly Obligation[];
   /**
-   * The definitions the exact path uses (X2–X7): the live list in region order, F5a's loop-exit adds among them; the
-   * activation that owns the place (`null`: a global's); whether another callable stores the key, a prefix or a key
-   * below it; and the key's own events by position in the dominator walk.
+   * The definitions the exact path uses: the live list in region order, the exit definitions of loops that end in an
+   * add among them (`DefinitionIndex.loopAdds`); the activation that owns the place (`null`: a global's); whether
+   * another callable stores the key, a prefix or a key below it; and the key's own events by position in the dominator
+   * walk.
    */
   readonly definitions: {
     readonly list: readonly Definition[];
@@ -475,7 +463,7 @@ export interface BudgetAnswer {
   readonly total: number;
   readonly allowance: number;
   readonly counts: ReadonlyMap<WorkCounter, number>;
-  /** The limit the analysis stopped proving at (D4 a′), or `null`. */
+  /** The limit the analysis stopped proving at, or `null`. */
   readonly exhausted: BudgetLimit | null;
   /** The warnings of the checks the stop moved to the runtime, never shown one by one (`Consumers.deferred`). */
   readonly deferred: readonly Extract<CoreDiagnostic, { obligation: unknown }>[];
@@ -490,20 +478,20 @@ export interface BudgetAnswer {
    */
   readonly stoppedIn: StopPhase | null;
   /**
-   * Whether what the analysis found before the stop stands: its pass's admission had settled (A6), or the analysis had
+   * Whether what the analysis found before the stop stands: its pass's admission had settled, or the analysis had
    * finished; else nothing of it stands and every unit was finished afresh. True without a stop.
    */
   readonly settled: boolean;
-  /** Each consumer read's demand: the work it was the first to compute, against its demand allowance (S3 §5). */
+  /** Each consumer read's demand: the work it was the first to compute, against its demand allowance. */
   readonly demands: readonly ReadWork[];
-  /** Each admission decision's demand, likewise (S3 §5, revision 14). */
+  /** Each admission decision's demand, likewise. */
   readonly decisions: readonly DecisionWork[];
   /** The finished demands with their work. */
   readonly finished: readonly DemandWork[];
   /** Facts of the indexes for the identity and mark controls (not work). */
   readonly facts: ContractFacts;
   /**
-   * The receiving closure's completion (#1526 phase C, `Answers.completed`), `null` until it runs and where it does
+   * The receiving closure's completion (#1526, `Answers.completed`), `null` until it runs and where it does
    * not (no frozen key, a stop, outside the slice): the units it charged to the total (its obligations found, its
    * completion pass and the questions asked again, included in `total`), its counters, and each decision it made, where
    * a level first asked for it, as a scoped decision from the remaining total, recorded here, never among the settled
@@ -524,11 +512,11 @@ export interface ReadWork {
   readonly allowance: number;
   /** Whether the allowance bounded it: a consumer's own read; admission's, for a store's check, has the program's. */
   readonly bounded: boolean;
-  /** Whether it stopped at its allowance (S3 §5). */
+  /** Whether it stopped at its allowance. */
   readonly stopped: boolean;
 }
 
-/** One admission decision for one key as a demand (S3 §5): its work, against its allowance, and whether it stopped. */
+/** One admission decision for one key as a demand: its work, against its allowance, and whether it stopped. */
 export interface DecisionWork {
   readonly place: PlaceId;
   readonly path: readonly string[];
@@ -536,7 +524,7 @@ export interface DecisionWork {
   readonly allowance: number;
   readonly stopped: boolean;
   /**
-   * A decision of the receiving closure's completion pass (#1526 phase C): its own allowance, the one a decision of the
+   * A decision of the receiving closure's completion pass (#1526): its own allowance, the one a decision of the
    * settled pass has (`allowance` is what was left of the total).
    */
   readonly completion?: { readonly local: number };
@@ -554,7 +542,7 @@ export interface Answers {
   /** The analysis's ledger, which the questions after it spend too (`asked`): the view's result translation. */
   readonly work: WorkLedger;
   readonly outcome: CoreOutcome;
-  /** One per cell outcome: an error, or a warning with its one obligation (§4). */
+  /** One per cell outcome: an error, or a warning with its one obligation. */
   readonly diagnostics: readonly CoreDiagnostic[];
   /** Every warning's obligation, one per warning, and the boundary checks. */
   readonly checks: readonly Obligation[];
@@ -567,7 +555,7 @@ export interface Answers {
     readonly results: readonly PlaceId[];
   };
   /**
-   * The input of the known values (S3 §2, group V): each read of an unwritten `let` or `global` that counts as its
+   * The input of the known values: each read of an unwritten `let` or `global` that counts as its
    * initializer, by the read's site key, with the initializer's site (the collector's links; no type answer).
    */
   readonly initializers: ReadonlyMap<string, SourceSite>;
@@ -575,32 +563,32 @@ export interface Answers {
   readonly epoch: number;
   /**
    * The contracts the stores owing a check require, captured once admission settled and before the consumers' walk
-   * (#1526 phase B): each store's destination with its result, in the order captured; none where admission did not settle.
+   * (#1526): each store's destination with its result, in the order captured; none where admission did not settle.
    */
   readonly contracts: readonly CapturedContract[];
-  /** Each receiving obligation of the capture with its result (#1526 phase C step 1), in the stable source order. */
+  /** Each receiving obligation of the capture with its result (#1526), in the stable source order. */
   readonly receiving: readonly {
     readonly obligation: ReceivingObligation;
     readonly result: ReceivingResult | null;
   }[];
   /**
-   * The receiving completion's complete contract at a place's path (#1526 phase C step 5): an obligation bound there that
+   * The receiving completion's complete contract at a place's path (#1526): an obligation bound there that
    * the completion completed, which a store's check there takes where the settled pass's own contract is not complete;
    * `null` elsewhere (no completion ran, or each obligation there is lost, open or a shape).
    */
   received(id: PlaceId, path: readonly string[]): ContractResult | null;
-  /** Whether the receiving completion's own store checks (C1) owe a runtime check at a site, as unstopped. */
+  /** Whether the receiving completion's own store checks owe a runtime check at a site, as unstopped. */
   completedCheck(site: SourceSite): boolean;
   /**
-   * Whether the receiving completion's own C1 ran at a place's path (`Consumers.completion.ran`, #2184): one of the
-   * decisions it checked, on the completion of the pass with `epoch`. False where none ran, it reached its allowance or
-   * left the slice, or the record is another pass's.
+   * Whether the receiving completion's own store checks ran at a place's path (`Consumers.completion.ran`, #2184): one
+   * of the decisions it checked, on the completion of the pass with `epoch`. False where none ran, it reached its
+   * allowance or left the slice, or the record is another pass's.
    */
   completionRan(id: PlaceId, path: readonly string[], epoch: number): boolean;
   /**
-   * The store warnings the receiving completion's own store checks (C1) made, the natural walk's obligations of its
+   * The store warnings the receiving completion's own store checks made, the natural walk's obligations of its
    * decisions on the settled pass's inputs (#1682), in the published order (`bySite`, at the stores consumer's rank);
-   * none where the completion lost a result, reached its allowance or left the slice. A store's part checks read them.
+   * none where the completion lost a result, reached its allowance or left the slice.
    */
   completedWarnings(): readonly CompletedWarning[];
   /**
@@ -610,18 +598,18 @@ export interface Answers {
    */
   publishedOrder(): ReadonlyMap<Obligation, number>;
   /**
-   * The receiving completion (#1526 phase C, `Consumers.receive`), asked for once everything of the analysis that can
+   * The receiving completion (#1526, `Consumers.receive`), asked for once everything of the analysis that can
    * stop has run, its questions included (`asked`): `again`'s result, the questions asked again with the completed
    * contracts within the completion's own allowance, or `null` where no completion ran or it kept no result. It never
    * stops the analysis.
    */
   completed<T>(again: () => T): T | null;
   /**
-   * The obligations a published plan's gate reads (#1526 decision 2, condition 1, `lostCheck`): the receiving registry
-   * where a receiving completion ran (`receiving`, its results); after a stop of the analysis, where none runs, or a
-   * completion past its allowance before it found them, once admission settled, the registry's obligations without
-   * results, found as finishing work counted apart (`Consumers.stopObligations`); none elsewhere. `null` where the
-   * obligations are unknown: a stop after admission settled with no seed to find them from, never read as none.
+   * The receiving obligations (#1526): the receiving registry where a receiving completion ran (`receiving`, its
+   * results); after a stop of the analysis, where none runs, or a completion past its allowance before it found them,
+   * once admission settled, the registry's obligations without results, found as finishing work counted apart
+   * (`Consumers.stopObligations`); none elsewhere. `null` where the obligations are unknown: a stop after admission
+   * settled with no seed to find them from, never read as none.
    */
   gated():
     | readonly {
@@ -630,9 +618,7 @@ export interface Answers {
       }[]
     | null;
   /**
-   * `callback` as finishing work counted apart (`WorkLedger.apart`), in the budget's `apart` and never its total: the
-   * settled pass's publication asked once more where the receiving completion kept no result, so its gate reads the
-   * registry (#1526 decision 2, condition 1, `asked`).
+   * `callback` as finishing work counted apart (`WorkLedger.apart`), in the budget's `apart` and never its total.
    */
   apart<T>(callback: () => T): T;
   at(node: FlowNode): OccurrenceAnswer | null;
@@ -643,24 +629,25 @@ export interface Answers {
   storedPlace(node: FlowNode): { readonly id: PlaceId; readonly path: readonly string[] } | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
   /**
-   * The complete type a store into a place at a path is checked against where a decision below the path stopped (S3 §5,
-   * #1416: `enclosingStores`), its levels below the path whole; `null` elsewhere.
+   * The complete type a store into a place at a path is checked against where a decision below the path stopped
+   * (#1416: `enclosingStores`), its levels below the path whole; `null` elsewhere.
    */
   requirement(id: PlaceId, path: readonly string[]): TypeTerm | null;
   /**
    * These answers stopped at `limit` after the analysis ran to its end (a question after it spent the allowance): its
-   * findings and decisions stand, its warning says so, and what is asked from then on answers `STOPPED` (D4 a′).
+   * findings and decisions stand, its warning says so, and the solver computes nothing new for what is asked from then
+   * on.
    */
   stoppedAt(limit: BudgetLimit): Answers;
   /**
    * The name a fix's kept variable takes (#1274, `keptVariableName`): chosen once per program and base, its survey and
-   * selection charged as a shared build, to the analysis's total and to no demand (Astra r1 on #1715), its budget then
+   * selection charged as a shared build, to the analysis's total and to no demand (#1715), its budget then
    * counted again.
    */
   keptName(base: string): string;
   /**
    * Counts `units` of a message's work over the source (#1730, `MessageSource.landing` and `owner`) as a shared build,
-   * to the analysis's total and to no demand (Astra r1 on #1730), its budget then counted again.
+   * to the analysis's total and to no demand (#1730), its budget then counted again.
    */
   messageWork(units: number): void;
   /** The occurrence answer at a path step below a value: a collection's `element`, a dict's `entry`, a property. */
@@ -678,26 +665,23 @@ export interface Answers {
    */
   valueAt(node: FlowNode, path: readonly string[]): ValueAnswer;
   /**
-   * The name an obligation gives the value at a node (§10.5, `keyLabel`): its key path, else its text; `null`
-   * where the node holds no value. The plan side reads an obligation's target by it, never by a name of its own.
+   * The name an obligation gives the value at a node (`keyLabel`): its key path, else its text; `null`
+   * where the node holds no value.
    */
   targetName(node: FlowNode): string | null;
   view(node: FlowNode): CoreView;
   /**
-   * Gives `view` its known values: the one constant service the consumer owns (S3 §1), so the known
+   * Gives `view` its known values: the one constant service the consumer owns, so the known
    * value a view reads and the consumer's own are one; until then a view knows none.
    */
   shareKnown(known: (expression: Expression) => KnownValue | undefined): void;
 }
 
 /**
- * The analysis of a project by the coarse core: its answers, published after its last pass. A stop is no compile
- * error (the owner's D4, option a′): past the work allowance or a read chain's depth the analysis
- * stops proving, and statements nested past the nesting limit are not proved at all; what it found stays, every check it
- * did not decide runs when the script runs, and one warning says so (`finished`). `stopped`: the analysis stops at
- * its start, as a question after an analysis that crossed the allowance stops it (the candidate route).
+ * The analysis of a project by the coarse core: its answers, published after its last pass. A stop is no compile error:
+ * every check the analysis did not decide runs when the script runs, and one warning says so.
  */
-export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit): Answers {
+export function analyseCore(request: CoreAnalysisRequest): Answers {
   const program = new CoreProgram(request);
   let analysed: { readonly pass: CorePass; readonly consumers: Consumers } | null = null;
   let rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map();
@@ -705,105 +689,101 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
   // #1275: the stores below a selection, their targets by the receivers each pass admits; new targets start the passes
   // again from no rejection, and targets a pass has used before are kept (no cycle of targets)
   let targets: StoreTargets = Retained.map("DefinitionIndex.storeTargets");
-  if (stopped !== undefined) program.work.stop(stopped);
-  else
-    try {
-      program.index();
-      // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
-      // whose changing stores stay possibilities. A pass in which a decision stops is not settled either
-      // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-180): the next, from the same
-      // rejected set, starts with every stopped key stopped, once per rejected set; a decision stopping in that pass
-      // again stops the analysis, as the work allowance does
-      // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183)
-      let cycling: ReadonlySet<number> = new Set();
-      const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
-      const selecting = selectingStores(program);
-      const used = new Set<string>();
-      for (let last = false, restarted = false; ;) {
-        const [passRejected, passTargets] = [rejected, targets];
-        const pass = createPass(program, passRejected, stops, passTargets);
-        // (its targets' receivers are decided where they can stop: every place may, until they are, #1599)
-        pass.contract.targetsDecide = selecting.length > 0 && !last;
-        // (the targets the pass's admission gives, asked before its walk: new ones start the passes again, and a pass
-        // that stops before them settles nothing, its finishing path keying by them)
-        const asked: { next: StoreTargets | null } = { next: null };
-        const consumers = new Consumers(
-          pass,
-          rejected,
-          cycling,
-          last,
-          false,
-          restarted,
-          (admission, decide) => {
-            if (selecting.length === 0 || last) return true;
-            used.add(targetsText(targets));
-            const next = storeTargets(program, pass, admission, decide, selecting);
-            if (used.has(targetsText(next))) return true;
-            asked.next = next;
-            return false;
-          },
-          // (the pass's own inputs without its frozen keys, for the receiving closure's completion pass, #1526 phase C:
-          // nothing there is frozen, so nothing is unfrozen and no cache of it holds a frozen key's answer)
-          (): CompletionPass => {
-            const completing = createPass(program, passRejected, [], passTargets, true);
-            return {
-              pass: completing,
-              retargeted: (admission) =>
-                retargeted(program, completing, admission, selecting, passTargets),
-            };
-          },
-        );
-        analysed = { pass, consumers };
-        consumers.check();
-        if (consumers.stopped !== null) {
-          targets = asked.next ?? targets;
-          break;
-        }
-        const stoppedMore = pass.contract.stoppedCount > stops.length;
-        if (stoppedMore) {
-          program.work.charge("stopPasses");
-          stops = pass.contract.stoppedKeys();
-        }
-        if (asked.next !== null) {
-          program.work.charge("rejectPasses");
-          targets = asked.next;
-          rejected = new Map();
-          cycling = new Set();
-          sets.splice(0, sets.length, rejected);
-          restarted = stoppedMore;
-          continue;
-        }
-        if (stoppedMore) {
-          restarted = true;
-          continue;
-        }
-        restarted = false;
-        const now = consumers.admission.newlyRejected;
-        if (last || sameSet(now, rejected)) break;
-        program.work.charge("rejectPasses");
-        const repeated = sets.findIndex((set) => sameSet(set, now));
-        if (repeated >= 0) {
-          // the stores every set of the cycle rejects stay rejected, the others are its possibilities
-          const cycle = sets.slice(repeated);
-          const every = new Map<number, ReadonlySet<Key>>();
-          const some = new Set<number>();
-          for (const set of cycle)
-            for (const [uid, keys] of set)
-              if (cycle.every((other) => other.has(uid))) every.set(uid, keys);
-              else some.add(uid);
-          rejected = every;
-          cycling = some;
-          last = true;
-          continue;
-        }
-        rejected = now;
-        sets.push(rejected);
+  try {
+    program.index();
+    // the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
+    // whose changing stores stay possibilities. A pass in which a decision stops is not settled either
+    // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-180): the next, from the same
+    // rejected set, starts with every stopped key stopped, once per rejected set; a decision stopping in that pass
+    // again stops the analysis, as the work allowance does
+    // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183)
+    let cycling: ReadonlySet<number> = new Set();
+    const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
+    const selecting = selectingStores(program);
+    const used = new Set<string>();
+    for (let last = false, restarted = false; ;) {
+      const [passRejected, passTargets] = [rejected, targets];
+      const pass = createPass(program, passRejected, stops, passTargets);
+      // (its targets' receivers are decided where they can stop: every place may, until they are, #1599)
+      pass.contract.targetsDecide = selecting.length > 0 && !last;
+      // (the targets the pass's admission gives, asked before its walk: new ones start the passes again, and a pass
+      // that stops before them settles nothing, its finishing path keying by them)
+      const asked: { next: StoreTargets | null } = { next: null };
+      const consumers = new Consumers(
+        pass,
+        rejected,
+        cycling,
+        last,
+        false,
+        restarted,
+        (admission, decide) => {
+          if (selecting.length === 0 || last) return true;
+          used.add(targetsText(targets));
+          const next = storeTargets(program, pass, admission, decide, selecting);
+          if (used.has(targetsText(next))) return true;
+          asked.next = next;
+          return false;
+        },
+        // (the pass's own inputs without its frozen keys, for the receiving closure's completion pass, #1526:
+        // nothing there is frozen, so nothing is unfrozen and no cache of it holds a frozen key's answer)
+        (): CompletionPass => {
+          const completing = createPass(program, passRejected, [], passTargets, true);
+          return {
+            pass: completing,
+            retargeted: (admission) =>
+              retargeted(program, completing, admission, selecting, passTargets),
+          };
+        },
+      );
+      analysed = { pass, consumers };
+      consumers.check();
+      if (consumers.stopped !== null) {
+        targets = asked.next ?? targets;
+        break;
       }
-    } catch (error) {
-      // a stop in the setup or in a pass's own setup, outside the consumers' walk
-      if (!(error instanceof BudgetExhausted)) throw error;
-      program.work.stop(error.limit);
+      const stoppedMore = pass.contract.stoppedCount > stops.length;
+      if (stoppedMore) {
+        program.work.charge("stopPasses");
+        stops = pass.contract.stoppedKeys();
+      }
+      if (asked.next !== null) {
+        program.work.charge("rejectPasses");
+        targets = asked.next;
+        rejected = new Map();
+        cycling = new Set();
+        sets.splice(0, sets.length, rejected);
+        restarted = stoppedMore;
+        continue;
+      }
+      if (stoppedMore) {
+        restarted = true;
+        continue;
+      }
+      restarted = false;
+      const now = consumers.admission.newlyRejected;
+      if (last || sameSet(now, rejected)) break;
+      program.work.charge("rejectPasses");
+      const repeated = sets.findIndex((set) => sameSet(set, now));
+      if (repeated >= 0) {
+        const cycle = sets.slice(repeated);
+        const every = new Map<number, ReadonlySet<Key>>();
+        const some = new Set<number>();
+        for (const set of cycle)
+          for (const [uid, keys] of set)
+            if (cycle.every((other) => other.has(uid))) every.set(uid, keys);
+            else some.add(uid);
+        rejected = every;
+        cycling = some;
+        last = true;
+        continue;
+      }
+      rejected = now;
+      sets.push(rejected);
     }
+  } catch (error) {
+    if (!(error instanceof BudgetExhausted)) throw error;
+    program.work.stop(error.limit);
+  }
   // the written types' own errors (V30 §13's union rule), from the declarations alone
   const written = writtenTypeErrors(request.files.map((file) => file.program));
   if (program.work.stopped !== null) return finished(program, analysed, rejected, targets, written);
@@ -826,11 +806,8 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
 }
 
 /**
- * The finishing path of an analysis that stopped at `limit` (D4 a′, S3 §5): only cheap work, no further proving. The
- * setup the stop cut is finished; a pass whose admission settled keeps what its walk found and walks the units the stop
- * left, and the units nested past the nesting limit; any other walks every unit from a fresh pass, none of its findings
- * standing (A6: a later pass could still change them). Each unit reads every value as `unknown` with the reason
- * `budget`, so it owes its check when the script runs.
+ * The finishing path of an analysis that stopped at `limit`: only cheap work, no further proving. Where admission had
+ * not settled, none of the stopped pass's findings stand: a later pass could still change them.
  */
 function finished(
   program: CoreProgram,
@@ -854,8 +831,8 @@ function finished(
 }
 
 /**
- * The core's result in S2's record shape, derived from its answers: the diagnostics, and the checks none owns (the
- * boundary checks, and those a stop moved to the runtime).
+ * The core's result as a record (`CoreResult`), derived from its answers: the diagnostics, and the checks none owns
+ * (the boundary checks, and those a stop moved to the runtime).
  */
 export function coreResult(answers: Answers): CoreResult {
   return {
@@ -870,7 +847,7 @@ export function coreResult(answers: Answers): CoreResult {
 
 /**
  * Test-only: the answers of these demands, by their keys, in a fresh analysis that runs nothing else: the first key is
- * the entry of whatever component it closes (the solver's component test, S3 §1).
+ * the entry of whatever component it closes (the solver's component test).
  */
 export function solveDemands(
   request: CoreAnalysisRequest,
@@ -880,7 +857,7 @@ export function solveDemands(
   const program = new CoreProgram(request);
   program.index();
   const pass = createPass(program);
-  // (names holding cursors came with their packet, made here and asked in this pass's identity: #1422 B1)
+  // (names holding cursors came with their packet, made here and asked in this pass's identity: #1422)
   const keys = packet === undefined ? asked : importNames(pass.contract, asked, packet);
   // (an inherited proof is made by an admission on the pass, as the replayed pass's was: `replayProof`)
   if (keys.some((key) => key.startsWith("a4|")))
@@ -907,15 +884,14 @@ export function solveDemands(
   });
 }
 
-/** A proof demand asked for its answer alone (`demandWork`). */
+/** Test-only: a proof demand asked for its answer alone. */
 function* asked(demand: ProofDemand<Proof>): Work<readonly Item[]> {
   return yield demand;
 }
 
 /**
- * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `a4|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`,
- * `lit|`, `op|`, `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write
- * them).
+ * Test-only: the computation a demand's key names, rebuilt from the key. The analysis makes its demands directly; a
+ * kind missing here fails only these replays.
  */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
@@ -1060,6 +1036,7 @@ function sameSet(a: ReadonlyMap<number, unknown>, b: ReadonlyMap<number, unknown
   return a.size === b.size && [...a.keys()].every((uid) => b.has(uid));
 }
 
+/** Test-only: the pass's definition numbered `uid`, by key, of a cell, or a loop's exit add. */
 function definitionByUid(pass: CorePass, uid: number): Definition {
   for (const list of [
     ...pass.definitions.byKey.values(),
@@ -1079,8 +1056,8 @@ function dynamicWhy(reasons: number): DynamicWhy {
 
 /**
  * Each warning with the value's other known kinds that its site's other diagnostics of the same rule report (`besides`):
- * one consumer reports one diagnostic per offending kind of the value at its use (§4), so a warning's fix names no code
- * that leaves the use invalid beside them (#1268). One pass over the diagnostics.
+ * one consumer reports one diagnostic per offending kind of the value at its use, so a warning's fix names no code
+ * that leaves the use invalid beside them (#1268).
  */
 function withBesides(diagnostics: readonly CoreDiagnostic[]): CoreDiagnostic[] {
   const key = (site: SourceSite, rule: string): string =>
@@ -1115,7 +1092,7 @@ function withBesides(diagnostics: readonly CoreDiagnostic[]): CoreDiagnostic[] {
  * (`rule`), and one consumer's by their own text, so the order is the same whichever order a consumer visits in and with
  * the sharing on or off. An item's text (its JSON) is made only where its site and rule tie with
  * another's, once per item: serializing flattens the operand text its records share, which a stopped analysis's many
- * records would then each keep (#1734).
+ * records would then each keep (#1734). Exported for the answers test.
  */
 export function bySite<T extends { readonly site: SourceSite }>(
   list: readonly { readonly item: T; readonly rule: number }[],
@@ -1180,7 +1157,7 @@ function isStopped(item: Item): boolean {
 
 /**
  * After a stop, what a literal's own syntax proves at a step it writes nothing for, as the unstopped read answers it: an
- * object, which has no member steps, lacks it (`missing`, F11, its writer the literal's); `null` holds nothing below
+ * object, which has no member steps, lacks it (`missing`, its writer the literal's); `null` holds nothing below
  * any step; an empty collection holds no element (`EMPTY` where the path ends at its element step, nothing below it).
  * Any other step stays `STOPPED`: a scalar's or a collection's named step may be a member its kind declares (a dict's
  * `keys`, a calendar duration's parts), which the syntax does not answer. A typed load's default read by its own syntax
@@ -1243,7 +1220,7 @@ class CoreAnswers implements Answers {
   readonly #obligations = new Map<string, Obligation[]>();
   #stores: Map<FlowNode, Definition> | null = null;
   #known: ((expression: Expression) => KnownValue | undefined) | null = null;
-  /** The analysis stopped (D4 a′): no question asks the solver, every value read is `unknown` with `budget`. */
+  /** The analysis stopped at a limit (statements nested past the nesting limit alone are no stop). */
   readonly #stopped: boolean;
 
   public constructor(
@@ -1285,9 +1262,6 @@ class CoreAnswers implements Answers {
       ]),
     );
     this.outcome = outcomeOf(this.diagnostics);
-    // each warning's obligation, one per warning (§4), then the boundary checks no warning owes: in source order of their
-    // sites, at one site the warnings' obligations in the diagnostics' order (a stop's moved checks after the shown
-    // ones'), then the others (`checksBySite`)
     const owned: Obligation[] = [];
     for (const diagnostic of this.diagnostics)
       if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {
@@ -1349,8 +1323,8 @@ class CoreAnswers implements Answers {
   }
 
   /**
-   * A question of a value's items. After a stop the solver computes nothing and answers what it had finished (its
-   * memo) or `STOPPED`; where admission had not settled even those may change, so every value is `STOPPED` (D4 a′).
+   * A question of a value's items. After a stop where admission had not settled, every value is `STOPPED`: even what
+   * had finished may change.
    */
   #run(work: Work<readonly Item[]>): readonly Item[] {
     return this.#stopped && !this.#consumers.settled ? STOPPED : this.#pass.solver.run(work);
@@ -1380,11 +1354,10 @@ class CoreAnswers implements Answers {
   }
 
   /**
-   * After a stop where admission had settled, the type admission gives a read's place at a path, as `place` answers it:
-   * its written type, its decision, or its key's finished contract where admission decides a path lazily (S3 §5: a
-   * lazily decided path is a source). A domain, as the finishing read reads one (a collection's element
-   * possibly absent, C6); `null` where the read has no place or nothing decides it. One check unit, no new walk: after a
-   * stop admission decides nothing more, it reads what had finished.
+   * After a stop where admission had settled, the type admission gives a read's place at a path: its written type, its
+   * decision, or its key's finished contract where admission decides a path lazily (a lazily decided path is a source).
+   * A domain (a collection's element possibly absent); `null` where the read has no place or nothing decides it. One
+   * check unit, no new walk: after a stop admission decides nothing more, it reads what had finished.
    */
   #lazilyDecided(value: PlaceId, path: readonly string[]): readonly Item[] | null {
     const { program } = this.#pass;
@@ -1419,20 +1392,13 @@ class CoreAnswers implements Answers {
       projection = program.projOf.get(base)
     )
       base = projection.owner;
-    // a bare read's place is its binding's, as a read below one is (S3 §1, Astra B7)
     return program.occurrenceOf.has(base)
       ? program.targetRoot(program.occurrenceOf.get(value) ?? value)
       : null;
   }
 
   /**
-   * After a stop, what a value's own syntax gives at a path, with no proof (D4 a′): its items and its objects' property
-   * names. A literal gives its own kind, and below it its children's items as their own questions answer them (`#items`)
-   * beside its children's own names (`#literalShape`: the descent follows the literal's syntax, so it ends); a typed
-   * parse's or load's expected type (F18) is its written destination's (`landsIn`), else its default's as a typed
-   * default reads it (`typedDefault`: a `null` there leaves its level open), at every depth, a literal's child included;
-   * any other value `STOPPED`. Each typed call and path once, every link of a chain of typed defaults sharing it; a
-   * literal's own shape is kept apart from what a typed call makes of it.
+   * After a stop, what a value's own syntax gives at a path, with no proof: its items and its objects' property names.
    */
   #stoppedShape(value: PlaceId, path: readonly string[]): StoppedShape {
     const { program, contract } = this.#pass;
@@ -1478,7 +1444,7 @@ class CoreAnswers implements Answers {
       }
     }
     // (an expected type is no proof of an element: a typed collection may be empty, as unstopped and as the consumers'
-    // typed read gives it, C6; the plan takes no kind from it)
+    // typed read gives it; the plan takes no kind from it)
     const step = path.at(-1);
     if (
       found!.items !== STOPPED &&
@@ -1642,13 +1608,11 @@ class CoreAnswers implements Answers {
             route: "value",
             place: { id: d.place, path: d.path },
             obligations,
-            narrowing: null,
           };
     }
     const items = this.#items(value, node, []);
     // a read of a binding or of a path below one; a projection of a literal, a call or an operation is no place
     const target = this.#readPlace(value);
-    // the route the read's answer took, recorded as it was answered (Astra B5)
     const route: Route =
       target === null
         ? "value"
@@ -1662,11 +1626,10 @@ class CoreAnswers implements Answers {
       route,
       place: target === null ? null : { id: target.root, path: target.path },
       obligations,
-      narrowing: null,
     };
   }
 
-  /** The store a statement makes, by its node: its first live store definition there, else its first rejected one (A6). */
+  /** The store a statement makes, by its node: its first live store definition there, else its first rejected one. */
   public storedPlace(
     node: FlowNode,
   ): { readonly id: PlaceId; readonly path: readonly string[] } | null {
@@ -1704,9 +1667,9 @@ class CoreAnswers implements Answers {
         elements: inItsOrder(withoutEmpty(elements)),
         emptiness: elements.some((item) => item.tag === "empty") ? "open" : "held",
       },
-      // (the key in its identity, as admission holds its boundaries: G3 stage 1)
+      // (the key in its identity, as admission holds its boundaries)
       ingresses: this.#consumers.admission.boundaries.get(contract.canonicalKey(key)) ?? [],
-      // the exact service's list, not the raw stores (Astra B8), made where it is read: a key's events walk its
+      // the exact service's list, not the raw stores, made where it is read: a key's events walk its
       // prefixes, and most askers want the place's types alone (the slice's facts ask one per expression)
       get definitions() {
         return (defined ??= {
@@ -1767,7 +1730,7 @@ class CoreAnswers implements Answers {
     if (this.budget.exhausted === null && !capped) return [];
     const found = this.apart(() => this.#consumers.stopObligations());
     // (no seed: unknown where admission settled, which saves one before anything of it can stop; none where it did not,
-    // an unsettled stop, option (a))
+    // an unsettled stop)
     if (found === null) return this.budget.settled ? null : [];
     return found.map((obligation) => ({ obligation, result: null }));
   }
@@ -1848,7 +1811,7 @@ class CoreAnswers implements Answers {
   }
 
   public placeProperties(id: PlaceId, path: readonly string[] = []): ReadonlySet<string> {
-    // (the key in its identity, as the property search names its tasks: G3 stage 1; the capture's search, where it made
+    // (the key in its identity, as the property search names its tasks; the capture's search, where it made
     // one in this pass, is the answer, #1526)
     const key = this.#pass.contract.keyAt(id, path);
     return this.#consumers.propertySets.get(key) ?? this.#propertyNames({ key });
@@ -1875,7 +1838,7 @@ class CoreAnswers implements Answers {
   }
 
   #propertyNames(start: PropertyNamesTask): ReadonlySet<string> {
-    // (a key whose decision stopped names nothing, as every read of it holds nothing but `unknown`, S3 §5)
+    // (a key whose decision stopped names nothing, as every read of it holds nothing but `unknown`)
     const { contract } = this.#pass;
     if (contract.anyStopped) {
       const read = "value" in start ? this.#readPlace(start.value) : null;
@@ -1907,7 +1870,6 @@ class CoreAnswers implements Answers {
     return {
       alternatives: alternatives.length > 0 ? alternatives : null,
       dynamic: unknown === undefined ? null : dynamicWhy(unknown.reasons),
-      // the constant service's value is the consumer's (S3 §2, group V)
       known: node.expression === undefined ? undefined : this.#known?.(node.expression),
       certain: items.length > 0 && items.every((item) => item.cert === "def"),
     };

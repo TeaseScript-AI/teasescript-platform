@@ -57,7 +57,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `S7` | historical port step adding runtime support for the discharge map’s new checks |
 | `S8` | the message and budget-fallback work family, including fresh finishing and warning-owned boundary requests ([r4-226](stops-and-finishing.md#r4-226)) |
 | `S9b` | the port plan's step S9b, the consumer completion: surviving checks, signatures, storage and side outputs; its design is a document outside the repository |
-| `checkpoint 9` | historical research checkpoint that established the coarse core’s design tables and port baseline |
 | `S10` | the port work family implementing narrowing, preserving loops, and required-check route errors |
 | `A1` | a written type decides the place’s domain and checks every store |
 | `A2` | the earliest eligible contribution decides an unwritten place; conflicting whole copies are checked where they meet ([section-5-a2](admission.md#section-5-a2)) |
@@ -74,7 +73,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `C4` | arithmetic and ordering operands must match a supported runtime operator row |
 | `C5` | member access checks receiver non-nullness, member suitability, and property presence |
 | `C5a` | a member, index, or method receiver must not be null |
-| `C5b` | a receiver’s kind must support the requested member or operation |
 | `C5c` | a property read or store requires a property present on its receiver |
 | `C6` | element selections require proven non-emptiness or an empty-collection runtime check |
 | `C7` | arguments and returned values must fit written parameter and result types |
@@ -87,17 +85,13 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `F1a` | a global default creates distinct startup and executable definitions |
 | `F2` | written declarations fix contracts; admission indexes values’ and source keys’ own fields, elements, depths, and shared source identities |
 | `F3` | as "the owner's F3", the owner's review finding that a fallback's default fits the expected type at every depth (ADR 0021 rules 1.2 and 7) |
-| `F4` | an uncertain-receiver store contributes to the contract but never becomes an exact definition |
-| `F5` | add and addAll contribute elements; an exact add also proves non-emptiness |
 | `F5a` | a guaranteed loop ending in an unconditional add proves the collection non-empty afterward |
 | `F6` | clear opens emptiness and removes exact elements while preserving the collection kind |
 | `F7` | removals preserve possible element kinds, open emptiness, and return their operation-specific result |
-| `F7a` | positional removals return possible elements and leave the collection possibly empty |
 | `F9` | a copy takes the source snapshot while retaining any inherited written domain |
 | `F10` | collection conversions and concatenation transfer element kinds and their specified emptiness |
 | `F11` | combine stored and copied property facts with missing evidence; dispatch built-in names by receiver, keeping object selections opaque |
 | `F12` | element projections follow literal structure; copied descendants take the contract answer ([section-2-f12](contract.md#section-2-f12)) |
-| `F13` | stores and mutations through element steps are weak and never exact definitions |
 | `F14` | built-in length reads produce integers on supported text and collection receivers |
 | `F16` | arithmetic and comparison results and obligations follow the runtime operator table |
 | `F17a` | otherwise removes the left operand’s null and joins fallback kinds, retaining them even when the graph never evaluates the fallback |
@@ -108,12 +102,9 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `F20` | function results use the joined return contract, including null from value-less exits |
 | `F21` | unwritten parameters use captured single-call arguments or conservative multi-call contracts |
 | `F22` | written parameter types constrain every argument while preserving its evaluation snapshot |
-| `F23` | returning a value stores it into the function’s result key |
 | `F24` | stores reachable from callbacks count as handler stores |
 | `F25` | built-in results follow declared kinds, with choice results derived from option values |
-| `F26b` | interpolation returns text while checking showability and selected-list non-emptiness |
 | `F27` | loop variables receive iterable snapshots: elements, dictionary keys and values, or range integers |
-| `F27b` | dictionary loops bind string keys and, when requested, dictionary values |
 | `F28` | explanations retain the earliest admitted writer per offending kind without discarding obligations |
 | `X1` | the read and its reaching definition must both be live |
 | `X2` | choose the nearest dominating definition over the key and its prefixes |
@@ -129,12 +120,9 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `N9` | unsupported narrowing forms retain guarded warnings rather than inventing stronger proofs |
 | `N10` | required-check errors identify the producer and missing test; failed narrowings name their invalidating event |
 | `U4a` | stored selections take their element narrowing while emptiness remains a separate proof |
-| `U5` | a lost narrowing names the failing event that prevented keeping its check ([r4-444](contract.md#r4-444)) |
 | `H6` | registrations reached through file transfers propagate possible handler interference |
 | `L10` | a call whose target cannot return leaves its continuation unreachable |
 | `L11` | computed transfers target every candidate file; glob targets use the name pass’s picks |
-| `O15` | block-local reads use the contract because handlers can run after intervening stores |
-| `P3` | a present, dominating, unguarded single-kind contract can prove a read definite |
 | `P7` | literal graph facts prove branch feasibility, loop entry, and selected literal elements |
 | `W5` | the work family for one text-valued preset over k numeric fields |
 | `W19` | the work family for k guarded copies of one record inside a literal |
