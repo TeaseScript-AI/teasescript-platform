@@ -66,7 +66,6 @@ export function landedKey(admission: Admission, place: PlaceId, key: Key): boole
  * their strips, on an explicit stack, each place and path asked once.
  */
 export function landed(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
-  // (a path past wrappers lands as its frontier's rest lands in the frontier's read's binding, `landedFrontier`)
   if (path.length > 1 && positions()) {
     const frontier = landedFrontier(admission, place, admission.pass.contract.pathIdOf(path));
     if (frontier.place !== place)

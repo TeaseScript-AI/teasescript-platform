@@ -749,7 +749,6 @@ function* buildView(admission: Admission, start: Expansion): Reads<View> {
       else list.push(inherits);
     }
     const own = task.stop;
-    // (one stop per source identity at a path)
     const map = own === null ? null : view[own.list];
     const pathKey = own === null ? "" : keptText(admission.work, path);
     let kept = own !== null;

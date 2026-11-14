@@ -341,7 +341,6 @@ export function literalElements(
       sentences.set(at, made);
       return made;
     };
-    // the error at the innermost offending expression, the element rejected
     const offended = (
       d: Definition,
       path: readonly string[],

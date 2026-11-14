@@ -256,8 +256,6 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
   admission.deciderSites.set(key, found.site);
   if (lazily) return null;
   const offends = (items: readonly Item[]): boolean => offending(items, found);
-  // the candidates: the direct stores, and the prefixes' whole stores whose source's contract at the path holds an
-  // offending kind
   const candidates = new Map<string, Candidate>();
   work.charge("checks", direct.length);
   for (const candidate of direct)
@@ -275,8 +273,6 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
         candidates.set(keptParts(admission.work, d.uid, path!), { d, at: path! });
   for (const { key: prefix, rest: ref } of prefixes) {
     const stored = contract.prefixStores(prefix);
-    // (a cursor's span as it is, its steps made only for a store taken as a candidate; an array's or a record's steps
-    // read as a rest, `stepsRest`)
     const rest: Rest = ref.kind === "span" ? ref : stepsRest(ref.steps());
     const take = (d: Definition): void => {
       // (a span's steps made through the charged boundary, only for a store taken)
@@ -328,7 +324,6 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
         work.charge("checks");
         if (offends(admission.run(contract.subAt(sub.key, rest)))) takeAll(sub.defs);
       }
-    // a rejected store is decided again in every pass, where it was rejected
     const retaken = admission.retaken.get(key) ?? [];
     work.charge("checks", retaken.length);
     for (const d of retaken)
@@ -427,10 +422,8 @@ function computeDecided(admission: Admission, at: At, key: Key, inputs: Inputs):
   // (a cursor's family's place is unwritten: its shape requires it; its steps made where one is not)
   const term = written === null ? null : permittedAt(written, path ?? keyStepsIn(contract, key));
   const none = { key, own: term !== null, transfer: false, tags: null } as const;
-  // every argument and return into a written parameter or result is a candidate
   const transfer =
     term !== null && (place.kind.kind === "parameter" || place.kind.kind === "result");
-  // below a reference nothing is admitted
   if (depth > 0 && admission.run(contract.refReceiver(key))) {
     work.charge("checksSkipped");
     return { ...NOTHING, ...none };
@@ -471,7 +464,6 @@ function computeDecided(admission: Admission, at: At, key: Key, inputs: Inputs):
     const all: ItemTag[] = [];
     for (const { d, at } of direct) {
       work.charge("checks");
-      // a multi-site argument decides nothing; a single-site one is the parameter's start value
       if (d.how === "argument" && !lists.singleSite(d.fn)) continue;
       const kinds = at.length === 0 ? admission.quietKinds(d.value) : null;
       if (kinds === null || !kinds.every((tag) => SCALAR.has(tag) || tag === "null")) {
