@@ -66,14 +66,16 @@ function compileFault(c) {
     !shaped(
       c,
       ["plan", "diagnostics", "checks", "error", "trace", "questions", "units"],
-      ["allowance", "stopped", "outside"],
+      ["allowance", "stopped", "outside", "thrown"],
     )
   )
-    return "a compile without exactly its seven parts, or one of the three a runner since #2796 adds";
+    return "a compile without exactly its seven parts, or one of the four a runner since #2796 adds";
   if (c.allowance !== undefined && !whole(c.allowance))
     return "a compile's allowance no whole number";
   if (c.stopped !== undefined && !textOrNull(c.stopped))
     return "a compile's stopped limit neither text nor null";
+  if (c.thrown !== undefined && !textOrNull(c.thrown))
+    return "a compile's thrown place neither text nor null";
   if (c.outside !== undefined && ![null, "limit", "slice"].includes(c.outside))
     return "a compile's refusal neither limit, slice nor null";
   if (![c.plan, c.diagnostics].every((part) => part === null || (text(part) && DIGEST.test(part))))

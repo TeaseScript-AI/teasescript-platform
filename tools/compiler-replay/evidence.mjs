@@ -16,17 +16,22 @@
 //
 // `evidence-report` first says what the run covered and what it left out (areas not asked or not run, the modes, the
 // package folders with their packages' counts, the bound and how many packages reached it), then, per part (the set,
-// each area, the packages), each tree's count of sources in five classes (`classOf`, `sourceClass`): completed, refused
-// at the limit, refused at the syntax gate, incomplete (stalled, crashed, past the safety net, thrown) and uncompared
-// (no record a class can be read from); the sources whose class differs between the trees, by name; the differences
-// over sources completed on both trees, each with its first differing part; and the heaviest share of the limit per
-// tree, with every source above half of it, each as a share of the allowance the code gives it and of the fixed
-// limit (`FIXED_LIMIT`). Exit 0 when every part asked ran, each completed something and nothing differs, moves class,
-// is incomplete or uncompared, and the checks passed; 3 when a part asked did not run; else 1; 2 on a usage error.
+// each area, the packages), each tree's count of sources in six classes (`classOf`, `sourceClass`): completed, refused
+// at the limit, refused at the syntax gate, threw (the checker's own outcome, by the error's class and the function and
+// file it is thrown from, `throwPlace`), incomplete (what the infrastructure did: stalled, killed, past the safety net,
+// a runner's own exception) and uncompared (no record a class can be read from); the sources whose class differs
+// between the trees, by name; the differences over sources completed on both trees, each with its first differing
+// part, and over those that threw on both, where the class or place of the throw differs; every source that threw
+// alike on both trees, by name, each time; and the heaviest share of the limit per tree, with every source above half
+// of it, each as a share of the allowance the code gives it and of the fixed limit (`FIXED_LIMIT`). Exit 0 when every
+// part asked ran, each completed something and nothing differs, moves class, is incomplete or uncompared, and the
+// checks passed (a throw alike on both trees is listed, never a reason); 3 when a part asked did not run; else 1; 2 on
+// a usage error.
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { packagesOf } from "../../tests/families/packages.mjs";
+import { throwPlace } from "../../tests/families/thrown.mjs";
 import { ROOT, Usage, areasOf, git, inTemporaryFolder, queue, quoted } from "./common.mjs";
 import { apartText, areaRecordForm, report, setDifference } from "./collect.mjs";
 import { jobsOf, lines, shardsOf, shardsRead } from "./results.mjs";
@@ -35,11 +40,12 @@ import { splitOf, submissions, batchOf } from "./submit.mjs";
 /** The work limit #2801 fixes for every script, beside which each share is also given. */
 export const FIXED_LIMIT = 30_000_000;
 /** The classes a source falls in on one tree, in the order the report prints them. */
-export const CLASSES = ["completed", "limit", "slice", "incomplete", "uncompared"];
+export const CLASSES = ["completed", "limit", "slice", "threw", "incomplete", "uncompared"];
 const CLASS_NAMES = {
   completed: "completed",
   limit: "refused at the limit",
   slice: "refused at the syntax gate",
+  threw: "threw",
   incomplete: "incomplete",
   uncompared: "uncompared",
 };
@@ -49,19 +55,32 @@ const manifestPath = (prefix) => path.join(homedir(), "work", "replay-evidence",
 /**
  * One run's class on one tree, the one place a limit is told from the rest: a ledger stopped at a limit (`stopped`) or
  * a candidate-route refusal a limit made (`outside: "limit"`) is refused at the limit; any other candidate-route refusal
- * is refused at the syntax gate; another error is incomplete; else completed. A run without `stopped` (a runner from
- * before #2796) is uncompared.
+ * is refused at the syntax gate; another error is the checker's own outcome, threw; else completed. A run without
+ * `stopped` (a runner from before #2796) is uncompared. What the infrastructure did (a stall, a kill, the safety net, a
+ * shard unread) is the record's, never a run's: incomplete.
  */
 export function classOf({ error = null, stopped, outside = null }) {
   if (stopped === undefined) return "uncompared";
   if (stopped !== null || outside === "limit") return "limit";
   if (outside === "slice") return "slice";
-  return error === null ? "completed" : "incomplete";
+  return error === null ? "completed" : "threw";
 }
 
-/** A source's class on one tree from its runs' classes: the first of incomplete, uncompared, limit, slice, else completed. */
+/** Where a run that threw threw (`throwPlace`'s text, as the runner recorded it). */
+const throwOf = (run) => run.thrown ?? run.error;
+
+/** The places a tree's runs threw at, sorted and joined, or `null` where none threw. */
+const threwAt = (runs) => {
+  const places = [...new Set(runs.filter((run) => classOf(run) === "threw").map(throwOf))].sort();
+  return places.length === 0 ? null : places.join("; ");
+};
+
+/**
+ * A source's class on one tree from its runs' classes: the first of incomplete, uncompared, threw, limit, slice, else
+ * completed.
+ */
 export function sourceClass(classes) {
-  for (const which of ["incomplete", "uncompared", "limit", "slice"])
+  for (const which of ["incomplete", "uncompared", "threw", "limit", "slice"])
     if (classes.includes(which)) return which;
   return classes.length === 0 ? "uncompared" : "completed";
 }
@@ -86,9 +105,11 @@ export function setSources(records) {
         head: "incomplete",
         apart: null,
         share: [null, null],
+        threw: [null, null],
       };
     const modes = r.modes ?? [];
     const side = (tree) => sourceClass(modes.map((m) => classOf(m[tree])));
+    const threw = ["base", "head"].map((tree) => threwAt(modes.map((m) => m[tree])));
     const apart = modes.map((m) => setDifference(m)).find((what) => what !== null) ?? null;
     const share = ["base", "head"].map((tree) =>
       modes.reduce(
@@ -96,45 +117,68 @@ export function setSources(records) {
         null,
       ),
     );
-    return { name: r.name, base: side("base"), head: side("head"), apart, share };
+    return { name: r.name, base: side("base"), head: side("head"), apart, share, threw };
   });
 }
 
 /**
  * An area's sources from `run.mjs`'s `--work` records and `--out` differences: a source whose own counts hold a stall,
- * a safety net, an exception or an unanswered run is incomplete, one unparsed refused at the syntax gate, one uncompared
- * so; else each tree's class from its runs' `stopped`. `apart` is the first difference's place (`apartText`).
+ * a safety net or an unanswered run is incomplete, as is one whose runner threw outside its runs; one unparsed is
+ * refused at the syntax gate, one uncompared so; a tree on which a run threw (`--out`'s exception records, each tree's
+ * stack read by `throwPlace`) threw; else each tree's class from its runs' `stopped`. `apart` is the first difference's
+ * place (`apartText`).
  */
 export function areaSources(work, differences) {
   const apartOf = new Map();
-  for (const d of differences)
-    if (areaRecordForm(d) === "difference" && !apartOf.has(`${d.generator}\0${d.source}`))
-      apartOf.set(`${d.generator}\0${d.source}`, `${d.mode}: ${apartText(d)}`);
+  const thrownOf = new Map();
+  for (const d of differences) {
+    const key = `${d.generator}\0${d.source}`;
+    if (areaRecordForm(d) === "difference" && !apartOf.has(key))
+      apartOf.set(key, `${d.mode}: ${apartText(d)}`);
+    if (areaRecordForm(d) === "exception") {
+      const at = thrownOf.get(key) ?? { runner: false, sides: [new Set(), new Set()] };
+      thrownOf.set(key, at);
+      if (d.thrown.runner !== undefined) at.runner = true;
+      ["base", "head"].forEach((tree, side) => {
+        if (d.thrown[tree] !== undefined) at.sides[side].add(throwPlace(d.thrown[tree]));
+      });
+    }
+  }
   return work
     .filter((w) => w.generator !== undefined && w.source !== undefined)
     .map((w) => {
       const name = `${w.generator} ${w.source}`;
       const apart = apartOf.get(`${w.generator}\0${w.source}`) ?? null;
       const counts = w.counts ?? {};
-      const both = ["stalled", "uncharged", "exceptions", "unanswered"].some(
-        (key) => counts[key] > 0,
-      )
-        ? "incomplete"
-        : counts.unparsed > 0
-          ? "slice"
-          : counts.uncompared > 0
-            ? "uncompared"
-            : null;
+      const thrown = thrownOf.get(`${w.generator}\0${w.source}`);
+      const both =
+        ["stalled", "uncharged", "unanswered"].some((key) => counts[key] > 0) ||
+        thrown?.runner === true ||
+        (counts.exceptions > 0 && thrown === undefined)
+          ? "incomplete"
+          : counts.unparsed > 0
+            ? "slice"
+            : counts.uncompared > 0
+              ? "uncompared"
+              : null;
       const runs = w.runs ?? [];
+      const threw = [0, 1].map((at) =>
+        thrown === undefined || thrown.sides[at].size === 0
+          ? null
+          : [...thrown.sides[at]].sort().join("; "),
+      );
       const side = (at) =>
-        both ?? sourceClass(runs.map((run) => classOf({ stopped: run.stopped?.[at] })));
+        both ??
+        (threw[at] !== null
+          ? "threw"
+          : sourceClass(runs.map((run) => classOf({ stopped: run.stopped?.[at] }))));
       const share = [0, 1].map((at) =>
         runs.reduce(
           (heaviest, run) => heavier(shareOf(run.work?.[at], run.allowance?.[at]), heaviest),
           null,
         ),
       );
-      return { name, base: side(0), head: side(1), apart, share };
+      return { name, base: side(0), head: side(1), apart, share, threw };
     });
 }
 
@@ -184,10 +228,12 @@ export function packageSources(records) {
         head: "incomplete",
         apart: null,
         share: [null, null],
+        threw: [null, null],
         bound: r.incomplete,
       };
     const modes = r.modes ?? [];
     const side = (tree) => sourceClass(modes.map((m) => classOf(m[tree].analysis)));
+    const threw = ["base", "head"].map((tree) => threwAt(modes.map((m) => m[tree].analysis)));
     const apart = modes.find((m) => !m.same);
     const share = ["base", "head"].map((tree) =>
       modes.reduce(
@@ -202,18 +248,25 @@ export function packageSources(records) {
       head: side("head"),
       apart: apart === undefined ? null : packageApart(apart),
       share,
+      threw,
     };
   });
 }
 
-/** A part's summary: each tree's counts by class, the class moves, the differences over completed sources, the shares. */
+/**
+ * A part's summary: each tree's counts by class, the class moves, the differences over sources completed or thrown on
+ * both trees (a throw of another class or place a difference), the sources that threw alike, the shares.
+ */
 export function partSummary(sources) {
   const counts = { base: {}, head: {} };
   for (const tree of ["base", "head"]) for (const c of CLASSES) counts[tree][c] = 0;
   const moved = [];
   const differences = [];
   const apartElsewhere = [];
+  // (the sources that threw alike on both trees: the checker's outcome, listed every time, never a reason)
+  const threwAlike = [];
   let completed = 0;
+  let threwBoth = 0;
   for (const s of sources) {
     counts.base[s.base] += 1;
     counts.head[s.head] += 1;
@@ -221,8 +274,17 @@ export function partSummary(sources) {
     else if (s.base === "completed") {
       completed += 1;
       if (s.apart !== null) differences.push(`${s.name}: ${s.apart}`);
-    } else if (s.apart !== null)
-      apartElsewhere.push(`${s.name} (${CLASS_NAMES[s.base]} on both): ${s.apart}`);
+    } else if (s.base === "threw" && s.threw[0] !== s.threw[1]) {
+      threwBoth += 1;
+      differences.push(`${s.name}: threw ${s.threw[0]} on the base, ${s.threw[1]} on the head`);
+    } else {
+      if (s.base === "threw") {
+        threwBoth += 1;
+        threwAlike.push(`${s.name}: ${s.threw[0]}`);
+      }
+      if (s.apart !== null)
+        apartElsewhere.push(`${s.name} (${CLASS_NAMES[s.base]} on both): ${s.apart}`);
+    }
   }
   const shares = [0, 1].map((at) => {
     const ranked = sources
@@ -235,7 +297,17 @@ export function partSummary(sources) {
       aboveHalf: ranked.filter((s) => s !== heaviest && (s.today > 0.5 || s.fixed > 0.5)),
     };
   });
-  return { sources: sources.length, counts, completed, moved, differences, apartElsewhere, shares };
+  return {
+    sources: sources.length,
+    counts,
+    completed,
+    threwBoth,
+    moved,
+    differences,
+    apartElsewhere,
+    threwAlike,
+    shares,
+  };
 }
 
 /** `evidence`: queue the run and record what it queued. */
@@ -482,8 +554,9 @@ export function evidenceReportStep({ positional: [prefix], options }) {
     const row = (tree) => CLASSES.map((c) => `${p.counts[tree][c]} ${CLASS_NAMES[c]}`).join(", ");
     out(`${name}: ${p.sources} sources; base ${row("base")}; head ${row("head")}`);
     out(
-      `${name}: ${p.differences.length} differences over ${p.completed} completed on both trees; ${p.moved.length} moved class`,
+      `${name}: ${p.differences.length} differences over ${p.completed} completed on both trees and ${p.threwBoth} that threw on both; ${p.moved.length} moved class`,
     );
+    for (const t of p.threwAlike) out(`${name} threw alike on both trees: ${t}`);
     p.shares.forEach((share, at) => {
       const tree = at === 0 ? "base" : "head";
       if (share.heaviest !== null) out(`${name} ${tree} heaviest: ${shareText(share.heaviest)}`);
