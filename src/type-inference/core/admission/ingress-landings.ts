@@ -13,21 +13,15 @@ import { concrete } from "./kinds.js";
 import type { IngressStop, Landing, LandingIndex, Stop, Via, ViaChain } from "./model.js";
 import { compareKeys, contributionSite, OWN_ROLES, stopsOf, TYPED_ROLES } from "./walk.js";
 
-// The landing index of external data: where each ingress lands (by the stores that bring it, or as an own read), every
-// landing walked once, and the ingresses an item's leaves name; and the typed calls among the ingresses (a typed `load`
-// or `fromJson`, `typedIngress`): whether a default alone types one (`typedByDefault`), and its expected kinds
-// (`typedCallKinds`).
-
 /** The kinds whose length is built in: a text's, a collection's. */
 const MEASURED: ReadonlySet<ItemTag> = new Set(["string", "list", "set", "dict"]);
 
 /**
  * Every store, add and transfer landing that admission does not reject walked once (`stopsOf`), then every
- * operation's own read, as its own landing; each
- * ingress stop recorded by the store that brings it, or as an own read. Built once per pass, at its first use. A store
- * in dead code and a dead call's argument for a written parameter are walked too: their boundaries are against the
- * destination's admitted type, as in live code (a written type is no flow fact). `keep`: the stops of the stores
- * it keeps only, no own read walked and nothing kept (`publish` after a stop before admission settled).
+ * operation's own read, as its own landing; each ingress stop recorded by the store that brings it, or as an own read.
+ * Built once per pass, at its first use. A store in dead code and a dead call's argument for a written parameter are
+ * walked too: their boundaries are against the destination's admitted type, as in live code (a written type is no flow
+ * fact). `keep`: the stops of the stores it keeps only, no own read walked and nothing kept.
  */
 export function landingIndex(
   admission: Admission,

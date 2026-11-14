@@ -53,7 +53,7 @@ export interface ReceivingSources {
    * decision's stores among them, each by the mark the stop gave it (`Consumers.stoppedStores`).
    */
   readonly storeSites: readonly { readonly site: SourceSite; readonly stopped: boolean }[];
-  /** The sites of the typed ingresses a stop left open (`Admission.ingressStores`), which the capture takes too. */
+  /** The sites of the typed ingresses a stop left open (`Admission.ingressStores`). */
   readonly ingressSites: readonly SourceSite[];
   /** A site's identity text. */
   readonly siteKey: (site: SourceSite) => string;

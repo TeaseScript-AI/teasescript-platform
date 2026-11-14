@@ -45,8 +45,6 @@ import { dictStepsRead, spellsValues } from "./structure.js";
 import { inputsAt, inputsOf, scanAt } from "./scan.js";
 import { compareKeys, stopsOf, writtenSource } from "./walk.js";
 
-// The decision of one place at one path, and its comparison under the member-answer oracle.
-
 /**
  * The member-answer oracle, for the tests: while `withMemberOracle` runs, every decided path compares each alias
  * member's own answer with its class representative's, each with its own guard applied (`marked` where a test of the
@@ -130,9 +128,8 @@ export function stopDecision(admission: Admission, at: DecidedAt): void {
 }
 
 /**
- * #1526: the receiving closure invalidated the decision of `key` (a decision it read was made after it read it
- * unmade, `Closure.made`): what it made of its key goes, so the next read that asks for it makes it again (`admitted`'s
- * pull), as a lazily decided path.
+ * #1526: the receiving closure invalidated the decision of `key`: what it made of its key goes, so the key is decided
+ * again where it is next read, as a lazily decided path.
  */
 export function forgetDecision(admission: Admission, key: CanonicalKey): void {
   admission.decisions.delete(key);

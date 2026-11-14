@@ -127,8 +127,7 @@ export { concrete, contributes, deciding, fits, isExternal, isOpaque } from "./a
 export type { DecidedAt, Decision } from "./admission/model.js";
 
 /*
- * Admission and the boundary checks of external data: each place's decided type, the rejections, a literal's elements
- * of one type (ADR 0021 1.3) and where each boundary check of external data stands. The rules and their reasons:
+ * Admission and the boundary checks of external data. The rules and their reasons:
  * `docs/specifications/type-inference-accepted-record/admission.md`.
  */
 
@@ -373,7 +372,7 @@ export class Admission {
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
   >();
   groupList: DecidedAt[] | null = null;
-  /** The groups' keys in their identities, once a pass (`admitted.ts`'s pull, #1526). */
+  /** The groups' keys in their identities, once a pass (#1526). */
   groupKeys: Set<CanonicalKey> | null = null;
   /**
    * The cursors decision records name, as one packet of their paths made as each record is (`decisionWork`): compact
@@ -729,9 +728,8 @@ export class Admission {
   }
 
   /**
-   * `labelOf` for a decided cursor: its parent's recipe one step on, each cursor's once (`keyLabels`),
-   * an element step's kinds asked of its parent's key as `labelOf` asks them, shallowest first; its place is unwritten
-   * (its family's shape requires it).
+   * `labelOf` for a decided cursor: its parent's recipe one step on, each cursor's once (`keyLabels`), an element
+   * step's kinds asked of its parent's key, shallowest first; its place is unwritten (its family's shape requires it).
    */
   public labelOfKey(key: KeyId): Label {
     const { contract } = this.pass;

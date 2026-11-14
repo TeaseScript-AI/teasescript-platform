@@ -643,9 +643,7 @@ export function forEachPath(
   }
 }
 
-/**
- * `forEachPath` of a visit that makes reads (`Read`, #1072), each path visited where `forEachPath` visits it.
- */
+/** `forEachPath` of a visit that makes reads (`Read`, #1072). */
 export function* forEachPathRead(
   region: Region,
   at: PathRef,

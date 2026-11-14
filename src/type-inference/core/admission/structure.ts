@@ -26,8 +26,6 @@ import { propertyStep } from "../program.js";
 import type { Structure } from "./model.js";
 import { readNow, type Reads } from "../inherited/reads.js";
 
-// The own structures of stored values and source keys: their literals' fields and elements, depths, landings.
-
 /**
  * A value's source key: the key a copy reads, a call's callee's result key, a dict's `values` read as its
  * elements; `null` for any other value and for a dict's `keys`, which hold text.
@@ -133,9 +131,7 @@ export function expectStructures(admission: Admission, values: Iterable<PlaceId>
 
 /**
  * A source key's own structure: the elements, at every depth, of the values stored at it or at a prefix of it (an
- * add's below its element), cut to the key's path, and of the keys below it with stores. A copied record's fields are
- * none of it: they are admitted at their first read
- * (docs/specifications/type-inference-accepted-record/admission.md#section-5-a2).
+ * add's below its element), cut to the key's path, and of the keys below it with stores.
  */
 function keyStructure(admission: Admission, key: Key): Structure {
   const id = `k${key}`;
@@ -603,9 +599,8 @@ export function pathsBelow(
 
 /**
  * The paths below a collection literal's elements that its own literals give or admission decides where the literal
- * lands (a read's path): there a named element's fields are compared too
- * (docs/specifications/type-inference-accepted-record/admission.md#section-5-a2: a field is copy-only until a literal
- * or a read reaches it); beside them, where copies land there and two elements may hold something (`touchElements`).
+ * lands (a read's path): there a named element's fields are compared too; beside them, where copies land there and two
+ * elements may hold something (`touchElements`).
  */
 export function sharedPaths(
   admission: Admission,
@@ -666,7 +661,6 @@ function decidedBelow(admission: Admission, asked: Key): readonly Steps[] {
   if (admission.below === null) {
     admission.below = new Map();
     for (const group of admission.groups()) {
-      // (a cursor's steps made through the charged boundary, its prefixes its ancestors)
       const path = admission.stepsAt(group);
       const walk = group.key === undefined ? null : keyWalk(admission.pass.contract, group.key);
       for (let length = 0; length < path.length; length += 1) {

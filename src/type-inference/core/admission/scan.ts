@@ -59,9 +59,6 @@ import { inheritedInto } from "../inherited/waiting.js";
 import { readNow, type Reads } from "../inherited/reads.js";
 import { compareKeys, expandRead, stopsOfRead, viaSignature, viewOfRead } from "./walk.js";
 
-// The scan for a path's decider: the stores a path is decided from, and the earliest contribution in evaluation order
-// that decides it.
-
 /**
  * The stores a place's path is decided from: its direct candidates (a store beside an unannotated parameter's default
  * none) and the prefixes of the path whole stores or adds reach; `null` for a literal's own cell or
@@ -422,7 +419,6 @@ export function* scanView(
   const deepest = Math.min(at.length, Math.max(depths.written, depths.values));
   for (let length = from; length <= deepest; length += 1) {
     program.work.charge("checks");
-    // (a span's prefix text its record's, `textOf`; an array's made plain)
     const prefix = at.text(length);
     const written = snapshots(admission, stops.written.get(prefix), false);
     // (and a call a join carries, by its written result; since #2378 such a call is a written stop too, and this read
@@ -866,9 +862,7 @@ export function perLink(
   );
 }
 
-/**
- * `perLink` of a test that makes reads (`Read`, #1072), each link's test asked as `perLink` asks it.
- */
+/** `perLink` of a test that makes reads (`Read`, #1072). */
 function* perLinkRead(
   admission: Admission,
   memo: WeakMap<ViaChain, boolean>,
