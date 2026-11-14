@@ -1860,7 +1860,7 @@ file from `fileFromBase64` ([§33](#stored-files)), as a data URL, `data:<type>;
 image, audio, or video type of [§33](#stored-files) becomes a file, and any other data URL stays text. `files: false` keeps references
 in `toJson` and data URLs in `fromJson` as text. A package path such as `"images/a.jpg"` and any other text are never
 embedded or converted: a text is a stored file reference only when the session knows it as one, never by its shape.
-`toJson` and `fromJson` wait briefly for the Player's file store only when files are involved.
+`toJson` and `fromJson` wait briefly for the Playroom's file store only when files are involved.
 
 ```text
 let exported = toJson(preset)                     // its photos as data URLs
@@ -1884,7 +1884,7 @@ the one another program, such as `sha256sum`, gives. They hash only text and fil
 
 `hashText` gives its result at once. A lone surrogate counts as U+FFFD, as in `toBase64`. `hashFile` hashes the stored
 files that `fileToBase64` reads, and fails where `fileToBase64` fails: for another value, also a package path such as
-`"images/a.jpg"`, and for a file that the Player can no longer read. Reading the file takes a short wait, and the result
+`"images/a.jpg"`, and for a file that the Playroom can no longer read. Reading the file takes a short wait, and the result
 is recorded as that of `fileToBase64`: a restore or a replay can reuse a recorded result without asking the store again.
 
 ```text
@@ -1925,24 +1925,24 @@ with AES-256-GCM under a new random key, and each way to open the lock, an opene
 one opener opens it ([`ENCRYPTION.md`](../ENCRYPTION.md)).
 
 - `password:` opens with exactly the text it is given. Written directly as `password: askPassword(...)`, also in
-  parentheses, it asks for the password in the Player's password field ([§20](#password-input)), and the typed password
+  parentheses, it asks for the password in the Playroom's password field ([§20](#password-input)), and the typed password
   never becomes a script value: an encrypt call's field asks for it twice, the second time as "Repeat password", and
   locks only when both match; a decrypt call's asks once. The question is said where `password:` stands among the
   arguments, and the field opens when the call locks or opens.
 - `publicKey:`, a public key or a list of them, each an age recipient (`age1…`) or an OpenSSH Ed25519 key
   (`ssh-ed25519 AAAA…`), locks the key in a standard age file that only the matching private key opens. The owner of
   the private key, a keyholder for example, opens it with the `age` tool and sends back the unlock key it holds, 44
-  characters of Base64, which opens the lock as `key:` of a decrypt call or in the Player's dialog
+  characters of Base64, which opens the lock as `key:` of a decrypt call or in the Playroom's dialog
   ([`ENCRYPTION.md`](../ENCRYPTION.md#for-the-owner-of-the-private-key)). A lock holds at most 594 public keys. Text
   that is no such key is an error, at compile time where it is written.
 - `timeLock:`, a moment (`absoluteDateTime`), is a time lock, a lock that cannot open before a set time: from that
   moment anyone can open the lock with it, also long after, and before it the time lock opens nothing, while another
-  opener may. The Player fetches the drand network's proof of that moment to open it. A moment in the past opens at
-  once. When the Player can reach the drand network while it locks and the device's clock is behind drand's time, the
+  opener may. The Playroom fetches the drand network's proof of that moment to open it. A moment in the past opens at
+  once. When the Playroom can reach the drand network while it locks and the device's clock is behind drand's time, the
   moment moves later by as much.
 
 Each of these options also takes `true` or `false`. A value is used as given, without asking; `true` lets the player
-set that opener in the Player's lock dialog, and `false` leaves it out, so `timeLock: false` gives no time lock at all.
+set that opener in the Playroom's lock dialog, and `false` leaves it out, so `timeLock: false` gives no time lock at all.
 A call without any of them lets the player set each, as if each were `true`. A call that gives one of them must give
 each, or it does not compile. A call whose options are all `false` has no way to open: an error at compile time where
 they are written, or when the call runs. **Without a time lock, the content never opens once its password and every
@@ -1968,10 +1968,10 @@ result type or is `null`, or of another type only where a written union holds bo
 password, a changed lock, text that is not a lock, a time lock whose moment has not come, and a cancelled dialog give
 the default, never a runtime error. The default is evaluated last, and only when it is used (owner decision,
 2026-10-16). With `password:` or `key:` a call tries only those. Without them, a lock whose time lock has passed opens
-without asking; otherwise the Player asks the player with what opens this lock: a password; for a public key, the unlock
+without asking; otherwise the Playroom asks the player with what opens this lock: a password; for a public key, the unlock
 request to copy or download for the owner of the private key and a field for the unlock key they send back; and the
 moment its time lock opens. A wrong password or key in that dialog lets the player try again, and Cancel gives the
-default. When the time lock has passed but the Player cannot reach the drand network, the dialog offers to try again,
+default. When the time lock has passed but the Playroom cannot reach the drand network, the dialog offers to try again,
 and without another opener the call gives the default.
 
 ```text
@@ -1984,10 +1984,10 @@ let photo = decryptFile(locked, default: null)        // opens if its time has p
 `decryptText` reads the Base64 as `fromBase64` does ([§13](#json-and-base64)), so a lock survives being copied through a
 chat, and gives the default for a lock whose content is not UTF-8 text. The file calls take the stored files that
 `fileToBase64` reads and fail where it fails ([§33](#stored-files)), and every call fails with a runtime error where the
-browser cannot encrypt at all, as on a Player page without https.
+browser cannot encrypt at all, as on a Playroom page without https.
 
-Each call waits for the Player, and its result is recorded: a restore or a replay reuses it without the network, the
-file store, the password, or the key. The Player's dialogs and password fields are interactions, which a timer's expiry
+Each call waits for the Playroom, and its result is recorded: a restore or a replay reuses it without the network, the
+file store, the password, or the key. The Playroom's dialogs and password fields are interactions, which a timer's expiry
 block interrupts ([§27](#27-timers)): they ask again once it returns, without what was typed and not yet given. The
 short step that locks or opens is not interrupted; a due block runs once it is done. What the player types in a dialog
 or password field never becomes a script value.
@@ -3019,7 +3019,7 @@ if code == hashText("corner") {
 `askPassword` is a basic ask without `prefill:`, as a password is typed by the person who knows it and never suggested.
 Its field is masked, with an eye button that shows the text while the person typing chooses to, and a warning while Caps
 Lock is on. It completes once a password is typed and returns `string`: the SHA-256 of the typed text as `hashText(...)`
-gives it ([§13](#hashes)), 64 lowercase hexadecimal digits. The Player hashes, so the typed text never reaches the
+gives it ([§13](#hashes)), 64 lowercase hexadecimal digits. The Playroom hashes, so the typed text never reaches the
 script, and the answer adds no line to the chat. Comparing the answer with `hashText(...)` of a password, or two answers
 with each other, tells whether the same password was typed. After a block interrupted it, the field asks again empty,
 without what was typed and not yet given.
@@ -3267,7 +3267,7 @@ Rules:
   field; otherwise the form stays open. The author's starting values are never changed.
 - Edits add nothing to the transcript. Submitting adds one player answer that lists every field with its state, in field
   order and never as a count: a toggle as on or off, and any other field as `label: value`, as its button shows it, or
-  `label: Not set` for an optional field without a value. The Player shows one field per line, a toggle behind a check
+  `label: Not set` for an optional field without a value. The Playroom shows one field per line, a toggle behind a check
   or an empty box, and a cycle with the option it showed, also where several of its options share a value. The
   answer's plain text, for the transcript, exports, and screen readers, joins the fields with `, ` and
   marks a toggle `✓` or `✗`, such as `✓ crop / cane, ✗ paddle, ✓ whip` or `Intensity: High, Impact: 5`. Every answer is
@@ -3364,7 +3364,7 @@ The compact forms `askDate`, `askTime`, and
 `askDateTime [as speaker] [bubble(options) | prose(options)] [question] [, prefill: value] [, hint: text]` are
 implemented ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The
 control submits strict ISO text ([§35](#35-date-time-and-durations)); a local time that the player's zone
-skips is a valid answer. The transcript shows the answer in the player's presentation. The Player's date and
+skips is a valid answer. The transcript shows the answer in the player's presentation. The Playroom's date and
 date-and-time controls cover the years 0001 through 9999, as the browser's native controls do; a prefill in year 0000 is
 shown and edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, prefills, and text
 answers.
@@ -3508,8 +3508,8 @@ let image = askImage(
 `askImage(...)` returns one engine-managed image reference as `string`.
 
 `askImage(...)` **status (Owner decisions, 2026-10-05 and 2026-10-13):** images only, for now. While the request
-waits, the Player shows its controls under the question in the chat, where `showButton` shows its button, in two steps.
-These are Player controls, not transcript messages.
+waits, the Playroom shows its controls under the question in the chat, where `showButton` shows its button, in two steps.
+These are Playroom controls, not transcript messages.
 
 - **First step.** It offers **Open camera** when the request allows the camera and the browser can capture, **Upload
   file** when it allows files, **Skip** when it is written with `allowSkip: true`, and **Use image**. Until the player
@@ -3530,7 +3530,7 @@ chosen image stays in the browser and is session media with the lifecycle of a `
 while saved script storage references it. The camera step uses the session camera when it is already open, as in a
 script that uses `takePhoto()`; otherwise the request opens a camera of its own at Open camera, which turns off again
 on the return to the first step and after the answer. Skip answers `null`, and the player's transcript shows `Skip`. After
-a reload while the request waits, the Player starts again at the first step without a preview, and a photo is never
+a reload while the request waits, the Playroom starts again at the first step without a preview, and a photo is never
 taken by itself. `invalidMessage` and `invalidLlmInstruction` are not implemented yet.
 
 ### Video input
@@ -3580,7 +3580,7 @@ let audio = askAudio(
 
 `askFile`, `askImage`, `askVideo`, `askAudio`, and `askFolder` take `allowSkip:`, which is `false` by default. Without
 it, or with `allowSkip: false`, the request waits until the player gives a file, and the result is a `string`. With
-`allowSkip: true` the Player also offers a skip control, **Skip** in the first step of `askImage`
+`allowSkip: true` the Playroom also offers a skip control, **Skip** in the first step of `askImage`
 ([Image input](#image-input)), and the request returns `null` when the player skips it, so its result is `string?` and
 needs a check or a fallback before it is used as text:
 
@@ -3740,7 +3740,7 @@ Rules:
 
 **Status:** Accepted (Owner decisions on [#445](https://github.com/TeaseScript-AI/teasescript-platform/issues/445)). The
 parser, compiler, deterministic runtime, and checkpoint foundation for image, audio, and video is implemented; the
-Player shows images and plays audio (#446), and browser video playback is planned.
+Playroom shows images and plays audio (#446), and browser video playback is planned.
 
 ### Stage image
 
@@ -3770,7 +3770,7 @@ command; write `playAudio (async)` to use a variable of that name.
 
 - Plain media is blocking: the script continues when playback finishes, is stopped, or cannot play. Blocking media
   returns no value; using it as a value is a compile error.
-- `async` media continues once the Player has reported the load result and evaluates to an opaque handle that may be
+- `async` media continues once the Playroom has reported the load result and evaluates to an opaque handle that may be
   ignored; after a successful load its duration is known.
 - Several audio sources may play at once. The Stage shows one video at a time over the Stage image: a new `playVideo`,
   `showImage`, or `hideImage` stops an active video (`stopped`, without `finish`) and cancels its queued blocks, and
@@ -3824,7 +3824,7 @@ if view.placement == "window" { ... }
 hideCamera                     // hides every camera view
 ```
 
-`showCamera [stage]` shows the camera's view: without a word in the Player's floating window, which the player may move
+`showCamera [stage]` shows the camera's view: without a word in the Playroom's floating window, which the player may move
 and resize, and with `stage` over the Stage image. `stage` is recognized only directly after `showCamera`. Used as a
 value, `showCamera` evaluates to an opaque camera view handle, which may be ignored. The camera has one view:
 `showCamera` while it is shown moves it instead of opening a second, and after `hideCamera` shows it again, so an
@@ -3839,7 +3839,7 @@ Both use command syntax only.
 - A camera view only shows the camera; it never takes a photo. `takePhoto()`
   ([§33](#33-browser-api-file-folder-camera-and-url-references)) captures from the same camera and changes nothing on
   screen.
-- Whether the Player has a camera is not part of the script: without one, `showCamera` shows nothing and the script
+- Whether the Playroom has a camera is not part of the script: without one, `showCamera` shows nothing and the script
   continues. Whether a camera view is shown, and its placement, are part of the session state and come back after a
   checkpoint is restored.
 - Camera views and their handles cannot be saved, used as a parameter default, or given to a global or speaker at the
@@ -3862,7 +3862,7 @@ say "${music.elapsed} of ${music.duration}"
 
 - `position` is the playhead in the source; `remaining` is the time to the effective end of the current pass;
   `duration` is the source duration; `elapsed` is the active playback time since the start across all passes, excluding
-  pauses and Player stalls; `volume` is the script volume.
+  pauses and Playroom stalls; `volume` is the script volume.
 - Assignable properties are `position` and `remaining` (`=`, `+=`, `-=`, with exact durations) and `volume`. `duration`,
   `elapsed`, and `state` are read-only. Media that could not be loaded reads `null` for `duration` and `remaining`.
 - `state` is `running`, `paused`, `finished`, or `stopped`. Idempotent calls, other operations on settled media, and
@@ -3932,14 +3932,14 @@ image, the camera view, and timers are unaffected. Without a running or paused s
 
 ### Failures, cleanup, and restore
 
-- When the Player cannot load or play a source, or the source leaves an empty playback range, the runtime reports developer
+- When the Playroom cannot load or play a source, or the source leaves an empty playback range, the runtime reports developer
   warning `TSW013`, the media becomes `stopped`, and the script continues: no further cue block or `finish` starts, and a
   cue block already running completes. A `null` file plays
   nothing, continues at once, and reports `TSW011`.
 - `exit` and the end of the session stop all media; the last Stage image stays. `goto`, `call`, and `end` do not stop
   media.
 - Checkpoint and restore preserve the Stage image and media state; playback resumes from the persisted position, and
-  time without a running Player does not advance media. Restore does not imply cross-device handoff.
+  time without a running Playroom does not advance media. Restore does not imply cross-device handoff.
 
 ### Future layered scene
 
@@ -4232,7 +4232,7 @@ let score = load "score", default: 0                              // compact for
 `default:` is required: a `load` without it is a compile error that names the fix, also `default: null` for a value
 that may be missing. `load` evaluates its key first. When the key holds a value that fits the load's type, `load`
 returns a copy without evaluating the default. Otherwise it evaluates and returns the default. `load` never writes: the
-default is not stored. Only `save` creates or changes a stored value, apart from the Player's Debug storage editor, a
+default is not stored. Only `save` creates or changes a stored value, apart from the Playroom's Debug storage editor, a
 debugging tool whose edits the next `load` reads like any stored value (see `RUNTIME.md`, Script storage).
 
 A `load` of a key written as one string literal without `${...}`, also in parentheses, reads the stored value as the
@@ -4320,7 +4320,7 @@ Rules:
   `null` is allowed.
 - Saving and loading copy data: later changes to the saved variable or a loaded value do not change storage.
 - A string naming a camera, file, or media reference is stored only as a string; storage itself does not persist the
-  media. A photo from `takePhoto()` or an image from `askImage(...)` is kept by the Player while saved storage
+  media. A photo from `takePhoto()` or an image from `askImage(...)` is kept by the Playroom while saved storage
   references it (§33).
 - Storage keys are plain strings.
 - A key that the compiler can see is not a string, also inside parentheses, is a compile error (`TSV038`). Other keys
@@ -4582,10 +4582,10 @@ block, because it is declared only once the timer has started.
 
 ### Time
 
-Timers and `wait` measure Player-executed scene time. Presentation and blocking do not change the clock. Time keeps
-running while a live Player is minimized or in the background; when the Player is closed and later restored,
+Timers and `wait` measure Playroom-executed scene time. Presentation and blocking do not change the clock. Time keeps
+running while a live Playroom is minimized or in the background; when the Playroom is closed and later restored,
 including on another device, the gap does not consume timer time and the timer continues with its saved remaining
-time. A script plays the same however late or often the Player observes time: everything happens at its own moment
+time. A script plays the same however late or often the Playroom observes time: everything happens at its own moment
 in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
 
 A `wait` or timer whose length is written in days or weeks gets warning `TSV061` on that length (owner decision,
@@ -4815,7 +4815,7 @@ Static analysis should warn, but not necessarily fail compilation, when:
 
 - statements are unreachable, also all of a file that no `goto` or `call` starts (`TSV065`);
 - an `exit` is declared but unreachable (`TSV066`);
-- a `wait` or timer has a length written in days or weeks, which counts only time while the Player is open (`TSV061`,
+- a `wait` or timer has a length written in days or weeks, which counts only time while the Playroom is open (`TSV061`,
   [§27](#time));
 - a loop has no way out once it starts (`TSV058`, on its `while` or `goto`): `while true`, with or without parentheses,
   or an unconditional top-level `goto` back to an earlier label of its file, whose loop is the statements between them.
@@ -5004,8 +5004,8 @@ openUrl("https://example.com", alwaysButton: true, buttonText: "Claim your rewar
 ```
 
 **Status (Owner decisions, 2026-10-13):** `openUrl(...)` waits until the URL is open in a new tab. That is usually
-immediate, and when the browser needs a click from the player first, the Player shows a button for it where
-`showButton` shows its button, without the URL. After a reload, a restore, or a replay the Player never opens the URL
+immediate, and when the browser needs a click from the player first, the Playroom shows a button for it where
+`showButton` shows its button, without the URL. After a reload, a restore, or a replay the Playroom never opens the URL
 by itself: a restored waiting `openUrl(...)` shows the button. Only `http` and `https` URLs open: another URL is a
 compile error where the compiler can see it, as for a written one, and fails at runtime otherwise.
 
@@ -5013,8 +5013,8 @@ Rules:
 
 - `buttonText` is optional and is the text of the button, `"Open link"` by default, with the rules of `showPopup`'s
   `buttonText`.
-- `alwaysButton` is optional, `true` or `false`, and defaults to `false`. With `true` the Player always shows the
-  button, also right after a click, and the script waits for the click on it. With `false` the Player opens the URL at
+- `alwaysButton` is optional, `true` or `false`, and defaults to `false`. With `true` the Playroom always shows the
+  button, also right after a click, and the script waits for the click on it. With `false` the Playroom opens the URL at
   once after a recent click and shows the button only when the browser needs that click.
 - Either way the script goes on once the tab is open.
 - A wrong type or an unknown named argument is a compile error, as for other named arguments.
@@ -5022,7 +5022,7 @@ Rules:
 How the browser internally stores or resolves references, handles permissions, or opens the URL is an engine implementation detail, not part of the language syntax.
 
 `takePhoto()` **status (Owner decisions, 2026-10-02):** `takePhoto()` captures silently from the camera stream the
-Player opened at session start ([`SECURITY.md`](../SECURITY.md)) and returns the photo's engine-managed reference. When
+Playroom opened at session start ([`SECURITY.md`](../SECURITY.md)) and returns the photo's engine-managed reference. When
 no usable camera is available it returns `null`, emits a non-fatal developer warning, and the script continues. A new
 photo is session media. It becomes durable only while its reference is reachable from saved script storage (§25),
 including a reference nested inside a saved composite value; `load` in a later run then returns the same reference,
@@ -5031,7 +5031,7 @@ the photo while another still references it, and once no saved value references 
 Clearing a script's saved data releases photos retained only by that data. If a saved photo cannot be stored durably,
 the `save` fails like any failed persistent write (§25): the script continues with a non-fatal developer warning and the
 previous value, the photo stays usable for the current session, and no reference is persisted that would look valid
-after a reload without its photo. A string is a usable media reference only when the trusted Player media store resolves
+after a reload without its photo. A string is a usable media reference only when the trusted Playroom media store resolves
 it; a well-formed string, including one returned by `load`, grants no access by itself.
 
 ### Stored files
@@ -5043,7 +5043,7 @@ fileFromBase64(text, default: value)
 fileToBase64(file)
 ```
 
-`fileFromBase64` stores the bytes that Base64 `text` holds as a file in the Player's file store and returns its
+`fileFromBase64` stores the bytes that Base64 `text` holds as a file in the Playroom's file store and returns its
 store-issued file reference, a `string` like a photo reference. It reads Base64 as `fromBase64` does, with spaces and
 line breaks, the URL alphabet, and missing padding ([§13](#json-and-base64)), and also a `data:<type>;base64,…` URL.
 `default:` is required and is text or `null`, or of another type only where a written union holds both
@@ -5167,7 +5167,7 @@ let started = getAbsoluteDateTime()
 `getDate()`, `getTime()`, and `getDateTime()` return the player's current local values; `getAbsoluteDateTime()` returns
 the current moment. Within one start or continue, `getAbsoluteDateTime()` never goes backwards. Local values can: after
 the autumn daylight-saving change, or after travelling west. The engine reads no clock and no host time-zone or locale
-data: the Player records the player's zone and presentation as session data (see
+data: the Playroom records the player's zone and presentation as session data (see
 [`RUNTIME.md`](../RUNTIME.md#date-and-time-context)).
 
 ### Construction and conversion
@@ -5333,10 +5333,10 @@ kind distinct from the others and from text: local values without an offset, abs
 
 ## 36. Scheduling
 
-**Status:** Wanted capability; final syntax, authority, and Player UI deferred
+**Status:** Wanted capability; final syntax, authority, and Playroom UI deferred
 
-Scheduled events and deadlines target absolute wall-clock moments and may become due while no Player is running.
-This differs from [timer and `wait` scene time](#27-timers), which excludes genuine Player unavailability.
+Scheduled events and deadlines target absolute wall-clock moments and may become due while no Playroom is running.
+This differs from [timer and `wait` scene time](#27-timers), which excludes genuine Playroom unavailability.
 
 Exact event syntax and handles, local/offline versus server-backed authority, recovery, and deadline presentation
 require a separate design. The earlier `schedule datetime { ... }` and `cancelSchedule(...)` forms are not accepted
@@ -5478,7 +5478,7 @@ say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] (t
 
 Brackets denote optional parts. `bubble` and `prose` may appear without parentheses; parentheses contain ordinary
 comma-separated named arguments. Both modes accept `color`, `background`, and `font`; only `prose` accepts
-`position` and `align`. Bubble placement and text alignment belong to the Player: received messages appear on the left
+`position` and `align`. Bubble placement and text alignment belong to the Playroom: received messages appear on the left
 and player-authored replies on the right. Bubble options cannot override them, including through speaker defaults or
 explicit `null` values. Direct `say` options and literal speaker-declaration defaults are checked at compile time.
 Speaker option objects supplied or reassigned at runtime are validated when used to prepare a message and fail with
@@ -5508,13 +5508,13 @@ speaker-mode object, then the platform default. `color` and `font` additionally 
 Overrides affect only that message. Explicit `null` behaves as omission.
 
 For prose, after message and speaker inheritance, an unchosen `position` or `align` remains `null` in the emitted
-presentation. The Player selects their defaults. Explicit choices remain distinguishable from omission. For bubbles,
-both resolved fields are always `null` and only the Player determines placement. For prose, `position` places the whole
+presentation. The Playroom selects their defaults. Explicit choices remain distinguishable from omission. For bubbles,
+both resolved fields are always `null` and only the Playroom determines placement. For prose, `position` places the whole
 block; `align` sets the text within it. Both accept
-`"left"`, `"center"`, or `"right"`. Bubble backgrounds and unspecified text/font use Player theme
+`"left"`, `"center"`, or `"right"`. Bubble backgrounds and unspecified text/font use Playroom theme
 roles; the runtime represents these theme selections with `null`. Prose has no background default: a prose message
 whose background was never chosen reports `null`. Prose retains speaker provenance; avatar and visible name treatment
-belong to the Player presentation design. These defaults do not introduce a new avatar/name visibility syntax.
+belong to the Playroom presentation design. These defaults do not introduce a new avatar/name visibility syntax.
 
 Option expressions evaluate once in written order before the text and pacing expressions, under the selected speaker
 context. Effective style defaults are resolved when the runtime prepares the output, using that speaker's current
@@ -5593,9 +5593,9 @@ Authored colours are always opaque. Concrete colour values accept CSS colour nam
 Host-dependent values such as `var()` and `currentColor`, relative colours, and explicit linear RGB are excluded.
 
 `transparent` and alpha below full opacity are invalid; full-opacity forms such as `#ff0000ff` and
-`rgb(255 0 0 / 1)` are accepted. This keeps authored colours independent of the Player's underlying theme surface.
+`rgb(255 0 0 / 1)` are accepted. This keeps authored colours independent of the Playroom's underlying theme surface.
 The restriction covers static and dynamic text/background colours in speaker properties and message options,
-not Player interface transparency.
+not Playroom interface transparency.
 
 The compiler validates constant speaker-declaration and message-option colours while retaining their authored values.
 The runtime normalizes both constant and dynamic colours to OKLCH when preparing output. An authored colour whose
@@ -5636,7 +5636,7 @@ lovingNames
 
 The player profile supplies the player's lists: `playerProfile.petNames` reads one, and `player.copyFrom(playerProfile)`
 copies them into the player. The player's settings require at least one name in each list, and the engine checks this
-where the host gives the profile; the Player has no profile input yet. There is no fallback text: a list that a script
+where the host gives the profile; the Playroom has no profile input yet. There is no fallback text: a list that a script
 empties follows the ordinary empty-list rules.
 
 ```text
