@@ -132,7 +132,7 @@ export interface CorePass {
   readonly lists: DefinitionLists;
   readonly handlers: HandlerIndex;
   readonly guards: GuardIndex;
-  /** #2764 (B): the cut depths of the pass's element-step-adding cycles. */
+  /** The cut depths of the cycles that nest a list deeper on each turn (#2764). */
   readonly nesting: NestingIndex;
   readonly exact: ExactPath;
   readonly contract: Contract;
@@ -189,7 +189,7 @@ function createPass(
     ),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
-    // (the pass's own definitions: admission's rejections take effect here, as in `lists`)
+    // (admission's rejected stores route nothing: A6)
     nesting: new NestingIndex(
       program,
       definitions,

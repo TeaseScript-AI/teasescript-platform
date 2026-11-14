@@ -15,11 +15,8 @@ import {
 } from "./nesting/components.js";
 import { routesOf, writtenAt, type Route } from "./nesting/routes.js";
 
-// #2764 (B): the nesting cut. A list nested a level deeper on each turn of a cycle of copies, arguments and results is
-// known one level deeper than what enters the cycle, and below it only when the script runs.
-
 /**
- * The cut's answer (#2764, B): a value known only when the script runs (rule 1.7), opaque, at every step below a
+ * The cut's answer (#2764): a value known only when the script runs (ADR 0021 rule 1.7), at every step below a
  * growing component's cut depth.
  */
 export const CUT: readonly Item[] = Object.freeze([
@@ -113,7 +110,7 @@ function layered<N>(
 }
 
 /**
- * The nesting graph of one pass (ADR 0021 §1.1, #2764's rule B) and its cut depths. Its nodes are the program's places,
+ * The nesting graph of one pass and its cut depths (#2764). Its nodes are the program's places,
  * its edges the routes (`routesOf`) from a receiver to a producer, weighted by the element levels the producer's value
  * gains in the receiver.
  *
@@ -136,8 +133,8 @@ export class NestingIndex {
   readonly #places = Retained.set<PlaceId>("NestingIndex.#places");
 
   /**
-   * `live` says which of the pass's definitions take effect (admission's rejections, A6); `operands` is the carrier
-   * table (`operandsOf`), given so that this index does not depend on the contract the table reads.
+   * `live` says which of the pass's definitions take effect (A6); `operands` is the carrier table, given so that this
+   * index does not depend on the contract the table reads.
    */
   public constructor(
     program: CoreProgram,
