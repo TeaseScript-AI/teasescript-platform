@@ -13,18 +13,15 @@ import { concrete } from "./kinds.js";
 import type { IngressStop, Landing, LandingIndex, Stop, Via, ViaChain } from "./model.js";
 import { compareKeys, contributionSite, OWN_ROLES, stopsOf, TYPED_ROLES } from "./walk.js";
 
-// The landing index (S6-CARRIERS §3.2): every landing walked once, and the ingresses an item's leaves name.
-
-/** The kinds whose length is built in (F14): a text's, a collection's. */
+/** The kinds whose length is built in: a text's, a collection's. */
 const MEASURED: ReadonlySet<ItemTag> = new Set(["string", "list", "set", "dict"]);
 
 /**
- * S6-CARRIERS §3.2: every store, add and transfer landing that admission does not reject walked once (`stopsOf`, the
- * walk admission's deciders and C1's contributions read), then every operation's own read, as its own landing; each
- * ingress stop recorded by the store that brings it, or as an own read. Built once per pass, at its first use. A store
- * in dead code and a dead call's argument for a written parameter are walked too: their boundaries are against the
- * destination's admitted type, as in live code (AD-3: a written type is no flow fact). `keep`: the stops of the stores
- * it keeps only, no own read walked and nothing kept (`publish` after a stop before admission settled).
+ * Every store, add and transfer landing that admission does not reject walked once (`stopsOf`), then every
+ * operation's own read, as its own landing; each ingress stop recorded by the store that brings it, or as an own read.
+ * Built once per pass, at its first use. A store in dead code and a dead call's argument for a written parameter are
+ * walked too: their boundaries are against the destination's admitted type, as in live code (a written type is no flow
+ * fact). `keep`: the stops of the stores it keeps only, no own read walked and nothing kept.
  */
 export function landingIndex(
   admission: Admission,
@@ -40,7 +37,7 @@ export function landingIndex(
     return found;
   };
   // the ingress a stop is, or reads through projections of it (a member of it); a length of an owner that is surely
-  // a text or a collection is derived (F14), no member of its external data (F15), an object's own `length` one
+  // a text or a collection is derived, no member of its external data, an object's own `length` one
   const ingressOf = (value: PlaceId): PlaceId | null => {
     let at = value;
     while (!definitions.ingress.has(at)) {
@@ -52,10 +49,10 @@ export function landingIndex(
     }
     return at;
   };
-  // the own reads some walk reached through its own row (§3.2: never walked again as their own landing), and per
+  // the own reads some walk reached through its own row (never walked again as their own landing), and per
   // row of a walk (its carrier and operand) whether it or a row outside it is an own row, and the innermost typed
   // default's call at or outside it: each row once, so a stop costs only the rows no stop before it went through
-  // (each value has one syntactic parent, so a row's outer rows are the same in every stop through it; Codex r21 B2)
+  // (each value has one syntactic parent, so a row's outer rows are the same in every stop through it)
   // host data in the default of a `load` or `fromJson` of an inferred place typed by that
   // default (its kinds definite) is the call's: the boundary at the call validates the loaded value, so the default
   // owes no own read; a default without definite kinds types nothing, its read an own read as any; the innermost
@@ -80,7 +77,7 @@ export function landingIndex(
       row = {
         own: row.own || OWN_ROLES.has(level.role),
         call: TYPED_ROLES.has(level.role)
-          ? admission.typedByDefault(level.value)
+          ? typedByDefault(admission, level.value)
             ? level.value
             : null
           : row.call,
@@ -137,7 +134,8 @@ export function landingIndex(
         site,
         reads: program.places[stop.value]?.site ?? site,
         contribution: contributionSite(admission, stop, d),
-        // (a loop variable's place takes its domain from the iterable, never inline: C1 beside the boundary)
+        // (a loop variable's place takes its domain from the iterable, never inline: the store check beside the
+        // boundary)
         whole:
           d.how !== "loop variable" &&
           ingress === stop.value &&
@@ -145,7 +143,7 @@ export function landingIndex(
       });
     });
   }
-  // an operation's own read is an own read wherever it stands (C10): one no walk reached is its own landing, the
+  // an operation's own read is an own read wherever it stands: one no walk reached is its own landing, the
   // outermost first, so a nested own read its enclosing one's walk reaches is walked once (not for some stores' stops)
   const owns: { readonly operand: PlaceId; readonly site: SourceSite }[] = [];
   for (const carrier of keep === undefined
@@ -190,7 +188,7 @@ export function landingIndex(
 }
 
 /**
- * Whether an ingress is a `load` or a `fromJson` typed by its default alone (F18): no declared or written expected
+ * Whether an ingress is a `load` or a `fromJson` typed by its default alone: no declared or written expected
  * type, a default whose own kinds type it.
  */
 export function typedByDefault(admission: Admission, value: PlaceId): boolean {
@@ -207,17 +205,17 @@ export function typedByDefault(admission: Admission, value: PlaceId): boolean {
   return (
     fallback !== undefined &&
     contract.landsIn(c.result, []) === null &&
-    f18Kinds(admission, c) !== null
+    typedCallKinds(admission, c) !== null
   );
 }
 
-/** Whether a value is surely a text or a collection, whose length is built in (F14): no kind of it unknown or other. */
+/** Whether a value is surely a text or a collection, whose length is built in: no kind of it unknown or other. */
 function measured(admission: Admission, value: PlaceId, path: readonly string[] = []): boolean {
   const kinds = withoutEmpty(admission.run(admission.pass.contract.contractOfValueAt(value, path)));
   return kinds.length > 0 && kinds.every((item) => MEASURED.has(item.tag));
 }
 
-/** Whether a stop reads a value's length where it is surely measured (F14): derived, no member of external data. */
+/** Whether a stop reads a value's length where it is surely measured: derived, no member of external data. */
 function lengthAt(admission: Admission, value: PlaceId, strip: readonly string[]): boolean {
   for (let at = 0; at < strip.length; at += 1) {
     admission.pass.program.work.charge("indexSteps");
@@ -231,7 +229,7 @@ export function leafIngress(admission: Admission, leaf: Writer): PlaceId | null 
   return admission.pass.definitions.ingressAt.get(writerKey(leaf)) ?? null;
 }
 
-/** The ingresses an item's leaves name, once per provenance node and pass (C1's membership tests read it). */
+/** The ingresses an item's leaves name, once per provenance node and pass. */
 export function leafIngresses(admission: Admission, node: IngressNode): ReadonlySet<PlaceId> {
   const known = admission.nodeIngresses.get(node);
   if (known !== undefined) return known;
@@ -253,19 +251,24 @@ export function leafIngresses(admission: Admission, node: IngressNode): Readonly
   return out;
 }
 
-export function f18Kinds(
+/**
+ * A typed `load`'s or `fromJson`'s label and expected kinds, once per call: the concrete kinds its live result holds,
+ * with `null` where it holds a `null` too and its written destination, if it has one, admits it; `null` where the
+ * constraint is no typed call, is dead, or holds no concrete kind. After a stop, a type the finishing read leaves open
+ * is recorded in `typedCallsOpen`.
+ */
+export function typedCallKinds(
   admission: Admission,
   c: CorePass["program"]["constraints"][number],
 ): { readonly label: string; readonly tags: readonly ItemTag[] } | null {
   if (!("result" in c)) return null;
-  const known = admission.f18.get(c.result);
+  const known = admission.typedCallKindsByResult.get(c.result);
   if (known !== undefined) return known;
   const { program, contract, values } = admission.pass;
   const parses = c.kind === "operation" && typedIngress(c);
   let found: { readonly label: string; readonly tags: readonly ItemTag[] } | null = null;
   const node = c.kind === "load" || parses ? program.exprAt(c.site) : null;
   if (node !== null && program.live(node)) {
-    // (after a stop, as the finishing read answers it: a typed call's expected type by its syntax, F18)
     const items = withoutEmpty(
       admission.host.read?.(c.result, node, []) ??
         admission.run(values.valueItems(c.result, node, [])),
@@ -288,13 +291,13 @@ export function f18Kinds(
       admission.pass.program.work.stopped !== null &&
       items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0)
     )
-      admission.f18Open.add(c.result);
+      admission.typedCallsOpen.add(c.result);
   }
-  admission.f18.set(c.result, found);
+  admission.typedCallKindsByResult.set(c.result, found);
   return found;
 }
 
-/** Whether a constraint is a typed ingress (F18): a load, or a parse of text to a type. */
+/** Whether a constraint is a typed ingress: a load, or a parse of text to a type. */
 export function typedIngress(c: CorePass["program"]["constraints"][number]): boolean {
   return (
     c.kind === "load" ||

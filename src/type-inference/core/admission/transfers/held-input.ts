@@ -1,5 +1,3 @@
-// A task's contributions to A2's held view, each once, at its path below the task's own.
-
 import type { Admission } from "../../admission.js";
 import { keep, keptParts, keptSteps, keptText } from "../../budget.js";
 import { type Key } from "../../definitions.js";
@@ -7,7 +5,7 @@ import type { Expansion } from "../model.js";
 import { contributionOf } from "../own.js";
 import { partOf } from "../walk.js";
 
-/** A task's contributions to A2's held view (`heldMeetings`), each once, by text, at its path below the task's own. */
+/** A task's contributions to the held view (`heldMeetings`), each once, by text, at its path below the task's own. */
 export interface HeldInput {
   readonly points: ReadonlyMap<string, readonly string[]>;
   readonly reads: ReadonlyMap<string, { readonly at: readonly string[]; readonly source: Key }>;
@@ -16,7 +14,7 @@ export interface HeldInput {
 const NOTHING: HeldInput = { points: new Map(), reads: new Map() };
 
 /**
- * A2's held view of a task (`ownOf`'s, its place's copies list empty), once per task and lane (`deep`: below an
+ * The held view of a task (`ownOf`'s, its place's copies list empty), once per task and lane (`deep`: below an
  * operation): its own stop's point (a literal, a written copy, a value of scalar kinds read whole) or read (a value's
  * source where it is no operand), and its parts', each where it stands; a copy that may inherit stands below and
  * decides nothing here. A literal is walked with the literals nested in it as cells, each one's own at its path; any

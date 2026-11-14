@@ -10,8 +10,6 @@ import { touchesOf, touchRef } from "./touches.js";
 import { heldInput } from "./transfers/held-input.js";
 import { expand } from "./walk.js";
 
-// What a place's live stores definitely hold (A2): its held tries, built once per pass, and where they meet.
-
 /**
  * The strongly connected components of a graph over `nodes` and the nodes they reach (`next`: a node's successors),
  * Tarjan's on an explicit stack, a component after every one it reaches; `step` hears of each node and edge.
@@ -68,7 +66,7 @@ function keyComponents<T>(
 }
 
 /**
- * Whether what a place's stores definitely hold meets at a path (A2): a store bringing the other type
+ * Whether what a place's stores definitely hold meets at a path: a store bringing the other type
  * there errs where it meets the place, never at a later read (ADR 0021 rule 1.1).
  */
 export function atCopy(admission: Admission, root: PlaceId, path: readonly string[]): boolean {
@@ -77,10 +75,9 @@ export function atCopy(admission: Admission, root: PlaceId, path: readonly strin
 }
 
 /**
- * What a place's live stores definitely hold (A2, `heldMeetings`): its own points (`heldPoints`) and its reads'
+ * What a place's live stores definitely hold (`heldMeetings`): its own points (`heldPoints`) and its reads'
  * sources' held tries where they stand, by reference (`heldReads`); none of its landings, its copies inheriting
- * written types (A4's) or its values holding anything, which decide nothing there. `null` where it holds nothing
- * definite. Built with its reads' sources first (`buildHeld`).
+ * written types or its values holding anything, which decide nothing there. `null` where it holds nothing definite.
  */
 function heldOf(admission: Admission, place: PlaceId): Touch | null {
   const known = admission.helds.get(place);
@@ -90,8 +87,8 @@ function heldOf(admission: Admission, place: PlaceId): Touch | null {
 }
 
 /**
- * A store's own points in a held trie (A2): what it holds itself, its copies of written bindings among them, whose
- * contents there are their types', a contribution like any other (`HeldExtra`, Astra r1 N1).
+ * A store's own points in a held trie: what it holds itself, its copies of written bindings among them, whose contents
+ * there are their types', a contribution like any other (`HeldExtra`).
  */
 function heldPoints(admission: Admission, own: HeldOwn | null): readonly (readonly string[])[] {
   if (own === null) return [];
@@ -99,7 +96,7 @@ function heldPoints(admission: Admission, own: HeldOwn | null): readonly (readon
   return keptArray(admission.work, [...own.points, ...own.held.points]);
 }
 
-/** A store's reads in a held trie (A2): each where it stands, whether its place's copies list stands for it. */
+/** A store's reads in a held trie: each where it stands, whether its place's copies list stands for it. */
 function heldReads(
   admission: Admission,
   own: HeldOwn | null,
@@ -112,7 +109,6 @@ function heldReads(
 /** A read's contribution to a held trie where it stands: its source's held trie at its path. */
 function heldRead(admission: Admission, source: Key, at: readonly string[]): Touch | null {
   const touches = touchesOf(admission);
-  // (a cursor's steps through the charged boundary, G3 stage 1)
   // (the touches' tries take arrays, kept in their payloads: a cursor's steps copied out, `stepsArray`)
   const held = touches.sub(
     heldOf(admission, keyPlace(source)),
@@ -146,8 +142,8 @@ function buildHeld(admission: Admission, root: PlaceId): void {
 }
 
 /**
- * The held tries of a component of the places live stores read (A2,
- * docs/specifications/type-inference-accepted-record/admission.md#r4-154: design §2.1.2 as accepted). Its members that
+ * The held tries of a component of the places live stores read
+ * (docs/specifications/type-inference-accepted-record/admission.md#r4-154). Its members that
  * hold each other through whole copies (a place read whole into a place) form live groups, the strongly connected
  * components of those copies: each group one trie, its members' own points and what their reads bring from outside the
  * group, sources first; where those meet, a member owes what its own contribution brings there (`groupHeld`). Every
@@ -225,8 +221,8 @@ function finishHeld(admission: Admission, members: readonly PlaceId[]): void {
 }
 
 /**
- * A live group's held trie, its members' own contributions merged, and what each member owes where they meet (A2,
- * `groupMeetings`). A store's own contribution is what it brings itself, its own points and its reads from outside
+ * A live group's held trie, its members' own contributions merged, and what each member owes where they meet
+ * (`groupMeetings`). A store's own contribution is what it brings itself, its own points and its reads from outside
  * the group (a whole copy from an earlier group by reference), or, for a whole copy of a member of the group, that
  * member's own contribution. A member owes a meeting path where one of its stores' own contribution stands, beside a
  * whole copy of a member (which brings what the group holds there, another kind): its own conflicting contribution,
@@ -257,7 +253,7 @@ function groupHeld(
       for (const { at: where, source } of heldReads(admission, store)) {
         work.charge("indexSteps");
         const from = index.get(keyPlace(source));
-        // (a cursor is never a place's own key: its source is below its root, G3 stage 1)
+        // (a cursor is never a place's own key: its source is below its root)
         const whole =
           where.length === 0 && !isKeyId(source) && keptPath(admission.work, source).length === 0;
         if (from === undefined) {
@@ -311,12 +307,12 @@ function groupHeld(
 }
 
 /**
- * A2: the paths where what the stores into one place (`base` empty, each store at its own path) or a
+ * The paths where what the stores into one place (`base` empty, each store at its own path) or a
  * literal's elements (each at `base`, its landing) definitely hold meet with two kinds or more (`copies`), relative to
  * `base`, sorted by text. Each store's or element's trie is its own points and its reads' held tries (`heldOf`), as
  * its value's carriers' transfers give them (`heldInput`: a nested carrier's once, never its element's whole walk
  * again), and the distinct ones are merged largest first, so k stores of one copy merge it once. A property only
- * copies of whole objects bring is owed as any other: the copy is checked where it meets the place. A4's copies
+ * copies of whole objects bring is owed as any other: the copy is checked where it meets the place. The copies
  * inheriting written types and the values holding anything stand below and decide nothing here.
  */
 export function heldMeetings(

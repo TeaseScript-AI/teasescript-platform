@@ -45,21 +45,21 @@ const RESOLVED: ReadonlySet<string> = new Set([
 /**
  * ADR 0021 1.3, V30 §4 and §16: a list's `+` (and `+=`) holds both operands' elements, so a join's right operand must
  * fit the element type its left operand holds (#1272), as a store into a variable holding the left one must. Each
- * value's element type at a path is the one a variable holding it is decided by (`scanAt`, A2, A4), so a join answers
- * the same inline as kept in a variable: an operand's own (`decidedAt`: a written copy by its type, a read or a call by
- * its place's decision, else its elements' kinds as a literal's earliest element decides them, `earliestDecider`); a
- * join's from its operands' in evaluation order, the earliest deciding there decides, a written type by itself, else
- * with the kinds of every operand the join holds; each operand's domain by `joinedDomain` (an open one leaves the join
- * open, one holding only `null` decides nothing but at a strict written destination). A right operand whose elements there are of one other family, none
- * of whose kinds fits, is an error at its join, unless the written type the tree lands in directly holds both (A1), and
- * is rejected from that join (A6): the join then holds its left operand's elements alone. A right operand is compared
- * at the paths of its own structure, a join's at its list levels as a variable holding it is (`pathsBelow`); a join's
- * paths are its operands', the smaller one's added to the larger one's, so a chain of k joins, on either side, costs
- * its operands' structures once. `error` hears of each with the join, the path, the decided kinds there and the
- * operand's, the tree's value, whose declaration a fix may give the type (#1268), and the type it writes: `levels`, what
- * the tree's elements hold at each list level down to the path, its `null`s and numbers kept. `undecided`, before
- * admission settled (`Consumers.#freshStores`): a join an operand of which is read through a decision. `stopped`, after
- * it settled: a join an operand of which a stop left undecided (#2289: a literal's element), not compared.
+ * value's element type at a path is the one a variable holding it is decided by (`scanAt`), so a join answers the same
+ * inline as kept in a variable: an operand's own (`decidedAt`: a written copy by its type, a read or a call by its
+ * place's decision, else its elements' kinds as a literal's earliest element decides them, `earliestDecider`); a join's
+ * from its operands' in evaluation order, the earliest deciding there decides, a written type by itself, else with the
+ * kinds of every operand the join holds; each operand's domain by `joinedDomain` (an open one leaves the join open, one
+ * holding only `null` decides nothing but at a strict written destination). A right operand whose elements there are of
+ * one other family, none of whose kinds fits, is an error at its join, unless the written type the tree lands in
+ * directly holds both, and is rejected from that join. A right operand is compared at the paths of its own structure,
+ * a join's at its list levels as a variable holding it is (`pathsBelow`); a join's paths are its operands', the
+ * smaller one's added to the larger one's, so a chain of k joins, on either side, costs its operands' structures once.
+ * `error` hears of each with the join, the path, the decided kinds there and the operand's, the tree's value, whose
+ * declaration a fix may give the type (#1268), and the type it writes: `levels`, what the tree's elements hold at each
+ * list level down to the path, its `null`s and numbers kept. `undecided`, before admission settled: a join an operand
+ * of which is read through a decision. `stopped`, after it settled: a join an operand of which a stop left undecided
+ * (#2289: a literal's element), not compared.
  */
 export function joinElements(
   admission: Admission,
@@ -130,12 +130,12 @@ export function joinElements(
     shapes.set(root.result, shape);
     return shape;
   };
-  // each value's element type per path, as a variable holding it is decided (`scanAt`): an operand's own at the paths of
-  // its structure, a join's its operands' in evaluation order (its paths the earliest decider of each, the kinds of every
-  // operand it holds there), the earliest operand deciding the element asked at any other path (its type may give it);
-  // read once per operand, never by reading a join's tree again (Astra's B1, Codex r7's B1 and B3 on #1310). An operand
-  // open at a path (`list`, V30 §13: any list) leaves the join open there and below, whichever operand came first: no
-  // conflict is proved from it (Astra r2's B1a on #1310)
+  // each value's element type per path, as a variable holding it is decided (`scanAt`): an operand's own at the paths
+  // of its structure, a join's its operands' in evaluation order (its paths the earliest decider of each, the kinds of
+  // every operand it holds there), the earliest operand deciding the element asked at any other path (its type may give
+  // it); read once per operand, never by reading a join's tree again (#1310). An operand open at a path (`list`, V30
+  // §13: any list) leaves the join open there and below, whichever operand came first: no conflict is proved from it
+  // (#1310)
   interface Decider {
     readonly decided: JoinDecided | "open";
     readonly position: number;
@@ -157,7 +157,7 @@ export function joinElements(
   // step read): a projection's owner, an `otherwise`'s sides; each part an earlier tree's join, whose composed type
   // stands for it, or a value taken for its own type; `null` where no part is a join, or a step is read into a value
   // that is no literal and carries nothing. The join check never derives again a type the join rule already composed:
-  // a join answers the same inline as kept (the lead's rule on #1310))
+  // a join answers the same inline as kept, #1310)
   type Part = { readonly join: PlaceId } | { readonly leaf: PlaceId };
   const reaches = new Map<PlaceId, readonly Part[] | null>();
   const reachOf = (operand: PlaceId): readonly Part[] | null => {
@@ -243,13 +243,12 @@ export function joinElements(
         ? admission.admitted(target!.place, target!.path).includes("list")
         : admission.items(operand, node, []).some((item) => item.tag === "list");
     // the place an operand reads, whose admitted type is its type: a variable's or a property's, a call's result
-    // (F20: a written result's type decides, Codex r5 on #1310), a `+=`'s target
+    // (a written result's type decides, #1310), a `+=`'s target
     const placeOf = (
       operand: PlaceId,
     ): { readonly place: PlaceId; readonly path: readonly string[] } | null => {
       if (stored(operand)) return target!;
       const key = contract.copiedKey(operand) ?? contract.resultKey(operand);
-      // (a cursor's steps through the charged boundary, G3 stage 1)
       // (a tree's target keeps an array: a cursor's steps copied out, `stepsArray`)
       return key === null
         ? null
@@ -274,7 +273,7 @@ export function joinElements(
     // what an operand's elements are at a path, by `joinedDomain`: a written copy's type, a read's place's decision,
     // the earliest deciding value's kinds, else its own kinds of one family and no unknown (a type holding only `null`
     // decides nothing, its `null` the sentence's walk's, never an empty domain no kind fits, but at a strict written
-    // destination: Astra r2's B1b on #1310)
+    // destination, #1310)
     const decidedAt = (
       operand: PlaceId,
       node: FlowNode,
@@ -294,7 +293,7 @@ export function joinElements(
         const tags = typeTags(decider.term).filter((tag) => tag !== "null");
         return {
           tags,
-          written: true,
+          exact: true,
           typed: true,
           own: tags,
           nullable: typeTags(decider.term).includes("null"),
@@ -309,7 +308,7 @@ export function joinElements(
         const tags = place.tags.filter((tag) => tag !== "null");
         return {
           tags,
-          written: place.byWritten,
+          exact: place.byWritten,
           typed: place.byWritten,
           own: tags,
           nullable: place.byWritten && place.nullable,
@@ -330,7 +329,7 @@ export function joinElements(
       // each of its kinds fits as itself)
       return own.length === 0
         ? null
-        : { tags: own, written: new Set(own.map(family)).size > 1, typed: false, own };
+        : { tags: own, exact: new Set(own.map(family)).size > 1, typed: false, own };
     };
     // (the type a fix writes holds every value the tree's operands bring and every legitimate store of the places
     // they read and it lands in: at each list level down to a path of elements, a place's admitted type, a value's
@@ -369,7 +368,7 @@ export function joinElements(
               if (item.tag === "unknown" || item.extOnly === true)
                 external ||= item.tag === "number";
               else kinds.add(item.tag);
-            // (a written type it copies may hold null where its value does not yet, A4)
+            // (a written type it copies may hold null where its value does not yet)
             const ruled = decidedAt(operand, node, prefix);
             if (ruled !== null && ruled !== "open" && ruled.nullable === true) kinds.add("null");
           }
@@ -474,7 +473,7 @@ export function joinElements(
       // families each fit as itself)
       const own = kinds.has("number") ? [...new Set([...kinds].map(family))] : [...kinds];
       return {
-        decided: { tags: own, written: new Set(own.map(family)).size > 1, typed: false, own },
+        decided: { tags: own, exact: new Set(own.map(family)).size > 1, typed: false, own },
       };
     };
     // (a join's paths: the smaller operand's added to the larger one's, the earlier decider at each)
@@ -502,13 +501,13 @@ export function joinElements(
     };
     // (an earlier join's composed type for an operand that reaches it, taken whole: a join's result is reached by one
     // operand only, and its own operands' places stand inside that operand's; compared at its list levels, as a join is
-    // (its paths are the earlier tree's, which grow with a chain: Codex r7's B3, #1383))
+    // (its paths are the earlier tree's, which grow with a chain, #1383))
     const reaching = new Set<PlaceId>();
     // (an operand's parts in evaluation order, the earlier part `first`: the earliest deciding at a path decides alone, as
     // `decidedAt`'s earliest decider does, a later part adding only the numbers that make whole numbers numbers, and
     // deciding where no earlier part does. The larger part's map is the result, by reference, and only the
     // smaller part's entries, opens and levels are visited, whichever of the two it is, so a growing earlier join is never
-    // walked again whatever position it stands in (Codex r15's and r16's B1 on #1310: the lead's rule))
+    // walked again whatever position it stands in, #1310)
     const parted = (first: Held, later: Held): Held => {
       const numbers = (into: Entry, from: Entry): void => {
         if (into.kinds.has("integer"))
@@ -602,14 +601,14 @@ export function joinElements(
           const own = decisionOf(theirs, path, at);
           if (own === null || own.decided === "open") continue;
           const kinds = own.decided.own;
-          const { tags, written: exact } = ruled.decided;
+          const { tags, exact } = ruled.decided;
           if (
             (exact ? kinds : kinds.map(family)).some((tag) =>
               tags.some((ref) => fits(tag, ref, exact)),
             )
           )
             continue;
-          // (A1: a written type the tree lands in directly holds both)
+          // (a written type the tree lands in directly holds both)
           const landing =
             written === null ? null : permittedAt(written, joinSteps(["element"], path));
           if (
@@ -621,7 +620,7 @@ export function joinElements(
           )
             continue;
           // (#1765: the layers between the element and the leaf that may hold null, each side's by its form, as a
-          // literal's elements are: each operand walked down below its elements, Codex r5's B2; #1790/#1828: and its
+          // literal's elements are: each operand walked down below its elements; #1790/#1828: and its
           // leaf by the same walk one depth more, the sentence's null as this occurrence holds it, not as the decided
           // domain allows it: `n: integer? = 1` joined names no null, a copied `integer?[]` its written leaf)
           const joinNode = program.exprAt(c.site) ?? program.flow.statementAt(c.site) ?? null;
@@ -632,7 +631,7 @@ export function joinElements(
               ? depths.map(() => false)
               : layersAt(admission, side, joinNode, below, depths);
           // (an operand whose occurrence says nothing at the leaf, as a compound assignment's target read through a
-          // property, names its place's admitted null there, as the sentence did before: the walk has nothing to read)
+          // property, names its place's admitted null there: the walk has nothing to read)
           const leafOf = (side: PlaceId, walked: boolean[]): boolean[] => {
             if (walked.at(-1)! || joinNode === null) return walked;
             const read = placeOf(side);
@@ -650,7 +649,7 @@ export function joinElements(
           ];
           const optional = mixedOptional(leftLayers.slice(0, -1), rightLayers.slice(0, -1));
           // (#1762, #1825: each operand's layers are a dict's or a set's by the same walk below its elements, its
-          // contract's items, Astra r1 on #1814)
+          // contract's items, #1814)
           const collections =
             (side: PlaceId): CollectionWalk =>
             (fact, walked, asked) =>
