@@ -536,7 +536,7 @@ even while charged capture work was linear.
 
 **Source.** The lead's #1734 ruling after Sol's #1078 growth map and merged PR #1754, 2026-11-05.
 
-### r4-453
+### r4-456
 
 **Cursors order only through their demands' logical names.**
 
