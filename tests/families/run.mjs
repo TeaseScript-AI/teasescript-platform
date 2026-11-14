@@ -963,11 +963,11 @@ function heapLimitWith(memory) {
     node: process.version,
   };
   if (storing !== undefined) {
-    // the shard whole, its total last, with what made it: never a peak, which is not the same on every machine, nor
-    // what this runner read of the tree
-    const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));
+    // the shard whole, its total last, with the run's counts and settings (`ended`) and its shard and tree
+    // (`storing.made`): never a peak, which is not the same on every machine, a source's process's heap limit
+    // (`heapLimit`, #2068), nor what this runner read of the tree
     const { nearCap: _peaks, heapLimit: _limit, capabilities: _read, ...stored } = ended;
-    const made = { ...stored, ...storing.made, runner: runner.digest("hex") };
+    const made = { ...stored, ...storing.made };
     const published = await endShard(storing.claim, storing.lines, made);
     // (foreign contents or a retired baseline, found at publication: nothing is published)
     if (published.refused !== undefined) refused(published.refused);

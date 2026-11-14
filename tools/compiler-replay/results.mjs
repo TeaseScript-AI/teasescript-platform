@@ -1,5 +1,10 @@
-// A replay campaign's jobs read from the queue's results: which attempt of each shard stands, as `collect.mjs`'s header
-// says.
+// A replay campaign's jobs read from the queue's results, and which attempt of each shard stands. A shard is its job
+// name (`<area>-<i>of<N>`), and of its attempts at most one is read: the one that left a summary line and whose queue
+// record (`meta.json`) shows its runner's own ending (`ranOut`: exit 0 or 1, 3 as well for an area job, with the
+// queue's outcome for that exit, no OOM kill, no timeout, no lost test file). Several attempts that could stand are
+// refused (exit 2) unless all but one are replaced: by a rerun's record (`rerun-shard`) or by `--replace
+// <failed>=<rerun>`. A replacement whose two jobs are not one shard's attempts is refused; a rerun that cannot stand
+// replaces nothing, and is refused when `--replace` names it.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { Usage } from "./common.mjs";
