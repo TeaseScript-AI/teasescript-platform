@@ -84,7 +84,8 @@ export function play(session, state, maxOperations, now) {
 /**
  * The sessions to play, by name: `engine` (today's runtime) and the three forms: `replay` (every drive runs the
  * program again from its start: its last drive is what one resume after a reload costs), `kept` (kept alive between
- * waits; generators) and `resumable` (a save at every wait, each drive continues from it).
+ * waits; generators), `resumable` (a save at every wait, each drive continues from it) and `chain` (resumable, every
+ * author call on the driver's frame chain).
  */
 export function sessions(api, driver) {
   return {
@@ -92,5 +93,7 @@ export function sessions(api, driver) {
     replay: { create: (plan) => driver.createEmittedSession(plan, FRESH), state: (s) => s.state },
     kept: { create: (plan) => driver.createGeneratorSession(plan, FRESH), state: (s) => s.state },
     resumable: { create: (plan) => driver.createResumableSession(plan, FRESH), state: (s) => s.state },
+    // The resumable form with every author call on the driver's frame chain.
+    chain: { create: (plan) => driver.createResumableSession(plan, FRESH, { chain: true }), state: (s) => s.state },
   };
 }

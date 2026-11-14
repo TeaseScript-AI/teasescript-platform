@@ -43,5 +43,5 @@ for (let round = 0; round < rounds; round += 1)
       const createMs = now() - t0;
       const r = play(session, () => kind.state(session), cap, now);
       console.log(JSON.stringify({ tease: tease.name, form, round, createMs: round2(createMs), ms: round2(r.ms), maxDriveMs: round2(r.maxDriveMs), lastDriveMs: round2(r.lastDriveMs),
-        drives: r.drives, operations: r.operations, status: r.status, waitingOn: r.waitingOn, failure: r.failure, largestSave: session.saveBytes ?? null, same: r.digest === expected.get(`${tease.name}/${cap}`) }));
+        drives: r.drives, operations: r.operations, status: r.status, waitingOn: r.waitingOn, failure: r.failure, largestSave: session.saveBytes ?? null, calls: session.calls ?? null, same: r.digest === expected.get(`${tease.name}/${cap}`) }));
     }
