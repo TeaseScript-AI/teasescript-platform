@@ -20,8 +20,8 @@ ADR 0015 remains authoritative for explicit JSON-safe execution state. ADR 0016 
 
 ## Decision summary
 
-1. Keep the engine core limited to the smallest deterministic, serializable, security-relevant primitives needed to execute TeaseScript and communicate with the player.
-2. Provide a platform-owned Standard Library implemented in TypeScript and versioned with the engine/player distribution.
+1. Keep the engine core limited to the smallest deterministic, serializable, security-relevant primitives needed to execute TeaseScript and communicate with the Playroom.
+2. Provide a platform-owned Standard Library implemented in TypeScript and versioned with the engine/Playroom distribution.
 3. Build author-friendly APIs such as `say`, visible timers, common input helpers, and presentation policies primarily in the Standard Library when they can be composed from core primitives without weakening determinism, validation, checkpointing, or security.
 4. Allow package libraries to import and reuse the public, capability-safe Standard Library surface.
 5. Generate type signatures and editor metadata from library exports so ordinary library functions receive autocomplete, parameter hints, hover documentation, diagnostics, navigation, and formatting through the normal call syntax.
@@ -71,7 +71,7 @@ This includes:
 - foreground and background pending-action identity and lifecycle;
 - deterministic session-time observation and timed-action settlement;
 - opaque engine-managed handles and reference validation;
-- typed, validated, JSON-safe data crossing runtime, player, host, checkpoint, and package-to-runtime boundaries, with
+- typed, validated, JSON-safe data crossing runtime, Playroom, host, checkpoint, and package-to-runtime boundaries, with
   resource/security bounds only at separately justified concrete boundaries;
 - stable output provenance such as output target identity and speaker identity where required;
 - engine-managed serializable continuations for resumable library workflows;
@@ -87,7 +87,7 @@ Exact public TypeScript names remain open. The following are conceptual capabili
 
 ### Text output
 
-A minimal typed text-output operation can carry the final text and a validated output target. It must also preserve stable provenance required by transcript history, player rendering, and future context selection.
+A minimal typed text-output operation can carry the final text and a validated output target. It must also preserve stable provenance required by transcript history, Playroom rendering, and future context selection.
 
 Conceptually:
 
@@ -154,11 +154,11 @@ Candidate responsibilities include:
 - reusable formatting, conversion, collection, and utility functions;
 - higher-level workflows built from typed core actions.
 
-The Standard Library is trusted platform code, but it remains subject to the player sandbox and documented capabilities. It may not bypass runtime validation, mutate parent-page state, access account cookies, or create hidden non-serializable execution state.
+The Standard Library is trusted platform code, but it remains subject to the Playroom sandbox and documented capabilities. It may not bypass runtime validation, mutate parent-page state, access account cookies, or create hidden non-serializable execution state.
 
 ## Resumability boundary
 
-Ordinary TypeScript library code may run synchronously between engine instruction boundaries. It may calculate values, validate arguments, and call synchronous capabilities. Inside the Player sandbox, package code may also await ephemeral local work, such as a camera frame, as Player-local execution detail. Such promises and capture or recording handles are not restored after a reload; a reconstructible TeaseScript pending interaction may be rebuilt from canonical state instead.
+Ordinary TypeScript library code may run synchronously between engine instruction boundaries. It may calculate values, validate arguments, and call synchronous capabilities. Inside the Playroom sandbox, package code may also await ephemeral local work, such as a camera frame, as Playroom-local execution detail. Such promises and capture or recording handles are not restored after a reload; a reconstructible TeaseScript pending interaction may be rebuilt from canonical state instead.
 
 When TeaseScript execution waits for a library workflow, for example for time, input, media, a background handler, or another pending result, the workflow must not retain an ordinary TypeScript stack, promise, callback, closure, or generator as canonical resume state. It must either:
 
@@ -171,7 +171,7 @@ The exact lowering and linkage mechanism remains deferred, but this invariant do
 
 Package libraries may import only the public, capability-safe Standard Library surface.
 
-Privileged platform adapters may exist internally for player integration or capability brokering, but they are separate modules and are not transitively exported. Calling a public helper must not grant access to privileged adapters, internal host capabilities, the parent DOM, account cookies, or unrestricted networking. Inside the Player sandbox, capability-authorized package code may receive and use ephemeral live browser and media objects and APIs through an accepted capability surface, for arbitrary local image, video, and audio processing, including pixel- and sample-level work, recording, and custom UI. That surface may expose raw objects such as streams, tracks, media elements, canvases, image bitmaps, workers, and audio contexts where deliberately supported, or equivalent capability objects. Such objects never enter canonical runtime, checkpoint, or persisted state and never cross the parent/Player boundary as raw objects. Pixel, image, and sample buffers derived from them also stay inside the Player sandbox unless a later explicit validated boundary admits them. Device access remains governed by the browser's permission and the Player-brokered capability. Player cleanup is guaranteed for the browser resources the Player owns; when a surface exposes raw clonable resources, complete revocation of package-created derivatives such as cloned tracks relies on the applicable sandbox teardown or lifecycle contract.
+Privileged platform adapters may exist internally for Playroom integration or capability brokering, but they are separate modules and are not transitively exported. Calling a public helper must not grant access to privileged adapters, internal host capabilities, the parent DOM, account cookies, or unrestricted networking. Inside the Playroom sandbox, capability-authorized package code may receive and use ephemeral live browser and media objects and APIs through an accepted capability surface, for arbitrary local image, video, and audio processing, including pixel- and sample-level work, recording, and custom UI. That surface may expose raw objects such as streams, tracks, media elements, canvases, image bitmaps, workers, and audio contexts where deliberately supported, or equivalent capability objects. Such objects never enter canonical runtime, checkpoint, or persisted state and never cross the parent/Playroom boundary as raw objects. Pixel, image, and sample buffers derived from them also stay inside the Playroom sandbox unless a later explicit validated boundary admits them. Device access remains governed by the browser's permission and the Playroom-brokered capability. Playroom cleanup is guaranteed for the browser resources the Playroom owns; when a surface exposes raw clonable resources, complete revocation of package-created derivatives such as cloned tracks relies on the applicable sandbox teardown or lifecycle contract.
 
 ## Deterministic version binding
 
@@ -191,7 +191,7 @@ Package libraries may:
 - import public Standard Library exports;
 - wrap or combine Standard Library functions;
 - expose package-specific helpers to `.tease` scripts;
-- create custom UI inside the player iframe through allowed UI capabilities;
+- create custom UI inside the Playroom iframe through allowed UI capabilities;
 - accept and return typed serializable values and engine-managed references;
 - publish generated signatures and editor metadata.
 
