@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
 
 import { ts } from "ts-morph";
 
@@ -391,5 +390,4 @@ function main(argv) {
   return allOnlyComments ? 0 : 1;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href)
-  process.exitCode = main(process.argv.slice(2));
+if (import.meta.main) process.exitCode = main(process.argv.slice(2));
