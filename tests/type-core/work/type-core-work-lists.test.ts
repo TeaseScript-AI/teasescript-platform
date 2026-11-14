@@ -1,12 +1,17 @@
 // Work that grows with the program over lists: a list's other members (#1573), lists of one set of choices in many
-// orders (#1397), and runs of joins with their indexed queries and holder bound (#1384).
+// orders (#1397), runs of joins with their indexed queries and holder bound (#1384), and a join with a list that holds
+// itself (#2763).
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProject, createFreshRuntimeSession } from "../../../src/index.js";
 import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
-import { WorkLedger, type WorkCounter } from "../../../src/type-inference/core/budget.js";
+import {
+  WorkLedger,
+  withTestAllowance,
+  type WorkCounter,
+} from "../../../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
 import {
   isPlusValue,
@@ -14,6 +19,7 @@ import {
 } from "../../../src/type-inference/core/indexes/plus-index.js";
 import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
 import type { PlaceId } from "../../../src/type-inference/graph.js";
+import { regressionCase } from "../../helpers/regression-case.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
 import { type WorkFamily } from "../../helpers/type-core/families/builders.js";
 import { narrowingPass } from "../../helpers/type-core/type-core-narrowing.js";
@@ -396,3 +402,42 @@ test("lists of one set of choices in many orders site their host data without wa
   }
   assert.deepEqual(steep, []);
 });
+
+/**
+ * #2763: a list joined with a list that holds it grows a level each turn of its cycle; the nesting cut (#2764) knows it one
+ * level deeper than what enters the cycle and leaves it unknown below, so the join check's descent ends and the join is
+ * accepted, far below an allowance the base's descent ran out of (125 levels at 300,000 units). Each shape is one way a
+ * list comes to hold itself through a join.
+ */
+regressionCase(
+  "a join with a list that holds itself ends far below the allowance, accepted (#2763)",
+  { pr: 0, atBase: /self-holding join .*: the join check ends below the allowance/ },
+  () => {
+    const shapes: Record<string, string> = {
+      once: "let a = [[]]\na = a + [a]\nexit\n",
+      "in a loop": "let a = []\nrepeat 3 {\n  a = a + [a]\n}\nexit\n",
+      compound: "let a = [[]]\na += [a]\nexit\n",
+      "on the left": "let a = [[]]\na = [a] + a\nexit\n",
+      "nested in a loop, then joined":
+        "let a = []\nrepeat 3 {\n  a = [a]\n}\nlet b = a + a\nexit\n",
+      "through a parameter":
+        "function f(d) {\n  return d\n}\nlet a = [f([])]\na = a + [f(a)]\nexit\n",
+    };
+    for (const [shape, source] of Object.entries(shapes)) {
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, `${shape}: parses and resolves`);
+      const answers = withTestAllowance(300_000, () => analyseCore(request));
+      assert.equal(
+        answers.budget.exhausted,
+        null,
+        `self-holding join ${shape}: the join check ends below the allowance`,
+      );
+      assert.ok(answers.work.total < 30_000, `${shape}: ${answers.work.total} units`);
+      assert.deepEqual(
+        answers.diagnostics.map((d) => d.code),
+        [],
+        `${shape}: the join is accepted`,
+      );
+    }
+  },
+);
