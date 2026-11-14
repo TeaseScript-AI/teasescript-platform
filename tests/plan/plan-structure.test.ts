@@ -299,7 +299,7 @@ test("each way jumps can fail to nest is refused at the instruction that breaks 
 });
 
 test("a region nested deeper than the call stack reaches is read", () => {
-  // 100,000 nested blocks, each with an if: no recursion on depth.
+  // 100,000 nested blocks: no recursion on depth.
   const depth = 100_000;
   const instructions: Instruction[] = [];
   for (let level = 0; level < depth; level += 1) instructions.push(enter);
