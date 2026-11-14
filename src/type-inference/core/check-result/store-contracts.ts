@@ -648,12 +648,14 @@ function defaultOf(call: CallExpression): Expression | null {
 const STRUCTURED: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object", "unknown"]);
 
 /**
- * Whether a default reads anything but literal data at any level: a variable, a property or an element of one, any
- * operation but a typed parse or load, or one whose own default does (#1755's test, read after a stop alone and through
- * nested typed calls, #1767). A projection of a literal is the literal data it selects (`projectedLiteral`), where no
- * object literal stands at any level below it: #1460's syntax route proves its items, not an object's names below a
- * projection (#1775: `({n: 0}).n`, `[0][i]` and `({p: [load("k", default: 0)]}).p` are literal data, `({p: {n: 0}}).p`
- * and `[{n: 0}][0]` are not).
+ * Whether a default may read anything but literal data at any level (#1755's test, read after a stop alone and through
+ * nested typed calls, #1767). It follows number, boolean, null and plain string literals, list, set and object
+ * literals, projections of literals, typed loads through their defaults and `fromJson` calls through theirs (one
+ * without a default counts as a read); any other form, a regex literal and an interpolated string among them, counts
+ * as a read. A projection of a literal is the literal data it selects
+ * (`projectedLiteral`), where no object literal stands at any level below it: #1460's syntax route proves its items,
+ * not an object's names below a projection (#1775: `({n: 0}).n`, `[0][i]` and `({p: [load("k", default: 0)]}).p` are
+ * literal data, `({p: {n: 0}}).p` and `[{n: 0}][0]` are not).
  */
 function readsPlace(fallback: Expression): boolean {
   const pending: { at: Expression; projected: boolean }[] = [{ at: fallback, projected: false }];
@@ -706,8 +708,7 @@ function readsPlace(fallback: Expression): boolean {
  * What an expression may select through parentheses and projections of literals: an object literal's literal property,
  * or any element of a list literal, whatever the index reads (`[0][load("i", default: 0)]` and `[0][({i: 0}).i]` are
  * elements of `[0]`); a selected part that is itself a projection is followed (`({p: ({n: 0}).n}).p`); an empty list's
- * none. `undefined` where a step leaves the literal's syntax: another receiver, a missing property. Recursive over the
- * syntax alone.
+ * none. `undefined` where a step leaves the literal's syntax: another receiver, a missing property.
  */
 function projectedLiteral(expression: Expression): readonly Expression[] | undefined {
   const at = unwrap(expression);
