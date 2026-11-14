@@ -99,7 +99,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `F6` | clear opens emptiness and removes exact elements while preserving the collection kind |
 | `F7` | removals preserve possible element kinds, open emptiness, and return their operation-specific result |
 | `F7a` | positional removals return possible elements and leave the collection possibly empty |
-| `F8` | reordering preserves kind, elements, and emptiness but can invalidate path narrowings |
 | `F9` | a copy takes the source snapshot while retaining any inherited written domain |
 | `F10` | collection conversions and concatenation transfer element kinds and their specified emptiness |
 | `F11` | combine stored and copied property facts with missing evidence; dispatch built-in names by receiver, keeping object selections opaque |
@@ -139,7 +138,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `U4a` | stored selections take their element narrowing while emptiness remains a separate proof |
 | `U5` | a lost narrowing names the failing event that prevented keeping its check ([r4-444](contract.md#r4-444)) |
 | `H6` | registrations reached through file transfers propagate possible handler interference |
-| `H9` | calling a helper that registers a handler counts as a registration in its caller |
 | `L10` | a call whose target cannot return leaves its continuation unreachable |
 | `L11` | computed transfers target every candidate file; glob targets use the name pass’s picks |
 | `O15` | block-local reads use the contract because handlers can run after intervening stores |
@@ -151,7 +149,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `W29` | the work family for N5's preserving stores to k locations in one loop, each evaluated once |
 | `W32` | the work family for N3's k whole stores of a record with null fields under k branches, read at k fields |
 | `W34` | the whole-copy chain and fan work family sharing source marks across demanded fields ([r4-38](sharing.md#r4-38)) |
-| `W40` | the work family indexing tested paths by callable or file instead of scanning contributions |
 | `W44` | the work family for the width of one root's keys under projected copies, whose stores are found below each copy's path alone |
 | `W45` | the work family for a joined copy's sources, referenced once per destination and never flattened into it |
 | `B1` | per-demand and program work budgets defer unproved checks to runtime ([r4-23](sharing.md#r4-23)) |
