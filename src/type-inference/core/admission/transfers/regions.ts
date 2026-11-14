@@ -280,9 +280,8 @@ export function* regionOf(
         else if (stop?.list === "literals") here.literals.push(entry());
         else if (stop?.list === "values") value(here, entry());
         const above = group.members[item.member]!;
-        // (a call a list join carries is read by its written result, as a written copy is, so the scan of the stops
-        // answers there, `earliestDecider`; since #2378 such a call is a written stop too, and this entry answers
-        // alike)
+        // (a call a list join carries is read by its written result, as a written copy is; since #2378 such a call is a
+        // written stop too, and this entry answers alike)
         if (stop?.list === "values" && above.joined && writtenResult(admission, item.task.value))
           here.written.push({ ...entry(), call: true });
         for (const [index, part] of item.task.parts.entries()) {
@@ -645,8 +644,7 @@ export function forEachPath(
 }
 
 /**
- * `forEachPath` of a visit that makes reads (`Read`), each path visited where `forEachPath` visits it (#1072: a read
- * inside an inherited proof is yielded, never run).
+ * `forEachPath` of a visit that makes reads (`Read`, #1072), each path visited where `forEachPath` visits it.
  */
 export function* forEachPathRead(
   region: Region,

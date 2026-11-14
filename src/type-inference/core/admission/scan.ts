@@ -285,14 +285,9 @@ export interface DeciderAnswer {
  * decision of `into` (`inheritedInto`; `null` outside a place's decision), or a value whose items there are of definite
  * kinds; a `null` or an unknown decides nothing, and a value an unknown may stand beside (a read, a copy, a call)
  * neither, while a literal's other elements still may (`[1, hostValue]`'s elements are whole numbers); a later copy
- * never comes before an earlier definite element. The place's decision and the literal's own elements
- * (`literalElements`) both take it, so they cannot pick opposite deciders. A list join's written operands count by
+ * never comes before an earlier definite element. A list join's written operands count by
  * `joinedDomain`, each whatever came before or after it: an open one leaves the path open, and one holding `null` makes
- * the copy's type optional (`joinedNull`). `null` where nothing on the path decides. Where a literal on the path takes
- * the literal route (`literalRoute`, #2289), the value's view is scanned, each literal's cell one contribution. Else,
- * where no written copy on the path asks a type, the value's carriers' transfers answer (`transferredDecider`), each
- * carrier once; else, outside every decision and into no decision's place, their written-decider summary
- * (`writtenDecider`); else its stops are scanned here.
+ * the copy's type optional (`joinedNull`). `null` where nothing on the path decides.
  */
 export function* earliestDecider(
   admission: Admission,
@@ -430,8 +425,8 @@ export function* scanView(
     // (a span's prefix text its record's, `textOf`; an array's made plain)
     const prefix = at.text(length);
     const written = snapshots(admission, stops.written.get(prefix), false);
-    // (and a call a join carries by its written result, as `joinElements` reads it; since #2378 such a call is a
-    // written stop too, `writtenSourceRead`, and this read answers alike)
+    // (and a call a join carries, by its written result; since #2378 such a call is a written stop too, and this read
+    // answers alike)
     const calls = joinedOf(admission, snapshots(admission, stops.values.get(prefix), false));
     for (const stop of [...joinedOf(admission, written), ...calls]) {
       program.work.charge("checks");
@@ -872,8 +867,7 @@ export function perLink(
 }
 
 /**
- * `perLink` of a test that makes reads (`Read`), each link's test asked as `perLink` asks it (#1072: a read inside an
- * inherited proof is yielded, never run).
+ * `perLink` of a test that makes reads (`Read`, #1072), each link's test asked as `perLink` asks it.
  */
 function* perLinkRead(
   admission: Admission,
