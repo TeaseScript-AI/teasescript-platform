@@ -164,7 +164,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   }
   // Which instructions can wait, and which functions can: those that reach such an instruction or call one that can.
   const waitsHere = (ins) =>
-    stops || (ins.kind === "say" && ins.pacing !== "instant") || WAITING_KINDS.has(ins.kind);
+    stops || (ins.kind === "say" && ins.pacing !== "instant") || WAITING_KINDS.has(ins.kind) || (ins.kind === "transfer" && ins.mode === "call");
   const canWait = new Set();
   for (let changed = true; changed; ) {
     changed = false;
@@ -195,7 +195,6 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   /** The resumable form's blocks, by function ID: their module-level function and registration. */
   const moduleBlocks = new Map();
   plan.files.forEach((file, index) => {
-    if (file.labels.length > 0) throw new Unsupported("labels");
     // The file's top-level variables: module-level, so that its functions see them; a goto to the file clears them.
     const rootScope = new Map();
     const root = emitRegion(file.startInstruction, file.rootEndInstruction, null, [], rootScope, index);
@@ -211,8 +210,18 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     if (vars.length > 0) lines.push(`var ${vars.join(", ")};`);
     lines.push(...functions, root, ...moduleBlocks.values());
     moduleBlocks.clear();
-    // The session starts at file 0's start (its speakers' and globals' start values); a goto enters a file at its entry.
-    lines.push(`function${generators ? "*" : ""} enter${index}(resume, fromEntry) { rt.file = ${index};${vars.length > 0 ? ` if (resume === null) ${vars.join(" = ")} = undefined;` : ""} ${generators ? "yield* " : ""}file${index}(resume, fromEntry); }`);
+    // An activation of the file from instruction `at`: its start (the session's first file: its speakers' and globals'
+    // start values), its entry (a goto or call), or a label (a goto inside the file, which keeps its variables). A call
+    // gives back the variables of an activation further out (a file called again while it runs below).
+    const fileVars = vars.join(", ");
+    lines.push(
+      `function${generators ? "*" : ""} enter${index}(resume, at, called) {`,
+      `  rt.file = ${index}; const depth = rt.depth;${vars.length > 0 ? ` const outer = called ? [${fileVars}] : null; if (resume === null) ${vars.join(" = ")} = undefined;` : ""}`,
+      "  try {",
+      `    for (;;) { try { ${generators ? "yield* " : ""}file${index}(resume, at); return; } catch (signal) { if (!(signal instanceof rt.Goto && signal.label)) throw signal; resume = null; at = signal.pc; rt.depth = depth; rt.file = ${index}; } }`,
+      `  } finally { ${vars.length > 0 ? `if (called) [${fileVars}] = outer;` : ""} }`,
+      "}",
+    );
     fileEntries.push(file.entryInstruction);
   });
   if (plan.functions.some((definition) => definition.handler === null && !emittedFunctions.has(definition.id)))
@@ -221,10 +230,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   lines.push(
     `function${generators ? "*" : ""} main() {`,
     "  let file = rt.resuming ? rt.resumeFrames[0].file : 0;",
-    "  let entered = false;",
+    `  let at = ${plan.files[0].startInstruction};`,
     "  for (;;) {",
-    `    try { ${generators ? "yield* " : ""}FILES[file](rt.resuming ? rt.resumeFrame() : null, entered); return; }`,
-    "    catch (signal) { if (signal instanceof rt.Goto) { file = signal.file; entered = true; continue; } throw signal; }",
+    `    try { ${generators ? "yield* " : ""}FILES[file](rt.resuming ? rt.resumeFrame() : null, at, false); return; }`,
+    "    catch (signal) { if (!(signal instanceof rt.Goto) || signal.label) throw signal; file = signal.file; at = signal.pc; rt.depth = 0; }",
     "  }",
     "}",
     "return main;",
@@ -1070,6 +1079,24 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       return { ...ins, captures: [] };
     }
 
+    /**
+     * `call` of a file: today's engine opens the file call; the program runs the file's activation until its `end`,
+     * following the gotos to other files it makes (each replaces the called activation). A resumable region resumes the
+     * activation from the next saved frame.
+     */
+    function callFile(ins, pc) {
+      if ("value" in ins.destination) throw new Unsupported("a call of a computed file");
+      const [d, f, a, r] = [x(), x(), x(), x()];
+      const enter = generators ? "yield* " : "";
+      line(`${d} = rt.depth;`);
+      if (resumable) line(`if (rt.resuming) { ${f} = rt.resumeFrames[0].file; ${a} = 0; ${r} = rt.resumeFrame(); } else { ${f} = rt.callFile(${konst(ins)}, ${pc}); ${a} = rt.fileEntries[${f}]; ${r} = null; }`);
+      else line(`${f} = rt.callFile(${konst(ins)}, ${pc}); ${a} = rt.fileEntries[${f}]; ${r} = null;`);
+      line(`rt.depth += 1;`);
+      const onSuspend = resumable ? ` if (signal === rt.SUSPEND) rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: ${pc}, v: [%SAVED%] });` : "";
+      line(`for (;;) { try { ${enter}FILES[${f}](${r}, ${a}, true); break; } catch (signal) { if (signal === rt.END) break; if (signal instanceof rt.Goto && !signal.label) { ${f} = signal.file; ${a} = signal.pc; ${r} = null; rt.depth = ${d} + 1; continue; }${onSuspend} throw signal; } }`);
+      line(`rt.depth = ${d}; rt.file = ${fileIndex};`);
+    }
+
     function statement(ins, pc) {
       switch (ins.kind) {
         case "declareGlobal":
@@ -1276,12 +1303,14 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
           line(`rt.exit(${konst(ins.span)}, ${pc});`);
           return;
         case "end":
-          line(`rt.end(${konst(ins.span)});`);
+          // Today's engine returns from the file call (or faults without one); the program unwinds to the call.
+          line(`rt.end(${konst(ins)}, ${pc});`);
           return;
         case "goto":
-          throw new Unsupported("goto a label");
+          bridgeInstruction(ins, pc, "rt.gotoLabel");
+          return;
         case "transfer":
-          if (ins.mode !== undefined && ins.mode !== "goto") throw new Unsupported(`a file ${ins.mode}`);
+          if (ins.mode === "call") return callFile(ins, pc);
           bridgeInstruction(ins, pc, "rt.transfer");
           return;
         default:
@@ -1338,14 +1367,18 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     }
 
     const entry = isRoot ? plan.files[fileIndex].entryInstruction : start;
-    if (isRoot && entry !== start && !flatRegion) {
-      line("if (!fromEntry) {");
-      indent += 1;
-      emitRange(start, entry);
-      indent -= 1;
-      line("}");
-      emitChunked(entry, end);
-    } else emitChunked(start, end);
+    // A file's places of entry: its start, its entry and its labels; each part runs when the activation starts at or
+    // before it. A resumable region jumps there instead (its switch has a case at each).
+    const entries = isRoot ? [...new Set([start, entry, ...plan.files[fileIndex].labels.map((label) => label.instruction)])].filter((at) => at >= start && at < end).sort((a, b) => a - b) : [start];
+    if (entries.length > 1 && !flatRegion)
+      entries.forEach((from, k) => {
+        line(`if (at <= ${from}) {`);
+        indent += 1;
+        emitChunked(from, entries[k + 1] ?? end);
+        indent -= 1;
+        line("}");
+      });
+    else emitChunked(start, end);
     // Each temporary is declared in the innermost function (region or outlined body) that holds all its uses.
     const ancestors = (key) => { const chain = [key]; while (chain.at(-1) !== "root") chain.push(bodyParents.get(chain.at(-1))); return chain; };
     const bodyTemps = new Map();
@@ -1366,17 +1399,17 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     const locals = [...regionChunks.lets, ...regionTemps, ...Array.from({ length: scratchMax }, (_, i) => `x${i}`), ...hoisted, ...(usesRV ? ["RV"] : [])];
     if (locals.length > 0) header.push(`  var ${locals.join(", ")};`);
     if (!flatRegion) {
-      if (definition === null) return [`function${generators ? "*" : ""} file${fileIndex}(resume, fromEntry) {`, ...header, ...out, "}"].join("\n");
+      if (definition === null) return [`function${generators ? "*" : ""} file${fileIndex}(resume, at) {`, ...header, ...out, "}"].join("\n");
       return [`function${star(definition.id)} f${definition.id}(${params.join(", ")}) {`, ...header, ...(tick ? [`  ${tick}`] : []), ...out, "  return null;", "}"].join("\n");
     }
     // A resumable region: its argument evaluation before a call that waits runs only on a fresh entry of that call.
     const savedList = saved().join(", ");
     const body = out.map((text) => text.replaceAll("%SAVED%", savedList));
-    const signature = definition === null ? `function file${fileIndex}(resume, fromEntry) {` : `function f${definition.id}(resume${params.map((p) => `, ${p}`).join("")}) {`;
+    const signature = definition === null ? `function file${fileIndex}(resume, at) {` : `function f${definition.id}(resume${params.map((p) => `, ${p}`).join("")}) {`;
     return [
       signature,
       ...header,
-      `  let pc = ${definition === null ? `fromEntry ? ${entry} : ${start}` : start};`,
+      `  let pc = ${definition === null ? "at" : start};`,
       `  if (resume !== null) { pc = resume.pc; [${savedList}] = resume.v; }`,
       "  D: for (;;) switch (pc) {",
       ...body,

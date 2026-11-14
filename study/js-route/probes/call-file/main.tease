@@ -1,4 +1,5 @@
-// call of a file returns after its end; then a goto to another file. Waits on both sides of each transfer.
+// call of a file returns after its end, also when the called file went on to another by goto; then a goto to a
+// third file. Waits on every side of each transfer.
 let visits = 0
 repeat 2 {
   call "rooms/hall.tease"

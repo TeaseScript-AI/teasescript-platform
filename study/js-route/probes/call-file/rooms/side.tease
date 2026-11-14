@@ -1,0 +1,4 @@
+// Reached by a goto inside a called file: its end returns to that call.
+let steps = randomInteger(1..=4)
+say "Side room, ${steps} steps"
+end

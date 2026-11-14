@@ -45,7 +45,6 @@ import {
   sayStage,
 } from "../../dist/src/runtime/instructions/say.js";
 import { resolveMessagePresentation } from "../../dist/src/runtime/message-presentation.js";
-import { endWithoutCall } from "../../dist/src/runtime/operations/transfers.js";
 import { assertCounterCanAdvance } from "../../dist/src/runtime/operations/support.js";
 import { assertFallbackType, assertValueType } from "../../dist/src/runtime/values/value-types.js";
 import { isRange } from "../../dist/src/runtime/values/value-predicates.js";
@@ -72,10 +71,14 @@ export const SUSPEND = Symbol("suspend");
 export const EXIT = Symbol("exit");
 /** Thrown by a `goto` to a file: the program's dispatcher starts that file. */
 export class Goto {
-  constructor(file) {
+  constructor(file, pc, label = false) {
     this.file = file;
+    this.pc = pc;
+    this.label = label;
   }
 }
+/** Thrown by `end` after today's engine returned from the file call: the program unwinds to the call. */
+export const END = Symbol("end");
 
 export class Runtime {
   constructor(plan, snapshot, session) {
@@ -94,6 +97,7 @@ export class Runtime {
     this.session = session;
     this.Goto = Goto;
     this.SUSPEND = SUSPEND;
+    this.END = END;
     /** The closures of the blocks created so far, by function ID (the latest creation of each). */
     this.blocks = new Map();
     /** Part C way (2): the frames a wait saved, innermost first; on resume, the frames to give back, outermost first. */
@@ -604,8 +608,9 @@ export class Runtime {
     haltForExit(this.snapshot, span, this.events);
     throw EXIT;
   }
-  end(span) {
-    throw endWithoutCall(span);
+  end(synthetic, pc) {
+    this.instruction(synthetic, pc, [], []);
+    throw END;
   }
   /**
    * Today's engine executes `synthetic`, an instruction whose operands are temporaries 1e9 + i holding `values`; the
@@ -640,8 +645,19 @@ export class Runtime {
     this.instruction(synthetic, pc, values, sources);
     const file = this.fileEntries.indexOf(this.snapshot.nextInstruction);
     if (file < 0) throw new Error("study: a goto to a place that is no file's entry");
-    this.depth = 0;
-    throw new Goto(file);
+    throw new Goto(file, this.snapshot.nextInstruction);
+  }
+  /** A `goto` to a label, executed by today's engine, then unwound to its file's activation. */
+  gotoLabel(synthetic, pc, values, sources) {
+    this.instruction(synthetic, pc, values, sources);
+    throw new Goto(this.file, this.snapshot.nextInstruction, true);
+  }
+  /** A `call` of a file, opened by today's engine: the index of the file it starts. */
+  callFile(synthetic, pc) {
+    this.instruction(synthetic, pc, [], []);
+    const file = this.fileEntries.indexOf(this.snapshot.nextInstruction);
+    if (file < 0) throw new Error("study: a call of a place that is no file's entry");
+    return file;
   }
   /** The value an instruction of today's engine wrote to temporary `id`, taken off the state. */
   takeTemporary(id) {
