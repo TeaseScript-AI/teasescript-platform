@@ -1419,7 +1419,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       ...out,
       ...(definition === null ? [] : ["  return null;"]),
       // A save from another program (the Tease published again) can name a place this one does not have.
-      "  default: throw new Error(`study: no resume point ${pc} in ${fnName}`);",
+      `  default: throw new Error(\`study: no resume point \${pc} in ${fnName}\`);`,
       "  }",
       "}",
     ].join("\n");
