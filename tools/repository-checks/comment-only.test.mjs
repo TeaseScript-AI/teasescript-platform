@@ -6,22 +6,18 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { READ_BY_TOOLS, compareTexts } from "./comment-only.mjs";
+import { compareTexts } from "./comment-only.mjs";
 import { isolateGit } from "../fixture-git.mjs";
 
 isolateGit();
 
 const tool = fileURLToPath(new URL("./comment-only.mjs", import.meta.url));
 
-// Each case: the file, its text at FROM and at TO, and the verdict with the start of its detail.
 const CASES = [
   [
     "a block comment holding a line break after `return` is the statement's end",
     ["a.ts", "function f() {\n  return /*\n*/ 1;\n}\n", "function f() {\n  return 1;\n}\n"],
-    [
-      "differs in more",
-      "the code parses differently, by a line break the grammar reads, at 2:3 (2:3 at FROM)",
-    ],
+    ["differs in more", "a line break before `1` removed at 2:10 (3:4 at FROM)"],
   ],
   [
     "a block comment without a line break",
@@ -29,30 +25,9 @@ const CASES = [
     ["only comments", "comments deleted"],
   ],
   [
-    "a comment deleted and the statement joined onto one line, where the grammar reads no line break",
+    "a line joined where the grammar reads no line break still differs",
     ["a.ts", "const a =\n  // Why.\n  f();\n", "const a = f();\n"],
-    ["only comments", "comments deleted"],
-  ],
-  [
-    "a line joined after the comment a tool reads above it, which widens the line it reaches",
-    [
-      "a.ts",
-      "// oxlint-disable-next-line no-x -- EVIDENCE: e.\nf(a,\n  b);\n",
-      "// oxlint-disable-next-line no-x -- EVIDENCE: e.\nf(a, b);\n",
-    ],
-    [
-      "differs in more",
-      "a line break before `b`, beside a comment a tool reads, removed at 2:6 (3:3 at FROM)",
-    ],
-  ],
-  [
-    "a line joined onto the line of a comment a tool reads at its end",
-    [
-      "a.ts",
-      "f(\n  a); // oxlint-disable-line no-x -- EVIDENCE: e.\n",
-      "f(a); // oxlint-disable-line no-x -- EVIDENCE: e.\n",
-    ],
-    ["differs in more", "the lines beside a comment a tool reads changed"],
+    ["differs in more", "a line break before `f` removed"],
   ],
   [
     "a comment deleted between two tokens that then read as one",
@@ -79,9 +54,9 @@ const CASES = [
     ["only comments", "comments deleted"],
   ],
   [
-    "a comment rewritten",
-    ["a.mjs", "// Old reason.\nexport const a = 1;\n", "// New reason.\nexport const a = 1;\n"],
-    ["only comments", "comments added or rewritten"],
+    "a kept comment shortened by deleting words",
+    ["a.mjs", "// do not remove\nexport const a = 1;\n", "// do remove\nexport const a = 1;\n"],
+    ["only comments", "comments changed"],
   ],
   [
     "a comment's text inside a template or a regular expression is code",
@@ -102,8 +77,21 @@ const CASES = [
     ["a.mjs", "await /x*/g; // c\n", "await /x*/g;\n"],
     ["only comments", "comments deleted"],
   ],
+  [
+    "a directive reaching more lines than the next",
+    [
+      "a.ts",
+      "/* c8 ignore next 3 */\nf();\n// Why.\ng();\n",
+      "/* c8 ignore next 3 */\nf();\ng();\n",
+    ],
+    ["not proven", "FROM holds a directive that reaches more than the next line"],
+  ],
   ["a syntax error", ["a.ts", "f(;\n", "f( ;\n"], ["not proven", "FROM does not parse: 1:3:"]],
-  ["a kind of file without a parser", ["a.vue", "<!-- x -->\n", "\n"], ["not proven", "no parser"]],
+  [
+    "a script, which may hold HTML-like comments",
+    ["a.cjs", "// x\nf();\n", "f();\n"],
+    ["not proven", "no parser"],
+  ],
 ];
 
 for (const [title, [path, from, to], [verdict, detail]] of CASES) {
@@ -114,25 +102,48 @@ for (const [title, [path, from, to], [verdict, detail]] of CASES) {
   });
 }
 
-// One comment for each entry of READ_BY_TOOLS, in the file it stands in, written above `export const a = 1;`.
-const READ = {
-  "a shebang": ["a.mjs", "#!/usr/bin/env node"],
-  "a lint directive": ["a.ts", "// oxlint-disable-next-line no-x -- EVIDENCE: fixture: x."],
-  "a TypeScript directive": ["a.ts", "// @ts-expect-error: the fixture is wrong on purpose."],
-  "an `EVIDENCE:` reason": ["a.ts", "// EVIDENCE: validation: checked above."],
-  "a `// pins` mark": ["a.ts", "// pins: the stop's message | line /x/"],
-  "a doc comment with a tag, in JavaScript": ["a.mjs", "/** @type {number} */"],
-  "a deprecation": ["a.ts", "/** @deprecated Use `b`. */"],
-  "a build directive": ["a.ts", "/* @vite-ignore */"],
-  "a formatter or coverage directive": ["a.ts", "// prettier-ignore"],
-};
-
-test("the samples name each comment a tool reads", () => {
-  assert.deepEqual(Object.keys(READ).sort(), READ_BY_TOOLS.map(([name]) => name).sort());
+test("a line break before an arrow's `=>` differs, as Node rejects it while TypeScript's parser does not", () => {
+  const from = "// remove\nconst f = (x) => x;\n";
+  const to = "const f = (x)\n=> x;\n";
+  assert.doesNotThrow(() => new Function(from));
+  assert.throws(() => new Function(to), SyntaxError);
+  assert.equal(compareTexts("a.mjs", from, to).verdict, "differs in more");
 });
 
-for (const [name, [path, comment]] of Object.entries(READ)) {
-  test(`${name}: deleting it, or a comment beside it, differs in more`, () => {
+test("a deeply nested expression is compared without exhausting the stack", () => {
+  const sum = Array.from({ length: 8000 }, () => "a").join(" + ");
+  const result = compareTexts(
+    "a.ts",
+    `// Why.\nexport const s = ${sum};\n`,
+    `export const s = ${sum};\n`,
+  );
+  assert.deepEqual(result, { verdict: "only comments", detail: "comments deleted" });
+});
+
+// One comment per consumer in the repository, chosen independently of how the tool groups them.
+const CONSUMERS = [
+  ["TypeScript", "a.ts", "// @ts-expect-error: the fixture is wrong on purpose."],
+  ["TypeScript", "a.ts", '/// <reference types="node" />'],
+  ["TypeScript", "a.mjs", "/** @type {number} */"],
+  ["TypeScript and type-aware lint", "a.ts", "/** @deprecated Use `b`. */"],
+  ["oxlint", "a.ts", "// oxlint-disable-next-line no-x -- EVIDENCE: fixture: x."],
+  ["ESLint", "a.ts", "/* global window */"],
+  ["Prettier", "a.ts", "// prettier-ignore"],
+  ["Knip", "a.ts", "/** @public */"],
+  ["Knip", "a.ts", "/* @beta */"],
+  ["Knip", "a.ts", "/** @alias other */"],
+  ["Vite", "a.ts", "/* @vite-ignore */"],
+  ["Rolldown", "a.ts", "/*#__PURE__*/"],
+  ["Rolldown", "a.ts", "/*! The license. */"],
+  ["source maps", "a.mjs", "//# sourceMappingURL=a.mjs.map"],
+  ["Node", "a.mjs", "#!/usr/bin/env node"],
+  ["the type-assertion lint", "a.ts", "// EVIDENCE: validation: checked above."],
+  ["pin-suites", "a.ts", "// pins: the stop's message | line /x/"],
+  ["the retained-state lint", "a.ts", "// #1072 R26: captures nothing"],
+];
+
+for (const [consumer, path, comment] of CONSUMERS) {
+  test(`${consumer} reads \`${comment}\`: deleting it, or a comment beside it, differs in more`, () => {
     const code = "export const a = 1;\n";
     const read = `${comment}\n${code}`;
     for (const [from, to] of [
@@ -141,7 +152,7 @@ for (const [name, [path, comment]] of Object.entries(READ)) {
     ]) {
       const result = compareTexts(path, from, to);
       assert.equal(result.verdict, "differs in more", `${JSON.stringify(from)}: ${result.detail}`);
-      assert.ok(result.detail.includes(`(${name})`), result.detail);
+      assert.match(result.detail, /a comment a tool reads/u);
     }
   });
 }
@@ -169,6 +180,8 @@ test("the command prints one line per changed file and exits 0 only when each di
   const program = "export const value = 1;\n";
   fixture.write({
     "zeta.ts": `// Deleted.\n${program}`,
+    "new\nline.ts": `// Deleted.\n${program}`,
+    "-leading.ts": `// Deleted.\n${program}`,
     "typed.ts": "export const a: number = 1;\n",
     "notes.md": "# Notes\n",
     "before.ts": "export const moved = 2;\n",
@@ -178,6 +191,8 @@ test("the command prints one line per changed file and exits 0 only when each di
   const from = fixture.commit();
   fixture.write({
     "zeta.ts": program,
+    "new\nline.ts": program,
+    "-leading.ts": program,
     "typed.ts": "export const a: 1 = 1;\n",
     "notes.md": "# Notes, changed\n",
     "added.ts": "export const added = 4;\n",
@@ -189,21 +204,27 @@ test("the command prints one line per changed file and exits 0 only when each di
 
   const all = fixture.run(from, to);
   assert.equal(all.status, 1, all.stderr);
-  assert.deepEqual(all.stdout.trimEnd().split("\n").sort(), [
-    "differs in more: added.ts: added",
-    "differs in more: after.ts: renamed from before.ts",
-    "differs in more: deleted.mjs: deleted",
-    "differs in more: mode.mjs: mode 100644 became 100755",
-    "differs in more: typed.ts: `number` became `1` at 1:17 (1:17 at FROM)",
-    "not proven: notes.md: no parser for this kind of file",
+  assert.deepEqual(
+    all.stdout.trimEnd().split("\n").sort(),
+    [
+      'only comments: "new\\nline.ts": comments deleted',
+      "differs in more: added.ts: added",
+      "differs in more: after.ts: renamed from before.ts",
+      "differs in more: deleted.mjs: deleted",
+      "differs in more: mode.mjs: mode 100644 became 100755",
+      "differs in more: typed.ts: `number` became `1` at 1:17 (1:17 at FROM)",
+      "not proven: notes.md: no parser for this kind of file",
+      "only comments: -leading.ts: comments deleted",
+      "only comments: zeta.ts: comments deleted",
+    ].sort(),
+  );
+
+  const filtered = fixture.run(from, to, "-leading.ts", "zeta.ts");
+  assert.equal(filtered.status, 0, filtered.stderr);
+  assert.deepEqual(filtered.stdout.trimEnd().split("\n").sort(), [
+    "only comments: -leading.ts: comments deleted",
     "only comments: zeta.ts: comments deleted",
   ]);
-
-  const filtered = fixture.run(from, to, "zeta.ts");
-  assert.deepEqual(
-    [filtered.status, filtered.stdout],
-    [0, "only comments: zeta.ts: comments deleted\n"],
-  );
 
   const nothing = fixture.run(from, to, "missing.ts");
   assert.equal(nothing.status, 2);
