@@ -2,6 +2,8 @@ import type { PlaceId, TypeTerm } from "../../../graph.js";
 import type { CarrierKind, Operand } from "../../carriers.js";
 import type { Definition, DefinitionIndex } from "../../definitions.js";
 import { propertyStep, type CoreProgram } from "../../program.js";
+import { NOTHING } from "./components.js";
+import { definedLevel } from "./levels.js";
 
 /**
  * A route into a receiver from a producer: `weight` the element levels the producer's value gains there. A `plain`
@@ -53,13 +55,15 @@ const CARRIED: Readonly<Record<CarrierKind, "below" | "none">> = {
  * call's result; +1 for a list literal's element and an `add`; a store through a path, the path's element steps; a
  * literal's property, 0 into that property; a projection and an operation, the carrier table's routes (`operands`,
  * `CARRIED`). A place with a written type takes no route: the written type decides it. A form not named here makes no
- * route, so a cycle through it is never cut.
+ * route, so a cycle through it is never cut. A fixed value's definition (`const`) makes no route: its level is the
+ * place's own, set in `fixed`.
  */
 export function routesOf(
   program: CoreProgram,
   definitions: DefinitionIndex,
   live: (d: Definition) => boolean,
   operands: (value: PlaceId) => readonly Operand[],
+  fixed: Map<PlaceId, number>,
 ): Map<PlaceId, Route[]> {
   const work = program.work;
   const into = new Map<PlaceId, Route[]>();
@@ -73,8 +77,13 @@ export function routesOf(
     add(receiver, { kind: "plain", producer, weight });
   const store = (d: Definition): void => {
     work.charge("indexSteps");
+    // (a store in code that never runs too: the contract counts it, as ADR 0021 checks all code, reachable or not)
+    if (!live(d)) return;
+    if (d.kind === "const") {
+      fixed.set(d.place, Math.max(fixed.get(d.place) ?? NOTHING, definedLevel(d)));
+      return;
+    }
     if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) return;
-    if (!program.live(d.node) || !live(d)) return;
     const elements = d.path.filter((step) => step === "element").length;
     const weight = elements + (d.kind === "add" ? (d.how === "elements" ? 0 : 1) : 0);
     const properties = d.path.filter((step) => step !== "element");

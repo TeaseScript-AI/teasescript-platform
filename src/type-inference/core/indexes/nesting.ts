@@ -1,9 +1,8 @@
-import type { PlaceId, TypeTerm } from "../../graph.js";
+import type { PlaceId } from "../../graph.js";
 import type { WorkLedger } from "../budget.js";
 import type { Operand } from "../carriers.js";
 import type { Definition, DefinitionIndex } from "../definitions.js";
 import { makeItem, REASON, type Item } from "../items.js";
-import { dictList } from "../method-categories.js";
 import type { CoreProgram } from "../program.js";
 import { Retained } from "../retained/retained.js";
 import {
@@ -14,6 +13,7 @@ import {
   reach,
   type Edge,
 } from "./nesting/components.js";
+import { ownLevel, termLevel } from "./nesting/levels.js";
 import { routesOf, writtenAt, type Route } from "./nesting/routes.js";
 
 /**
@@ -23,37 +23,6 @@ import { routesOf, writtenAt, type Route } from "./nesting/routes.js";
 export const CUT: readonly Item[] = Object.freeze([
   makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled", cert: "pos" }),
 ]);
-
-/**
- * The depth a place holds by itself, before any route: an expression's own value (a literal, an operation's result,
- * host data, a load) is a kind at its root; a variable, a parameter, a result, a literal's cell, a read, a projection
- * and a call's result hold only what reaches them. A value whose kind declares its elements holds that level too,
- * whatever its operands: a range's whole numbers (`kindElement`) and a dict's `keys`, its text (`dictList`).
- */
-function ownDepth(program: CoreProgram, place: PlaceId): number {
-  const projection = program.projOf.get(place);
-  if (projection !== undefined) return dictList(projection.step) === "keys" ? 1 : NOTHING;
-  if (program.places[place]?.kind.kind !== "value") return NOTHING;
-  if (program.occurrenceOf.has(place)) return NOTHING;
-  const op = program.opOf.get(place);
-  if (op?.kind === "operation" && op.contract.family === "range") return 1;
-  return op?.kind === "call" ? NOTHING : 0;
-}
-
-/** The element levels a written type spells: a list's, a set's or a dict's element below each, a union's deepest. */
-function writtenDepth(term: TypeTerm): number {
-  let depth = 0;
-  const pending: { readonly term: TypeTerm; readonly at: number }[] = [{ term, at: 0 }];
-  while (pending.length > 0) {
-    const { term: next, at } = pending.pop()!;
-    depth = Math.max(depth, at);
-    if (next.kind === "list" || next.kind === "set" || next.kind === "dict")
-      pending.push({ term: next.element, at: at + 1 });
-    else if (next.kind === "union")
-      for (const member of next.members) pending.push({ term: member, at });
-  }
-  return depth;
-}
 
 /** Whether a text key may hold two element steps or more: two `element`s in its text, read without making its path. */
 export function twoElementSteps(key: string): boolean {
@@ -140,7 +109,26 @@ function layered<N>(
  * property and read from another closes none. A route through two properties or more has no position, so no cycle
  * through it is cut; an `M` taken over every route, names ignored, never puts a cut above a level known without it.
  */
+/** Test-only: whether an index made now cuts nothing (`withoutNestingCut`). */
+let uncut = false;
+
+/**
+ * Test-only: runs `callback` with every nesting index made inside it cutting nothing: the analysis the cut's levels are
+ * checked against, asked only where it settles.
+ */
+export function withoutNestingCut<T>(callback: () => T): T {
+  if (uncut) throw new Error("The nesting cut is already off.");
+  uncut = true;
+  try {
+    return callback();
+  } finally {
+    uncut = false;
+  }
+}
+
 export class NestingIndex {
+  /** Test-only: whether this index cuts nothing (`withoutNestingCut`). */
+  readonly #uncut = uncut;
   /** Each place with a position in a growing component: the cut depth of each of its properties (`""` its root). */
   readonly #cut = Retained.map<PlaceId, Map<string, number>>("NestingIndex.#cut");
   /** Whether `#cut` is built (#1072 1b: a record, the one thing it fills later). */
@@ -157,7 +145,11 @@ export class NestingIndex {
     readonly live: (d: Definition) => boolean,
     readonly operands: (value: PlaceId) => readonly Operand[],
   ) {
-    Retained.owner(this, "NestingIndex", (index) => ({ cut: index.#cut, state: index.#state }));
+    Retained.owner(this, "NestingIndex", (index) => ({
+      cut: index.#cut,
+      state: index.#state,
+      uncut: index.#uncut,
+    }));
   }
 
   /** The index, built by its first query as every later one's (`shared`); a build a stop ends is made again whole. */
@@ -167,35 +159,36 @@ export class NestingIndex {
     const work = program.work;
     work.shared(() => {
       this.#cut.clear();
-      const routes = routesOf(program, this.definitions, this.live, this.operands);
+      const fixed = new Map<PlaceId, number>();
+      const routes = routesOf(program, this.definitions, this.live, this.operands, fixed);
+      // (each place's own level: its written type's, or what it holds by itself and by a fixed value's definition)
+      const base = (place: PlaceId): number => {
+        const written = writtenAt(program, place);
+        return written !== null
+          ? termLevel(written)
+          : Math.max(ownLevel(program, place), fixed.get(place) ?? NOTHING);
+      };
       const graph = new Map<PlaceId, Edge<PlaceId>[]>();
       for (const [receiver, list] of routes)
         graph.set(
           receiver,
           list.map((route) => ({ producer: route.producer, weight: route.weight })),
         );
-      layered(
-        work,
-        graph,
-        (place) => {
-          const written = writtenAt(program, place);
-          return written !== null ? writtenDepth(written) : ownDepth(program, place);
-        },
-        (component, entering, gain, depth) => {
-          // (a bound on every member's levels, names ignored, which a loose route brings inside; what reads a member takes
-          // the level it is known to, its positions' deepest)
-          const bound = Math.max(entering, 0) + gain;
-          const known = this.#byName(
-            program,
-            routes,
-            component,
-            depth,
-            Math.max(entering, 0),
-            bound,
-          );
-          return (place) => known.get(place) ?? NOTHING;
-        },
-      );
+      layered(work, graph, base, (component, entering, gain, depth) => {
+        // (a bound on every member's levels, names ignored, which a loose route brings inside; what reads a member
+        // takes the level it is known to, its positions' deepest)
+        const bound = Math.max(entering, 0) + gain;
+        const known = this.#byName(
+          program,
+          base,
+          routes,
+          component,
+          depth,
+          Math.max(entering, 0),
+          bound,
+        );
+        return (place) => known.get(place) ?? NOTHING;
+      });
     });
     this.#state.built = true;
   }
@@ -208,6 +201,7 @@ export class NestingIndex {
    */
   #byName(
     program: CoreProgram,
+    base: (place: PlaceId) => number,
     routes: ReadonlyMap<PlaceId, readonly Route[]>,
     members: readonly PlaceId[],
     depth: ReadonlyMap<PlaceId, number>,
@@ -251,11 +245,7 @@ export class NestingIndex {
       entry.set(at, Math.max(entry.get(at) ?? NOTHING, level));
     };
     for (const receiver of members) {
-      const written = writtenAt(program, receiver);
-      enter(
-        position(receiver, ""),
-        written !== null ? writtenDepth(written) : ownDepth(program, receiver),
-      );
+      enter(position(receiver, ""), base(receiver));
       for (const route of routes.get(receiver) ?? []) {
         work.charge("indexSteps");
         const from = inside.has(route.producer)
@@ -304,6 +294,7 @@ export class NestingIndex {
 
   /** Whether some position of `place` is cut: else none of its paths is. */
   public cuts(place: PlaceId): boolean {
+    if (this.#uncut) return false;
     this.#build();
     return this.#cut.has(place);
   }
