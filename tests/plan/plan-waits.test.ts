@@ -211,6 +211,70 @@ test("a block's waits are its own, and a goto in a block reaching a waiting file
   assert.equal(waits.fileMayWait(quiet), true);
 });
 
+test("an instruction that can make a block due while the script runs marks its function when that block may wait", () => {
+  const timerWaits = "let beat = timer async hidden 10 s { wait 1 s }";
+  const mediaWaits = 'let music = playAudio async "music.mp3" { finish { wait 1 s } }';
+  const cases: readonly (readonly [string, string, Instruction["kind"], boolean])[] = [
+    // An async timer whose round may be 0 starts its own block right after it.
+    [
+      "function f { let t = timer async hidden 0 s { wait 1 s } }\nf()",
+      "zero round",
+      "startTimer",
+      true,
+    ],
+    [
+      "function f(d) { let t = timer(duration: d, async: true) { wait 1 s } }\nf(2 s)",
+      "computed round",
+      "startTimer",
+      true,
+    ],
+    [
+      'function f { let t = timer async hidden 0 s { say "Beat.", instant } }\nf()',
+      "block that cannot wait",
+      "startTimer",
+      false,
+    ],
+    // A store into `remaining` or `position` may start any timer or media block.
+    [
+      `${timerWaits}\nfunction f(h) { h.remaining = 0 s }\nf(beat)`,
+      "remaining, timer block",
+      "assign",
+      true,
+    ],
+    [
+      `${mediaWaits}\nfunction f(h) { h.position = 10 s }\nf(music)`,
+      "position, media block",
+      "assign",
+      true,
+    ],
+    [
+      "let beat = timer async hidden 10 s { }\nfunction f(h) { h.remaining = 0 s }\nf(beat)",
+      "remaining, no block waits",
+      "assign",
+      false,
+    ],
+    // `pause()` or `resume()` may start any timer block, never a media block.
+    [`${timerWaits}\nfunction f(h) { h.pause() }\nf(beat)`, "pause, timer block", "evaluate", true],
+    [
+      `${mediaWaits}\nfunction f(h) { h.resume() }\nf(music)`,
+      "resume, only a media block",
+      "evaluate",
+      false,
+    ],
+  ];
+  for (const [source, name, kind, expected] of cases) {
+    const { plan, waits, marked } = analysed(main(`${source}\nwait 2 s\nexit`));
+    const sites = inFunction(plan, "f", kind);
+    assert.notEqual(sites.length, 0, name);
+    assert.deepEqual(
+      sites.map((index) => waits.mayWaitAt(index)),
+      sites.map(() => expected),
+      name,
+    );
+    assert.equal(marked("f"), expected, name);
+  }
+});
+
 test("at every wait of a played session, each live function, block and file call is marked", () => {
   const sources: readonly Readonly<Record<string, string>>[] = [
     main(
@@ -240,4 +304,51 @@ test("at every wait of a played session, each live function, block and file call
     assert.equal(result.status, "halted");
     assert.ok(result.waits > 3, `${result.waits} waits`);
   }
+  // A block the script makes due starts inside the function and waits there, above its frame, which the play sees.
+  for (const source of [
+    "function site { let t = timer async hidden 0 s { wait 1 s } }\nsite()",
+    "let beat = timer async hidden 10 s { wait 1 s }\nfunction site(h) { h.remaining = 0 s }\nsite(beat)",
+    'let music = playAudio async "music.mp3" { finish { wait 1 s } }\nfunction site(h) { h.position = 10 s }\nsite(music)',
+  ]) {
+    const { plan } = analysed(main(`${source}\nwait 2 s\nexit`));
+    const result = checkWaitsAgainstEngine(plan);
+    assert.deepEqual(result.unmarked, []);
+    assert.equal(result.status, "halted");
+    const site = plan.functions.find((definition) => definition.name === "site")!;
+    assert.ok(result.live.has(site.id), source);
+  }
+});
+
+test("the engine check reports every unmarked live part, also at a wait settled inside one operation", () => {
+  const none: PlanWaits = {
+    waitsAt: () => false,
+    mayWaitAt: () => false,
+    functionMayWait: () => false,
+    fileMayWait: () => false,
+  };
+  // The block's goto replaces the activation; the inner block waits and its wait is settled by the same catch-up.
+  const settled = analysed({
+    "main.tease": 'let beat = timer async hidden 1 s { goto "room.tease" }\nwait 10 s\nexit',
+    "room.tease": "function f { let inner = timer async hidden 0 s { wait 1 s } }\nf()\nexit",
+  }).plan;
+  const f = settled.functions.find((definition) => definition.name === "f")!;
+  const missed = checkWaitsAgainstEngine(settled, 200, none).unmarked;
+  assert.ok(
+    missed.some((line) => line.endsWith(`function or block ${f.id} is live unmarked`)),
+    missed.join("\n"),
+  );
+  assert.ok(
+    missed.some((line) => line.includes("waits unmarked")),
+    missed.join("\n"),
+  );
+  assert.deepEqual(checkWaitsAgainstEngine(settled).unmarked, []);
+  const called = analysed({
+    "main.tease": 'call "rooms/hall.tease"\nexit',
+    "rooms/hall.tease": "wait 1 s\nend",
+  }).plan;
+  const missedCall = checkWaitsAgainstEngine(called, 200, none).unmarked;
+  assert.ok(
+    missedCall.some((line) => line.includes("the file call at")),
+    missedCall.join("\n"),
+  );
 });

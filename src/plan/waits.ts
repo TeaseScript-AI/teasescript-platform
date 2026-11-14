@@ -1,22 +1,24 @@
 import { PlanControlFlow } from "./control-flow.js";
-import type { Instruction, InstructionPlan } from "./model.js";
+import { expressionPlanChildren } from "./expression-children.js";
+import { instructionExpressions } from "./instruction-expressions.js";
+import type { ExpressionPlan, Instruction, InstructionPlan } from "./model.js";
 
 /**
  * Which parts of a plan may be live while the session waits for the host: the instructions that can leave it waiting,
  * the author functions and blocks whose activation may stand below such a wait, and the file activations that may.
  *
- * Sound and exact up to values and dead code: a function the plan can reach a wait from is marked, and a marked
- * function has a path in the plan to an instruction that can wait; a pacing that evaluates to `instant`, a lock that
- * never blocks or a branch that never runs still marks. A block starts only where the runtime dispatches it; this
- * analysis counts a block's waits as its own and assumes no block starts and waits between two instructions of a
- * function that cannot wait itself.
+ * Sound: a function the plan can reach a wait from is marked. A marked function has a path in the plan to an
+ * instruction that can wait, or to one that can start a block that can wait (see `blocksItMayStart`); a pacing that
+ * evaluates to `instant`, a lock that never blocks, a branch that never runs, or a store that only names a handle's
+ * field still marks. A block's own waits are its own: the runtime starts a block at a wait, or right after an
+ * instruction of the script that made it due, and only the latter leaves the script's frames below the block.
  */
 export interface PlanWaits {
   /** The instruction at `index` can leave the session waiting by itself. */
   waitsAt(index: number): boolean;
   /**
-   * The instruction at `index` may stand below a wait: it waits by itself, or it calls a function or a file whose
-   * activation may wait.
+   * The instruction at `index` may stand below a wait: it waits by itself, it calls a function or a file whose
+   * activation may wait, or it may start a block that may wait.
    */
   mayWaitAt(index: number): boolean;
   /** An author function's or a block's activation may be live while the session waits. */
@@ -87,9 +89,61 @@ function instructionWaits(instruction: Instruction): boolean {
 }
 
 /**
+ * The blocks an instruction may make due while the script runs, which the runtime then starts right after it: an
+ * async timer's own block when its round may be 0; any timer or media block after a store into a property named
+ * `remaining` or `position` (a seek can pass a media's cues and end, a timer's `remaining` can reach 0); any timer block
+ * after a `pause()` or `resume()` call (on a timer with nothing remaining). The plan does not say which value is a
+ * handle, so the names alone count: a store into an object's `remaining`, or a `pause()` of anything else, counts too
+ * and cannot start a block. Sound before exact; a plan whose blocks cannot wait loses nothing by it.
+ */
+function blocksItMayStart(instruction: Instruction): {
+  readonly ownBlock: number | null;
+  readonly timerBlocks: boolean;
+  readonly timerOrMediaBlocks: boolean;
+} {
+  const ownBlock =
+    instruction.kind === "startTimer" && !positiveConstantDuration(instruction)
+      ? instruction.handlerFunctionId
+      : null;
+  const timerOrMediaBlocks =
+    instruction.kind === "assign" &&
+    instruction.target.kind === "property" &&
+    (instruction.target.name === "remaining" || instruction.target.name === "position");
+  // Every expression the instruction reads, walked with a list: valid source may nest deeper than the call stack.
+  let timerBlocks = false;
+  const pending: ExpressionPlan[] = [...instructionExpressions(instruction)];
+  while (pending.length > 0 && !timerBlocks) {
+    const expression = pending.pop()!;
+    if (
+      expression.kind === "call" &&
+      expression.callee.kind === "property" &&
+      (expression.callee.name === "pause" || expression.callee.name === "resume")
+    )
+      timerBlocks = true;
+    pending.push(...expressionPlanChildren(expression));
+  }
+  return { ownBlock, timerBlocks, timerOrMediaBlocks };
+}
+
+/** A timer's duration written as a constant above zero, whose round is never 0. */
+function positiveConstantDuration(
+  instruction: Extract<Instruction, { kind: "startTimer" }>,
+): boolean {
+  const duration = instruction.duration;
+  if (duration.kind === "duration") return duration.milliseconds > 0;
+  return (
+    instruction.unit !== null &&
+    duration.kind === "literal" &&
+    typeof duration.value === "number" &&
+    duration.value > 0
+  );
+}
+
+/**
  * The least fixpoint over these facts, each a node that turns true once and never back:
  * - a region (an author function, a block, or a file's root region) may wait: one of its instructions waits by
- *   itself, or it calls a function that may wait, or it calls a file whose activation may wait;
+ *   itself, or it calls a function that may wait, or it calls a file whose activation may wait, or it may start a
+ *   block that may wait (`blocksItMayStart`);
  * - a region's goto reaches a wait (`gotoNode`): a `goto` of a file that the region, or a function it calls, holds goes
  *   to a file whose activation may wait;
  * - a file's activation may wait: its root region may wait, or its root region's goto reaches a wait, as a `goto`
@@ -117,12 +171,14 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
   const blocks = plan.functions.map((definition) => definition.handler !== null);
 
   // Nodes: regions, then whether their goto reaches a wait, then the files' activations, then "some activation may
-  // wait" and "every activation may wait".
+  // wait", "every activation may wait", "some timer block may wait" and "some timer or media block may wait".
   const gotoNode = (region: number): number => regionCount + region;
   const activationNode = (file: number): number => 2 * regionCount + file;
   const someActivation = 2 * regionCount + fileCount;
   const everyActivation = someActivation + 1;
-  const nodeCount = everyActivation + 1;
+  const someTimerBlock = everyActivation + 1;
+  const someTimerOrMediaBlock = someTimerBlock + 1;
+  const nodeCount = someTimerOrMediaBlock + 1;
   /** For each node, the nodes that turn true when it does. */
   const dependents: number[][] = Array.from({ length: nodeCount }, () => []);
   const depend = (from: number, to: number): void => {
@@ -136,6 +192,17 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
     work.push(node);
   };
 
+  /** The nodes that make an instruction that may start a block stand below a wait, by instruction. */
+  const startedBlocks = new Map<number, readonly number[]>();
+  const startNodes = (instruction: Instruction): readonly number[] => {
+    const { ownBlock, timerBlocks, timerOrMediaBlocks } = blocksItMayStart(instruction);
+    const nodes: number[] = [];
+    const own = ownBlock === null ? undefined : regionOfFunction.get(ownBlock);
+    if (own !== undefined) nodes.push(own);
+    if (timerBlocks) nodes.push(someTimerBlock);
+    if (timerOrMediaBlocks) nodes.push(someTimerOrMediaBlock);
+    return nodes;
+  };
   for (let file = 0; file < fileCount; file += 1) {
     depend(file, activationNode(file));
     depend(gotoNode(file), activationNode(file));
@@ -147,11 +214,19 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
     const block = region >= fileCount && blocks[region - fileCount]!;
     // A goto in a block that reaches a waiting activation: every activation, as any may be running the block.
     if (block) depend(gotoNode(region), everyActivation);
+    const handler = region >= fileCount ? plan.functions[region - fileCount]!.handler : null;
+    if (handler === "timer") depend(region, someTimerBlock);
+    if (handler === "timer" || handler === "media") depend(region, someTimerOrMediaBlock);
     for (let index = start; index < end; index += 1) {
       const instruction = instructions[index]!;
       if (instructionWaits(instruction)) {
         set(region);
         continue;
+      }
+      const starts = startNodes(instruction);
+      if (starts.length > 0) {
+        startedBlocks.set(index, starts);
+        for (const node of starts) depend(node, region);
       }
       if (instruction.kind !== "callFunction" && instruction.kind !== "transfer") continue;
       for (const { edge } of flow.successors(index)) {
@@ -181,6 +256,7 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
       const instruction = instructions[index];
       if (instruction === undefined) return false;
       if (instructionWaits(instruction)) return true;
+      if (startedBlocks.get(index)?.some((node) => value[node] === 1) === true) return true;
       if (instruction.kind !== "callFunction" && instruction.kind !== "transfer") return false;
       return flow.successors(index).some(({ edge }) => {
         if (edge.kind === "call") {
