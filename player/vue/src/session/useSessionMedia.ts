@@ -201,8 +201,8 @@ export function useSessionMedia({
   ): Promise<{ readonly reference: string } | { readonly message: string }> {
     const checked = await checkImageFile(file, filters, decodeImage());
     if (!checked.ok) return { message: checked.message };
-    // An unmounted Player keeps no media.
-    if (isDisposed()) return { message: "The question was gone before your answer arrived." };
+    // An unmounted Player keeps no media and shows nothing.
+    if (isDisposed()) return { message: "" };
     const stored = capturedMedia.add("image", checked.data, {
       width: checked.width,
       height: checked.height,

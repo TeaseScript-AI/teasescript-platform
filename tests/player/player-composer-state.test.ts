@@ -665,7 +665,6 @@ RERUN.rows(
     assert.equal(record?.stage, "settled");
     assert.ok(said(p).includes("B?"), "the block took the screen");
     assert.equal(p.composer.chatText.value, "SENT");
-    assert.notEqual(p.submission.notice.value, "");
     assert.equal(
       ops(p, "submitComposer").length,
       0,
@@ -820,7 +819,7 @@ RERUN.rows(
 
 RERUN.rows(
   "N5 chat",
-  "a refused text comes back before what was typed meanwhile, with the notice",
+  "a refused text comes back before what was typed meanwhile",
   async (context, topology, end) => {
     const p = await page(context, topology, script(BUTTON_BLOCK, 'let name = askText "Name?"'));
     type(p.composer, "SENT");
@@ -840,10 +839,6 @@ RERUN.rows(
     p.frame.release();
     await until(() => record.stage === "settled", "the answer settled", "host");
     assert.equal(p.composer.chatText.value, "SENTTAIL");
-    assert.equal(
-      p.submission.notice.value,
-      "The question was gone before your answer arrived. Your text is back in the field.",
-    );
     assert.equal(p.submission.consumed.value, null);
     return end();
   },
@@ -859,7 +854,6 @@ RERUN.rows(
     due(context);
     await sendSettled(p);
     assert.equal(p.composer.chatText.value, "", "nothing written to the chat");
-    assert.notEqual(p.submission.notice.value, "");
     await until(() => action(p)?.ui.kind === "button", "the block's button", "host");
     p.submission.choose(null);
     await shows(p, "temporal", "the date again");
@@ -920,7 +914,7 @@ RERUN.rows(
 
 RERUN.rows(
   "N5 choice",
-  "a refused choice shows its buttons again with the notice",
+  "a refused choice shows its buttons again",
   async (context, topology, end) => {
     const p = await page(context, topology, script(BUTTON_BLOCK, 'let pick = askChoice "A", "B"'));
     due(context);
@@ -932,7 +926,6 @@ RERUN.rows(
     p.frame.release();
     await until(() => p.submission.pending.value === null, "refused", "host");
     assert.equal(p.submission.consumed.value, null);
-    assert.notEqual(p.submission.notice.value, "");
     return end();
   },
 );
@@ -948,7 +941,6 @@ RERUN.rows(
     await sendSettled(p);
     assert.equal(p.submission.pending.value, null);
     assert.equal(p.composer.chatText.value, "");
-    assert.notEqual(p.submission.notice.value, "");
     p.submission.choose(null);
     await shows(p, "password", "the password again");
     assert.equal(p.composer.displayed.value, "");
@@ -1196,7 +1188,6 @@ RERUN.rows(
     due(context);
     p.submission.send("input");
     await until(() => p.forms.commitWindow.value === null, "the window ends", "host");
-    assert.notEqual(p.submission.notice.value, "");
     await until(() => action(p)?.ui.kind === "button", "the block", "host");
     p.submission.choose(null);
     await shows(p, "form", "the field again");

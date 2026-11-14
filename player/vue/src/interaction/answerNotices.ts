@@ -1,21 +1,17 @@
-// The composer's notices for an answer or a form edit that the runtime did not take, shared by `useAnswerSubmission` and
+// The composer's notice for an answer or a form edit that the runtime did not take, shared by `useAnswerSubmission` and
 // `useFormUpdates`.
 
-/** The notice of an answer or edit that arrived after its question was gone. */
-export const QUESTION_GONE = "The question was gone before your answer arrived.";
-
-/** `QUESTION_GONE`, saying so where the answer's typed text came back to the composer. */
-export const questionGone = (textBack: boolean) =>
-  textBack ? `${QUESTION_GONE} Your text is back in the field.` : QUESTION_GONE;
-
-/** The notice of a refused answer or edit; `textBack` when its typed text came back to the composer. */
-export function refusalMessage(
-  outcome: { readonly kind: string; readonly message?: string },
-  textBack = false,
-): string {
+/**
+ * The notice of a refused answer or edit, or "" for one refused because its question was gone, which settles silently
+ * (the owner's decision of 2026-11-14): the refusal is a window no player's timing hits.
+ */
+export function refusalMessage(outcome: {
+  readonly kind: string;
+  readonly message?: string;
+}): string {
   return outcome.kind === "invalidPayload" && outcome.message !== undefined
     ? outcome.message
     : outcome.kind === "executionPending"
       ? "The script moved on; try again."
-      : questionGone(textBack);
+      : "";
 }

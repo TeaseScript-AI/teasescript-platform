@@ -656,7 +656,7 @@ RERUN.rows(
 
 RERUN.rows(
   "the origin gone after the yield",
-  "a block that takes the screen during the answer's painted frame refuses it before it is sent: it is undone with the notice",
+  "a block that takes the screen during the answer's painted frame refuses it before it is sent: it is undone, without a notice",
   async (context, topology, end) => {
     const { player, composer, submission, connection, frame } = await page(
       context,
@@ -676,10 +676,7 @@ RERUN.rows(
     frame.release();
     await until(() => record.stage === "settled", "the answer settled", "host");
     assert.equal(composer.chatText.value, "Go");
-    assert.equal(
-      submission.notice.value,
-      "The question was gone before your answer arrived. Your text is back in the field.",
-    );
+    assert.equal(submission.notice.value, "");
     assert.equal(connection.posts.filter((post) => post.op === ANSWER_OP).length, 0);
     return end();
   },
