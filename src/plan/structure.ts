@@ -137,7 +137,12 @@ function readStructure(
         parent.pc = join;
         open.push(
           sequence(
-            { kind: "else", at: owner.at, whenTrue: current.constructs, elseJump: current.elseJump },
+            {
+              kind: "else",
+              at: owner.at,
+              whenTrue: current.constructs,
+              elseJump: current.elseJump,
+            },
             current.to,
             join,
           ),

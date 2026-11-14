@@ -74,7 +74,8 @@ test("a lowered plan reads back as its source's constructs, each sequence coveri
       all.push(construct);
       if (construct.kind === "if") {
         covered(construct.whenTrue, construct.at + 1, construct.elseJump ?? construct.to);
-        if (construct.whenFalse !== null) covered(construct.whenFalse, construct.elseJump! + 1, construct.to);
+        if (construct.whenFalse !== null)
+          covered(construct.whenFalse, construct.elseJump! + 1, construct.to);
       } else if (construct.kind === "loop") {
         covered(construct.head, construct.from, construct.at);
         covered(construct.body, construct.at + 1, construct.to);
@@ -140,7 +141,8 @@ test("plan validation accepts a lowered plan and refuses one whose jumps do not 
       [
         {
           code: "TSC002",
-          message: "Jumps must nest: this jumpIfFalse's target lies outside the construct around it.",
+          message:
+            "Jumps must nest: this jumpIfFalse's target lies outside the construct around it.",
           path: `$.instructions[${inner.index}]`,
         },
       ],
@@ -151,13 +153,14 @@ test("plan validation accepts a lowered plan and refuses one whose jumps do not 
 test("a plan that fails an earlier check gets no nesting error on top", () => {
   const plan = compileValidPlan("let a = true\nif a { a = false }\nexit");
   const at = plan.instructions.findIndex((instruction) => instruction.kind === "jumpIfFalse");
-  const instructions = plan.instructions.map(
-    (instruction, index): Instruction =>
-      index === at && instruction.kind === "jumpIfFalse"
-        ? { ...instruction, target: plan.instructions.length + 5 }
-        : instruction,
+  const instructions = plan.instructions.map((instruction, index): Instruction =>
+    index === at && instruction.kind === "jumpIfFalse"
+      ? { ...instruction, target: plan.instructions.length + 5 }
+      : instruction,
   );
-  const messages = validateInstructionPlan({ ...plan, instructions }).errors.map((error) => error.message);
+  const messages = validateInstructionPlan({ ...plan, instructions }).errors.map(
+    (error) => error.message,
+  );
   assert.notDeepEqual(messages, []);
   assert.deepEqual(
     messages.filter((message) => message.startsWith("Jumps must nest")),
