@@ -67,6 +67,8 @@ import { NativeDict, NativeObject, NativeSet } from "../../dist/src/runtime/nati
 
 /** Thrown to unwind the program when it waits at a wait the session has not settled; the drive ends there. */
 export const SUSPEND = Symbol("suspend");
+/** The chain form: a frame stands at a call; the driver runs the callee (`callee`, `callArgs`, `callSpan`, `callerRec`). */
+export const CALL = Symbol("call");
 /** Thrown to unwind the program after `exit`. */
 export const EXIT = Symbol("exit");
 /** Thrown by a `goto` to a file: the program's dispatcher starts that file. */
@@ -97,6 +99,16 @@ export class Runtime {
     this.session = session;
     this.Goto = Goto;
     this.SUSPEND = SUSPEND;
+    this.CALL = CALL;
+    /** The chain form (set by its program): every author call goes through `drive`; the functions by name; calls made. */
+    this.chain = false;
+    this.fns = null;
+    this.calls = 0;
+    this.callee = null;
+    this.callArgs = null;
+    this.callSpan = null;
+    this.callerRec = null;
+    this.result = null;
     this.END = END;
     /** The closures of the blocks created so far, by function ID (the latest creation of each). */
     this.blocks = new Map();
@@ -521,6 +533,53 @@ export class Runtime {
       );
     this.fuel = 1_000_000;
   }
+  /**
+   * The chain form's driver for one activation (a file's root or a block): it owns the frames of the author calls made
+   * below `fn`. A frame at a call returns `CALL` with its record; the driver checks the depth, runs the callee, and on its
+   * return writes the value to `result` and re-enters the caller at its record. At a suspension it saves the callers'
+   * records (each marked `call`), innermost first; a resume rebuilds them and re-enters the innermost.
+   */
+  drive(fn, rec, at) {
+    const stack = [];
+    let value;
+    try {
+      if (rec !== null) {
+        while (rec.call) {
+          stack.push(fn, rec);
+          rec = this.resumeFrame();
+          fn = this.fns[rec.fn];
+          this.depth += 1;
+        }
+        value = fn(rec);
+      } else value = fn(null, at);
+      for (;;) {
+        if (value === CALL) {
+          stack.push(fn, this.callerRec);
+          this.enter(this.callSpan);
+          this.calls += 1;
+          fn = this.callee;
+          const a = this.callArgs;
+          switch (a.length) {
+            case 0: value = fn(null); break;
+            case 1: value = fn(null, a[0]); break;
+            case 2: value = fn(null, a[0], a[1]); break;
+            case 3: value = fn(null, a[0], a[1], a[2]); break;
+            default: value = fn(null, ...a);
+          }
+        } else {
+          if (stack.length === 0) return value;
+          this.depth -= 1;
+          const caller = stack.pop();
+          fn = stack.pop();
+          this.result = value;
+          value = fn(caller);
+        }
+      }
+    } catch (signal) {
+      if (signal === SUSPEND) for (let i = stack.length - 1; i > 0; i -= 2) this.frames.push(stack[i]);
+      throw signal;
+    }
+  }
   resumeFrame() {
     const frame = this.resumeFrames.shift();
     if (this.resumeFrames.length === 0) this.resuming = false;
@@ -599,7 +658,9 @@ export class Runtime {
     if (this.resuming) {
       const frame = snapshot.callFrames.at(-1);
       this.depth += 1;
-      this.blocks.get(frame.functionId)(this.resumeFrame());
+      const block = this.blocks.get(frame.functionId);
+      if (this.chain) this.drive(block, this.resumeFrame());
+      else block(this.resumeFrame());
       this.depth -= 1;
       returnFromTimerHandler(this.plan, snapshot, frame, this.events, null, null);
       ran = true;
@@ -610,7 +671,8 @@ export class Runtime {
       const block = this.blocks.get(frame.functionId);
       if (block === undefined) throw new Error("study: a block whose creating instruction did not run in this drive");
       this.depth += 1;
-      block(null);
+      if (this.chain) this.drive(block, null);
+      else block(null);
       this.depth -= 1;
       returnFromTimerHandler(this.plan, snapshot, frame, this.events, null, null);
       ran = true;

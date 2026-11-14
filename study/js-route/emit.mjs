@@ -101,7 +101,7 @@ export const STOP_EXCLUDED = new Set(["jump", "jumpIfFalse", "loopStart", "loopC
  * its variables saved as plain data at a wait); everything else stays structured. Without it, a wait asks the session
  * (`rt.waited`), which way (1), replaying from the start, answers.
  */
-export function emitProgram(plan, { resumable = false, runawayCheck = false, generators = false, facts = null, stops = false } = {}) {
+export function emitProgram(plan, { resumable = false, runawayCheck = false, generators = false, facts = null, stops = false, chain = false } = {}) {
   // `facts`: the type analysis's `facts().values` (the typed probe, ruling 3): a plan expression finds its type by its
   // span and the AST kind it was lowered from; a guard is dropped where the types make it unneeded. `typeStats` counts
   // the sites that asked and those that found a type.
@@ -135,6 +135,9 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   const isBool = (e) => typeOf(e) === "boolean";
   const isList = (e) => typeOf(e)?.startsWith("list<") === true;
   if (resumable && generators) throw new Error("study emitter: resumable or generators, not both");
+  // `chain`: the resumable form with every author call on a frame chain the runtime's driver owns (`rt.drive`): a call
+  // is a place, where the caller saves its record and returns `rt.CALL`; it is re-entered after the call with the result.
+  if (chain && !resumable) throw new Error("study emitter: the chain form is a resumable form");
   // `stops` (part F): Debug's stop at a statement is a resume point, so every function becomes a generator.
   if (stops && !generators) throw new Error("study emitter: stops need the generator form");
   // `generators`: part C's third form: a function that can wait is a JavaScript generator that yields at a wait, kept
@@ -182,7 +185,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   }
   const waitsAt = (pc) => {
     const ins = plan.instructions[pc];
-    return waitsHere(ins) || (ins.kind === "callFunction" && canWait.has(ins.functionId));
+    return (chain && ins.kind === "callFunction") || waitsHere(ins) || (ins.kind === "callFunction" && canWait.has(ins.functionId));
   };
   const rangeWaits = (from, to) => {
     if (!resumable) return false;
@@ -218,7 +221,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       `function${generators ? "*" : ""} enter${index}(resume, at, called) {`,
       `  rt.file = ${index}; const depth = rt.depth;${vars.length > 0 ? ` const outer = called ? [${fileVars}] : null; if (resume === null) ${vars.join(" = ")} = undefined;` : ""}`,
       "  try {",
-      `    for (;;) { try { ${generators ? "yield* " : ""}file${index}(resume, at); return; } catch (signal) { if (!(signal instanceof rt.Goto && signal.label)) throw signal; resume = null; at = signal.pc; rt.depth = depth; rt.file = ${index}; } }`,
+      `    for (;;) { try { ${generators ? "yield* " : ""}${chain ? `rt.drive(file${index}, resume, at)` : `file${index}(resume, at)`}; return; } catch (signal) { if (!(signal instanceof rt.Goto && signal.label)) throw signal; resume = null; at = signal.pc; rt.depth = depth; rt.file = ${index}; } }`,
       `  } finally { ${vars.length > 0 ? `if (called) [${fileVars}] = outer;` : ""} }`,
       "}",
     );
@@ -227,6 +230,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   if (plan.functions.some((definition) => definition.handler === null && !emittedFunctions.has(definition.id)))
     throw new Unsupported("a function outside every file's functions");
   lines.push(`const FILES = [${plan.files.map((_, i) => `enter${i}`).join(", ")}];`);
+  if (chain) lines.push("rt.chain = true;", `rt.fns = { ${[...emittedFunctions].map((id) => `f${id}`).join(", ")} };`);
   lines.push(
     `function${generators ? "*" : ""} main() {`,
     "  let file = rt.resuming ? rt.resumeFrames[0].file : 0;",
@@ -1227,6 +1231,22 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
           const slots = ins.arguments.map((a) => definition.parameters.findIndex((p) => p.name === a.parameterName));
           if (slots.includes(-1) || new Set(slots).size !== slots.length)
             throw new Unsupported("a call whose arguments do not match the parameters");
+          if (chain) {
+            if (!flat) throw new Unsupported("a chain call outside its region's switch");
+            const args = ins.arguments.map((a) => {
+              const v = x();
+              line(`${v} = ${own(a.value)};`);
+              return v;
+            });
+            ins.arguments.forEach((a, index) => {
+              if (a.typeCheck !== undefined) line(`rt.typeCheck(${args[index]}, ${konst(a.typeCheck)}, ${konst(a.value.span)});`);
+            });
+            const ordered = definition.parameters.map((_, slot) => args[slots.indexOf(slot)] ?? "undefined");
+            line(`rt.callee = f${ins.functionId}; rt.callArgs = [${ordered.join(", ")}]; rt.callSpan = ${konst(ins.span)}; rt.callerRec = CALLER(${1e6 + pc}); return rt.CALL;`);
+            line(`case ${1e6 + pc}:`);
+            line(`${temp(ins.destinationTemporary)} = rt.result;`);
+            return;
+          }
           const resumes = resumable && canWait.has(ins.functionId);
           if (resumes) {
             line("if (!rt.resuming) {");
@@ -1403,7 +1423,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     if (locals.length > 0) header.push(`  var ${locals.join(", ")};`);
     if (!flatRegion) {
       if (definition === null) return [`function${generators ? "*" : ""} file${fileIndex}(resume, at) {`, ...header, ...out, "}"].join("\n");
-      return [`function${star(definition.id)} f${definition.id}(${params.join(", ")}) {`, ...header, ...(tick ? [`  ${tick}`] : []), ...out, "  return null;", "}"].join("\n");
+      return [`function${star(definition.id)} f${definition.id}(${(chain ? ["resume", ...params] : params).join(", ")}) {`, ...header, ...(tick ? [`  ${tick}`] : []), ...out, "  return null;", "}"].join("\n");
     }
     // A resumable region: its argument evaluation before a call that waits runs only on a fresh entry of that call.
     const savedList = saved().join(", ");
@@ -1415,6 +1435,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       `  if (resume !== null) { pc = resume.pc; [${savedList}] = resume.v; }`,
       // One list of the saved variables per region, not one per wait: it was most of a large program's text.
       `  const SAVE = (at) => rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: at, v: [${savedList}] });`,
+      ...(chain ? [`  const CALLER = (at) => ({ fn: "${fnName}", file: ${fileIndex}, pc: at, v: [${savedList}], call: true });`] : []),
       "  D: for (;;) switch (pc) {",
       ...out,
       ...(definition === null ? [] : ["  return null;"]),

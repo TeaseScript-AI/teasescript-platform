@@ -19,7 +19,7 @@ import { NativeDict, NativeObject, NativeSet } from "../../dist/src/runtime/nati
 const programs = new Map();
 
 /** The emitted program of a validated plan: its source, constants and the function that instantiates it. */
-/** `form`: false (replay), true (resumable) or "generators". */
+/** `form`: false (replay), true (resumable), "chain" (resumable, every author call on the driver's chain) or "generators". */
 export function compileProgram(plan, resumable = false, runawayCheck = false, facts = null, stops = false) {
   const key = `${resumable}/${runawayCheck}/${facts === null ? "" : "typed"}/${stops}`;
   if (!programs.has(key)) programs.set(key, new WeakMap());
@@ -27,7 +27,7 @@ export function compileProgram(plan, resumable = false, runawayCheck = false, fa
   let program = cache.get(plan);
   if (program === undefined) {
     const t0 = performance.now();
-    const emitted = emitProgram(plan, { resumable: resumable === true, generators: resumable === "generators", runawayCheck, facts, stops });
+    const emitted = emitProgram(plan, { resumable: resumable === true || resumable === "chain", chain: resumable === "chain", generators: resumable === "generators", runawayCheck, facts, stops });
     const t1 = performance.now();
     const instantiate = new Function("rt", "K", emitted.source);
     // Part G: the time to emit, and to turn the text into a function (V8 compiles function bodies lazily, at first run).
@@ -224,11 +224,13 @@ export class ResumableSession {
   /** The save: JSON text, or null before the first wait. */
   save = null;
   #state;
-  constructor(plan, fresh, { runawayCheck = false } = {}) {
+  /** Author calls made through the chain so far (the chain form only). */
+  calls = 0;
+  constructor(plan, fresh, { runawayCheck = false, chain = false } = {}) {
     const captured = captureOrReuseInstructionPlan(plan);
     if (!captured.validation.valid || captured.plan === null) throw new TypeError("Malformed instruction plan.");
     this.#plan = captured.plan;
-    this.#program = compileProgram(this.#plan, true, runawayCheck);
+    this.#program = compileProgram(this.#plan, chain ? "chain" : true, runawayCheck);
     this.#state = withFrozenTemporalCaptures(createFreshRuntimeSnapshotWithValidatedPlan(this.#plan, fresh));
   }
   get state() {
@@ -297,6 +299,7 @@ export class ResumableSession {
       }
     }
     this.#state = rt.snapshot;
+    this.calls += rt.calls;
     this.bridged = rt.bridged;
     this.bridgedInstructions = rt.bridgedInstructions;
     return { events: rt.events, instructionsExecuted: 0 };

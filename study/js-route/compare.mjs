@@ -145,7 +145,7 @@ for (const file of files) {
   const weight = { files: compiled.files, planInstructions: compiled.plan.instructions.length, instructions: expected.instructions, operations: expected.out.length };
   let emitted;
   try {
-    emitted = compileProgram(compiled.plan, mode === "resumable" ? true : mode === "generators" ? "generators" : false, RUNAWAY);
+    emitted = compileProgram(compiled.plan, mode === "resumable" ? true : mode === "chain" ? "chain" : mode === "generators" ? "generators" : false, RUNAWAY);
   } catch (error) {
     if (!(error instanceof Unsupported)) throw error;
     console.log(JSON.stringify({ file: name, verdict: "unsupported", why: error.message, ...weight }));
@@ -153,11 +153,11 @@ for (const file of files) {
   }
   if (emitDir !== null) fs.writeFileSync(path.join(emitDir, `${name}.js`), emitted.source);
   const session =
-    mode === "resumable" ? createResumableSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY })
+    mode === "resumable" || mode === "chain" ? createResumableSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY, chain: mode === "chain" })
     : mode === "generators" ? createGeneratorSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY })
     : createEmittedSession(compiled.plan, FRESH, { runawayCheck: RUNAWAY });
   let largestSave = 0;
-  if (mode === "resumable") {
+  if (mode === "resumable" || mode === "chain") {
     const run = session.run.bind(session);
     session.run = (o) => {
       const r = run(o);
