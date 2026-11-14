@@ -174,17 +174,21 @@ export function storeOf(
 /** What a name of a program refers to: its `let`, its function's parameter, or a `for` loop's variable (`null`). */
 export type Declared = LetStatement | FunctionParameter | null;
 
+/** A name its scope declares more than once: the oracle resolves no block scope (V30 §14 allows sibling blocks one each). */
+const TWICE = Symbol("declared more than once");
+
 const SCOPES = new WeakMap<
   readonly Statement[],
-  (at: number, name: string) => Declared | undefined
+  (at: number, name: string) => Declared | typeof TWICE | undefined
 >();
 
 /**
- * The declaration a name read or stored at `at` refers to, in its owning scope (V30 §14): the function whose span holds
- * `at` (a function is declared at a file's top level, so the spans of a file's functions do not overlap), whose own
- * `let`s, parameters and loop variables come first, then the file's, outside every function. Within one scope the first
- * declaration of a name, as the oracle reads a file. `undefined` where no scope declares it. `statements` are one file's
- * (`allStatements`), the scopes built once for them.
+ * The one declaration a name read or stored at `at` refers to (V30 §14), the derived oracle's every by-name lookup: in the
+ * function whose span holds `at` (a function is declared only at a file's top level, so their spans do not overlap) its
+ * parameters, `let`s and loop variables at any block depth, else the file's, outside every function, likewise.
+ * `undefined` where no scope declares the name. A name its scope declares more than once is underivable: the oracle
+ * models no block scope, so it declines rather than pick one. `statements` are one file's (`allStatements`), the scopes
+ * built once for them.
  */
 export function declaredIn(
   statements: readonly Statement[],
@@ -198,11 +202,11 @@ export function declaredIn(
     );
     const ownerAt = (offset: number): FunctionDeclaration | null =>
       functions.find((fn) => fn.span.start.offset <= offset && offset < fn.span.end.offset) ?? null;
-    const scopes = new Map<FunctionDeclaration | null, Map<string, Declared>>();
+    const scopes = new Map<FunctionDeclaration | null, Map<string, Declared | typeof TWICE>>();
     const declare = (owner: FunctionDeclaration | null, declared: string, as: Declared): void => {
-      const scope = scopes.get(owner) ?? new Map<string, Declared>();
+      const scope = scopes.get(owner) ?? new Map<string, Declared | typeof TWICE>();
       scopes.set(owner, scope);
-      if (!scope.has(declared)) scope.set(declared, as);
+      scope.set(declared, scope.has(declared) ? TWICE : as);
     };
     for (const fn of functions)
       for (const parameter of fn.parameters) declare(fn, parameter.name.name, parameter);
@@ -222,7 +226,9 @@ export function declaredIn(
     };
     SCOPES.set(statements, resolve);
   }
-  return resolve(at.span.start.offset, name);
+  const found = resolve(at.span.start.offset, name);
+  if (found === TWICE) throw new Underivable(`'${name}' declared more than once in its scope`);
+  return found;
 }
 
 export function targetName(expression: Expression): string {
