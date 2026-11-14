@@ -41,7 +41,7 @@ import {
 } from "../helpers/player/worker-topology.js";
 
 /*
- * The composer's controllers as `RuntimeInteraction` wires them (the owner's decisions of 2026-11-11/12, #2430): the
+ * The composer's controllers as `RuntimeInteraction` wires them (PLAYER-UI "Composer and foreground interactions"): the
  * slots of the composer's one field, the answers checked at once and settled by the runtime, and a form's updates.
  * Each row runs the real controllers over the real `usePlayerSession`, its lock service and input sections, on both
  * topologies, with the post log. A block wins by controlled time: `performance.now` stands past its timer, no automatic
