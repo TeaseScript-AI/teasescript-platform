@@ -528,10 +528,10 @@ test("the host global at a position, where the run ends before its instruction's
   const producer = "s.substring(50)";
   for (const [source, position] of [
     // the run does not reach the command
-    [`let s = load "k", default: "x"\nlet a = ${producer}\nopenUrl hostValue\nexit\n`, "url"],
+    [`let s = load "k", default: "x"\nlet a = ${producer}\nopenUrl(hostValue)\nexit\n`, "url"],
     // an earlier operand of the same command fails before the command checks the host global's value
     [
-      `let s = load "k", default: "https://example.com"\nopenUrl ${producer}, alwaysButton: hostValue\nexit\n`,
+      `let s = load "k", default: "https://example.com"\nopenUrl(${producer}, alwaysButton: hostValue)\nexit\n`,
       "alwaysButton",
     ],
   ] as const) {
