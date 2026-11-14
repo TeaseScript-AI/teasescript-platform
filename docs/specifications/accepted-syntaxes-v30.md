@@ -1978,7 +1978,7 @@ and without another opener the call gives the default.
 let photo = decryptFile(locked, password: "corner", default: null)
 let photo = decryptFile(locked, password: askPassword("Password"), default: null)
 let photo = decryptFile(locked, key: unlockKey, default: null)
-let photo = decryptFile(locked, default: null)        // opens if its time has passed, otherwise the Player asks
+let photo = decryptFile(locked, default: null)        // opens if its time has passed, otherwise the Playroom asks
 ```
 
 `decryptText` reads the Base64 as `fromBase64` does ([§13](#json-and-base64)), so a lock survives being copied through a
@@ -3816,7 +3816,7 @@ ended or been skipped, also in timer and cue blocks ([message reading time](#mes
 2026-10-05) and implemented.
 
 ```text
-showCamera                     // the camera's live view in the Player's floating window
+showCamera                     // the camera's live view in the Playroom's floating window
 showCamera stage               // the camera's live view over the Stage image, which stays underneath
 let view = showCamera          // keeps a handle
 view.placement = "stage"       // moves the view, like a timer's t.display = "mystery"
