@@ -413,11 +413,13 @@ export function joinElements(
         if (path.every((step) => step === "element")) held.levels.add(at);
         if (path.length === 0 && ruled !== null) held.head = { operand, node, position };
       }
-      // (a type open at a list level below its value's levels, `list[]` holding no element yet, leaves the join open
-      // there too: each further level asked once while the one above holds lists)
+      // (a written type open at a list level below its value's levels, `list[]` holding no element yet, leaves the join
+      // open there too: each further level asked once while a written type decides the one above and holds lists there.
+      // A written type's levels end; a level decided by values alone ends the descent, since below its structure a value
+      // is a list only through a cycle that adds a step each turn, followed no further (ADR 0021 1.1, #2763))
       let level: readonly string[] = [];
       let above = held.entries.get("")?.first?.decided ?? null;
-      while (above !== null && above !== "open" && above.tags.includes("list")) {
+      while (above !== null && above !== "open" && above.typed && above.tags.includes("list")) {
         program.work.charge("checks");
         level = keptSteps(admission.work, level, ["element"]);
         const at = keptText(admission.work, level);
