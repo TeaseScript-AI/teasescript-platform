@@ -4,6 +4,7 @@ import type {
   RuntimeForegroundActionSnapshot,
   RuntimeInteractionActionSnapshot,
 } from "../../../src/runtime/actions/model.js";
+import type { InterpreterEvent } from "../../../src/runtime/events.js";
 import type { RuntimeSession } from "../../../src/runtime/session.js";
 import type { PlayHost } from "./fixtures.js";
 import type { MediaProgressReport } from "./generated-side.js";
@@ -89,7 +90,7 @@ export class Play {
   public next(
     done: HostOperation,
     outcome: unknown,
-    events: readonly unknown[],
+    events: readonly InterpreterEvent[],
   ): HostOperation | PlayEnding {
     const kind = outcomeKind(outcome);
     // Every operation may settle foreground actions: an answer, a time observation, a load report, or a run whose
@@ -374,20 +375,32 @@ function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-const BACKGROUND_KINDS: ReadonlySet<unknown> = new Set(["timer", "media", "permanentButton"]);
-
-/** Whether `event` is an `actionCompleted` event of a foreground action, not of a timer, medium or button. */
-function completesForegroundAction(event: unknown): boolean {
-  if (
-    typeof event !== "object" ||
-    event === null ||
-    !("kind" in event) ||
-    event.kind !== "actionCompleted"
-  )
-    return false;
-  if (!("settlement" in event) || typeof event.settlement !== "object" || event.settlement === null)
-    return false;
-  return "actionKind" in event.settlement && !BACKGROUND_KINDS.has(event.settlement.actionKind);
+/**
+ * Whether `event` completes a foreground action, which the play counts as an answer. A timer, medium or button settling
+ * is not one; a kind added later fails to compile here until it is classified.
+ */
+export function completesForegroundAction(event: InterpreterEvent): boolean {
+  if (event.kind !== "actionCompleted") return false;
+  const kind = event.settlement.actionKind;
+  switch (kind) {
+    case "delay":
+    case "interaction":
+    case "chatPacingGate":
+    case "mediaPlayback":
+    case "storageWrite":
+    case "capture":
+    case "fileStore":
+    case "lock":
+      return true;
+    case "timer":
+    case "media":
+    case "permanentButton":
+      return false;
+    default: {
+      const unhandled: never = kind;
+      throw new Error("A settled action has no classification.", { cause: unhandled });
+    }
+  }
 }
 
 function outcomeKind(outcome: unknown): string | null {

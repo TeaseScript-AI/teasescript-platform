@@ -135,8 +135,12 @@ export function compareSessions(
   }
 }
 
-function apply(side: ComparedSession, operation: HostOperation, host: PlayHost): OperationResult {
-  let result: OperationResult;
+function apply<Event>(
+  side: ComparedSession<Event>,
+  operation: HostOperation,
+  host: PlayHost,
+): OperationResult<Event> {
+  let result: OperationResult<Event>;
   switch (operation.kind) {
     case "run":
       result = side.run();

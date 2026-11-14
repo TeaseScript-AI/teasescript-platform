@@ -20,9 +20,16 @@ async function main() {
     else if (args[index] === "--timeout-ms") timeoutMs = Number(args[++index]);
     else programs.push(args[index]);
   }
-  if (programs.length === 0 || !(timeoutMs > 0)) {
+  // `setTimeout` takes at most this delay; a longer one fires at once.
+  if (
+    programs.length === 0 ||
+    !Number.isInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > 2_147_483_647
+  ) {
     console.error(
-      "usage: node tools/generated-comparison/run.mjs [--play first|last|seed:N] [--timeout-ms N] PATH...",
+      "usage: node tools/generated-comparison/run.mjs [--play first|last|seed:N] [--timeout-ms N] PATH...\n" +
+        "--timeout-ms takes an integer from 1 to 2147483647.",
     );
     process.exit(2);
   }

@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import { GenerationRefused } from "../../src/compiler/javascript/refusal.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
+import type { ActionCompletedEvent } from "../../src/runtime/events.js";
 import { createFreshRuntimeSession } from "../../src/runtime/session.js";
 import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
@@ -24,7 +26,7 @@ import {
   todaySide,
 } from "../helpers/generated-comparison/generated-side.js";
 import { PlayHost } from "../helpers/generated-comparison/fixtures.js";
-import { Play } from "../helpers/generated-comparison/play.js";
+import { completesForegroundAction, Play } from "../helpers/generated-comparison/play.js";
 import { projectRecord, type SideRecord } from "../helpers/generated-comparison/record.js";
 
 // Stand-ins for generated code: today's engine with one planted change each. Each test names the comparison clause
@@ -423,30 +425,117 @@ test("a failure that is not the instruction budget is compared, also one with a 
   assert.equal(different.kind, "differs");
 });
 
-test("only plain data is compared: hidden, accessor and symbol-keyed properties and other prototypes are no match", () => {
-  const hiddenElement: unknown[] = [1];
-  Object.defineProperty(hiddenElement, 0, { enumerable: false });
-  const hiddenField = Object.defineProperty({}, "unlisted", { value: 901 });
-  const accessor = Object.defineProperty({}, "kind", { get: () => "say", enumerable: true });
-  const symbolKeyed = { [Symbol("extra")]: 1 };
-  // The shape of a class instance whose chain ends one step above it, like a class extending `null`.
-  const rooted: unknown = Object.create(Object.create(null));
-  for (const event of [hiddenElement, hiddenField, accessor, symbolKeyed, rooted])
-    assert.throws(
-      () =>
-        compare("exit", {
-          result: (kind, _input, result) =>
-            kind === "run" ? { ...result, events: [...result.events, event] } : result,
-        }),
-      TypeError,
-    );
-  // An object without a prototype is plain data, compared like any other.
-  const bare = Object.assign(Object.create(null), { kind: "extra" });
-  const verdict = compare("exit", {
-    result: (kind, _input, result) =>
-      kind === "run" ? { ...result, events: [...result.events, bare] } : result,
-  });
-  assert.equal(verdict.kind, "differs");
+test("only plain data is compared: each descriptor, key and prototype shape against its plain control", () => {
+  const descriptors = [true, false].flatMap((enumerable) => [
+    {
+      name: `${enumerable ? "" : "hidden "}data`,
+      plain: enumerable,
+      of: { value: 1, enumerable, writable: true, configurable: true },
+    },
+    {
+      name: `${enumerable ? "" : "hidden "}read-only data`,
+      plain: enumerable,
+      of: { value: 1, enumerable, configurable: true },
+    },
+    {
+      name: `${enumerable ? "" : "hidden "}accessor`,
+      plain: false,
+      of: { get: () => 1, enumerable, configurable: true },
+    },
+  ]);
+  const prototypes = {
+    array: [
+      { name: "Array.prototype", plain: true, value: Array.prototype },
+      { name: "null", plain: true, value: null },
+    ],
+    object: [
+      { name: "Object.prototype", plain: true, value: Object.prototype },
+      { name: "null", plain: true, value: null },
+      { name: "a null-rooted chain", plain: false, value: Object.create(null) },
+      { name: "an object", plain: false, value: {} },
+      { name: "a class", plain: false, value: class {}.prototype },
+      {
+        name: "another realm's Object.prototype",
+        plain: false,
+        value: runInNewContext("Object.prototype"),
+      },
+    ],
+  };
+  interface Shape {
+    readonly container: "array" | "object";
+    readonly prototype: {
+      readonly name: string;
+      readonly plain: boolean;
+      readonly value: object | null;
+    };
+    readonly key: "text" | "symbol";
+    readonly descriptor: (typeof descriptors)[number];
+  }
+  const build = (shape: Shape): unknown[] | Record<string, unknown> => {
+    const value: unknown[] | Record<string, unknown> = shape.container === "array" ? [] : {};
+    Reflect.setPrototypeOf(value, shape.prototype.value);
+    const key =
+      shape.key === "symbol" ? Symbol("extra") : shape.container === "array" ? "0" : "field";
+    return Object.defineProperty(value, key, shape.descriptor.of);
+  };
+  const withEvent = (event: unknown): ComparisonVerdict =>
+    compare("exit", {
+      result: (kind, _input, result) =>
+        kind === "run" ? { ...result, events: [...result.events, event] } : result,
+    });
+  let shapes = 0;
+  for (const container of ["array", "object"] as const)
+    for (const prototype of prototypes[container])
+      for (const key of ["text", "symbol"] as const)
+        for (const descriptor of descriptors) {
+          shapes += 1;
+          const shape: Shape = { container, prototype, key, descriptor };
+          const name = `${container} of ${prototype.name}, ${key} key, ${descriptor.name}`;
+          // The same container made plain where it is not: it is compared, so a refusal of the shape is its own.
+          const control: Shape = {
+            container,
+            prototype: prototype.plain ? prototype : prototypes[container][0]!,
+            key: "text",
+            descriptor: descriptors[0]!,
+          };
+          assert.equal(withEvent(build(control)).kind, "differs", `control of ${name}`);
+          if (prototype.plain && key === "text" && descriptor.plain)
+            assert.equal(withEvent(build(shape)).kind, "differs", name);
+          else assert.throws(() => withEvent(build(shape)), TypeError, name);
+        }
+  assert.equal(shapes, 96);
+});
+
+test("an answer is a foreground action completing: every settled action kind is classified", () => {
+  const answers: Record<ActionCompletedEvent["settlement"]["actionKind"], boolean> = {
+    delay: true,
+    interaction: true,
+    chatPacingGate: true,
+    mediaPlayback: true,
+    storageWrite: true,
+    capture: true,
+    fileStore: true,
+    lock: true,
+    timer: false,
+    media: false,
+    permanentButton: false,
+  };
+  const session = createFreshRuntimeSession(compileValidPlan('say "x"\nwait 2 s\nexit'), FRESH);
+  const ran = session.run().events;
+  assert.ok(ran.length > 0);
+  assert.ok(!ran.some(completesForegroundAction));
+  const waited = session
+    .observeTime(2_000, [])
+    .events.find((event) => event.kind === "actionCompleted");
+  assert.ok(waited !== undefined && completesForegroundAction(waited));
+  for (const [actionKind, answer] of Object.entries(answers)) {
+    // EVIDENCE: fixture: a delay's completion with another kind; the classifier reads only that kind.
+    const event = {
+      ...waited,
+      settlement: { ...waited.settlement, actionKind },
+    } as ActionCompletedEvent;
+    assert.equal(completesForegroundAction(event), answer, actionKind);
+  }
 });
 
 test("a record outside plain data is no match: holes, extra array keys, class instances, maps, dates", () => {
@@ -498,4 +587,21 @@ test("the command compares each program in a worker of its own and counts the ve
   for (const line of output.slice(0, 2)) assert.match(line, /"verdict":\{"kind":"refused"/u);
   assert.deepEqual(JSON.parse(output[2]!), { counts: { refused: 2 } });
   rmSync(folder, { recursive: true });
+});
+
+test("the command refuses a timeout setTimeout cannot hold as a usage error that says the range", () => {
+  for (const timeout of ["2147483648", "Infinity"]) {
+    const run = spawnSync(
+      process.execPath,
+      [
+        fileURLToPath(new URL("../../../tools/generated-comparison/run.mjs", import.meta.url)),
+        "--timeout-ms",
+        timeout,
+        "missing.tease",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(run.status, 2, timeout);
+    assert.match(run.stderr, /--timeout-ms takes an integer from 1 to 2147483647/u, timeout);
+  }
 });

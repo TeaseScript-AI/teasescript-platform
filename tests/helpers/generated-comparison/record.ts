@@ -125,10 +125,12 @@ function shell(
 }
 
 /**
- * Whether `value` is a container of plain data: an array (of any prototype, as the engine's own capture admits its
- * arrays) whose own keys are exactly its indices and `length`, or an object whose prototype is `Object.prototype` or
- * `null` and whose own keys are all text. Every element and property must be an enumerable data property, so that the
- * copy, which reads them all, holds everything the container holds.
+ * Whether `value` is a container of plain data: an array whose own keys are exactly its indices and `length`, or an
+ * object whose prototype is this realm's `Object.prototype` or `null` and whose own keys are all text. Every element and
+ * property must be an enumerable data property, so that the copy, which reads them all, holds everything the container
+ * holds. An array's prototype is not checked, because the engine's snapshots give arrays of its own captured-array
+ * prototype (`src/external-data-capture.ts`). Another realm's object is refused, as `captureExternalData` and
+ * `isPlainRecord` refuse it: both sides run in one realm.
  */
 function isPlainContainer(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;

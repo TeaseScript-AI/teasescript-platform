@@ -1,4 +1,5 @@
 import type { InstructionPlan } from "../../../src/plan/model.js";
+import type { InterpreterEvent } from "../../../src/runtime/events.js";
 import type { ActionCompletionOptions } from "../../../src/runtime/operations/complete-action.js";
 import type { RuntimeSession, RuntimeSessionOptions } from "../../../src/runtime/session.js";
 import type { FreshRuntimeOptions } from "../../../src/runtime/snapshot/state.js";
@@ -18,24 +19,27 @@ export interface MediaProgressReport {
 }
 
 /** What an operation gave: its events and semantic outcome (`null` for `run`). */
-export type OperationResult = Pick<SideRecord, "events" | "outcome">;
+export interface OperationResult<Event = unknown> {
+  readonly events: readonly Event[];
+  readonly outcome: unknown;
+}
 
 /**
  * One side of a comparison: the session operations a play uses, and the state after them in today's snapshot shape.
  * Today's engine is one side (`todaySide`); generated code is the other, through an adapter over its module.
  */
-export interface ComparedSession {
-  run(): OperationResult;
-  observeTime(nowMs: number, reports: readonly MediaProgressReport[]): OperationResult;
-  completeAction(request: unknown, options: ActionCompletionOptions): OperationResult;
-  updateInteraction(request: unknown): OperationResult;
-  reportMediaLoad(mediaId: number, report: unknown): OperationResult;
-  pressPermanentButton(buttonId: number): OperationResult;
+export interface ComparedSession<Event = unknown> {
+  run(): OperationResult<Event>;
+  observeTime(nowMs: number, reports: readonly MediaProgressReport[]): OperationResult<Event>;
+  completeAction(request: unknown, options: ActionCompletionOptions): OperationResult<Event>;
+  updateInteraction(request: unknown): OperationResult<Event>;
+  reportMediaLoad(mediaId: number, report: unknown): OperationResult<Event>;
+  pressPermanentButton(buttonId: number): OperationResult<Event>;
   state(): Pick<SideRecord, "snapshot" | "interrupt">;
 }
 
 /** Today's engine as a side of a comparison. */
-export function todaySide(session: RuntimeSession): ComparedSession {
+export function todaySide(session: RuntimeSession): ComparedSession<InterpreterEvent> {
   return {
     run: () => ({ events: session.run().events, outcome: null }),
     observeTime: (nowMs, reports) => session.observeTime(nowMs, reports),
