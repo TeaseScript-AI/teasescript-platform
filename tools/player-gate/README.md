@@ -1,12 +1,12 @@
 # The L5 activation gate kit
 
-The kit measures what the L5 gate's cost report needs to decide whether the Player's engine moves into its Worker. It
+The kit measures what the L5 gate's cost report needs to decide whether the Playroom's engine moves into its Worker. It
 runs real browsers and the Pixel 4a, outside CI, and never sets a threshold. It changes no product file. It measures:
 
-- the production Player builds it is given;
+- the production Playroom builds it is given;
 - gate variants of those builds, made by `variants/vite.config.mjs`: an `instrumented` bridge seam on both backends,
   and `delayed` replies at 0, 50 or 250 ms;
-- the bridge page (`bridge/`), which runs the real engine Worker entry and the in-process backend below the Player.
+- the bridge page (`bridge/`), which runs the real engine Worker entry and the in-process backend below the Playroom.
 
 Playwright is loaded from the package.json that `PLAYWRIGHT_PACKAGE` names. Without it, or without a phone, the kit
 exits 2.
@@ -88,7 +88,7 @@ ROWS.jsonl...`. Beside each number it writes the conditions it depends on. The r
 - **`artifacts.mjs`** lists a build's files with raw, gzip and brotli sizes, each marked eager, lazy or Worker.
 - **`inputs.mjs`** writes the bridge page's inputs from a built tree: a package's project and its plan text.
 
-Every number names its route (the full Player compiles source; plan text exists only on the bridge page), its backend
+Every number names its route (the full Playroom compiles source; plan text exists only on the bridge page), its backend
 and its cohort:
 
 - headline numbers come from unmodified builds with the passive probe;
