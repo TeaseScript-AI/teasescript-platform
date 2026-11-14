@@ -109,6 +109,44 @@ test("tracked globs and unique basenames resolve; qualified context resolves oth
   assert.deepEqual(result, { status: 0, problems: [] });
 });
 
+test("stale bare filenames with fragments fail on every extended surface, retaining their full token", () => {
+  const result = check(
+    {},
+    {
+      "README-FIRST.md": "`no-first.md#start`\n",
+      "docs/agents/README.md": "`no-guide.mjs#start`\n",
+      "docs/agents/DIRECT-REPOSITORY.md": "`no-direct.sh#start`\n",
+      "docs/ORCHESTRATION.md": "## Repository ownership\n\n`area.sh#start`\n",
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.deepEqual(result.problems, [
+    "README-FIRST.md:1: `no-first.md#start` names no tracked file or folder",
+    "docs/agents/README.md:1: `no-guide.mjs#start` names no tracked file or folder",
+    "docs/agents/DIRECT-REPOSITORY.md:1: `no-direct.sh#start` names no tracked file or folder",
+    "docs/ORCHESTRATION.md:3: `area.sh#start` names no tracked file or folder",
+  ]);
+});
+
+test("file parts with fragments resolve as unique names, directory context and globs", () => {
+  const result = check(
+    {},
+    {
+      "README-FIRST.md": "`stalls.mjs#runner`\n",
+      "docs/agents/README.md": "`helper.mjs#notes`\n",
+      "docs/agents/DIRECT-REPOSITORY.md":
+        "`src/plan/#map` owns `model.ts#members` and `validation/#rules`.\n",
+      "docs/ORCHESTRATION.md": "## Repository ownership\n\n`tests/families/*#helpers`\n",
+      "tests/families/stalls.mjs": "",
+      "tools/helper.mjs": "",
+      "src/plan/model.ts": "",
+      "src/other/model.ts": "",
+      "src/plan/validation/check.ts": "",
+    },
+  );
+  assert.deepEqual(result, { status: 0, problems: [] });
+});
+
 test("an ambiguous bare basename fails and directory context does not leak into the next paragraph", () => {
   const result = check(
     {},

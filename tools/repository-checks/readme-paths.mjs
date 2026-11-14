@@ -20,8 +20,8 @@ import remarkGfm from "remark-gfm";
 // The route and ownership surfaces additionally admit other file suffixes (area.sh included), tracked globs,
 // and bare names. A bare name can use the preceding inline directory in the same paragraph; otherwise the document's
 // folder and repository root are tried, then an exact basename only when unique among tracked files/folders.
-// A glob must match a tracked path, or a tracked basename for a bare glob. An inline #fragment is removed for path
-// resolution; this check does not validate its heading (doc-links checks Markdown link targets).
+// A glob must match a tracked path, or a tracked basename for a bare glob. An inline #fragment is removed before
+// classifying or resolving the path; its heading is not checked (doc-links checks Markdown link targets).
 //
 // What is skipped, and so not checked: in a Player README, code that is a link's whole text (`doc-links.mjs`
 // checks the link's target); a span starting with `/` (a URL route, as `/player/`) or `@` (a package name, as
@@ -69,7 +69,7 @@ function trackedPaths() {
   return paths;
 }
 
-/** Whether a code span's text is shaped like a path the check reads. */
+/** Whether a span's file part is shaped like a path the check reads. */
 function isPathShaped(text, extended) {
   return (
     !/\s/u.test(text) &&
@@ -100,14 +100,16 @@ function pathSpans(markdown, { extended, heading }) {
       const linkText =
         (parent?.type === "link" || parent?.type === "linkReference") &&
         parent.children.length === 1;
-      if ((!linkText || extended) && isPathShaped(node.value, extended)) {
+      const name = extended ? node.value.split("#", 1)[0] : node.value;
+      if ((!linkText || extended) && isPathShaped(name, extended)) {
         spans.push({
           text: node.value,
+          name,
           line: node.position.start.line,
           directory: directories.at(-1),
         });
-        if (extended && node.value.endsWith("/") && node.value.slice(0, -1).includes("/"))
-          directories.push(node.value);
+        if (extended && name.endsWith("/") && name.slice(0, -1).includes("/"))
+          directories.push(name);
       }
       return;
     }
@@ -129,8 +131,7 @@ function names(paths, folder, text, extended) {
   );
 }
 
-function resolves(paths, file, { text, directory }, extended) {
-  const name = extended ? text.split("#", 1)[0] : text;
+function resolves(paths, file, { name, directory }, extended) {
   const bare = !name.replace(/\/$/u, "").includes("/");
   if (
     extended &&
