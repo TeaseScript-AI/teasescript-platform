@@ -276,7 +276,7 @@ export class ResumableSession {
     if (saved !== null) {
       const decode = graphDecoder();
       rt.globals.push(...saved.globals.map(decode));
-      rt.resumeFrames = saved.frames.map((frame) => ({ ...frame, v: frame.v.map(decode) }));
+      rt.resumeFrames = saved.frames.map((frame) => ({ ...frame, v: frame.v.map(decode), ...(frame.r === undefined ? {} : { r: frame.r.map(decode) }) }));
       rt.resuming = rt.resumeFrames.length > 0;
     }
     const main = this.#program.instantiate(rt, this.#program.constants);
@@ -289,7 +289,7 @@ export class ResumableSession {
         // Innermost first as they were pushed; a resume gives them back outermost first.
         const encode = graphEncoder();
         const globals = rt.globals.map(encode);
-        const frames = rt.frames.reverse().map((frame) => ({ ...frame, v: frame.v.map(encode) }));
+        const frames = rt.frames.reverse().map((frame) => ({ ...frame, v: frame.v.map(encode), ...(frame.r === undefined ? {} : { r: frame.r.map(encode) }) }));
         this.save = JSON.stringify({ snapshot: rt.snapshot, globals, frames });
         this.saveBytes = this.save.length;
       } else if (error !== EXIT) {
