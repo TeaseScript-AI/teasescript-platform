@@ -723,7 +723,6 @@ const UNCONDITIONAL: readonly SyntaxKind[] = [
   "parenthesizedExpression",
   "indexExpression",
   "rangeExpression",
-  // (a unit's or an angle's amount is judged after the analysis)
   "unitExpression",
   "angleExpression",
 ];

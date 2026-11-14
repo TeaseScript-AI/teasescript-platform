@@ -195,10 +195,7 @@ export function coreCheckResult(
   };
 }
 
-/**
- * The known values of a program (S3 §2, group V), handed to the answers so that a view's known value is the consumer's;
- * a `fromJson` reads its JSON as `expected` gives its type, so its known value is the one the run gets.
- */
+/** The known values of a program (S3 §2, group V), shared by the checks and the answers. */
 function knownValues(
   answers: Answers,
   index: SliceIndex,
@@ -243,10 +240,7 @@ const KIND_WORDS: Readonly<Record<string, string>> = {
   angleExpression: "angle expression",
 };
 
-/**
- * The first step whose known operands give no value a run can hold: a step whose result is too large to represent, then
- * a calendar unit whose known amount gives no whole days or months; `null` where none is.
- */
+/** The first step whose known operands give no value a run can hold, or `null`. */
 function knownAmountRefused(
   index: SliceIndex,
   values: KnownValues,

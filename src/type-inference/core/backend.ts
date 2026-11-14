@@ -265,10 +265,7 @@ export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
   ["gender", { takes: ["string", "null"], check: null }],
 ]);
 
-/**
- * What the amount of a unit or angle expression takes (`n s`, `n calendar months`, `n deg`; a unit follows a number,
- * ADR 0026 §8): a number, whole or not; `check` names the function that checks the amount as a run evaluates it.
- */
+/** What the amount of a unit or angle expression takes (`n s`, `n deg`): a number (ADR 0026 §8). */
 export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: OperandCheck } = {
   takes: ["integer", "number"],
   check: { file: "src/runtime/evaluator.ts", function: "evaluate" },
@@ -276,9 +273,8 @@ export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: 
 
 /**
  * Whether the route admits a unit's or an angle's amount: one the core shows to be a number (`UNIT_AMOUNT`), or an
- * external value the evaluator checks as it runs. A missing property's unknown is no value there, as its read fails
- * first; a typed ingress's read is the unknown its store's check stands for. An amount that only a narrowing or an
- * `otherwise` shows to be a number is declined: a read of `n: integer?` under `n != null`, `(n otherwise 1) s`.
+ * external value the evaluator checks as it runs. An amount that only a narrowing or an `otherwise` shows to be a
+ * number is declined: a read of `n: integer?` under `n != null`, `(n otherwise 1) s`.
  */
 function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression): boolean {
   const answer = answers.at(nodeOf(answers, index, amount));

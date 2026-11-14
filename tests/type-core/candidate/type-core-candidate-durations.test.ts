@@ -1,7 +1,4 @@
-// Durations, unit expressions and angles on the candidate route (#2657, step 2d of #2488): a literal the plan stores
-// publishes, any other is refused at the literal or gets today's error; a unit's or an angle's amount publishes where the
-// core shows it to be a number, or it is an external value the evaluator checks as it runs, and today's checker knows no
-// value of it that it refuses; any other amount is refused at the unit or the angle.
+// Durations, unit expressions and angles on the candidate route (#2657, step 2d of #2488).
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -28,14 +25,6 @@ import {
   records,
   script,
 } from "../../helpers/type-core/row-guard-records.js";
-
-/*
- * Each source is compiled by today's checker and by the route in the four held modes (`differential.mjs`, with the host
- * global at every value of the derived domain and the host values below) and judged alike: where today's checker plans,
- * the route plans in every mode with today's checks and today's runs, but at a source `UNDER_OFFERS` names, which it
- * refuses there; where today's checker gives no plan, the route gives none either, refusing at the text the source
- * names or answering with today's errors. Every refusal is one text in all four modes.
- */
 
 /** The host values a source runs with beside the domain. */
 const HOSTS = [
@@ -235,7 +224,6 @@ test("each duration literal, unit and angle publishes as today's where today pla
     assert.ok(at >= 0 && found[at]!.checker.plan, source);
     assert.ok(refusals.has(`${source}\n${UNIT}`) || refusals.has(`${source}\n${ANGLE}`), source);
   }
-  // the family reaches each refusal, and the published forms (not a family that only refuses)
   for (const text of [UNIT, ANGLE, LITERAL])
     assert.ok(
       [...refusals].some((refusal) => refusal.endsWith(`\n${text}`)),

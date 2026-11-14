@@ -258,7 +258,6 @@ export const DECLARED_REFUSALS: readonly {
     position: "the condition",
     refused: 'if hostValue {\n  say "y"\n}',
     admitted: 'let b = hostValue == null\nif b {\n  say "y"\n}',
-    // (an unknown condition's operator diagnostic, which the route refuses after the analysis)
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
   },
@@ -267,7 +266,6 @@ export const DECLARED_REFUSALS: readonly {
     position: "`get`'s receiver",
     refused: "let x: integer = hostValue.get(0, default: 0)",
     admitted: "let xs = [1]\nlet x: integer = xs.get(0, default: 0)",
-    // (`get` on a receiver of unknown kind, which the route refuses after the analysis)
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
   },
