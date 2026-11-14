@@ -26,7 +26,7 @@ const INTERPRETER_TOP_LEVEL = new Set([
   "retainedScopes",
   "nextScopeId",
   "nextCallFrameId",
-  // A known hole until S5, when generated code keeps globals in today's form (README).
+  // A known comparison gap: globals are not compared (README).
   "globals",
 ]);
 const INTERPRETER_ANY_RECORD = new Set([

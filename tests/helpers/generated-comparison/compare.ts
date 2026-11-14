@@ -69,8 +69,8 @@ const SCENE_TIME_MS = 6 * 60 * 60 * 1000;
 const INSTRUCTION_BUDGET = "TSR037";
 
 /**
- * Compares the code the stage generates for `input.plan` with today's engine. `generate` defaults to a stub that refuses
- * every plan until S1. Only `GenerationRefused` becomes `refused`; any other exception propagates.
+ * Compares the code the stage generates for `input.plan` with today's engine. The default generator refuses every plan.
+ * Only `GenerationRefused` becomes `refused`; any other exception propagates.
  */
 export async function compareGenerated(
   input: ComparisonInput & { readonly generate?: (plan: InstructionPlan) => GeneratedProgramText },
@@ -128,7 +128,7 @@ export function compareSessions(
         after: operation.kind,
         mismatches: compared.mismatches,
       };
-    const next = play.next(operation, mine.outcome);
+    const next = play.next(operation, mine.outcome, mine.events);
     if (typeof next === "string")
       return { kind: "matched", ended: next, answers: play.answers, operations: index };
     operation = next;
@@ -160,7 +160,7 @@ function apply(side: ComparedSession, operation: HostOperation, host: PlayHost):
   return { events: result.events, outcome: result.outcome };
 }
 
-/** The generator until S1: it admits no form, so it refuses the plan's first instruction. */
+/** The default generator: it admits no form, so it refuses the plan's first instruction. */
 function refuseEveryPlan(plan: InstructionPlan): never {
   throw new GenerationRefused(`instruction:${plan.instructions[0]?.kind ?? "none"}`, 0);
 }

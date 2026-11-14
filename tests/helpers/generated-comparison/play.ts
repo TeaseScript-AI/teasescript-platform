@@ -60,8 +60,6 @@ export class Play {
   #press: { readonly buttonId: number; retried: boolean } | null = null;
   /** An input refused with `executionPending`, kept across the runs that drain work until an answer is accepted. */
   #pending: HostOperation | null = null;
-  /** The foreground wait an observation answered that has not settled yet: a block may run before it does. */
-  #awaited: number | null = null;
   #lastObserved: { readonly nowMs: number; readonly answers: number | null } | null = null;
 
   public constructor(
@@ -78,7 +76,7 @@ export class Play {
     this.#random = typeof policy === "object" ? policy.seed >>> 0 || 1 : 1;
   }
 
-  /** How many foreground answers the play has completed. */
+  /** How many foreground actions have completed on today's side: its `actionCompleted` events of foreground kinds. */
   public get answers(): number {
     return this.#answers;
   }
@@ -88,9 +86,15 @@ export class Play {
    * answer ends the play as unanswered, except `executionPending`, after which runnable work drains and the answer is
    * decided again; the same input refused that way again, with only draining runs between, ends the play.
    */
-  public next(done: HostOperation, outcome: unknown): HostOperation | PlayEnding {
+  public next(
+    done: HostOperation,
+    outcome: unknown,
+    events: readonly unknown[],
+  ): HostOperation | PlayEnding {
     const kind = outcomeKind(outcome);
-    this.#countSettledWait();
+    // Every operation may settle foreground actions: an answer, a time observation, a load report, or a run whose
+    // catch-up ends a wait.
+    this.#answers += events.filter(completesForegroundAction).length;
     if (kind === "executionPending" && done.kind === "pressPermanentButton") {
       // A press waits for the running block: it is pressed again once after the work drains, then given up.
       if (this.#press === null || this.#press.retried) this.#press = null;
@@ -107,13 +111,11 @@ export class Play {
     return this.#decide();
   }
 
-  /** Counts an accepted answer; an answer refused another way ends the play. */
+  /** Takes an accepted operation's effect on the schedule; an answer refused another way ends the play. */
   #accept(done: HostOperation, kind: string | null): PlayEnding | null {
     switch (done.kind) {
       case "completeAction":
-        if (kind !== "completed") return `unanswered: ${operationLabel(done)}`;
-        this.#answers += 1;
-        return null;
+        return kind === "completed" ? null : `unanswered: ${operationLabel(done)}`;
       case "updateInteraction":
         if (kind !== "updated" && kind !== "unchanged") return "unanswered: form";
         this.#edits?.requests.shift();
@@ -121,10 +123,6 @@ export class Play {
       case "observeTime":
         if (kind !== "observed") return "unanswered: time";
         this.#lastObserved = { nowMs: done.nowMs, answers: done.answers };
-        if (done.answers !== null) {
-          this.#awaited = done.answers;
-          this.#countSettledWait();
-        }
         return null;
       case "reportMediaLoad":
         this.#loadsReported.add(done.mediaId);
@@ -135,19 +133,6 @@ export class Play {
       case "run":
         return null;
     }
-  }
-
-  /** Counts the observed wait once it has settled: neither foreground nor suspended by a running block. */
-  #countSettledWait(): void {
-    if (this.#awaited === null) return;
-    const view = this.#session.view();
-    if (
-      view.foregroundAction?.actionId === this.#awaited ||
-      view.suspendedAction?.actionId === this.#awaited
-    )
-      return;
-    this.#awaited = null;
-    this.#answers += 1;
   }
 
   #decide(): HostOperation | PlayEnding {
@@ -387,6 +372,22 @@ function numberWithin(min: number | null, max: number | null, integer: boolean):
 
 function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+const BACKGROUND_KINDS: ReadonlySet<unknown> = new Set(["timer", "media", "permanentButton"]);
+
+/** Whether `event` is an `actionCompleted` event of a foreground action, not of a timer, medium or button. */
+function completesForegroundAction(event: unknown): boolean {
+  if (
+    typeof event !== "object" ||
+    event === null ||
+    !("kind" in event) ||
+    event.kind !== "actionCompleted"
+  )
+    return false;
+  if (!("settlement" in event) || typeof event.settlement !== "object" || event.settlement === null)
+    return false;
+  return "actionKind" in event.settlement && !BACKGROUND_KINDS.has(event.settlement.actionKind);
 }
 
 function outcomeKind(outcome: unknown): string | null {

@@ -4,7 +4,7 @@ import type { RuntimeSession, RuntimeSessionOptions } from "../../../src/runtime
 import type { FreshRuntimeOptions } from "../../../src/runtime/snapshot/state.js";
 import type { SideRecord } from "./record.js";
 
-/** The stage's output, until S1 lands its `GeneratedProgram`: an ES module's text and its table. */
+/** The stage's output as this comparison takes it: an ES module's text and its table. */
 export interface GeneratedProgramText {
   readonly module: string;
   readonly table: unknown;
@@ -54,8 +54,8 @@ export function todaySide(session: RuntimeSession): ComparedSession {
 }
 
 /**
- * The generated side for a program the stage gave. Generated code runs on the runtime entries of the engine lane's
- * piece 4, which start with S1; until then no program can run, and the default generator refuses every plan first.
+ * The generated side for a program the stage gave. No runtime entries for generated code exist, so this side is
+ * unavailable: it rejects every program, and the default generator refuses every plan before reaching it.
  */
 export function generatedSide(
   _program: GeneratedProgramText,
@@ -63,5 +63,5 @@ export function generatedSide(
   _fresh: FreshRuntimeOptions,
   _options: RuntimeSessionOptions,
 ): Promise<ComparedSession> {
-  return Promise.reject(new Error("Generated code has no runtime entries to run on before S1's."));
+  return Promise.reject(new Error("Generated code has no runtime entries to run on."));
 }

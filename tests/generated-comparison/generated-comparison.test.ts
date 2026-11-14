@@ -352,6 +352,19 @@ test("a wait a block interrupts counts as an answer once it settles", () => {
   assert.deepEqual(verdict.kind === "matched" && [verdict.ended, verdict.answers], ["bound", 1]);
 });
 
+test("every foreground action a run or a load report settles counts against the answer bound", () => {
+  const nested =
+    'let t = timer async 1 s {\n  say "tick", instant\n  wait 500 ms\n}\nplayAudio "long.mp3"\nlet a = askText "later"\nexit';
+  const settled = compare(nested, {}, { end: { answers: 2 } });
+  assert.deepEqual(settled.kind === "matched" && [settled.ended, settled.answers], ["bound", 2]);
+  const loaded = compare(
+    'let m = playAudio async "long.mp3"\nlet a = askText "later"\nexit',
+    {},
+    { end: { answers: 1 } },
+  );
+  assert.deepEqual(loaded.kind === "matched" && [loaded.ended, loaded.answers], ["bound", 1]);
+});
+
 test("the host opens only text it locked itself", () => {
   const foreign = compare(
     'let opened = decryptText("bG9ja2VkOmhlbGxv", password: "p", default: "no")\nsay opened, instant\nexit',
@@ -375,9 +388,9 @@ test("an input refused for pending work again after the work drained ends the pl
     request: { actionId: 1, actionKind: "interaction", interactionKind: "text" },
   } as const;
   const pending = { kind: "executionPending" };
-  assert.notEqual(typeof play.next(answer, pending), "string");
-  assert.notEqual(typeof play.next({ kind: "run" }, null), "string");
-  assert.equal(play.next(answer, pending), "unanswered: text");
+  assert.notEqual(typeof play.next(answer, pending, []), "string");
+  assert.notEqual(typeof play.next({ kind: "run" }, null, []), "string");
+  assert.equal(play.next(answer, pending, []), "unanswered: text");
 });
 
 test("the entry sets up the generated side with its own host call", async () => {
