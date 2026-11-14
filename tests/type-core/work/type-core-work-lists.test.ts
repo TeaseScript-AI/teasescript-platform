@@ -1,12 +1,17 @@
 // Work that grows with the program over lists: a list's other members (#1573), lists of one set of choices in many
-// orders (#1397), and runs of joins with their indexed queries and holder bound (#1384).
+// orders (#1397), runs of joins with their indexed queries and holder bound (#1384), and a join's descent where the
+// nesting cut does not reach (#2800).
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProject, createFreshRuntimeSession } from "../../../src/index.js";
 import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
-import { WorkLedger, type WorkCounter } from "../../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  WorkLedger,
+  type WorkCounter,
+} from "../../../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
 import {
   isPlusValue,
@@ -14,7 +19,9 @@ import {
 } from "../../../src/type-inference/core/indexes/plus-index.js";
 import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
 import type { PlaceId } from "../../../src/type-inference/graph.js";
+import { regressionCase } from "../../helpers/regression-case.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { inMode, MODES } from "../../helpers/type-core-oracles.js";
 import { type WorkFamily } from "../../helpers/type-core/families/builders.js";
 import { narrowingPass } from "../../helpers/type-core/type-core-narrowing.js";
 import {
@@ -396,3 +403,38 @@ test("lists of one set of choices in many orders site their host data without wa
   }
   assert.deepEqual(steep, []);
 });
+
+/**
+ * #2800: a `+` over a list nested a level deeper on each turn through a store with two property steps, which the
+ * nesting cut does not cut (r4-455), settles far below the allowance in every mode: the join descends an operand's
+ * levels only as far as a written type decides them.
+ */
+regressionCase(
+  "a join over a list nested through two property steps ends far below the allowance (#2800)",
+  {
+    pr: 2813,
+    atBase:
+      /a join over a list nested through two property steps \(.+\): the analysis settles in .+/,
+  },
+  () => {
+    const sources = {
+      once: 'let o = {p: {q: []}}\no.p.q = [o.p.q]\nlet j = o.p.q + o.p.q\nsay "${j}"\nexit\n',
+      loop:
+        "let o = {p: {q: []}}\nfor i in 1..3 {\n  o.p.q = o.p.q + [o.p.q]\n}\n" +
+        'let j = o.p.q + o.p.q\nsay "${j}"\nexit\n',
+    };
+    for (const [shape, source] of Object.entries(sources)) {
+      const request = coreRequest([{ path: "main.tease", source }], []);
+      assert.ok(request !== null, shape);
+      for (const mode of MODES)
+        inMode(mode, () => {
+          const answers = withTestAllowance(300_000, () => analyseCore(request));
+          assert.equal(
+            answers.budget.exhausted,
+            null,
+            `a join over a list nested through two property steps (${shape}): the analysis settles in ${JSON.stringify(mode)}`,
+          );
+        });
+    }
+  },
+);
