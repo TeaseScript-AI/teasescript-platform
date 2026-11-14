@@ -1,6 +1,6 @@
 // Work that grows with the program over lists: a list's other members (#1573), lists of one set of choices in many
-// orders (#1397), runs of joins with their indexed queries and holder bound (#1384), and a join with a list that holds
-// itself (#2763).
+// orders (#1397), runs of joins with their indexed queries and holder bound (#1384), a join with a list that holds
+// itself (#2763), and a join whose operand holds lists at every level by its own decision (#2800).
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -23,6 +23,7 @@ import { regressionCase } from "../../helpers/regression-case.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
 import { type WorkFamily } from "../../helpers/type-core/families/builders.js";
 import { narrowingPass } from "../../helpers/type-core/type-core-narrowing.js";
+import { inMode, MODES } from "../../helpers/type-core-oracles.js";
 import {
   DOUBLING,
   sized,
@@ -439,5 +440,45 @@ regressionCase(
         `${shape}: the join is accepted`,
       );
     }
+  },
+);
+
+/**
+ * #2800: a join's level loop asks an operand's next level while the one above holds lists. A loader that fills a
+ * written `list` or a written `dict` with its own result, read into a `+` in a function no one calls, holds lists at every
+ * level through its own decision there (`computeDecided` from the contract's kinds, no written decider), which the nesting
+ * cut does not reach: the cut leaves out stores in code no run reaches. The loop now continues only while a written type
+ * decides the level above (#2763's C1), so it ends; the base asked one level deeper each turn until the allowance.
+ */
+regressionCase(
+  "a join whose operand holds lists at every level by its own decision ends far below the allowance (#2800)",
+  {
+    pr: 0,
+    atBase:
+      /a join over a recursive loader's levels: the level loop ends below the allowance in .+/,
+  },
+  () => {
+    const source =
+      "function loadValue(key, fallback = null) {\n  let value = load key, default: null\n" +
+      "  if value == null {\n    let names: string[] = []\n    let numbered = true\n" +
+      "    if names.length > 0 and numbered {\n      let items: list = []\n      value = items\n" +
+      "    } else if names.length > 0 {\n      let entries: dict = dict{}\n      for name in names {\n" +
+      '        entries[name] = loadValue("${key}.${name}")\n      }\n      value = entries\n    }\n  }\n' +
+      "  return value otherwise fallback\n}\n" +
+      'function getProp(name, f, d = null) {\n  let v = loadValue("p.${name}")\n  return v otherwise d\n}\n' +
+      "function setProp(name, v) {\n}\n" +
+      'function bump(name, amount = 1) {\n  setProp(name, getProp(name, "int", 0) + amount)\n}\nexit\n';
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const answers = withTestAllowance(300_000, () => analyseCore(request));
+        assert.equal(
+          answers.budget.exhausted,
+          null,
+          `a join over a recursive loader's levels: the level loop ends below the allowance in ${JSON.stringify(mode)}`,
+        );
+        assert.ok(answers.work.total < 30_000, `${answers.work.total} units`);
+      });
   },
 );
