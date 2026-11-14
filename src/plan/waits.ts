@@ -26,7 +26,7 @@ export interface PlanWaits {
 }
 
 /** Whether the instruction can leave the session waiting by itself; every kind is named, so a new kind is decided here. */
-export function instructionWaits(instruction: Instruction): boolean {
+function instructionWaits(instruction: Instruction): boolean {
   switch (instruction.kind) {
     case "say":
       // An instant say shows its message and goes on; any other pacing may hold for reading time.
@@ -88,11 +88,12 @@ export function instructionWaits(instruction: Instruction): boolean {
 
 /**
  * The least fixpoint over these facts, each a node that turns true once and never back:
- * - `region` r (an author function, a block, or a file's root region) may wait: one of its instructions waits by itself,
- *   or it calls a function that may wait, or it calls a file whose activation may wait;
- * - `gotoWaits` r: a `goto` of a file that r, or a function it calls, holds goes to a file whose activation may wait;
- * - `activation` f may wait: f's root region may wait, or its `gotoWaits` holds, as a `goto` replaces the running
- *   activation, whichever function it stands in.
+ * - a region (an author function, a block, or a file's root region) may wait: one of its instructions waits by
+ *   itself, or it calls a function that may wait, or it calls a file whose activation may wait;
+ * - a region's goto reaches a wait (`gotoNode`): a `goto` of a file that the region, or a function it calls, holds goes
+ *   to a file whose activation may wait;
+ * - a file's activation may wait: its root region may wait, or its root region's goto reaches a wait, as a `goto`
+ *   replaces the running activation, whichever function it stands in.
  * A `goto` does not mark the region holding it, which it leaves. A block is entered by the runtime only, so its waits
  * are its own; as where a block runs is the runtime's decision, a `goto` in a block that reaches a waiting activation
  * marks every activation. A computed destination reaches every file. Work and memory are linear in instructions and
@@ -103,11 +104,15 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
   const fileCount = plan.files.length;
   // Regions: the files' root regions first, then the functions and blocks in plan order.
   const regionOfFunction = new Map<number, number>();
-  plan.functions.forEach((definition, index) => regionOfFunction.set(definition.id, fileCount + index));
+  plan.functions.forEach((definition, index) =>
+    regionOfFunction.set(definition.id, fileCount + index),
+  );
   const regionCount = fileCount + plan.functions.length;
   const ranges: (readonly [number, number])[] = [
     ...plan.files.map((file) => [file.startInstruction, file.rootEndInstruction] as const),
-    ...plan.functions.map((definition) => [definition.entryInstruction, definition.endInstruction] as const),
+    ...plan.functions.map(
+      (definition) => [definition.entryInstruction, definition.endInstruction] as const,
+    ),
   ];
   const blocks = plan.functions.map((definition) => definition.handler !== null);
 
@@ -156,8 +161,7 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
           depend(callee, region);
           depend(gotoNode(callee), gotoNode(region));
         } else if (edge.kind === "transfer" || edge.kind === "computed") {
-          const target =
-            edge.kind === "transfer" ? activationNode(edge.file) : someActivation;
+          const target = edge.kind === "transfer" ? activationNode(edge.file) : someActivation;
           depend(target, edge.mode === "call" ? region : gotoNode(region));
         }
       }
@@ -183,7 +187,8 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
           const callee = regionOfFunction.get(edge.functionId);
           return callee !== undefined && value[callee] === 1;
         }
-        if (edge.kind === "transfer" && edge.mode === "call") return value[activationNode(edge.file)] === 1;
+        if (edge.kind === "transfer" && edge.mode === "call")
+          return value[activationNode(edge.file)] === 1;
         if (edge.kind === "computed" && edge.mode === "call") return value[someActivation] === 1;
         return false;
       });
