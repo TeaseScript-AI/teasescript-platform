@@ -108,7 +108,11 @@ const CASES: readonly [string, Files][] = [
     "a global function of another file",
     [
       { path: "main.tease", source: 'check(hostValue)\nsay "back"\nexit\n' },
-      { path: "helpers.tease", source: "global function check(n: integer) {\n  say n\n}\n" },
+      // (the function starts past every entry of the calling file, so its run reads none of them)
+      {
+        path: "helpers.tease",
+        source: `// ${"-".repeat(40)}\nglobal function check(n: integer) {\n  say n\n}\n`,
+      },
     ],
   ],
 ];
@@ -218,8 +222,9 @@ test("the derived oracle refuses a check into an untyped parameter or result", (
 });
 
 test("another file's function: each file's stores are its own, and a run that would read entries by offset is underivable", () => {
-  // a written result returned by another file's function, beside a store of the calling file; then a body without checks
-  // whose `let` lies at the offsets of a store of the calling file
+  // a written result returned by another file's function, beside a store of the calling file; a body without checks
+  // whose `let` lies at the offsets of a store of the calling file, at its span and at its start only; a parse in a type
+  // test whose site is that of a parse the calling file's content holds
   for (const files of [
     [
       {
@@ -236,6 +241,23 @@ test("another file's function: each file's stores are its own, and a run that wo
       {
         path: "helpers.tease",
         source: 'global function show {\n  let n = "aaaaaaaaaaaaaaaa"\n  say n\n}\n',
+      },
+    ],
+    [
+      {
+        path: "main.tease",
+        source: `say "${"x".repeat(18)}"\nlet m: integer = hostValue\nshow()\nexit\n`,
+      },
+      { path: "helpers.tease", source: 'global function show {\n  let n = "x"\n  say n\n}\n' },
+    ],
+    [
+      {
+        path: "main.tease",
+        source: `${" ".repeat(11)}let m: integer? = fromJson("2"${" ".repeat(6)}, default: null)\nshow()\nexit\n`,
+      },
+      {
+        path: "helpers.tease",
+        source: "global function show {\n  say fromJson(hostValue, default: null) is string\n}\n",
       },
     ],
   ]) {
@@ -276,7 +298,7 @@ test("another file's default is never the calling file's store, at whatever offs
   const helpers = syntaxOf("global function check(n: integer[] = hostValue) {\n  say n\n}\n");
   const start = 37;
   const store = transferStore(
-    { start, end: start + "hostValue".length, target: "check.n" },
+    { start, end: start + "hostValue".length, target: "check.n.element" },
     main,
     expressions(main.statements),
     [main, helpers],
