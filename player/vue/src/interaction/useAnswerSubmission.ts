@@ -34,8 +34,8 @@ import { questionGone, refusalMessage } from "./answerNotices.js";
 import { presentedForm, type FormUpdates } from "./useFormUpdates.js";
 
 /*
- * The answers the player gives (PLAYER-UI "Composer and foreground interactions"; decisions of 2026-11-11/12): each is
- * checked at once with the runtime's own rule (`src/interaction-completion.ts`). A locally invalid answer never leaves
+ * The answers the player gives (PLAYER-UI "Composer and foreground interactions"): each is checked at once with the
+ * runtime's own rule (`src/interaction-completion.ts`). A locally invalid answer never leaves
  * the composer and shows the notice at once. A valid one is the one pending answer: its controls go at once, and the
  * runtime, which stays the authority, settles it. A refusal undoes it by its origin; the session's end settles it once
  * by its stage. Form edits are no answers: they go in order, never greyed, and a field's commit keeps its field

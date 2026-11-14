@@ -298,7 +298,8 @@ function unansweredMessage() {
 }
 // The composer's slots and the answers given, each with its own controller: the composer's text changes only by the
 // player's edits and these controllers (useComposerState), and an answer is checked at once and settled by the runtime
-// (useAnswerSubmission). The three reach each other only through the closures below, which run once all three exist.
+// (useAnswerSubmission). The composer's state comes first because the other two take it at setup; the rest of their
+// references to each other are callbacks, called only once all three exist.
 const composerState = useComposerState({
   draft: (draft) => formUpdates.draft(draft),
   holdDrafts: () => !!props.holdFormDrafts || !props.inputSection,
