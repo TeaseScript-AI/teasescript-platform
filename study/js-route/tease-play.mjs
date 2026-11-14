@@ -95,5 +95,7 @@ export function sessions(api, driver) {
     resumable: { create: (plan) => driver.createResumableSession(plan, FRESH), state: (s) => s.state },
     // The resumable form with every author call on the driver's frame chain.
     chain: { create: (plan) => driver.createResumableSession(plan, FRESH, { chain: true }), state: (s) => s.state },
+    // The chain form keeping place-free constructs outlined (remedy (a)).
+    "chain-structured": { create: (plan) => driver.createResumableSession(plan, FRESH, { chain: true, keepStructure: true }), state: (s) => s.state },
   };
 }

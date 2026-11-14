@@ -101,7 +101,7 @@ export const STOP_EXCLUDED = new Set(["jump", "jumpIfFalse", "loopStart", "loopC
  * its variables saved as plain data at a wait); everything else stays structured. Without it, a wait asks the session
  * (`rt.waited`), which way (1), replaying from the start, answers.
  */
-export function emitProgram(plan, { resumable = false, runawayCheck = false, generators = false, facts = null, stops = false, chain = false } = {}) {
+export function emitProgram(plan, { resumable = false, runawayCheck = false, generators = false, facts = null, stops = false, chain = false, keepStructure = false } = {}) {
   // `facts`: the type analysis's `facts().values` (the typed probe, ruling 3): a plan expression finds its type by its
   // span and the AST kind it was lowered from; a guard is dropped where the types make it unneeded. `typeStats` counts
   // the sites that asked and those that found a type.
@@ -138,6 +138,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   // `chain`: the resumable form with every author call on a frame chain the runtime's driver owns (`rt.drive`): a call
   // is a place, where the caller saves its record and returns `rt.CALL`; it is re-entered after the call with the result.
   if (chain && !resumable) throw new Error("study emitter: the chain form is a resumable form");
+  // `keepStructure` (remedy (a)): in a region in the waiting form, a construct that contains no place is emitted as in a
+  // region that cannot wait, loop bodies outlined and long sequences cut into functions, unless it holds a break or
+  // continue of an enclosing loop that is in the switch form (`continue D`, which no nested function can run).
+  if (keepStructure && !resumable) throw new Error("study emitter: keepStructure applies to a resumable form");
   // `stops` (part F): Debug's stop at a statement is a resume point, so every function becomes a generator.
   if (stops && !generators) throw new Error("study emitter: stops need the generator form");
   // `generators`: part C's third form: a function that can wait is a JavaScript generator that yields at a wait, kept
@@ -688,6 +692,21 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     }
 
     /** Emits `body` as structured JavaScript, also inside a resumable region (where it holds no wait). */
+    /**
+     * Whether place-free [from, to) may be outlined or cut into functions: in a region that cannot wait always; in one
+     * in the waiting form only with `keepStructure`, and only when no break or continue in it leaves for a loop in the
+     * switch form.
+     */
+    function mayOutline(from, to) {
+      if (!flatRegion) return true;
+      if (!keepStructure) return false;
+      for (let at = from; at < to; at += 1) {
+        const ins = plan.instructions[at];
+        if (ins.kind === "loopControl" && loops.get(ins.loopId)?.flat === true) return false;
+      }
+      return true;
+    }
+
     function structured(body) {
       const was = flat;
       flat = false;
@@ -792,7 +811,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         scopes.push(new Map());
       } else throw new Unsupported(`a '${ins.loopKind}' loop`);
       // A body that holds a loop, or a long one, is outlined; in the generator form a body that waits is a generator.
-      if (!flatRegion && ((containsLoop(pc + 1, endLoop) && endLoop - pc > OUTLINE_WITH_LOOP) || endLoop - pc > OUTLINE_LENGTH))
+      if (mayOutline(pc + 1, endLoop) && ((containsLoop(pc + 1, endLoop) && endLoop - pc > OUTLINE_WITH_LOOP) || endLoop - pc > OUTLINE_LENGTH))
         outlinedBody(ins, pc, endLoop, roundVars, regionYields && containsWait(pc + 1, endLoop));
       else emitRange(pc + 1, endLoop);
       scopes.pop();
@@ -908,7 +927,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
      */
     function emitChunked(from, to) {
       // Not in a resumable region: its structured parts may hold a flat loop's `continue D`, which no nested function sees.
-      if (flat || flatRegion || to - from <= CHUNK_LENGTH) return emitRange(from, to);
+      if (flat || !mayOutline(from, to) || to - from <= CHUNK_LENGTH) return emitRange(from, to);
       emitItems(itemsOf(from, to));
     }
 
