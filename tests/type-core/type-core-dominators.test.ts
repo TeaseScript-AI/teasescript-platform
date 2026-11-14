@@ -134,8 +134,8 @@ test("the dominators agree with the iterative algorithm on every graph of the co
           dom.dfsIn(above) < dom.dfsIn(node) && dom.dfsOut(node) < dom.dfsOut(above),
           `${program.name}: the interval of node ${node.id} lies in its dominator's`,
         );
-      // The nearest boundary and block entry are found up the tree. A boundary is X4's: a function's entry, a file's
-      // entry that something other than the session's start enters, a label that some `goto` enters.
+      // A boundary is X4's: a function's entry, a file's entry that something other than the session's start enters, a
+      // label that some `goto` enters.
       const boundary = (candidate: FlowNode): boolean =>
         candidate.kind === "function-entry" ||
         (candidate.kind === "file-entry" &&
@@ -331,7 +331,6 @@ test("a callable that calls and file transfers may run twice at once is recursiv
     recursive("function f {\n  g()\n}\nfunction g {\n  if hostFlag { f() }\n}\nf()\nexit"),
     ["f", "g"],
   );
-  // One call of `visit`, which calls a file that starts, by a `goto`, the file that calls `visit` again.
   assert.deepEqual(
     recursive([
       { path: "main.tease", source: 'global depth = 0\ncall "b.tease"\nexit' },
@@ -442,7 +441,7 @@ test("code after a call that cannot return is dead, and after one that may retur
     ]),
     true,
   );
-  // A block may end the running file at any wait: here the called file, which never ends itself, returns through it.
+  // A block may end the running file at any wait.
   assert.equal(
     live([
       {
@@ -477,7 +476,7 @@ test("code after a call that cannot return is dead, and after one that may retur
       never,
     );
   // A block registered only behind a call that cannot return registers nothing, so its `end` cannot justify that
-  // call's return: behind `stop()` in the called file, after the call in main, or in a function called there.
+  // call's return.
   const exits = { path: "part.tease", source: 'say "TARGET"\nexit' };
   const button = 'showPermanentButton "Never" {\n  end\n}\n';
   assert.equal(
