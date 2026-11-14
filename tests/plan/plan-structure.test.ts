@@ -118,7 +118,7 @@ test("plan validation accepts a lowered plan and refuses one whose jumps do not 
   // The same nested ifs in a file's root region and in a function's.
   for (const source of [
     "let a = true\nif a { if a { a = false } }\nexit",
-    'function f(a) { if a { if a { say "f", instant } } }\nf(true)\nexit',
+    'function f(a) { if a { if a { say "f", instant } }\n say "g", instant\n say "h", instant }\nf(true)\nexit',
   ]) {
     const plan = compileValidPlan(source);
     assert.deepEqual(validateInstructionPlan(plan).errors, []);
