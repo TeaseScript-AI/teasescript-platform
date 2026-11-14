@@ -492,7 +492,7 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     );
     // a core comment's label with its glossary row: no finding, so the glossary is the README Git lists
     write("src/type-inference/core/labelled.ts", "// C9 holds here\nexport const x = 1;\n");
-    // printed text, not an expected message: a label without a row refused, a row only it carries kept, in a title (an
+    // printed text, not an expected message: a label without a row refused, one with a row accepted, in a title (an
     // escaped callee too), a bracketed name, each erased wrapper on a value (`as`, `<T>`, `satisfies`, `!`) or object
     write(
       "tests/printed.test.ts",
@@ -543,7 +543,6 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     write("docs/sections.md", "See §5.\n");
     write("src/sections.ts", "// §6\n");
     write("tests/fixtures/type-core/cells.jsonl", '{"cells": ["§7"]}\n');
-    write("tools/oxlint/comments/comment-declarations-waiting.json", '[{"text": "§8"}]\n');
     write("sections.bin", "x\0§9\n");
     write("src/rev.ts", 'const reason = "r4.9998 and r4.38";\n');
     symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
@@ -769,7 +768,6 @@ test("the section rule's exemptions are exact paths and two folders", () => {
     "src/a.ts",
     "src/type-inference/core/b.ts",
     "tests/fixtures/type-core/cells.jsonl",
-    "tools/oxlint/comments/comment-declarations-waiting.json",
     CITATION_FIXTURES,
   ])
     assert.deepEqual(unnamedSectionsIn(file, "§1\n"), [], file);
@@ -780,7 +778,6 @@ test("the section rule's exemptions are exact paths and two folders", () => {
     "other/tests/fixtures/type-core/cells.jsonl",
     "tests/fixtures/type-core/cells-deferred.jsonl",
     "tests/fixtures/type-core/MANIFEST.md",
-    "tools/oxlint/comments/comment-declarations-waiting.json.bak",
     "tools/oxlint/comments/comment-citations.json",
     `other/${CITATION_FIXTURES}`,
   ])

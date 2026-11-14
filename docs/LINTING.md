@@ -109,8 +109,7 @@ as a whole number, in a section list right after a repository document's name on
 repository. Any other section number is refused in every file
 Git lists except `docs/`, whose documents number their own sections; `src/`, whose comments #2209 rewrites;
 `tests/fixtures/type-core/cells.jsonl`, whose section numbers are cell ids in recorded data whose bytes `MANIFEST.md`
-fixes; `tools/oxlint/comments/comment-declarations-waiting.json`, which quotes comments word for word, its section numbers only
-`src/`'s, and shrinks with #2209; and the check's test. The check proves the form, not that the section exists or
+fixes; and the check's test. The check proves the form, not that the section exists or
 carries the sentence's claim. A research label (a `LABEL` of the check: `C9`, `W34`, `S6-CARRIERS`) has a row in the
 record's glossary (its `README.md`, "Labels") where it stands in a comment under `src/type-inference/core/` or in
 printed test text: a test's title (the first argument of `test`, `it`, `describe` or `suite`, or of a property so
@@ -119,9 +118,8 @@ or a class's, its name bare, quoted or a string in brackets). Of a title or valu
 template's text (not its `${}` expressions), either side of a `+`, parentheses, what TypeScript erases (an `as` or
 angle-bracket assertion, `satisfies`, a non-null assertion) and an arrow function's expression body, with escapes
 resolved; a variable, a call or a helper's result is not read. A review reference (`Codex r2's B1`) and the names
-`V30`, `V8` and `RE2` are no labels. A row counts as carried when such a comment or printed text uses it, and a row
-nothing carries is refused. Test comments, other strings and code are not read, and a row proves the label is defined,
-not that the text uses it in that sense.
+`V30`, `V8` and `RE2` are no labels. Test comments, other strings and code are not read, and a row proves the label is
+defined, not that the text uses it in that sense.
 `comment-citations.json` holds each file's exact counts in comments of its other forms (a
 bare `r4.N`, read as the revision rule reads it, and the record's name with another id), which may only fall.
 `comment-forecasts-allowed.json` lists the forecasts the check accepts, and each entry must still be found.
@@ -130,10 +128,7 @@ bare `r4.N`, read as the revision rule reads it, and the record's name with anot
 
 `tools/oxlint/comments/check-comment-declarations.mjs` refuses a backticked name in a comment that names nothing the repository
 declares or reads: it proves only that the name exists somewhere, not that it names what the comment's site means.
-`comment-external-names.json` declares names no file can, each with its kind and source; that list may grow. It also
-refuses a `/**` docblock that does not stand directly on its declaration (a blank line, another block or comment between,
-or nothing after it); a file's opening header and a same-line cast are allowed. `comment-declarations-waiting.json`
-lists the findings that wait for another pull request or the compiler's cleanup, and only shrinks.
+`comment-external-names.json` declares names no file can, each with its kind and source; that list may grow.
 
 ## Type evidence
 
