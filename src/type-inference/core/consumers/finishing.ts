@@ -28,7 +28,8 @@ import { LITERALS, unsettledItem } from "./kinds.js";
 import { readKey } from "./names.js";
 import { placelessCells, syntaxRead } from "./syntax.js";
 import { heldIngress, hostIngress } from "./host-frontier.js";
-import { openness, prefixAt, writtenTags } from "./written-openness.js";
+import { openness } from "../contract/terms.js";
+import { prefixAt, writtenTags } from "./written-openness.js";
 
 // The finishing read after a stop, from what the stop left: a value's items, a key's, a typed parse's or load's.
 
