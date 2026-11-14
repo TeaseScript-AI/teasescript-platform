@@ -80,7 +80,7 @@ export class Contracts {
   readonly #literals = new Map<Expression, Expression | null>();
   /** The stores' contracts (`ContractDescriptors`), read through the answers' places. */
   readonly #descriptors: ContractDescriptors<readonly Expression[]>;
-  /** Each checked store's contract result, as `stored` made it; read through `results`. */
+  /** Each checked store's contract result, as `stored` made it. */
   readonly #results = new Map<Store, ContractResult>();
 
   /** Each store's contract result, recorded by `stored` as it is asked, where it makes one. */
@@ -118,8 +118,7 @@ export class Contracts {
   /**
    * The check of a store: the destination's written type, else the complete type a stop below its path left it to check
    * whole (`Answers.requirement`, #1416), else its contract at the stored path: a complete one's, a lost one's part, none
-   * for an open one. It records the store's contract result in `results`, and throws `OutsideContract` for a value
-   * whose contract is deeper than the slice follows (`outsideStructure`).
+   * for an open one.
    */
   public stored(store: Store): TypeCheckPlan | null {
     const declaration = declarationOf(this.answers, this.index, this.lets, store);
@@ -165,7 +164,7 @@ export class Contracts {
   }
 
   /**
-   * The label of the place a store stores into (its variable, then the core's steps), the place `stored` reads;
+   * The label of the place a store stores into (its variable, then the core's steps);
    * `undefined` where the answers name no place there. It reads no value and asks for no contract, so a store whose
    * only owed checks are the receiving completion's is asked nothing (#1682).
    */
@@ -237,12 +236,7 @@ export class Contracts {
 
   /**
    * The type a typed load or `fromJson` reads its value as: the core's own answer at the call, level by level
-   * (`#answerTask`). Its outcomes, in the order it reaches them: `null` for a load whose key is computed; a throw of
-   * `OutsideContract`, so the program leaves the slice, after a stop before admission settled, for a default that reads
-   * a place, unless the call lands in a written scalar destination; a throw where a stop left a level of the answer
-   * open (#1767); `null` where the call's kinds hold an unknown or no kind; a throw where the plan cannot carry the
-   * answer exactly below the call (`#answerTask`'s other cases); and, for an answer, a throw for a typed parse or load
-   * into a copy of a written type.
+   * (`#answerTask`).
    */
   public expected(call: CallExpression | LoadExpression): TypePlan | null {
     if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
@@ -315,9 +309,7 @@ export class Contracts {
 
   /**
    * The complete contract of the value a fallback stands in for at `steps` below it (ADR 0021 7.2): a `get`'s value,
-   * an `otherwise`'s left one without `null`, as `#provenanceOf` finds it; `null` for another owner. It throws
-   * `OutsideContract` where the plan cannot carry that contract: a join of different written types that no place admits,
-   * or a value whose structure the slice does not follow.
+   * an `otherwise`'s left one without `null`, as `#provenanceOf` finds it; `null` for another owner.
    */
   public direct(
     owner: BinaryExpression | CallExpression,
