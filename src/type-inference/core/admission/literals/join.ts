@@ -1,4 +1,6 @@
 // A list's join (V30 §16): the right operand's elements fit the element type the left operand holds.
+// Its descent into an operand's levels: ADR 0021 rule 1.1 and the nesting cut (record r4-455), and the levels a written
+// type spells (#2800).
 import type { PlaceId } from "../../../graph.js";
 import type { Admission } from "../../admission.js";
 import {
