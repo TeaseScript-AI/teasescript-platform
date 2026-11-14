@@ -176,7 +176,9 @@ function loopBackToContinuation(): { plan: Plan; continuation: number } {
   const assign = plan.instructions[assignIndex];
   assert.ok(interaction?.kind === "interaction" && "preparedUi" in interaction);
   assert.ok(interaction.preparedUi.kind === "button");
-  assert.ok(loop?.kind === "loopStart" && loop.loopKind === "while" && back?.kind === "loopControl");
+  assert.ok(
+    loop?.kind === "loopStart" && loop.loopKind === "while" && back?.kind === "loopControl",
+  );
   assert.ok(assign?.kind === "assign" && continuation < loopIndex);
   // EVIDENCE: fixture starts the loop's rounds at the settled button's continuation, so its back edge reaches it.
   (plan.instructions as unknown[])[loopIndex] = { ...loop, continueTarget: continuation };
