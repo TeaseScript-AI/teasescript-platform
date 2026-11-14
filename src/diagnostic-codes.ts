@@ -670,7 +670,7 @@ export const DIAGNOSTIC_CODES = {
   TSW019: entry(
     ["runtime"],
     "warning",
-    "File that the Player could not keep",
+    "File that the Playroom could not keep",
     "docs/RUNTIME.md#stored-files",
   ),
   TSW020: entry(

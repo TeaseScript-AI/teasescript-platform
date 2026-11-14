@@ -294,19 +294,19 @@ const HELP: Readonly<Record<CompactCommand, LanguageContextHelp>> = Object.freez
   ),
   askDate: help(
     "askDate",
-    "Waits for a date from the Player's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional prefill date fills the control at first.",
+    "Waits for a date from the Playroom's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional prefill date fills the control at first.",
     ASK_HEAD,
     "date",
   ),
   askTime: help(
     "askTime",
-    "Waits for a time of day from the Player's time control, which submits ISO text such as 14:30. Returns a time. An optional prefill time fills the control at first.",
+    "Waits for a time of day from the Playroom's time control, which submits ISO text such as 14:30. Returns a time. An optional prefill time fills the control at first.",
     ASK_HEAD,
     "time",
   ),
   askDateTime: help(
     "askDateTime",
-    "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional prefill fills the control at first.",
+    "Waits for a local date and time from the Playroom's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional prefill fills the control at first.",
     ASK_HEAD,
     "datetime",
   ),
@@ -381,7 +381,7 @@ const COMMAND_HELP: Readonly<Record<OtherCommand, CommandHelp>> = Object.freeze(
   ),
   openUrl: commandHelp(
     "openUrl",
-    "Opens an http or https web address in a new tab and waits until it is open. When the browser needs a click first, the Player shows a button, whose text is buttonText, Open link by default; with alwaysButton: true it always shows the button and waits for the click.",
+    "Opens an http or https web address in a new tab and waits until it is open. When the browser needs a click first, the Playroom shows a button, whose text is buttonText, Open link by default; with alwaysButton: true it always shows the button and waits for the click.",
     `openUrl(url${optionalOptions(OPEN_URL_OPTIONS)})`,
     ["url", ...OPEN_URL_OPTIONS],
   ),
@@ -405,7 +405,7 @@ const COMMAND_HELP: Readonly<Record<OtherCommand, CommandHelp>> = Object.freeze(
   ),
   showCamera: commandHelp(
     "showCamera",
-    "Shows the camera's live view in the Player's floating window, or with stage over the Stage image. As a value, it returns the camera view's handle.",
+    "Shows the camera's live view in the Playroom's floating window, or with stage over the Stage image. As a value, it returns the camera view's handle.",
     "showCamera [stage]",
     ["stage"],
   ),
