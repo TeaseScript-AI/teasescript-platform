@@ -63,7 +63,7 @@ function scalarOnly(items: readonly Item[]): boolean {
  * The stores admission walks: the stores, adds, returns, parameter defaults and single-site arguments into each key (a
  * multi-site argument decides nothing), found once.
  */
-export function stores(admission: Admission): readonly Definition[] {
+function stores(admission: Admission): readonly Definition[] {
   if (admission.storeList === null) {
     const { definitions, lists } = admission.pass;
     admission.storeList = [...definitions.storeDefs, ...definitions.transferDefs].filter(
