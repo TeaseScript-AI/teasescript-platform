@@ -108,8 +108,7 @@ import { Retained } from "./retained/retained.js";
  * marked. A read inside a stored value takes its narrowing definition where that holds: so a copy, an operation or a
  * store check sees the tested kinds, and the test whether a loop's store preserves a narrowing, which reads the store's
  * own value, takes them too. The value of an expression at its node follows the read through projections, call
- * results, operations and literals. Literals and operations are demands, a literal's once per path and
- * node, an operation's once per path (`#literalItems`, `#operationItems`).
+ * results, operations and literals.
  */
 
 const COLLECTIONS: ReadonlySet<string> = new Set(["list", "set", "dict", "object"]);
@@ -344,7 +343,6 @@ export class Values {
     if (read === null || read.span === null || guards.testless) return null;
     const binding = this.#stableBinding(value);
     if (binding === null || !guards.narrowing.tests(binding)) return null;
-    // (the chain's steps, then the steps below)
     const { steps: path, root: at, node } = this.#chainOf(value);
     for (let index = 0; index < rest.length; index += 1) {
       program.work.charge("eventSteps");
@@ -364,8 +362,8 @@ export class Values {
   }
 
   /**
-   * A read's chain of projections down to its root (`#narrowingOf`, `#narrowingBelow`): its steps from the root as the
-   * exact path keys them, the root, and the node `#valueAt` passes down; a charge per step.
+   * A read's chain of projections down to its root: its steps from the root as the exact path keys them, the root,
+   * and the node `#valueAt` passes down.
    */
   #chainOf(value: PlaceId): {
     readonly steps: string[];
