@@ -18,6 +18,8 @@ Which tool answers which question:
 | Are two trees' records of a list of cases equal but for some fields, such as a changed message's `message`? | `differential.mjs join --ignore` ([Differential records](#differential-records)) |
 | Which receiving-context class (A, R, R+, L, I; #1072) has each typed call of a list of cases, with its fixed points? | `receiving.mjs` (its header) |
 | A compiler pull request's whole replay of base against head | `tools/compiler-replay.mjs` |
+| The evidence for a change meant to keep behaviour: the set, the areas, the converted packages and the checks, as one report | `tools/compiler-replay.mjs evidence` |
+| Do the converted packages' analysis and research-route compile differ between two trees? | `packages.mjs` (its header) |
 | Does a change outside the type core keep the current checker's output? | `tools/compiler-differential.mjs` |
 
 ## The runner's contract

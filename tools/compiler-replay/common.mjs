@@ -11,7 +11,7 @@ export const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 export const SHARDS = 16;
 export const CASES = path.join(homedir(), "work", "o4-m4-g3", "cases.json");
 export const USAGE =
-  "usage: node tools/compiler-replay.mjs submit|collect|rerun-shard|rerun-stalls|aside|plan-checks … (its header)";
+  "usage: node tools/compiler-replay.mjs submit|collect|rerun-shard|rerun-stalls|aside|plan-checks|evidence|evidence-report … (its header)";
 
 export class Usage extends Error {}
 
