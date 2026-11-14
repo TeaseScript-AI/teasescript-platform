@@ -316,7 +316,7 @@ test("a property read that finds no such property fails at the read: the table j
   }
 });
 
-test("no table operand inside the slice holds an unknown of a reason the table does not admit: its refusal of one has no witness yet", () => {
+test("no table operand inside the slice holds an unknown of a reason the table does not admit: its refusal of one has no witness at a command operand", () => {
   // (the family's sources in every context, and the guard's templates of the table's rows)
   const pair = (row: SyntaxKind, source: string): readonly [SyntaxKind, string] => [row, source];
   const sources = [
@@ -348,7 +348,7 @@ test("no table operand inside the slice holds an unknown of a reason the table d
           if (item.tag === "unknown" && (item.reasons & ~(REASON.external | REASON.missing)) !== 0)
             failures.push(
               `${JSON.stringify(source)} ${position}: an unknown of reasons ${item.reasons}, which \`operandAdmitted\` refuses ` +
-                "with no witness inside the slice yet (its mutant `reasons-any` survives): write the witness and the row",
+                "with no witness at a command operand: write the witness and the row",
             );
       }
   }
