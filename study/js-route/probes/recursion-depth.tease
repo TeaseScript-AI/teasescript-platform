@@ -1,0 +1,9 @@
+// Recursion past the call depth (TSR047), with paced says deep in the recursion, so that a save holds many frames.
+function down(n: integer): integer {
+  if n % 250 == 0 {
+    say "Depth ${n}"
+  }
+  return down(n + 1) + 1
+}
+say "Result ${down(1)}"
+exit

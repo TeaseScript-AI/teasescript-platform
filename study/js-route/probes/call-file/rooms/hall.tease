@@ -1,0 +1,3 @@
+let mood = randomInteger(1..=3)
+say "In the hall, mood ${mood}"
+end

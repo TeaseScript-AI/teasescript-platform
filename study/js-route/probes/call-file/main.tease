@@ -1,0 +1,8 @@
+// call of a file returns after its end; then a goto to another file. Waits on both sides of each transfer.
+let visits = 0
+repeat 2 {
+  call "rooms/hall.tease"
+  visits += 1
+  say "Back in main ${visits}"
+}
+goto "rooms/end.tease"

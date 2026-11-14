@@ -1,0 +1,23 @@
+// goto to a label from inside a loop inside a called function: both are abandoned, and the lines after the label run
+// again, with waits on every pass.
+let passes = 0
+let seen = []
+function scan(limit: integer): integer {
+  for i in 0..limit {
+    seen.add(i)
+    if i == passes {
+      say "Back at ${i}"
+      if passes < 3 {
+        goto top
+      }
+    }
+  }
+  return seen.length
+}
+label top
+passes += 1
+let mark = randomInteger(1..=9)
+say "Pass ${passes}, mark ${mark}"
+let n = scan(5)
+say "Done after ${passes}: ${n} ${seen}"
+exit
