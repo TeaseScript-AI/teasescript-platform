@@ -1,9 +1,9 @@
 import type { Work } from "../solver.js";
 
 /**
- * A semantic read A4's scans make (#1072): a value's items, a contract's kinds, a receiver's decision. Outside a solver
- * run it is answered by `now`, its synchronous run; inside an inherited proof's run by `work`, yielded to
- * the solver, so the proof depends on what it read. One computation, two drivers.
+ * A semantic read the inheritance scans make (#1072): a value's items, a contract's kinds, a receiver's decision.
+ * Outside a solver run it is answered by `now`, its synchronous run; inside an inherited proof's run by `work`, yielded
+ * to the solver, so the proof depends on what it read. One computation, two drivers.
  */
 export interface Read {
   readonly now: () => ReadAnswer;

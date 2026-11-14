@@ -36,8 +36,7 @@ const isMissing = (item: Item): boolean =>
  * `value` or its `text` as the answer reads it (`choiceItems`). Each is decided over its known kinds: every one a
  * choice value, quiet; none and all definite, an error; else a warning whose check is the runtime's own check of the
  * buttons (TSR052) when the choice opens, a button's value the script cannot know among them, the known misfit alone
- * beside one. A labelled option's buttons return the label. The answer's value side takes only choice values
- * (`choiceItems`), so no record of a button is composed.
+ * beside one. A labelled option's buttons return the label.
  */
 export function choiceValues(
   walk: Consumers,

@@ -207,7 +207,7 @@ function guarded(
   if (statement === null) return null;
   const text = source.text(statement);
   if (!kept) return { statement, read, text };
-  // (the place a store changes, a compound assignment's target among them, is no value a kept one may replace: G2)
+  // (the place a store changes, a compound assignment's target among them, is no value a kept one may replace)
   if (source.target(read)) return null;
   // (its only text in the statement)
   const from = read.start - statement.start;
@@ -548,20 +548,7 @@ interface WarnedUse {
   readonly expects: SiteExpectation | undefined;
 }
 
-/**
- * A warning's fix, by the first case that applies: for the elements a call reads and what `toJson` writes below its
- * argument, the rule's own advice or none; for a store whose place is an element below the value, the test of the whole
- * receiving type (`wholeCheck`), none for a literal, a property the read may lack or a whole check unproved; for null,
- * a null check, or a type test beside another type the use does not take, with a fallback where the value is not
- * changed in place; a selection's length check; a number's rounding where a count or a store needs a whole number; an
- * operator's text join or date and time conversion, none for a whole operation with neither; a member's own fix
- * (`memberWarningFix`); none for a button's value from outside the script, a literal or a property the read may lack;
- * for a value of a type the script cannot know, a store's property fix or a test of what the rule takes, none where
- * no written type names it; else a store's property fix where part of the value is unknown, but not into a declared
- * place whose fitting kinds no type test names (#1730), a type test of the kinds that fit, or the fix of the error
- * the kinds would be (`errorFix`). A value that is a store's target and no variable is checked where it stands, in
- * words.
- */
+/** A warning's fix sentence, `""` where it has none. */
 export function warningFix(warned: WarnedUse, source: MessageSource, diagnosed: Diagnosed): string {
   const { rule, text, kinds, fits, besides, detail, context, site, expects } = warned;
   const subject = rule.rule === "member" ? rule.receiver : text;
@@ -573,7 +560,7 @@ export function warningFix(warned: WarnedUse, source: MessageSource, diagnosed: 
       : "";
   if (rule.rule === "json" && rule.nested) return WRITABLE_JSON_FIX;
   // (a store's place that is no variable, a compound assignment's target among them, is checked where it stands, in
-  // words: a new variable would take the change instead, G2)
+  // words: a new variable would take the change instead)
   const inPlace = (test: Test): string | null =>
     source.target(site) && variable(subject) === null
       ? `Check that '${subject}' ${test.words} first.`

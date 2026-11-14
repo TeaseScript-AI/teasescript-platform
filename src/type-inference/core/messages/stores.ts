@@ -251,10 +251,10 @@ function declarationCode(
 
 /**
  * The owner's sentences (#2289) for a store of numbers into a place that holds whole numbers because a copy of a
- * variable declared `integer`, or of the result of a function declared `integer` (#2378), decided it (`copyOf`, A4): a
+ * variable declared `integer`, or of the result of a function declared `integer` (#2378), decided it (`copyOf`): a
  * variable declared as a copy of that value, or a list, set or dict declared with elements or values that are copies
  * of it, with the fix that declares the place with `number`, the declaration as written with one type written in;
- * `null` for any other store, whose sentence is `storeSubject`'s with `storeFix`'s fix.
+ * `null` for any other store.
  */
 export function copySentence(
   rule: StoreRule,

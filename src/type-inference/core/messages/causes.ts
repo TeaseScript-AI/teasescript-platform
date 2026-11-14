@@ -259,8 +259,7 @@ function nullCause(
 
 /**
  * The route rule's error's first sentence (#1073), from the required check (`RequiredCheck`): the read, the offending
- * kind, and the writer's line; its fix is the warning's it stands in for (`coreMessage`). A null's names what brings it
- * (`nullCause`), else nothing past the rule.
+ * kind, and the writer's line. A null's names what brings it (`nullCause`), else nothing past the rule.
  */
 export function requiredSentence(
   kinds: readonly ItemTag[],
