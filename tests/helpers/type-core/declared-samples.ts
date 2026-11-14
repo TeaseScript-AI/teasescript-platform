@@ -128,7 +128,7 @@ export interface Sample {
     | "otherwise"
     | "property"
     | "narrowed";
-  /** What stands before the command: the typed ingress, or nothing. */
+  /** What stands before the command. */
   readonly prelude: string;
   /** The operand's value as the command writes it. */
   readonly value: string;

@@ -333,8 +333,6 @@ function operandTemplates(
 ): string[] {
   return [
     ...Object.values(operands).flat(),
-    // (at a position of the command operand table, a nested form is an outside value carried, which the table declines,
-    // R10: `DECLARED_REFUSALS`)
     ...Object.entries(operands).flatMap(([operand, templates]) =>
       operandRules(row)?.[operand] === undefined
         ? templates.flatMap((template) =>
