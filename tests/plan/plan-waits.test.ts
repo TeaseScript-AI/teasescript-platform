@@ -1,0 +1,233 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compileProject } from "../../src/compiler.js";
+import type { Instruction, InstructionPlan } from "../../src/plan/model.js";
+import { planWaits, type PlanWaits } from "../../src/plan/waits.js";
+import { checkWaitsAgainstEngine } from "../helpers/plan-waits-engine.js";
+
+/** A compiled project with its waits, and its functions and blocks by name (a block by its creator's kind). */
+function analysed(files: Readonly<Record<string, string>>): {
+  readonly plan: InstructionPlan;
+  readonly waits: PlanWaits;
+  readonly marked: (name: string) => boolean;
+} {
+  const compiled = compileProject(
+    Object.entries(files).map(([path, source]) => ({ path, source })),
+    { images: [] },
+  );
+  assert.deepEqual(
+    compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+    [],
+  );
+  const plan = compiled.plan!;
+  const waits = planWaits(plan);
+  return {
+    plan,
+    waits,
+    marked: (name) => {
+      const found = plan.functions.filter((definition) => definition.name === name);
+      assert.equal(found.length, 1, `one function named ${name}`);
+      return waits.functionMayWait(found[0]!.id);
+    },
+  };
+}
+
+const main = (source: string): Record<string, string> => ({ "main.tease": source });
+
+/** The indexes of the instructions of `kind` inside the function named `name`. */
+function inFunction(plan: InstructionPlan, name: string, kind: Instruction["kind"]): number[] {
+  const definition = plan.functions.find((candidate) => candidate.name === name)!;
+  const found: number[] = [];
+  for (let index = definition.entryInstruction; index < definition.endInstruction; index += 1)
+    if (plan.instructions[index]!.kind === kind) found.push(index);
+  return found;
+}
+
+test("each instruction that can leave the session waiting marks its function; the others do not", () => {
+  const cases: readonly (readonly [string, Instruction["kind"], boolean])[] = [
+    ["wait 1 s", "wait", true],
+    ['let name = askText "Your name?"', "interaction", true],
+    ['showButton "Go"', "interaction", true],
+    ["let photo = takePhoto()", "capture", true],
+    ['let file = fileFromBase64("SGVsbG8=", default: null)', "fileStore", true],
+    ['let locked = encryptText("x", password: "p", publicKey: false, timeLock: false)', "lock", true],
+    ['save 4 as "level"', "storageWrite", true],
+    ['playAudio "sounds/bell.mp3"', "playMedia", true],
+    ['say "Read this.", 1.5 s', "say", true],
+    ['say "At the reading speed."', "say", true],
+    ['say "No pause.", instant', "say", false],
+    ['showImage "images/room.jpg"', "showImage", false],
+    ["let beat = timer async hidden 1 s { }", "startTimer", false],
+  ];
+  for (const [statement, kind, waits] of cases) {
+    const { plan, waits: analysis, marked } = analysed(
+      main(`function f {\n  ${statement}\n}\nf()\nexit`),
+    );
+    const sites = inFunction(plan, "f", kind);
+    assert.notEqual(sites.length, 0, `${statement} lowers to ${kind}`);
+    assert.deepEqual(
+      sites.map((index) => analysis.waitsAt(index)),
+      sites.map(() => waits),
+      statement,
+    );
+    assert.equal(marked("f"), waits, statement);
+  }
+});
+
+test("a call marks its caller exactly when what it calls may wait, through any depth and recursion", () => {
+  const { plan, waits, marked } = analysed(
+    main(
+      [
+        "function pause { wait 1 s }",
+        "function middle { pause() }",
+        "function outer { middle() }",
+        "function addUp(n: integer): integer { if n == 0 { return 0 }\n return n + addUp(n - 1) }",
+        "function ping(n: integer) { if n > 0 { pong(n - 1) } }",
+        "function pong(n: integer) { if n > 0 { ping(n - 1) } else { wait 1 s } }",
+        "function quiet { let total = addUp(3)\n say \"${total}\", instant }",
+        "outer()",
+        "quiet()",
+        "ping(2)",
+        "exit",
+      ].join("\n"),
+    ),
+  );
+  assert.deepEqual(
+    ["pause", "middle", "outer", "addUp", "ping", "pong", "quiet"].map((name) => [name, marked(name)]),
+    [
+      ["pause", true],
+      ["middle", true],
+      ["outer", true],
+      ["addUp", false],
+      ["ping", true],
+      ["pong", true],
+      ["quiet", false],
+    ],
+  );
+  assert.deepEqual(
+    inFunction(plan, "middle", "callFunction").map((index) => waits.mayWaitAt(index)),
+    [true],
+  );
+  assert.deepEqual(
+    inFunction(plan, "quiet", "callFunction").map((index) => waits.mayWaitAt(index)),
+    [false],
+  );
+});
+
+test("a file call marks its caller exactly when the called activation may wait, also through its gotos", () => {
+  const { plan, waits, marked } = analysed({
+    "main.tease": [
+      'function toWaiting { call "rooms/waits.tease" }',
+      'function toQuiet { call "rooms/quiet.tease" }',
+      'function toPassing { call "rooms/passes.tease" }',
+      'function toAny { call "rooms/q*.tease" }',
+      "toWaiting()",
+      "toQuiet()",
+      "toPassing()",
+      "toAny()",
+      "exit",
+    ].join("\n"),
+    "rooms/waits.tease": "wait 1 s\nend",
+    "rooms/quiet.tease": 'say "Quiet.", instant\nend',
+    "rooms/quick.tease": 'say "Quick.", instant\nend',
+    // A goto in a function replaces the running activation, so the call stands below the wait it reaches.
+    "rooms/passes.tease": 'function leave { goto "rooms/waits.tease" }\nleave()\nend',
+  });
+  assert.deepEqual(
+    ["toWaiting", "toQuiet", "toPassing", "toAny", "leave"].map((name) => [name, marked(name)]),
+    [
+      ["toWaiting", true],
+      ["toQuiet", false],
+      ["toPassing", true],
+      ["toAny", false],
+      // It leaves; it does not wait.
+      ["leave", false],
+    ],
+  );
+  const file = (path: string): number => plan.files.findIndex((candidate) => candidate.path === path);
+  assert.deepEqual(
+    ["rooms/waits.tease", "rooms/quiet.tease", "rooms/passes.tease"].map((path) =>
+      waits.fileMayWait(file(path)),
+    ),
+    [true, false, true],
+  );
+});
+
+test("a computed file call may reach every file", () => {
+  const { marked } = analysed({
+    "main.tease": [
+      'function toComputed { let next = script("rooms/quiet.tease")\n call (next) }',
+      "toComputed()",
+      "exit",
+    ].join("\n"),
+    "rooms/quiet.tease": 'say "Quiet.", instant\nend',
+    "rooms/waits.tease": "wait 1 s\nend",
+  });
+  assert.equal(marked("toComputed"), true);
+});
+
+test("a block's waits are its own, and a goto in a block reaching a waiting file marks every activation", () => {
+  const { plan, waits, marked } = analysed({
+    "main.tease": [
+      "function start { let beat = timer async hidden 1 s { wait 1 s } }",
+      "function quietStart { let beat = timer async hidden 1 s { say \"Beat.\", instant } }",
+      "start()",
+      "quietStart()",
+      'call "rooms/quiet.tease"',
+      "wait 2 s",
+      "exit",
+    ].join("\n"),
+    "rooms/quiet.tease": [
+      'let beat = timer async hidden 1 s { goto "rooms/waits.tease" }',
+      'say "Quiet.", instant',
+      "end",
+    ].join("\n"),
+    "rooms/waits.tease": "wait 1 s\nexit",
+  });
+  assert.deepEqual(
+    ["start", "quietStart"].map((name) => [name, marked(name)]),
+    [
+      ["start", false],
+      ["quietStart", false],
+    ],
+  );
+  const blocks = plan.functions.filter((definition) => definition.handler === "timer");
+  assert.deepEqual(
+    blocks.map((block) => waits.functionMayWait(block.id)),
+    [true, false, false],
+  );
+  const quiet = plan.files.findIndex((file) => file.path === "rooms/quiet.tease");
+  assert.equal(waits.fileMayWait(quiet), true);
+});
+
+test("at every wait of a played session, each live function, block and file call is marked", () => {
+  const sources: readonly Readonly<Record<string, string>>[] = [
+    main(
+      [
+        "function pause(n: integer) { wait 1 s\n say \"pause ${n}\", instant }",
+        "function rounds(n: integer): integer {",
+        "  let total = 0",
+        "  for i in 0..n { total += askInteger \"How many?\"\n pause(i) }",
+        "  return total",
+        "}",
+        "let beats = 0",
+        "let beat = timer async hidden 2 s { beats += 1\n pause(beats) }",
+        "repeat 2 { let got = rounds(2)\n say \"${got}\" }",
+        "exit",
+      ].join("\n"),
+    ),
+    {
+      "main.tease": 'function visit { call "rooms/hall.tease" }\nrepeat 2 { visit() }\nexit',
+      "rooms/hall.tease": 'wait 1 s\nfunction onward { goto "rooms/side.tease" }\nonward()\nend',
+      "rooms/side.tease": 'say "Which?", instant\nlet choice = askChoice "left", "right"\nend',
+    },
+  ];
+  for (const files of sources) {
+    const { plan } = analysed(files);
+    const result = checkWaitsAgainstEngine(plan);
+    assert.deepEqual(result.unmarked, []);
+    assert.equal(result.status, "halted");
+    assert.ok(result.waits > 3, `${result.waits} waits`);
+  }
+});
