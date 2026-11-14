@@ -414,9 +414,8 @@ const NAMED_SECTIONS = (() => {
 
 /**
  * The files outside the section rule: documents, whose bare section numbers name their own sections; `src/`, whose
- * comments #2209 rewrites; the expectation set's cell ids inside recorded data whose bytes `MANIFEST.md` fixes; the
- * waiting list, which quotes comments word for word and whose section numbers are all in quotes of `src/`; and this
- * lint's test.
+ * comments #2209 rewrites; the expectation set's cell ids inside recorded data whose bytes `MANIFEST.md` fixes; and
+ * this lint's test.
  */
 const outsideSectionRule = (file) =>
   file.startsWith("docs/") ||
