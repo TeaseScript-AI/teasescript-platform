@@ -182,6 +182,7 @@ function loopBackToContinuation(): { plan: Plan; continuation: number } {
   assert.ok(assign?.kind === "assign" && continuation < loopIndex);
   // EVIDENCE: fixture starts the loop's rounds at the settled button's continuation, so its back edge reaches it.
   (plan.instructions as unknown[])[loopIndex] = { ...loop, continueTarget: continuation };
+  // EVIDENCE: fixture points only the loop's continue at the same instruction, as validation requires.
   (plan.instructions as unknown[])[backIndex] = { ...back, target: continuation };
   // EVIDENCE: fixture replaces only the loop body's assignment with a store into the button-label temporary.
   (plan.instructions as unknown[])[assignIndex] = {
