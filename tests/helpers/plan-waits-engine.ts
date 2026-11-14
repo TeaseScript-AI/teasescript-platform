@@ -36,15 +36,22 @@ export function checkWaitsAgainstEngine(plan: InstructionPlan, maxOperations = 2
     checked += 1;
     const action = view.foregroundAction;
     if (action !== null && !waits.waitsAt(action.owningInstruction))
-      unmarked.push(`wait ${checked}: instruction ${action.owningInstruction} (${action.kind}) waits unmarked`);
+      unmarked.push(
+        `wait ${checked}: instruction ${action.owningInstruction} (${action.kind}) waits unmarked`,
+      );
     for (const call of session.callStack()) {
       if (call.kind === "function") {
         if (!waits.functionMayWait(call.functionId))
-          unmarked.push(`wait ${checked}: ${call.functionName} (${call.functionId}) is live unmarked`);
+          unmarked.push(
+            `wait ${checked}: ${call.functionName} (${call.functionId}) is live unmarked`,
+          );
       } else if (!waits.mayWaitAt(call.returnInstruction - 1))
-        unmarked.push(`wait ${checked}: the file call at ${call.returnInstruction - 1} is live unmarked`);
+        unmarked.push(
+          `wait ${checked}: the file call at ${call.returnInstruction - 1} is live unmarked`,
+        );
     }
-    if (operation >= maxOperations || !answer(session)) return { waits: checked, unmarked, status: "waiting" };
+    if (operation >= maxOperations || !answer(session))
+      return { waits: checked, unmarked, status: "waiting" };
     session.run();
   }
 }

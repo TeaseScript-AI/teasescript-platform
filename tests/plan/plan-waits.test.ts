@@ -51,7 +51,11 @@ test("each instruction that can leave the session waiting marks its function; th
     ['showButton "Go"', "interaction", true],
     ["let photo = takePhoto()", "capture", true],
     ['let file = fileFromBase64("SGVsbG8=", default: null)', "fileStore", true],
-    ['let locked = encryptText("x", password: "p", publicKey: false, timeLock: false)', "lock", true],
+    [
+      'let locked = encryptText("x", password: "p", publicKey: false, timeLock: false)',
+      "lock",
+      true,
+    ],
     ['save 4 as "level"', "storageWrite", true],
     ['playAudio "sounds/bell.mp3"', "playMedia", true],
     ['say "Read this.", 1.5 s', "say", true],
@@ -61,9 +65,11 @@ test("each instruction that can leave the session waiting marks its function; th
     ["let beat = timer async hidden 1 s { }", "startTimer", false],
   ];
   for (const [statement, kind, waits] of cases) {
-    const { plan, waits: analysis, marked } = analysed(
-      main(`function f {\n  ${statement}\n}\nf()\nexit`),
-    );
+    const {
+      plan,
+      waits: analysis,
+      marked,
+    } = analysed(main(`function f {\n  ${statement}\n}\nf()\nexit`));
     const sites = inFunction(plan, "f", kind);
     assert.notEqual(sites.length, 0, `${statement} lowers to ${kind}`);
     assert.deepEqual(
@@ -85,7 +91,7 @@ test("a call marks its caller exactly when what it calls may wait, through any d
         "function addUp(n: integer): integer { if n == 0 { return 0 }\n return n + addUp(n - 1) }",
         "function ping(n: integer) { if n > 0 { pong(n - 1) } }",
         "function pong(n: integer) { if n > 0 { ping(n - 1) } else { wait 1 s } }",
-        "function quiet { let total = addUp(3)\n say \"${total}\", instant }",
+        'function quiet { let total = addUp(3)\n say "${total}", instant }',
         "outer()",
         "quiet()",
         "ping(2)",
@@ -94,7 +100,10 @@ test("a call marks its caller exactly when what it calls may wait, through any d
     ),
   );
   assert.deepEqual(
-    ["pause", "middle", "outer", "addUp", "ping", "pong", "quiet"].map((name) => [name, marked(name)]),
+    ["pause", "middle", "outer", "addUp", "ping", "pong", "quiet"].map((name) => [
+      name,
+      marked(name),
+    ]),
     [
       ["pause", true],
       ["middle", true],
@@ -145,7 +154,8 @@ test("a file call marks its caller exactly when the called activation may wait, 
       ["leave", false],
     ],
   );
-  const file = (path: string): number => plan.files.findIndex((candidate) => candidate.path === path);
+  const file = (path: string): number =>
+    plan.files.findIndex((candidate) => candidate.path === path);
   assert.deepEqual(
     ["rooms/waits.tease", "rooms/quiet.tease", "rooms/passes.tease"].map((path) =>
       waits.fileMayWait(file(path)),
@@ -171,7 +181,7 @@ test("a block's waits are its own, and a goto in a block reaching a waiting file
   const { plan, waits, marked } = analysed({
     "main.tease": [
       "function start { let beat = timer async hidden 1 s { wait 1 s } }",
-      "function quietStart { let beat = timer async hidden 1 s { say \"Beat.\", instant } }",
+      'function quietStart { let beat = timer async hidden 1 s { say "Beat.", instant } }',
       "start()",
       "quietStart()",
       'call "rooms/quiet.tease"',
@@ -205,15 +215,15 @@ test("at every wait of a played session, each live function, block and file call
   const sources: readonly Readonly<Record<string, string>>[] = [
     main(
       [
-        "function pause(n: integer) { wait 1 s\n say \"pause ${n}\", instant }",
+        'function pause(n: integer) { wait 1 s\n say "pause ${n}", instant }',
         "function rounds(n: integer): integer {",
         "  let total = 0",
-        "  for i in 0..n { total += askInteger \"How many?\"\n pause(i) }",
+        '  for i in 0..n { total += askInteger "How many?"\n pause(i) }',
         "  return total",
         "}",
         "let beats = 0",
         "let beat = timer async hidden 2 s { beats += 1\n pause(beats) }",
-        "repeat 2 { let got = rounds(2)\n say \"${got}\" }",
+        'repeat 2 { let got = rounds(2)\n say "${got}" }',
         "exit",
       ].join("\n"),
     ),
