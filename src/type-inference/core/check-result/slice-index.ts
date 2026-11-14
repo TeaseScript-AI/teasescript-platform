@@ -623,9 +623,9 @@ export function declarationOf(
   store: LetStatement | AssignmentStatement,
 ): Declaration {
   if (store.kind === "letStatement") return store;
-  const place = answers.at(nodeOf(answers, index, store))?.place;
-  const declaration =
-    place === null || place === undefined ? undefined : declaredAt(index, lets, store, place.id);
+  // (the place the store writes: a compound assignment's node is its operation, which `at` answers with no place)
+  const place = storePlace(answers, index, store);
+  const declaration = place === null ? undefined : declaredAt(index, lets, store, place.id);
   if (declaration === undefined)
     throw new Error("An assignment of the slice stores into no variable.");
   return declaration;
