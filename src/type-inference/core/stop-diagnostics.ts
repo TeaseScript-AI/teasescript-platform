@@ -83,7 +83,6 @@ export function stopDiagnostics(
   let heaviest: FileRegion | FunctionRegion;
   if (limit === "nesting") heaviest = places.of(program.deep[0]!);
   else {
-    // the most work counted to one place, the earliest region on a tie; setup's work (0) is never compared (#2701)
     const spent = program.work.spent();
     let best = 0;
     for (let spender = 1; spender < spent.length; spender += 1)
