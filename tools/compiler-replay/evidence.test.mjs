@@ -397,8 +397,45 @@ test("evidence: a package's class is its analysis's, its first difference by par
   );
   assert.equal(summary.shares[0].heaviest.name, "stops");
   assert.equal(sources.find((s) => s.name === "hang").bound, "safety net 3600 s");
-  // (a research-route compile that threw alike is listed by its place)
-  assert.equal(summary.routeThrewAlike[0], "a: CandidateOutsideSlice");
+  // (the completed packages' research routes refused alike: their route results are not compared)
+  assert.deepEqual(summary.routeNotCompared, { threw: 0, refused: 2 });
+});
+
+test("evidence: a package's research route compared where it completed on both trees, else counted not compared where alike, a move where not", () => {
+  const route = (fields) => ({ ...packageRun(), route: { ...packageRun().route, ...fields } });
+  const done = route({ error: null, outside: null, plan: "p" });
+  const thrownAt = (at) => route({ error: `TypeError at ${at}`, outside: null });
+  const pkg = (name, base, head = base) => ({
+    name,
+    root: 0,
+    files: 1,
+    differing: 0,
+    modes: MODE_NAMES.map((m) => packageMode(m, base, head)),
+  });
+  const sources = packageSources([
+    pkg("compared", done, route({ error: null, outside: null, plan: "p", diagnostics: "e" })),
+    // (alike: only the analysis's parts are compared, so other work before the throw is no difference)
+    pkg("threw alike", thrownAt("g (src/b.js)"), {
+      ...thrownAt("g (src/b.js)"),
+      route: { ...thrownAt("g (src/b.js)").route, trace: "u" },
+    }),
+    pkg("refused alike", packageRun()),
+    pkg("throws now", done, thrownAt("g (src/b.js)")),
+    pkg("throws elsewhere", thrownAt("g (src/b.js)"), thrownAt("h (src/c.js)")),
+  ]);
+  const summary = partSummary(sources);
+  assert.equal(summary.completed, 5);
+  assert.deepEqual(summary.differences, ["compared: forward: route diagnostics"]);
+  assert.deepEqual(summary.routeNotCompared, { threw: 1, refused: 1 });
+  assert.deepEqual(summary.routeNotComparedList, [
+    "threw alike: threw TypeError at g (src/b.js)",
+    "refused alike: refused CandidateOutsideSlice",
+  ]);
+  // (a route outcome on one tree only, or at another place, is a move, listed with the class moves)
+  assert.deepEqual(summary.moved, [
+    "throws now: route completed → threw TypeError at g (src/b.js)",
+    "throws elsewhere: route threw TypeError at g (src/b.js) → threw TypeError at h (src/c.js)",
+  ]);
 });
 
 /** A results folder of campaign `p`: `set` shards (`setRecords(i)`), the packages' one shard and the checks' job. */
@@ -472,6 +509,11 @@ test("evidence-report: equal only where every part asked ran and completed somet
   try {
     const equal = report({ setRecords: fine, packages: [pkg] });
     assert.deepEqual([equal.status, equal.reasons, equal.notRun], [0, [], []]);
+    // (the package's route refused alike: the equal claim says it covers the analysis's publication only there)
+    assert.equal(
+      equal.verdict,
+      "equal (for 1 package whose route result is not compared, over the analysis's publication only)",
+    );
     assert.equal(equal.parts.set.completed, 16);
     // (an area left out is said so by the manifest, never "not run"; a shard missing is)
     const missing = report({ setRecords: fine, packages: [pkg], setShards: 15 });
