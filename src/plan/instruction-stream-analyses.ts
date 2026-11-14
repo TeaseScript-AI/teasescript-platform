@@ -13,6 +13,8 @@ import type {
 import { validateFunctionDefinitions } from "./instruction-stream-analyses/function-definitions.js";
 import { validateCanonicalInteractionResultHandoffs } from "./instruction-stream-analyses/interaction-result-handoffs.js";
 import { validateCanonicalPreparedSays } from "./instruction-stream-analyses/prepared-says.js";
+import type { Instruction } from "./model.js";
+import { structureRefusal } from "./structure.js";
 import {
   type InstructionSummary,
   summarizeInstructions,
@@ -35,6 +37,39 @@ export function analyzeInstructionStream(
     errors,
   );
   validateInstructionControlFlowRegions(instructions, validationIndex, summary, errors);
+  if (errors.length === 0 && validationIndex !== null)
+    validateNestedJumps(instructions, validationIndex, errors);
+}
+
+/**
+ * Every region's jumps nest, so its ifs, loops, parameter defaults and blocks can be read back from them
+ * (`structure.ts`). Checked once every instruction, target and region passed its own check.
+ */
+function validateNestedJumps(
+  instructions: readonly unknown[],
+  index: PlanValidationIndex,
+  errors: PlanValidationError[],
+): void {
+  // EVIDENCE: validation: every instruction passed its shape check above, with no error.
+  const checked = instructions as readonly Instruction[];
+  const regions = [
+    ...index.files.map((file) => ({ start: file.startInstruction, end: file.rootEndInstruction })),
+    ...[...index.functionsById.values()].map((range) => ({
+      start: range.entryInstruction,
+      end: range.endInstruction,
+    })),
+  ];
+  for (const region of regions) {
+    const refused = structureRefusal(checked, region);
+    if (refused !== null)
+      errors.push(
+        planError(
+          "TSC002",
+          `Jumps must nest: ${refused.message}.`,
+          `$.instructions[${refused.instruction}]`,
+        ),
+      );
+  }
 }
 
 function validatePreparedReferenceStructure(

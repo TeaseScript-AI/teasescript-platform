@@ -2106,9 +2106,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format           | Current revision | Reason for current revision                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------- | ---------------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Instruction plan |              105 | A check of a part of a stored value (#1224; only the new type analysis's plans carry it): a `declareBinding` or an `assign` may carry `partChecks`, each a path of properties and elements, a type and a place, which the runtime checks in the value it stores where the value has that part; plan validation previously rejected the field.                                    |
+| Instruction plan | 106 | Jumps must nest (#2767): plan validation refuses a plan whose jumps do not nest, so each region's ifs, loops, parameter defaults and blocks can be read back from its jumps; a revision 105 plan may hold crossing jumps. |
 | Runtime snapshot |               93 | Engine-independent colours (#2147): the normalized colours a snapshot holds (open buttons, choices and forms, captured speakers) are the same text in every JavaScript engine for numbers of at most 20 significant digits; restore recomputes an open button's or choice's colour and compares it with that text, so a revision 92 snapshot, holding the host engine's digits, could be rejected. |
-| Checkpoint       |              132 | The engine-independent colours' snapshot contract (#2147).                                                                                                                                                                                                                                |
+| Checkpoint | 133 | A checkpoint carries a revision 106 plan, whose jumps nest (#2767). |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2143,6 +2143,10 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Instruction plan history
 
+- Revision 105: A check of a part of a stored value (#1224; only the new type analysis's plans carry it): a
+  `declareBinding` or an `assign` may carry `partChecks`, each a path of properties and elements, a type and a place,
+  which the runtime checks in the value it stores where the value has that part; plan validation previously rejected
+  the field.
 - Revision 104: A typed reading into a written `object` (#1223; only the new type analysis's plans carry it): an object type may carry `keepExtra: true`, with which a typed `fromJson` keeps a JSON object's other keys, and a `storageLoad` may carry `repair` beside a union with an object member, as an `object?`'s; plan validation previously rejected both.
 - Revision 103: The new type analysis's runtime checks (the port of the coarse core, step S7; only its plans carry them
   until it is selected): an `assign` of a property may carry `requireExisting`, a call `indexCheck`, `fallbackCheck`,
@@ -2528,6 +2532,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 132: The engine-independent colours' snapshot contract (#2147).
 - Revision 130: The plan contract of a check of a part of a stored value.
 - Revision 129: The plan contract of a typed reading into a written `object`.
 - Revision 128: The form-presentation snapshot contract.

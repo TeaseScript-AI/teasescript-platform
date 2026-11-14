@@ -149,21 +149,42 @@ test("a forged retained choice is rejected until cleanup clears the presented op
   assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 });
 
-test("a valid plan that refills a button label and jumps back to its continuation keeps running", () => {
+/**
+ * A valid plan whose `while` loop, right after a settled button, goes back to the button's continuation without passing
+ * the button again, after its body stored new text into the button-label temporary.
+ */
+function loopBackToContinuation(): { plan: Plan; continuation: number } {
   const compiled = compileSource(
-    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant\nexit',
+    'let word = "Go"\nlet n = 0\nshowButton word\nwhile n < 1 {\n    n += 1\n    word = "Run"\n}\nsay "end", instant\nexit',
   );
   const plan = structuredClone(compiled.plan!);
   const continuation =
     plan.instructions.findIndex((instruction) => instruction.kind === "interaction") + 1;
-  const assignIndex = plan.instructions.findIndex((instruction) => instruction.kind === "assign");
-  const assign = plan.instructions[assignIndex];
   const interaction = plan.instructions[continuation - 1];
-  assert.ok(
-    assign?.kind === "assign" && interaction?.kind === "interaction" && "preparedUi" in interaction,
+  const loopIndex = plan.instructions.findIndex((instruction) => instruction.kind === "loopStart");
+  const loop = plan.instructions[loopIndex];
+  const backIndex = plan.instructions.findIndex(
+    (instruction) => instruction.kind === "loopControl" && instruction.action === "continue",
   );
+  const back = plan.instructions[backIndex];
+  const assignIndex = plan.instructions.findIndex(
+    (instruction) =>
+      instruction.kind === "assign" &&
+      instruction.value.kind === "literal" &&
+      instruction.value.value === "Run",
+  );
+  const assign = plan.instructions[assignIndex];
+  assert.ok(interaction?.kind === "interaction" && "preparedUi" in interaction);
   assert.ok(interaction.preparedUi.kind === "button");
-  // EVIDENCE: fixture refills the label temporary and jumps back to the settled button's continuation.
+  assert.ok(
+    loop?.kind === "loopStart" && loop.loopKind === "while" && back?.kind === "loopControl",
+  );
+  assert.ok(assign?.kind === "assign" && continuation < loopIndex);
+  // EVIDENCE: fixture starts the loop's rounds at the settled button's continuation, so its back edge reaches it.
+  (plan.instructions as unknown[])[loopIndex] = { ...loop, continueTarget: continuation };
+  // EVIDENCE: fixture points only the loop's continue at the same instruction, as validation requires.
+  (plan.instructions as unknown[])[backIndex] = { ...back, target: continuation };
+  // EVIDENCE: fixture replaces only the loop body's assignment with a store into the button-label temporary.
   (plan.instructions as unknown[])[assignIndex] = {
     kind: "storeTemporary",
     temporaryId: interaction.preparedUi.buttonLabelTemporary,
@@ -171,14 +192,12 @@ test("a valid plan that refills a button label and jumps back to its continuatio
     expectBoolean: false,
     span: assign.span,
   };
-  // EVIDENCE: fixture replaces only the following instruction with a jump to the old continuation.
-  (plan.instructions as unknown[])[assignIndex + 1] = {
-    kind: "jump",
-    target: continuation,
-    span: assign.span,
-  };
   assert.equal(validateInstructionPlan(plan).valid, true);
+  return { plan, continuation };
+}
 
+test("a valid plan that refills a button label and loops back to its continuation keeps running", () => {
+  const { plan, continuation } = loopBackToContinuation();
   const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
   assert.ok(pending.foregroundAction?.kind === "interaction");
   let snapshot = completeAction(plan, pending, {
@@ -235,23 +254,8 @@ test("a valid plan that overwrites the button label right after the settlement k
   assert.doesNotThrow(() => executeInstruction(plan, overwritten));
 });
 
-test("a forged button transcript is rejected at its first completion even when the plan jumps back later", () => {
-  const compiled = compileSource(
-    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant\nexit',
-  );
-  const plan = structuredClone(compiled.plan!);
-  const continuation =
-    plan.instructions.findIndex((instruction) => instruction.kind === "interaction") + 1;
-  const assignIndex = plan.instructions.findIndex((instruction) => instruction.kind === "assign");
-  const assign = plan.instructions[assignIndex];
-  assert.ok(assign?.kind === "assign");
-  // EVIDENCE: fixture adds a later jump back to the settled button's continuation.
-  (plan.instructions as unknown[])[assignIndex + 1] = {
-    kind: "jump",
-    target: continuation,
-    span: assign.span,
-  };
-  assert.equal(validateInstructionPlan(plan).valid, true);
+test("a forged button transcript is rejected at its first completion even when the plan loops back later", () => {
+  const { plan } = loopBackToContinuation();
   const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
   assert.ok(pending.foregroundAction?.kind === "interaction");
   const settled = completeAction(plan, pending, {
