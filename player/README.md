@@ -1,6 +1,6 @@
-# Player implementation
+# Playroom implementation
 
-The Player implementation is under `vue/src/`. The canonical observable UI contract is
+The Playroom implementation is under `vue/src/`. The canonical observable UI contract is
 [`docs/ui/PLAYER-UI.md`](../docs/ui/PLAYER-UI.md). Do not infer new product requirements from HTML structure, CSS
 selectors, TypeScript helpers, demo data, or other implementation details here.
 
@@ -14,31 +14,31 @@ development preview. The default build, served on `/player/` by `npm run playgro
 [`examples/demo/`](../examples/demo/demo.tease) behind Start and loads preview fixtures only when `?dev` is selected.
 With a development package root, `?package=<id>` plays that package instead (see the repository `README.md`), and
 `?dev&package=<id>` plays it in the development preview.
-This is a local inspection route, not the production cross-origin Player/host protocol.
+This is a local inspection route, not the production cross-origin Playroom/host protocol.
 
 ## Implementation seams
 
-- `runtime/runtime-adapter.ts` contains framework-independent runtime-to-Player translation and shared action helpers used by
-  the Player and playground workspace controller, including reporting a persisted script-storage write.
+- `runtime/runtime-adapter.ts` contains framework-independent runtime-to-Playroom translation and shared action helpers used by
+  the Playroom and playground workspace controller, including reporting a persisted script-storage write.
 - `engine-bridge/` is the bridge to the engine's host (the L5 series of Runtime 2): its protocol, host, client and ops,
   which run the adapter's sessions where the host is. The main realm holds a `PlayerSession` (`runtime/runtime-view.ts`), the
   published state with its transcript, which `persistence/session-store.ts` builds from each reply; `runtime/player-bridge.ts` sends the
-  requests; it serves one live Player at a time (`claim`), and a later Player may reuse it. Until the Worker is
-  activated, the host runs in the page (`engine-bridge/in-process.ts`): the Player builds its backend there, and only
+  requests; it serves one live Playroom at a time (`claim`), and a later Playroom may reuse it. Until the Worker is
+  activated, the host runs in the page (`engine-bridge/in-process.ts`): the Playroom builds its backend there, and only
   tests use its facade; `engine-bridge/inventory.ts` lists what still moves.
   The player's input reaches the host from one section of the shown session (`vue/src/session/runtime-input.ts`): it observes,
   checks that the session still owns the UI and that the action the player acted on is still presented, then posts the
   control's op. Input's ops read no basis; an answer to another action is refused by its action ID.
-- `presentation/notices.ts` contains the Player notice channel and its fixed wording per condition; see
-  [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#player-notices).
+- `presentation/notices.ts` contains the Playroom notice channel and its fixed wording per condition; see
+  [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#playroom-notices).
 - `persistence/script-storage.ts` contains the asynchronous script-storage provider boundary and its browser-local
   implementation; see [`DATA-AND-API.md`](../docs/DATA-AND-API.md#script-storage-in-the-browser).
-- `vue/src/` contains the Player composition, components, shared layout/theme CSS, demo host, and development preview;
+- `vue/src/` contains the Playroom composition, components, shared layout/theme CSS, demo host, and development preview;
   its [component map](vue/src/README.md) records responsibility boundaries.
 - `presentation/model.ts` and `presentation/presentation.ts` contain shared presentation shapes and timer formatting helpers.
 - `theme/` owns theme generation and authored action-button material.
 - `media/capture-device.ts`, `media/rgba-image.ts`, and `media/browser-capture.ts` contain the framework-independent camera/microphone
-  capture foundation: Player-owned stream lifecycle, bounded failures, recording, still frames, pixel copies, and
+  capture foundation: Playroom-owned stream lifecycle, bounded failures, recording, still frames, pixel copies, and
   microphone sampling. `media/session-camera.ts` opens the session camera at Start and answers `takePhoto()`;
   `media/captured-media.ts`, `media/indexeddb-media-repository.ts`, and `media/captured-media-persistence.ts` keep captured photos and
   images chosen for `askImage(...)` as session media and durable while saved script storage references them;
@@ -54,27 +54,27 @@ This is a local inspection route, not the production cross-origin Player/host pr
   [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#session-start-and-user-activation)).
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
-presentation state in the Player; Tailwind CSS 4 is integrated through Vite as a foundation layer,
+presentation state in the Playroom; Tailwind CSS 4 is integrated through Vite as a foundation layer,
 repository-owned shadcn-vue source/config provides local component seams, Reka is the selected accessible
 primitive/positioning/focus layer when interactive components need it, and TanStack Vue Virtual is the single
 transcript windowing/scroll-anchoring owner. The engine and shared presentation contracts remain framework-independent
 as required by ADR 0020.
 
-`vue/src/style.css` owns shared Player geometry and semantic token mapping; `theme/` generates the currently
+`vue/src/style.css` owns shared Playroom geometry and semantic token mapping; `theme/` generates the currently
 applied light/dark roles. Components consume semantic roles. Speaker, authored control, media, and technical mask
 colours retain separate ownership. The maintained presentation contract and intended theme boundaries live in
 [`docs/ui/PLAYER-UI.md`](../docs/ui/PLAYER-UI.md); provisional generator values do not settle final palette policy.
 
 ## Experimental dynamic theme evaluation
 
-The Player currently renders generated light/dark theme roles. In the development preview, Visual Lab → Theme Lab
+The Playroom currently renders generated light/dark theme roles. In the development preview, Visual Lab → Theme Lab
 edits the live theme intent. See the [component map](vue/src/README.md).
 
 `theme/palette.ts` resolves Material-based light/dark roles; `theme/material.ts` isolates MCU's tonal palettes;
 `theme/color.ts` isolates Color.js conversion, gamut mapping and contrast. `vue/src/shell/usePlayerTheme.ts` applies the generated
 roles to the document root, including body-portaled controls, and restores previous inline values on unmount.
 Theme Lab edits session-local intent: accent, surface hue/tint, maximum chroma and monochrome. Contrast is shared
-with Player Settings and kept browser-locally like the other Player Settings. Zero tint is achromatic; accent remains
+with Playroom Settings and kept browser-locally like the other Playroom Settings. Zero tint is achromatic; accent remains
 independent. High contrast increases tone separation rather than saturation.
 Colour-pair presets change surface/accent inputs without changing mode or contrast; they do not register themes.
 While the Stage shows a photo, its colours replace the intent's surfaces and, under the photo accent A/B test's A, its
@@ -96,7 +96,7 @@ The generator consumes resolved platform intent. User/package precedence, author
 missing-variant fallback are not yet implemented; see the
 [theme boundary](../docs/ui/PLAYER-UI.md#theme-and-customization-boundary). It does not convert authored custom themes
 or scene/speaker colours. The generated system and its default light/dark intents are adopted
-([default themes](../docs/ui/PLAYER-UI.md#default-themes)); preference persistence beyond Player Settings and
+([default themes](../docs/ui/PLAYER-UI.md#default-themes)); preference persistence beyond Playroom Settings and
 palette/contrast policy remain Owner decisions.
 
 MCU (Apache-2.0) and Color.js (MIT) replace local colour-science implementations while leaving product role choices
@@ -106,7 +106,7 @@ bundler here: direct Node ESM execution of the adapter fails. No package patch o
 
 ## Component dependencies
 
-The Player components follow the shadcn-vue structure and use four further pinned browser packages. `@lucide/vue`
+The Playroom components follow the shadcn-vue structure and use four further pinned browser packages. `@lucide/vue`
 supplies the shared SVG icons; the alternative is locally maintained SVGs. `@vueuse/core` supplies lifecycle-aware
 events, observers, media queries, storage and textarea autosizing; the alternative is local browser-API composables.
 `class-variance-authority` expresses the shared component variants that the design lint checks; the alternative is
@@ -115,11 +115,11 @@ components; the alternative is maintained CSS keyframes. They add browser code/C
 a network service, data access or host boundary. On upgrades, verify icons, focus/autosizing, variants and overlay
 animations.
 
-`vue-sonner` (MIT) draws the Player notice toasts through shadcn-vue's Sonner wrapper: stacking, enter/exit
+`vue-sonner` (MIT) draws the Playroom notice toasts through shadcn-vue's Sonner wrapper: stacking, enter/exit
 animation, swipe-to-hide, pause under the pointer and polite announcement. The alternative is a locally maintained
 toast stack with its own timers, stacking and animation. It adds browser code/CSS and dependency-update review from a single
 maintainer, without a network service, data access or host boundary; notice state, the bell and the panel stay
-Player-owned. Version 2.0.9 orders its stack by mount, so `vue/src/notifications/PlayerToasts.vue` creates each toast in its own render. On
+Playroom-owned. Version 2.0.9 orders its stack by mount, so `vue/src/notifications/PlayerToasts.vue` creates each toast in its own render. On
 upgrades, verify that order, placement, swipe, expiry and the theme status colours.
 
 ## Tool panel ordering
@@ -137,11 +137,11 @@ Its type package is development-only; versions live in the manifest/lockfile. Ve
 Theme Lab, the Stage media picker, and timer/background-button fixtures. As the scenario's development host, it
 resolves the scenario's Stage images to the development illustrations and its chime to a generated tone; the picker's
 "Runtime" option shows the scenario's own Stage image, and a fixture overrides it. Visual Lab and Layout Debug are development
-surfaces, not Standard Player product tools or runtime/package/host APIs. Fixture timer/control values remain local;
+surfaces, not Standard Playroom product tools or runtime/package/host APIs. Fixture timer/control values remain local;
 the opening scenario still uses the shared canonical runtime adapter.
 
-Player Settings' **Debug menu** adds the **Debug** panel for testing long scripts in every build
-([`docs/DEBUGGER.md`](../docs/DEBUGGER.md#player-debug)); it starts off on every load, and on with the explicit `?dev`
+Playroom Settings' **Debug menu** adds the **Debug** panel for testing long scripts in every build
+([`docs/DEBUGGER.md`](../docs/DEBUGGER.md#playroom-debug)); it starts off on every load, and on with the explicit `?dev`
 opt-in. The panel's **Debug** switch starts on and pauses its time controls (#615) and countdowns. **Skip event** advances scene time to the next wait, timer
 expiry, pacing pause, button timeout, or audio cue or end (silent rounds of a repeating timer without an expiry block
 and passes of looping audio without cues are no stops), and **+10 s** and **+1 min** advance it by that amount at any
@@ -150,7 +150,7 @@ The **Auto-skip** switch skips event after event while no input is pending and n
 a player's think time and the background timers running meanwhile stay real time; a badge over the Stage shows it while
 it is on. `?dev&time=skip` starts with auto-skip on, plain `?dev` with it off; Debug turned on again later starts with
 it off. Jumps are ordinary observations (see
-[`docs/RUNTIME.md`](../docs/RUNTIME.md#timers-and-scene-time)), made in short tasks so the Player stays responsive;
+[`docs/RUNTIME.md`](../docs/RUNTIME.md#timers-and-scene-time)), made in short tasks so the Playroom stays responsive;
 playing audio seeks along, and browser video seeking waits for video playback. Each jump adds a line to the panel's
 **Debug log** ("⏩ 30 s skipped", newest first), which an invisible live region also announces while the panel is
 closed; these lines are local UI state, never transcript entries, notices, or checkpoint data. The explanations of
@@ -160,8 +160,8 @@ for it. The **Now** tab (`vue/src/debug/DebugNow.vue`) combines `playerRuntimeDe
 timers, and media with their start statements) with the Stage's load reports for its current image element
 (`stageImageObservation`, judged by `debugStageImageStatus`); it adds nothing to the session. Its readers read only the
 published view: while the tab or the error dialog's call chain shows, the session's publications carry its active calls
-(`demandCallView`), from the first one after it opens; a session a Player error stopped carries them already. Automation finds the
-controls by role and name (the `Debug menu` switch in Player Settings, the Debug launcher,
+(`demandCallView`), from the first one after it opens; a session a Playroom error stopped carries them already. Automation finds the
+controls by role and name (the `Debug menu` switch in Playroom Settings, the Debug launcher,
 the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` buttons) or by
 `[data-player-setting="debug-menu"]`, `[data-debug-active]` and `data-development-time-action` (`skip`, `advance-10s`,
 `advance-1min`), the countdown in `[data-debug-countdown]`, the Now tab's `[data-debug-now]` with `-next`, `-waiting`,
@@ -189,8 +189,8 @@ while a script write waits for the host; a script write issued meanwhile settles
 the value the provider kept (`overtaken` when that is the script's). `debugEdits` holds the Edited-while-debugging mark,
 which `debugExportCandidate` passes to the debug export's `editedWhileDebugging`. While Debug runs, `usePlayerDebug`
 turns the value trace on (`setDebugTracing`): the engine's host keeps it as the connection's state (`debugTracing`),
-and every session operation there records into it. A setting made before the host is reachable waits as the Player's,
-and only its latest goes once the host is reachable, while the Player lives. The Variables tab (`vue/src/debug/DebugVariables.vue`, `vue/src/debug/DebugTraceRows.vue`) and
+and every session operation there records into it. A setting made before the host is reachable waits as the Playroom's,
+and only its latest goes once the host is reachable, while the Playroom lives. The Variables tab (`vue/src/debug/DebugVariables.vue`, `vue/src/debug/DebugTraceRows.vue`) and
 the Now tab's Stage image origin show views the host makes from its session and trace (`debugView`,
 `player/debug/debug-view.ts`), with `player/debug/debug-variables.ts`: `playerDebugVariables` groups live variables, and
 `playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened. The tabs keep
@@ -205,5 +205,5 @@ it shows; `playerDebugMessageOrigin` gives that event's output record or why the
 `firstEventSequence`; `playerDebugImageOrigin` does the same for the Stage image in the Now tab, from `stageImageSet`.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
-[`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's
+[`docs/TESTING.md`](../docs/TESTING.md#playroom-browser-and-visual-verification) for prerequisites and for the demo's
 end-to-end checks.

@@ -70,7 +70,7 @@ milestone, gate, integration-status, or current-capability work.
   `docs/TEASESCRIPT.md#language-design-intent` for simplicity, defaults, and advanced control.
 - `docs/CODE-EDITOR.md`: browser code editor and tooling integration.
 - `docs/DEBUGGER.md`: runtime inspection, simulation, and debug execution.
-- `docs/ui/PLAYER-UI.md`: normative Standard Player UI. While `Upstream contract integration` is non-empty, Player work
+- `docs/ui/PLAYER-UI.md`: normative Standard Playroom UI. While `Upstream contract integration` is non-empty, Playroom work
   must also read that section.
 - `docs/ui/UI-DESIGN-AND-ENGINEERING.md`: shared UI guidance; narrow tasks use its focused reading route.
 - `docs/DOCUMENTATION-OWNERSHIP.md`: mandatory documentation-edit/review guidance and the boundary between canonical repository material and shared research.

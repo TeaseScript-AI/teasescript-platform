@@ -13,7 +13,7 @@ export interface PlayerToastSink {
 const toastId = (entry: PlayerNotification) => `${entry.notice.key}#${entry.sequence}`;
 
 /**
- * Shows a toast for each new publication (PLAYER-UI "Player notices"), and retires it when its notice is replaced,
+ * Shows a toast for each new publication (PLAYER-UI "Playroom notices"), and retires it when its notice is replaced,
  * withdrawn, dismissed, or seen in the panel.
  */
 export function usePlayerToasts(

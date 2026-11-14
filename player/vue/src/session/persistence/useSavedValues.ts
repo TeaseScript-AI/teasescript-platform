@@ -187,7 +187,7 @@ export function useSavedValues({
   const clearing = ref(false);
   // While an import replaces the saved data, no Start, Continue, or clear begins.
   const importing = ref(false);
-  // Debug storage edits (DEBUGGER.md "Player Debug"), one at a time. An edit is stored first and reaches the running
+  // Debug storage edits (DEBUGGER.md "Playroom Debug"), one at a time. An edit is stored first and reaches the running
   // session only once that succeeded, through the engine's storage-edit input; its next `load` then returns it. While
   // the script's own write waits for the host, an edit is not taken: it would have to come between that write and the
   // script. A write the script issues while an edit is being stored settles as usual first.

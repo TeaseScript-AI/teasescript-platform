@@ -234,7 +234,7 @@ Do not enable new upstream defaults as an incidental upgrade.
 it as an optional peer and speaks its protocol, so the two are upgraded together. It is a native Go binary per
 platform, installed through optional dependencies and published by oxlint's maintainers with npm provenance, and it is
 built on typescript-go 7.0, the compiler line of the repository's `@typescript/native`. It reads the source in local
-checks and CI; nothing of it reaches the Player bundle. The alternative, typescript-eslint's typed rules, type-checks
+checks and CI; nothing of it reaches the Playroom bundle. The alternative, typescript-eslint's typed rules, type-checks
 through TypeScript's JavaScript API at another version and was not measured. `node_modules/typescript` is TypeScript
 6.0.3, a peer dependency npm installs for the ESLint parser and `vue-tsc`; the repository's `tsc` is
 `@typescript/native` 7.0.2 (`node_modules/.bin/tsc`, `npm run typecheck`).
@@ -244,9 +244,9 @@ the rule fixtures directly; the existing compiler type-checks their source. The 
 existing `ts-morph` parser dependency. The costs are maintaining the selected plugin source and reviewing justified
 exceptions; the plugin's lexical analysis does not prove cross-file type safety or replace runtime boundary tests.
 
-## Player design lint
+## Playroom design lint
 
-`npm run lint:design` checks the Player's Vue/TypeScript under `player/vue/src/`, including shared `components/ui`
+`npm run lint:design` checks the Playroom's Vue/TypeScript under `player/vue/src/`, including shared `components/ui`
 source (including CVA variants) and `PlayerActionButton.vue`. `eslint.design.config.mjs` owns the executable scope and
 contracts. The command and `npm run test:lint:design` are required by `npm run check`, including CI.
 Selected rules are errors; warnings fail the command. This scope does not cover the framework-independent `player/*.ts`
@@ -257,7 +257,7 @@ choose their variants instead of adding padding, color, shape or typography over
 Composition can control placement and containment. Check ownership before adding a variant or
 exception: an existing override is not evidence of a sound boundary. The embedded Textarea variant
 removes field chrome because Composer owns the enclosing surface and focus treatment; BubbleContent
-owns reading size and joined corners. Player-owned material, authored appearance and specialized
+owns reading size and joined corners. Playroom-owned material, authored appearance and specialized
 chrome stay in their local components. File/component-specific contracts allow their named CSS hooks,
 not arbitrary overrides throughout the application. Inline ESLint configuration is disabled; necessary
 exceptions belong in the configuration with a concrete rationale and regression coverage.
@@ -293,7 +293,7 @@ focus.
 
 The rule's tests check it against Tailwind's own output (`tools/design-lint/oracle.mjs`).
 
-- **The oracle.** Tailwind compiles each tested class with the Player's `style.css`. `postcss` finds the selector of
+- **The oracle.** Tailwind compiles each tested class with the Playroom's `style.css`. `postcss` finds the selector of
   each `opacity` declaration, and `postcss-selector-parser` reads its subject compounds, expanding `:is()` and
   `:where()`.
 - **Its verdicts.** A class is refused when a subject holds `:disabled`, `[disabled]` or `[data-disabled…]`, or when
@@ -321,7 +321,7 @@ consistency. Scoped/global CSS, runtime style objects and externally supplied cl
 and relevant browser checks. `no-inline-styles` stays off because authored styles, virtualizer offsets
 and measured geometry are legitimate; forcing them through CSS variables solely for lint adds indirection.
 Do not move a violation into CSS or an opaque helper to evade a diagnostic. Preserve author-selected
-foreground/background pairs under the Player color contract. A CSS linter is not added here: meaningful
+foreground/background pairs under the Playroom color contract. A CSS linter is not added here: meaningful
 palette validation would also need to distinguish theme definitions, technical masks/lighting, debug
 overlays and author data, beyond this utility/component check.
 

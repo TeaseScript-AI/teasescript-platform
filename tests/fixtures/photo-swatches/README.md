@@ -1,14 +1,14 @@
 # node-vibrant reference swatches
 
 `node-vibrant.json` holds what node-vibrant 4.0.4 measures for six photos. In `tests/player/player-photo-swatches.test.ts` the
-Player's own extraction (`player/theme/node-vibrant/swatches.ts`) must give the same colours and swatches;
+Playroom's own extraction (`player/theme/node-vibrant/swatches.ts`) must give the same colours and swatches;
 `tests/player/player-photo-theme.test.ts` checks the contrast of their photo colours.
 
 The photos are from Unsplash (Unsplash License), 1500 × 1000 through picsum.photos: P1 green forest valley by Jerry
 Adney (`_WiFMBRT7Aw`), P2 blue sea by Isaak Dury (`YhZbnxqtooM`), P3 portrait in a yellow field by Alexander Shustov
 (`AHBiSKaENwc`), P4 red cup on red by Justin Leibow (`ZJsseAxEcqM`), P5 purple petunias by Steven Spassov
 (`tVIqMgGlAG0`), and P6 black-and-white city by Oleg Chursin (`IoCWq07GaG4`). Chromium drew each photo on a canvas at
-128 px on its longest side, as the Player measures it, and read the RGBA pixels back on 2026-10-13.
+128 px on its longest side, as the Playroom measures it, and read the RGBA pixels back on 2026-10-13.
 
 For each photo:
 

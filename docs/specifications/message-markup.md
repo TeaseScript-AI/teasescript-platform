@@ -130,7 +130,7 @@ Colour spans normalize to opaque OKLCH through the shared colour parser; like ot
 colours](accepted-syntaxes-v30.md#authored-colours), values below full opacity are invalid. Their values remain
 constrained data; CSS declarations, host variables, classes, selectors, and additional attributes are not accepted.
 Invalid runtime colours use `inherit` in the prepared span so enclosing text/background presentation remains effective.
-Player themes own the exact visual mapping of accepted weight and size names.
+Playroom themes own the exact visual mapping of accepted weight and size names.
 
 A recognized valid opening tag formats content only when a matching closer can complete a properly nested span on the
 same line. An empty extension span is valid. An unknown tag, invalid non-colour value, extra attribute of a non-colour
@@ -175,8 +175,8 @@ excluded while it has no unmatched opener of the same kind inside the candidate.
 ordinary text after the link.
 
 The displayed content of a labeled link is its parsed label. The displayed content of a bare link is the exact consumed
-URL substring. The Player exposes a discoverable destination through ordinary link accessibility behavior, uses only
-the validated activation target, and opens an external destination without replacing the active Player session. Exact
+URL substring. The Playroom exposes a discoverable destination through ordinary link accessibility behavior, uses only
+the validated activation target, and opens an external destination without replacing the active Playroom session. Exact
 production host and sandbox navigation policy is outside this grammar.
 
 ## Backslash escaping
@@ -233,10 +233,10 @@ HTML. Exact TypeScript property names and serialized format versions belong to t
 
 The following semantic invariants are required:
 
-- the runtime, pacing logic, transcript adapter, and Player consume the same parsed representation or helpers from its
+- the runtime, pacing logic, transcript adapter, and Playroom consume the same parsed representation or helpers from its
   owning module;
 - no consumer reparses authored markup with a separate grammar;
-- the Player constructs framework/DOM text and supported elements directly and never sends authored text through
+- the Playroom constructs framework/DOM text and supported elements directly and never sends authored text through
   `innerHTML` or an equivalent raw-HTML path;
 - parsing uses no host capability, pending action, RNG, or mutable session state;
 - prepared `say` content captures structured content and visible text together, and checkpoint/restore validation keeps

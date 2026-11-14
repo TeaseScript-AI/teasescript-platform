@@ -1,4 +1,4 @@
-# Player camera, media, and time-integrity follow-ups
+# Playroom camera, media, and time-integrity follow-ups
 
 - **Status:** Active non-implemented planning
 - **Authority:** Non-authoritative owner-selected direction; accepted ADRs and current topic documents control
@@ -15,7 +15,7 @@ or accept final TeaseScript APIs.
 
 The permission and lifecycle model is accepted in [`SECURITY.md`](../SECURITY.md): browser permission is the boundary,
 requested on first activation according to the browser's current permission state, with the camera acquired after Start
-and kept open for the session rather than reopened for every capture. For platform-brokered acquisition the Player owns
+and kept open for the session rather than reopened for every capture. For platform-brokered acquisition the Playroom owns
 the browser streams, without its own prompt, indicator, or stop control, and gives TeaseScript only validated,
 engine-managed media references.
 
@@ -27,23 +27,23 @@ A camera/media decision must still define:
   separate execution realm or trusted code transformation;
 - switching, revocation handling, reload, restore, reconnect, and failure recovery;
 - quality negotiation and default resolution;
-- Player cleanup details beyond the accepted release on session teardown, unmount, navigation, `end`, and `exit`;
+- Playroom cleanup details beyond the accepted release on session teardown, unmount, navigation, `end`, and `exit`;
 - recording, still capture, motion detection, sampling, and resource limits.
 
 ## Interactive and direct image capture
 
 The [accepted V30 baseline](../specifications/accepted-syntaxes-v30.md) defines mandatory `askImage(...)` and nullable
-direct `takePhoto(...)`; this planning does not redefine their names or return contracts. The remaining Player design
+direct `takePhoto(...)`; this planning does not redefine their names or return contracts. The remaining Playroom design
 must decide source selection, preview, countdown, accept/retake, validation, retry, and recovery behavior, including
 after a denied permission. A rejected preview candidate is not runtime-visible.
 
-`takePhoto(...)` captures silently from the camera stream the Player opened at session start, without a source question,
+`takePhoto(...)` captures silently from the camera stream the Playroom opened at session start, without a source question,
 preview, or interactive acceptance flow ([`SECURITY.md`](../SECURITY.md)). Its camera options, transcript behavior, and
 Standard Library composition require a later accepted camera decision.
 
 ## Multiple cameras
 
-A single-camera player needs no role configuration. Packages may later declare free-form camera roles that players map
+A single-camera Playroom needs no role configuration. Packages may later declare free-form camera roles that players map
 to physical devices or personal aliases. Calls without a selector use the player's current default camera.
 
 The first implementation should support multiple configured devices while keeping only one physical stream active at a

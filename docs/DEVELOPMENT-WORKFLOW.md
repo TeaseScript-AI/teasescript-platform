@@ -474,8 +474,8 @@ its second round. There is no route beyond full; a family there follows the step
 | | Full | Light | Minimal |
 | --- | --- | --- | --- |
 | Compiler | a rule that changes diagnostics, emitted plans, or checks; charging, stop thresholds, or growth with input | a crash on one input; a tooling or generator change | docs, comments |
-| Runtime | a checkpoint field; the protocol between runtime and Player; a value or format rule | a local error with a reproduction | a test clean-up that touches no oracle or shared helper |
-| Player | who owns input state; the mechanism that orders asynchronous replies; a layout rule used everywhere | one component's layout fault; a guard against a double tap, with a deterministic regression test | wording in docs |
+| Runtime | a checkpoint field; the protocol between runtime and Playroom; a value or format rule | a local error with a reproduction | a test clean-up that touches no oracle or shared helper |
+| Playroom | who owns input state; the mechanism that orders asynchronous replies; a layout rule used everywhere | one component's layout fault; a guard against a double tap, with a deterministic regression test | wording in docs |
 | Backend | a database migration; an API contract, including an additive field; authentication | a validation fix in one endpoint | config comments |
 | Website front end | an API client contract; sign-in or session handling; a component or style rule used on every page | one page's fault, with a deterministic regression test | copy text |
 
@@ -764,7 +764,7 @@ pull request depends on the behavior it changes:
 | RNG-dependent behavior | Fixed-seed deterministic comparison |
 | Time-dependent behavior | Fake clock or equivalent deterministic source; no real waiting |
 | Security boundary | Structured rejection, bounded work, and no uncontrolled host exception at the real documented boundary |
-| Browser host/player behavior | Real browser E2E after the concrete cross-origin boundary exists |
+| Browser host/Playroom behavior | Real browser E2E after the concrete cross-origin boundary exists |
 
 These are relevance-based requirements. A pull request is not required to run or add every test category when
 the changed behavior does not reach that layer.
@@ -773,7 +773,7 @@ the changed behavior does not reach that layer.
 
 Every pull request runs its relevant configured checks and reports exact commands and results. Use the exact
 Node.js version declared in `.nvmrc` and confirm the effective environment before installing dependencies.
-The code targets ES2025 (`tsconfig.json`'s `target`, the Player's `lib` in `player/vue/tsconfig.json` and its Vite
+The code targets ES2025 (`tsconfig.json`'s `target`, the Playroom's `lib` in `player/vue/tsconfig.json` and its Vite
 `build.target`), which Node 26 and current browsers implement; older browsers are not supported (owner, 2026-11-07).
 Missing NVM is not itself a verification failure when another supported mechanism activated the required
 version. Reuse earlier verification while the tested source/content and every relevant input, toolchain,

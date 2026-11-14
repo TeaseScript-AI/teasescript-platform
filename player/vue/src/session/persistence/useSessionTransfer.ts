@@ -102,7 +102,7 @@ export function useSessionTransfer({
   settlePlanJson,
 }: SessionTransferHost) {
   /**
-   * The session an export of the session takes (PLAYER-UI "Player Settings"): the shown one while it runs or waits, or the
+   * The session an export of the session takes (PLAYER-UI "Playroom Settings"): the shown one while it runs or waits, or the
    * one Continue goes on with; or why there is none. A debug room's session stays in its browser.
    */
   const exportableSession = computed(

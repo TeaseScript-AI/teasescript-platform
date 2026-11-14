@@ -85,7 +85,7 @@ const props = defineProps<{
   images?: PlayerImageInput;
   /** The steps of a presented `askImage` request, whose "Use image" answers it with the preview. */
   capture?: ImageCapture;
-  /** The Debug countdown line, shown under the foreground controls while Debug runs (DEBUGGER.md "Player Debug"). */
+  /** The Debug countdown line, shown under the foreground controls while Debug runs (DEBUGGER.md "Playroom Debug"). */
   debugCountdown?: string | null;
   /** Whether a popup or an exportText dialog is modal; while Debug runs it is not, so the Debug panel stays usable. */
   popupModal?: boolean;

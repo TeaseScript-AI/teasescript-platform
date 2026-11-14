@@ -1,7 +1,7 @@
 # Debugger
 
-The Debugger owns runtime inspection and diagnostic execution independently of editor or Player presentation. The code
-editor may embed it, and the Standard Player may expose it as a platform tool. It is hidden by default in ordinary play
+The Debugger owns runtime inspection and diagnostic execution independently of editor or Playroom presentation. The code
+editor may embed it, and the Standard Playroom may expose it as a platform tool. It is hidden by default in ordinary play
 but may be deliberately enabled by players or developers; package content cannot disable platform debugging solely to
 preserve surprises.
 
@@ -18,15 +18,15 @@ branches. Exact UI and source mapping remain presentation/tooling work. Value pr
 - **Active debug** runs a disposable fork of a selected session/checkpoint. It may Run, Step, Pause, change variables,
   control deterministic RNG outcomes, exercise branches, and use manual checkpoint/restore. Debug mutations never merge
   back into the canonical session.
-- **Storage edits and adopted rewinds** of a local Player session are the exception: an edit through
+- **Storage edits and adopted rewinds** of a local Playroom session are the exception: an edit through
   `applyExternalStorageEdit` ([`RUNTIME.md`](RUNTIME.md#script-storage)), or new input to a state Debug's
   [rewind](#rewind) restored, turns the active session into a diagnostic fork in place, without a separate fork object.
-  The Player marks the session edited or rewound while debugging, in its own session data rather than the checkpoint,
+  The Playroom marks the session edited or rewound while debugging, in its own session data rather than the checkpoint,
   keeps the mark with its debug export and restore, and never treats it as normal play.
 
-## Player Debug
+## Playroom Debug
 
-The Standard Player's Debug panel is the first Debugger slice. Player Settings' **Debug menu** switch offers it in the
+The Standard Playroom's Debug panel is the first Debugger slice. Playroom Settings' **Debug menu** switch offers it in the
 tools menu; the switch is not stored, so every load starts with it off in the normal room (the development preview's
 `?dev` starts it on, unless `debug=off`) and on in the debug room. Debug runs in the [debug room](#debug-room): turning
 the menu on in the normal room goes on there.
@@ -43,7 +43,7 @@ which appears when the host persists script storage.
   accelerated time, not an active-debug fork, and change no script semantics.
 - **Countdowns** show the deadline of the current foreground wait from canonical state: an authored `wait` (a blocking
   `timer` stays a timer), a presented `showButton` with a timeout, or a message's reading time. An action suspended behind a running timer, media, or permanent-button block does not count; that
-  block's own foreground work does. Seconds round up against the Player's display estimate of scene time. An elapsed
+  block's own foreground work does. Seconds round up against the Playroom's display estimate of scene time. An elapsed
   deadline whose action has not settled reads **Wait elapsed · waiting for script**; the line ends when its action
   settles or loses the foreground, and does not show before Start or Continue or after the session ends.
 - **Now** shows where the session is, derived on demand from canonical state and the Stage's own load reports. Paths
@@ -89,7 +89,7 @@ which appears when the host persists script storage.
   dict's members, 20 at a time, as one flat outline. Text stays text: when it has the exact shape of a photo
   reference, a thumbnail beside it shows the photo this browser saved under it, read only once it is in view, or says
   No saved photo. Each such reference also appears once under Photo references with the keys whose values contain it.
-  The tab reads the saved values freshly when it opens, after this Player saved, cleared, or imported them, after
+  The tab reads the saved values freshly when it opens, after this Playroom saved, cleared, or imported them, after
   another tab of this browser changed this script's values, and on Refresh. The running session keeps the copy it
   loaded at Start, apart from its own edits:
   - **Edit**, **Delete**, and **Add a value** open an editor with the value's type (Text, Number, Integer, Yes/no, or
@@ -105,12 +105,12 @@ which appears when the host persists script storage.
     browser kept, and when that is the script's, the editor says so. Without a running session, the edit is for the
     next Start. Editing waits while the session waits for Continue, the camera opens, or an import or clear runs.
   - The first applied edit marks the session **Edited while debugging** (with the scene time of the first edit and
-    the number of edits) in the Player's own session data, which a debug export carries.
+    the number of edits) in the Playroom's own session data, which a debug export carries.
 
 ### Debug room
 
 Debugging stays apart from normal play. Each script with storage has a normal room, its own saved data and the session
-the Player keeps for it ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), and a debug room with a
+the Playroom keeps for it ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), and a debug room with a
 session, saved values, and photos of its own, kept in the IndexedDB database `teasescript-debug-rooms`
 (`player/persistence/kept-sessions.ts`). A plain URL opens the normal room; `room=debug` opens the debug room, made from a copy of
 the script's own saved values and photos as they are now when there is none yet. The development preview opens the
@@ -123,7 +123,7 @@ debug room while it starts with the Debug menu on, and with `room=debug`.
   session and what it saved. Your normal session stays as it is.", with **Cancel** and **Overwrite**. Without a
   running normal session, Debug on opens the debug room's start page. The address then gets `room=debug`, so a reload
   stays in the debug room. **Debug off** in the debug room only makes the script read `debugMode` as `false`.
-- **Its start page** names its session: **Continue debug session** or **Start debug session**, which a Player update
+- **Its start page** names its session: **Continue debug session** or **Start debug session**, which a Playroom update
   that changed the session's format explains as the normal room's does
   ([`PLAYER-UI.md`](ui/PLAYER-UI.md#session-start-and-user-activation)). Once the debug room
   has something to delete, a session or saved values, it also offers **Reload session**, a new debug session from the
@@ -194,12 +194,12 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
 ### Rewind
 
 While the Debug features run, Debug's rewind keeps a history in the engine's host (`player/engine-bridge/history/`),
-which the Player shows as it changes (`player/debug/debug-history.ts`). It has a **point** for every interaction the session
+which the Playroom shows as it changes (`player/debug/debug-history.ts`). It has a **point** for every interaction the session
 newly presents (`askChoice`, a button, an ask, or `askImage`), the one shown when Debug is turned on included; an
 interaction answered before then has none. An ask that a timer, media, or permanent-button block suspended and shows
 again is the same point. A point holds the validated state as checkpoint JSON, which includes the session's storage
 view, and the number of the session's events that led to it, which rebuild its transcript; the plan is shared, and
-photos stay in the Player's captured-media store, which keeps every photo it admitted while it is mounted. Each point's
+photos stay in the Playroom's captured-media store, which keeps every photo it admitted while it is mounted. Each point's
 JSON is written at once to an IndexedDB database of the history's own (`teasescript-debug-history-<UUID>`) and leaves
 memory once written. A point is taken only while the JSON in memory, writes still pending included, stays within
 32 Mi UTF-16 code units (`DEBUG_HISTORY_ADMITTED_SNAPSHOT_CHARS`, provisional); without IndexedDB every point stays in
@@ -207,9 +207,9 @@ memory, and once a write fails only the JSON not yet written stays there, while 
 the history keeps the points it has and takes no more. The state the first Back leaves is kept the same way; when it
 does not fit, Back changes nothing. Turning
 either Debug switch off, a new Start or Continue, importing or clearing this script's saved data, and unmounting the
-Player delete the history and its database; an import also ends an inspected state. A page that ended without deleting
-its database, for example after a crash or by navigating away, leaves it to the next Player, which deletes it at startup
-where the browser lists its databases; one that another open Player still uses is deleted only once that Player is done
+Playroom delete the history and its database; an import also ends an inspected state. A page that ended without deleting
+its database, for example after a crash or by navigating away, leaves it to the next Playroom, which deletes it at startup
+where the browser lists its databases; one that another open Playroom still uses is deleted only once that Playroom is done
 with it.
 
 - **Back** restores a point that leads to the state shown as a new generation of the session: its state with its storage
@@ -225,17 +225,17 @@ with it.
   view, as one replacement through the provider and its captured-media layer, and then the input applies and the
   session runs and saves as any session. The parked session, the states kept for Forward, and the points after the
   adopted state are gone; earlier points stay for a later Back. When the saved data cannot be replaced, for example on
-  quota, the state stays inspected, the Player says so, and nothing changes. Rewind does one thing at a time: while a
+  quota, the state stays inspected, the Playroom says so, and nothing changes. Rewind does one thing at a time: while a
   step restores a state, a state is being adopted, or Return or Debug off waits to reinstate the parked session, input
   to an inspected state, Resume, Return, and another step are refused, and nothing is read or saved for them.
 - In the chat, Back is each earlier answer's **Back to here**; while a state is inspected, the later messages show grey
-  and a bar offers Forward, Resume, and Return to session ([Player
+  and a bar offers Forward, Resume, and Return to session ([Playroom
   UI](ui/PLAYER-UI.md#composer-and-foreground-interactions)). Each state's transcript folds only the events that led to
   it, so a message that changes later shows the text it had then, and the grey messages are only those created later,
   with their text in the state Forward restores.
 - Every restored state marks the session **Rewound while debugging**, with the scene time of the state the latest
   rewind restored and how many rewinds led to it, which an adopted state keeps. The debug recorder and the value trace
-  begin anew at every restored state, so a replay never mixes branches. After a Player error, rewinding does not replace
+  begin anew at every restored state, so a replay never mixes branches. After a Playroom error, rewinding does not replace
   what the debug export replays: the export keeps the recording up to the error until the next Start.
   A lost engine connection takes the host's history with it: its timeline stays read-only until a new session begins,
   and Debug offers no rewind again until the page is reloaded. A debug export dialog already open keeps what it copied.
@@ -243,51 +243,51 @@ with it.
 ## Debug export
 
 A debug export (`<script>-debug.teasedebug.json.gz`, or `.teasedebug.json` where the browser cannot compress) lets a
-developer find why a Player session failed. Owner decision: noise, such as whole histories, unrelated media, browser
+developer find why a Playroom session failed. Owner decision: noise, such as whole histories, unrelated media, browser
 storage, credentials, or host objects, is never included; useful but personal content (saved values, submitted
-answers, session text, photos, and Player/browser details) is a separate choice for each export, off by default and
+answers, session text, photos, and Playroom/browser details) is a separate choice for each export, off by default and
 previewed before download; a selected photo carries its original bytes and links to the call or action that used it.
 The technical report, always included, locates the failure without runtime values. Replay data discloses state that
 copies saved values, answers, and session text, so it requires all three.
 
 `player/debug/debug-export-file.ts` owns the format and writes the file; `player/debug/debug-export.ts` reads and replays it, in the engine's Worker and in `tools/debug-export.mjs`. The format is a versioned JSON document (`format: "teasescript-debug-export"`,
 `version: 6`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
-(unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
+(unknown fields are `null`); the incident (code and one-based source location, or a Playroom exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
 covers edits before the replay anchor, and `rewoundWhileDebugging`, the [rewind](#rewind)'s mark (`restoredSceneTimeMs`
 and `rewindCount`, or `null`), both of which `inspect` prints; the selection and omissions; the canonical checkpoint
 and its role, `current` or `lastGood`; the replay data; photos; and readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
-every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
+every elementary engine call the Playroom made since, in order: `run` with its options, `observeTime`, `completeAction`
 with the media store's recorded answers and how the player gave the answer (`input`: Enter in the composer, its Send
 button, a button of the request, or the key that activates the preselected button, else `null`), `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
 `applyExternalStorageEdit` with the edit, `updateInteraction` with the form edit, and `setDebugMode` with whether Debug
 is on, each with its plain arguments, outcome, emitted event range, resulting
 status, or thrown error name and the status the call started from, the random outcomes chosen during it, and the
 [random draw](RUNTIME.md#controlled-randomness) it stands paused at, or `null`. A call that paused stays one record
-while the Player resolves its draws: each resolution adds its events to it, and a chosen one also its outcome; calls
+while the Playroom resolves its draws: each resolution adds its events to it, and a chosen one also its outcome; calls
 the engine refuses meanwhile are not recorded; only a resolution of a draw that paused before the
 anchor is a `resumeRandomDraw` call of its own. Replay decides each recorded draw as recorded, every other one
 naturally, and pauses where the call stood paused. It adds no plan, snapshot, or checkpoint revision.
 
-In every build, the Player's `player/debug/debug-recorder.ts` records each session from its Start or Continue: the anchor
+In every build, the Playroom's `player/debug/debug-recorder.ts` records each session from its Start or Continue: the anchor
 before its first call and copies of every call's plain arguments and results, beside the session and outside its state.
 When the record would outgrow its retention (4,096 calls or 2 Mi characters of argument JSON, diagnostic tuning rather
-than a script limit), it starts again from the state before the Player's next call, never dropping a call in between. A
+than a script limit), it starts again from the state before the Playroom's next call, never dropping a call in between. A
 call that fails the session or throws freezes the record, which keeps the state that call reached, or for a call that
 threw, the state it started from, as the export's checkpoint, so that later observations, such as on hiding the page,
 cannot evict or outdate it; a call the recorder cannot copy, or a media store or random decision callback that throws
 during a call, marks it incomplete, and so does a state the session cannot export, such as one holding a list too long
 for the browser to enumerate, for which the record keeps no end state but still how the session failed there, if it
-did. The recorder also lets the Player continue after a call throws, which ends the
-session's [runtime session](RUNTIME.md#runtime-sessions): the Player rebuilds the state it showed last from the recorded
+did. The recorder also lets the Playroom continue after a call throws, which ends the
+session's [runtime session](RUNTIME.md#runtime-sessions): the Playroom rebuilds the state it showed last from the recorded
 calls. For that, the recorder keeps logging calls after the record froze without changing the record, and after a call
-it cannot copy, it starts that log again at the Player's next call.
+it cannot copy, it starts that log again at the Playroom's next call.
 
-The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
+The Playroom assembles an export when its dialog opens ([Playroom UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
 session, the record, and the photos frozen then (`player/debug/debug-export-assembly.ts`), so play may continue meanwhile. The
 technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
 where the browser can hash, the incident as the session's actual state shows it, also a state it cannot export, the
-storage editor's and the rewind's marks, the sequence and kind of the last 256 events, and what the Player itself observed, as Debug's Now view and the notices show it: the
+storage editor's and the rewind's marks, the sequence and kind of the last 256 events, and what the Playroom itself observed, as Debug's Now view and the notices show it: the
 Stage image's status (such as an unresolved path or a failed load), each playing medium's kind, load, and state, and
 each notice's kind and level, such as blocked audio. These describe this browser; a replay of the engine calls does not
 reproduce them. Saved values add the session's storage view; answers add the recorded interaction completions with their `input`; session
@@ -301,7 +301,7 @@ checkpoint of the state a complete record reaches (of the actual state when the 
 as the last good state when that state cannot be exported or checkpointed; photos add the chosen originals of the
 photos the export refers to and their uses (a recorded image answer or capture, or a saved value; none for one it holds only otherwise,
 such as in a variable of the replay's state), where a state's `storedFiles`, which names every stored file the session
-knew, does not count as referring to one; Player and browser details add the presentation settings, screen
+knew, does not count as referring to one; Playroom and browser details add the presentation settings, screen
 geometry, pointer, language, and user agent. Text that looks like a credential, or a rooted, drive, or network file path
 or a file URL outside another URL, is replaced in every readable section, and replay data containing it is left out
 entirely, since changing it would change the replay; such detection in free text is best effort and cannot prove text

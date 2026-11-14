@@ -11,20 +11,20 @@ The engine/platform must support:
 
 Blocking versus non-blocking execution and presentation surface are separate concepts, subject to these surface rules:
 
-- a Player-owned custom tool body is always non-blocking; user hide/show changes presentation only and does not end the
+- a Playroom-owned custom tool body is always non-blocking; user hide/show changes presentation only and does not end the
   view or its runtime state;
 - the central stage supports blocking and non-blocking custom views and is script-controlled rather than user-dismissed;
 - a floating non-modal overlay supports both modes; the author chooses whether it is hideable or dismissible;
 - a modal overlay is blocking; it is not dismissible by default, while an explicitly dismissible modal defines its
   cancellation result/event;
-- a temporary full-Player takeover may be blocking or non-blocking, replaces the complete Standard Player presentation,
-  and later returns to the same Standard Player state. It is not dismissible by default, though the author may provide
-  an explicit exit/cancel path. A takeover cannot selectively retain arbitrary Standard Player regions; authors who
+- a temporary full-Playroom takeover may be blocking or non-blocking, replaces the complete Standard Playroom presentation,
+  and later returns to the same Standard Playroom state. It is not dismissible by default, though the author may provide
+  an explicit exit/cancel path. A takeover cannot selectively retain arbitrary Standard Playroom regions; authors who
   need those regions use a smaller custom surface instead.
 
-A custom stage may also use Player/browser fullscreen where permitted; fullscreen and full-Player takeover are distinct.
-All forms remain inside the accepted sandboxed Player iframe. Custom tool/stage content is confined to its assigned
-surface and cannot escape into structural Player chrome through CSS or `z-index`.
+A custom stage may also use Playroom/browser fullscreen where permitted; fullscreen and full-Playroom takeover are distinct.
+All forms remain inside the accepted sandboxed Playroom iframe. Custom tool/stage content is confined to its assigned
+surface and cannot escape into structural Playroom chrome through CSS or `z-index`.
 
 Cancellation and failure are distinct. If custom-view code fails before normal completion, the result is an ordinary
 runtime error for both blocking and non-blocking views; there is no separate per-view failure-handler layer. Owner or
@@ -32,7 +32,7 @@ session termination ends owned views, cancels view-local pending work/subscripti
 releases temporary resources according to their owning contracts. Hiding a view is not cleanup.
 
 A blocking modal/takeover moves keyboard focus into the active custom surface and restores focus to a logical Standard
-Player target when it ends. A non-modal non-blocking view does not steal focus merely because it appears. Browser Back
+Playroom target when it ends. A non-modal non-blocking view does not steal focus merely because it appears. Browser Back
 is not repurposed as generic custom-view dismissal/navigation.
 
 Canonical runtime/checkpoint state remains serializable; arbitrary custom DOM or JavaScript state is not required to be

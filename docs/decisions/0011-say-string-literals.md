@@ -23,7 +23,7 @@ physical-newline-to-space folding during the language/runtime POC.
 
 Strings without interpolation still lower to the existing literal plan expression. Interpolated strings still lower
 to the existing `template` plan expression, so this source and AST change does not alter the versioned instruction-plan,
-snapshot, or checkpoint formats. Player message text preserves resulting newlines when rendered.
+snapshot, or checkpoint formats. Playroom message text preserves resulting newlines when rendered.
 
 This decision replaces ADR 0011's 2026-07-21 selection of double-quoted plain strings and backtick interpolation
 templates. Existing source must migrate to the quote-based forms; no compatibility alias is retained.

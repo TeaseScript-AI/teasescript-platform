@@ -2,12 +2,12 @@
 
 - **Status:** Current cross-surface UI engineering and design guidance.
 - **Use when:** changing layout, responsive behavior, browser interaction presentation, controls, media presentation,
-  or visual styling in Player, host, editor, or debugger UI. Broad/cross-cutting UI work reads the complete guide;
+  or visual styling in Playroom, host, editor, or debugger UI. Broad/cross-cutting UI work reads the complete guide;
   narrow work uses the focused route below.
 - **Does not define:** product features, runtime/host protocols, trust boundaries, exact visual design, framework
   choice, or TeaseScript semantics.
 
-This guide distils recurring Player POC failures and design research into reusable rules for any UI surface.
+This guide distils recurring Playroom POC failures and design research into reusable rules for any UI surface.
 Architecture, security, runtime, and product contracts remain with their controlling sources.
 
 ## Focused reading route
@@ -25,7 +25,7 @@ task crosses categories or the relevant ownership is unclear.
   [Keep defaults and visual roles explicit](#keep-defaults-and-visual-roles-explicit),
   [Build colour systems from semantic roles](#build-colour-systems-from-semantic-roles),
   [Shared control baseline](#shared-control-baseline),
-  [Player action button design rationale](#player-action-button-design-rationale), and
+  [Playroom action button design rationale](#playroom-action-button-design-rationale), and
   [Match interaction feedback to input capability](#match-interaction-feedback-to-input-capability).
 - **Demo/content independence, media decoration, or effect containment:**
   [Keep content independent from demo markup and decorative
@@ -94,7 +94,7 @@ Focus is a separate state and must remain explicit without changing geometry.
 
 Keep the structural surface vocabulary as small as the hierarchy permits. Near-identical tints with no distinct role add
 visual noise and make nesting harder to read; consolidate them and use borders, shadow, or restrained elevation when
-depth is the real need. Do not flatten genuinely different roles merely to minimize the colour count. The Player POC,
+depth is the real need. Do not flatten genuinely different roles merely to minimize the colour count. The Playroom POC,
 for example, exposed this failure when transcript, chrome, raised components, top bar, and input accumulated several
 very similar warm near-whites despite representing fewer meaningful levels.
 
@@ -120,7 +120,7 @@ Use the Radix twelve-step role-band model as the default palette structure for T
 Radix dependency: steps 1–2 are backgrounds, 3–5 component states, 6–8 borders, 9–10 solid accent, and 11–12 text.
 The values are project-owned; do not copy Radix palette values mechanically and do not invent intermediate values solely
 to fill all twelve positions. A maintained surface specification owns its approved palette and theme boundaries. For
-the Player's intended contract and provisional theme treatment, see [`PLAYER-UI.md`](PLAYER-UI.md).
+the Playroom's intended contract and provisional theme treatment, see [`PLAYER-UI.md`](PLAYER-UI.md).
 
 ### Shared control baseline
 
@@ -145,16 +145,16 @@ Individual product surfaces may compose the shared roles differently where their
 product-surface widths, heights, spacing, layout geometry, and palette values remain owned by the maintained
 specification for that surface unless this shared baseline deliberately adopts them.
 
-### Player action button design rationale
+### Playroom action button design rationale
 
-The accepted Standard Player action-button direction is **soft bevel**: a filled, modestly raised surface for scripted
-Player actions. This is a deliberate exception to flat ordinary controls, not a new default for settings,
+The accepted Standard Playroom action-button direction is **soft bevel**: a filled, modestly raised surface for scripted
+Playroom actions. This is a deliberate exception to flat ordinary controls, not a new default for settings,
 toolbars, or every button in the product. The observable contract remains in
 [Composer and foreground interactions](PLAYER-UI.md#composer-and-foreground-interactions).
 
-**Author colour is content; material and shape are Player identity.** Equal narrative alternatives have equal visual
+**Author colour is content; material and shape are Playroom identity.** Equal narrative alternatives have equal visual
 weight. A supplied colour does not automatically make an answer recommended, dangerous, or secondary. When no colour
-is supplied, the Player theme provides the base. Do not silently replace an awkward authored colour with a curated one.
+is supplied, the Playroom theme provides the base. Do not silently replace an awkward authored colour with a curated one.
 
 | Ingredient | Purpose |
 | --- | --- |
@@ -166,15 +166,15 @@ is supplied, the Player theme provides the base. Do not silently replace an awkw
 
 Derive lighting from the base colour while keeping its hue recognizable. Near a text-contrast boundary, reduce the
 lighting variation instead of sacrificing legibility for relief. Choose readable black or white text against the
-rendered fill states, accounting for gamut mapping. Player action buttons use APCA to choose black or white ink;
+rendered fill states, accounting for gamut mapping. Playroom action buttons use APCA to choose black or white ink;
 their existing lighting is bounded with WCAG contrast. Authored transcript backgrounds use WCAG to choose
 default ink. Both call `blackOrWhiteInk` in `player/theme/color.ts`; explicit authored text colours remain separate.
 A gradient and its hover/pressed variants need checking, not just
 one nominal base colour. Focus remains a separate visible keyboard indication. Very dark fills can show less relief;
 neon or clashing colours can remain aesthetically loud even when the controls are readable and coherent.
 
-For another Player button family, reuse this material only if the interaction calls for the same tactile character.
-Evaluate it in the surrounding Player, with short and wrapped labels, few and many choices, light/dark backgrounds,
+For another Playroom button family, reuse this material only if the interaction calls for the same tactile character.
+Evaluate it in the surrounding Playroom, with short and wrapped labels, few and many choices, light/dark backgrounds,
 extreme and uncurated colours, and actual hover/press/focus. A curated palette or isolated screenshot alone does not
 establish that the design works. This is a critique method, not a new global numeric or geometry requirement.
 
@@ -221,10 +221,10 @@ measurement when modern CSS can express the same invariant more directly and rel
 
 Consume current dynamic safe-area insets as browser-reported layout inputs; do not permanently reserve their static
 maximum, infer physical corner shapes from a device or user agent, or subtract guessed space from rectangular viewports.
-The Standard Player's scoped touch-first composer side clearance and fullscreen top minimum are narrow exceptions for
+The Standard Playroom's scoped touch-first composer side clearance and fullscreen top minimum are narrow exceptions for
 browsers that report zero safe area beside rounded corners or at a camera cutout; because the platform cannot report
 corner shape, a qualifying rectangular touch-first viewport also receives them. See
-[Player conditions](PLAYER-UI.md#player-conditions); the Player shell owns the resulting usable rectangle.
+[Playroom conditions](PLAYER-UI.md#playroom-conditions); the Playroom shell owns the resulting usable rectangle.
 For software keyboards, use the browser-resized visual viewport in normal presentation. In fullscreen, prefer
 feature-detected keyboard geometry when the browser exposes it and otherwise use the visual viewport. Do not combine a
 reported keyboard occlusion with a second bottom-safe-area reservation. Re-evaluate after viewport transitions settle
@@ -238,7 +238,7 @@ primitives for their semantics, focus, dismissal, and collision-aware placement,
 of hand-maintained viewport offsets. Keep the trigger usable for pointer, keyboard, and touch input; dismiss on the
 accepted outside/Escape paths and restore focus where appropriate. Do not add a separate positioning dependency unless
 a later concrete requirement cannot be met cleanly through the selected foundation. Anchored-component placement does
-not own general Player geometry or justify a generic overlay system without concrete consumers.
+not own general Playroom geometry or justify a generic overlay system without concrete consumers.
 
 ### Size responsive layouts from constraints
 
@@ -290,7 +290,7 @@ coherent system.
   placeholder art and mixed icon styles quickly erase product identity.
 - **Motion:** use motion to communicate state, hierarchy, or causality. Avoid movement on every hover merely to signal
   that a component is interactive.
-- **Domain specificity:** let real product structure create character. Tease/player controls, community/catalog content,
+- **Domain specificity:** let real product structure create character. Tease/Playroom controls, community/catalog content,
   authoring workflows, BDSM/toy/media motifs where appropriate, and other genuine domain details are stronger identity
   signals than generic decorative novelty.
 
@@ -336,9 +336,9 @@ removed or folded into its real owner once the direction is accepted.
 
 Current breakpoints, colours, fonts, demo media, control labels, component shapes, framework choices, and POC-only types
 remain implementation details unless another controlling source accepts them as product requirements. For example,
-`PLAYER-UI.md` intentionally promotes selected current Player values into that surface's maintained contract. The
+`PLAYER-UI.md` intentionally promotes selected current Playroom values into that surface's maintained contract. The
 anti-slop section is design-review guidance, not a prohibition on gradients, glass, cards, rounded corners, common
 fonts, dark mode, or any other individual technique.
 
 This guide records reusable UI maintenance experience. It must not override architecture, security, runtime, package,
-accessibility, product, or host/player protocol decisions owned elsewhere.
+accessibility, product, or host/Playroom protocol decisions owned elsewhere.

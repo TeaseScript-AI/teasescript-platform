@@ -208,7 +208,7 @@ reviews a file's structure and changes.
   `tests/families/stalls.mjs`, `tests/families/baselines.mjs`, the baseline store's format), and the two language
   specification documents (`docs/TEASESCRIPT-REFERENCE.md`, `docs/specifications/accepted-syntaxes-v30.md`): the compiler's
   canonical text; new syntax still needs the owner's acceptance.
-- **The runtime and Player coordinator owns runtime, Player and everything general:** `src/runtime/`, `player/`, the
+- **The runtime and Playroom coordinator owns runtime, Playroom and everything general:** `src/runtime/`, `player/`, the
   bridge, their tests; `tools/` as repo-wide tooling (`check-changed`, `measure-test-files`, the costly table,
   `pin-suites.mjs`, `check-shas`, the test runners, the browser tools, `tools/local-agent/*`,
   `tools/chatgpt-project-agent/*`), where the compiler entries inside such a tool (the pin-suite list, the compiler's
@@ -218,25 +218,25 @@ reviews a file's structure and changes.
 
 ### The plan format and language tooling
 
-- **`src/plan/` is the compiler coordinator's, whole** (`model.ts` and `validation/`), with the runtime and Player
+- **`src/plan/` is the compiler coordinator's, whole** (`model.ts` and `validation/`), with the runtime and Playroom
   coordinator as required reviewer of every change. The format changes when the language changes, and model and
   validation change together then. The runtime's own boundaries (checkpoint, host, package data) stay the runtime and
-  Player coordinator's. `tests/plan/instruction-plan-validation.test.ts` follows the folder.
+  Playroom coordinator's. `tests/plan/instruction-plan-validation.test.ts` follows the folder.
 - **Language and editor tooling is compiler side:** `src/language-tooling.ts`, its tests, and the editor adapters
   beside it. A grammar change breaks it, so the one who changes the grammar owns it.
 
 ### The rule for shared entries
 
 A file under `src/` that parses, analyses, lowers or types the language is the compiler coordinator's.
-`src/message-markup.ts` is the runtime and Player coordinator's: a value the runtime and the Player read, whose
+`src/message-markup.ts` is the runtime and Playroom coordinator's: a value the runtime and the Playroom read, whose
 persisted-tree validation is a runtime boundary. Feature suites that compile source and run the engine
 (`compact-interactions`, `file-transfers`, `project-globals`, `regex`, `list-functions`, `value-check-forms`) are the
-runtime and Player coordinator's while they are one file; when one is split at its families, the parsing half goes to
+runtime and Playroom coordinator's while they are one file; when one is split at its families, the parsing half goes to
 the compiler coordinator with the split.
 
 ### The folder-move refinement
 
-The runtime and Player coordinator executes the top-level grouping moves of `tests/`, `src/` and `tools/` (the folder
+The runtime and Playroom coordinator executes the top-level grouping moves of `tests/`, `src/` and `tools/` (the folder
 plan, the test-runner change that lets `tests/` have one level of folders, the pure-move PRs decided by `git diff -M`,
 tsc, `check:imports`, knip and equal test counts). The names and membership of the compiler's folders are the compiler
 coordinator's. One folder plan, approved by both coordinators before its HEAD 0; the other coordinator is required
