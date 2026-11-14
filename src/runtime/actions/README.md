@@ -8,7 +8,7 @@ Pending actions: what a script waits for or keeps running, and how each kind beh
 - `capture.ts`: what the host vouches for about captured media and stored files.
 - `choice-options.ts`: the buttons of a prepared `askChoice`.
 - `delay.ts`: the domain of a session time.
-- `file-store.ts`: the calls that store, read, or hash files in the Player's file store.
+- `file-store.ts`: the calls that store, read, or hash files in the Playroom's file store.
 - `form/`: `askForm`: its UI, state, updates, submission, and validation, one file per subject.
 - `interaction.ts`: completing an interaction, and the button timeout and image request helpers.
 - `lock.ts`: the calls that lock and open text and stored files.
