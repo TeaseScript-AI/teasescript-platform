@@ -6,7 +6,7 @@ import { MAX_TEXT_LENGTH } from "../values/text-length.js";
 // the validation that restoring a checkpoint runs (`checkpoint.ts`).
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 132;
+export const CHECKPOINT_VERSION = 133;
 
 export interface CheckpointErrorInfo {
   readonly code: OwnedDiagnosticCode<"checkpoint">;
