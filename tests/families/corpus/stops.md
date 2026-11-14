@@ -12,6 +12,12 @@ outside the repository").
   implementation-independent predicate, the relocation-only replay driver (`replay.mjs`, `check-run.py`),
   `cost-probe.mjs` and the raw results, and its `README.md` gives the replay commands. It is the standard oracle for
   the stops area: it runs before a builder's first review there.
+- The stop corpus, on the agents host:
+  `~/work/evidence/2275/52bf273eef6372b2d754b0edda402c7240d7d5f8/moved-items-keyed.jsonl` (SHA-256
+  `b4f41476bdc8a63de8c3766737cbc43bd8e03e4657236d8f02426fc0eaab0b7b`), 6,387 `stop-runs.mjs` items: #2080's moved stops,
+  keyed where one name has several units (#2254; #1072's unkeyed `moved-items.jsonl` runs 8 such names `ambiguous`),
+  and the 8 units sharing those names that #2080's census never ran. Its `corpus` items need `CASES_JSON`
+  ([Plans](../README.md#plans)).
 - `desktop:~/work/evidence/corpus/stops/i1433-fallback-labels/`: #1476's fallback-label kit (#1433). `labels.mjs`
   keeps an analysis's exception as its own row and exits 1 on it, and `labels-compare.py` counts such rows apart and
   rejects them (#1494). Its `canary-1494.sh` checks that; its changed files stay beside it as `<file>.pre-1494`
