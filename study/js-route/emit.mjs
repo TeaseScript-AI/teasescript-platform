@@ -84,11 +84,11 @@ const EXPRESSION_KINDS = new Set(["literal", "regex", "duration", "calendarDurat
 
 /** Instruction kinds today's engine may leave waiting (an action with the host), besides a paced `say`. */
 /** A loop body longer than this many instructions is outlined even without an inner loop. */
-const OUTLINE_LENGTH = 120;
+const OUTLINE_LENGTH = 50;
 /** A loop body that holds a loop is outlined from this many instructions (a small nest stays in one function). */
-const OUTLINE_WITH_LOOP = 60;
+const OUTLINE_WITH_LOOP = 30;
 /** A structured sequence longer than this many instructions is cut into functions between its constructs. */
-const CHUNK_LENGTH = 150;
+const CHUNK_LENGTH = 50;
 const WAITING_KINDS = new Set(["wait", "interaction", "capture", "fileStore", "lock", "storageWrite", "playMedia", "showImage"]);
 
 /**
