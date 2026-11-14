@@ -240,7 +240,8 @@ test("a chain of a helper that wraps its argument demands no key below the cut, 
  * #2771: a recursive function that fills a written `dict` with its own result nests it without end below the `dict`'s
  * open element, where the contract reads the stores; `asList`, called on the elements of its own result, reads one level
  * deeper on each turn. Before the written place took its routes, each level was a new key and the analysis ran to the
- * allowance; now `value` is cut one level below its written `dict` (M = 1) and the analysis settles in every mode.
+ * allowance; now `value` is cut at depth 2, one level below `entries`' written `dict` (M = 1), and the analysis settles in
+ * every mode.
  */
 regressionCase(
   "a recursive function filling a written dict with its own result, read a level deeper on each turn, settles (#2771)",
