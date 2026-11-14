@@ -144,6 +144,15 @@ test("`while`, `break` and `continue` answer as today's compiler, the false TSV0
       ),
       one("while (true)", "while (true) {\n  exit\n}\n"),
       one("while true, a statement after", 'while true {\n  exit\n}\nsay "unreached"\n'),
+      one("while true, a wait in the body", "while true {\n  wait 1 s\n}\n"),
+      {
+        name: "while true, a wait in the body, in a file a transfer starts",
+        files: [
+          { path: "main.tease", source: 'goto "part.tease"\n' },
+          { path: "part.tease", source: "while true {\n  wait 1 s\n}\n" },
+        ],
+        expect: "equal",
+      },
       one("while false", 'while false {\n  say "never"\n}\nexit\n'),
       one("while true, break", 'while true {\n  break\n}\nsay "after"\nexit\n'),
       one("a host condition", 'while hostValue != null {\n  exit\n}\nsay "after"\nexit\n'),
