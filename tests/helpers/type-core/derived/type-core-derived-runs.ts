@@ -141,7 +141,6 @@ export function evaluate(
     first ??= failure;
     if (!through) throw new Stop(failure);
   };
-  // (the calls of the script's own functions, `derived-functions.ts`)
   const functions = functionCalls({
     own: statements,
     stores,

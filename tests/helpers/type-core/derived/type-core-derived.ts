@@ -1,7 +1,14 @@
 // What the derivation's parts share: the record's checked types, stores and content, the source's syntax as the rules
 // read it, and the type helpers each part applies.
 
-import type { Expression, Statement, TypeAnnotation } from "../../../../src/ast.js";
+import type {
+  Expression,
+  FunctionDeclaration,
+  FunctionParameter,
+  LetStatement,
+  Statement,
+  TypeAnnotation,
+} from "../../../../src/ast.js";
 import { parse } from "../../../../src/parser.js";
 import { VALUE_KIND_NAMES } from "../../../../src/value-kinds.js";
 
@@ -162,6 +169,60 @@ export function storeOf(
   )
     return { name: targetName(statement.target), value: statement.value };
   return null;
+}
+
+/** What a name of a program refers to: its `let`, its function's parameter, or a `for` loop's variable (`null`). */
+export type Declared = LetStatement | FunctionParameter | null;
+
+const SCOPES = new WeakMap<
+  readonly Statement[],
+  (at: number, name: string) => Declared | undefined
+>();
+
+/**
+ * The declaration a name read or stored at `at` refers to, in its owning scope (V30 §14): the function whose span holds
+ * `at` (a function is declared at a file's top level, so the spans of a file's functions do not overlap), whose own
+ * `let`s, parameters and loop variables come first, then the file's, outside every function. Within one scope the first
+ * declaration of a name, as the oracle reads a file. `undefined` where no scope declares it. `statements` are one file's
+ * (`allStatements`), the scopes built once for them.
+ */
+export function declaredIn(
+  statements: readonly Statement[],
+  at: { readonly span: Expression["span"] },
+  name: string,
+): Declared | undefined {
+  let resolve = SCOPES.get(statements);
+  if (resolve === undefined) {
+    const functions = statements.filter(
+      (statement): statement is FunctionDeclaration => statement.kind === "functionDeclaration",
+    );
+    const ownerAt = (offset: number): FunctionDeclaration | null =>
+      functions.find((fn) => fn.span.start.offset <= offset && offset < fn.span.end.offset) ?? null;
+    const scopes = new Map<FunctionDeclaration | null, Map<string, Declared>>();
+    const declare = (owner: FunctionDeclaration | null, declared: string, as: Declared): void => {
+      const scope = scopes.get(owner) ?? new Map<string, Declared>();
+      scopes.set(owner, scope);
+      if (!scope.has(declared)) scope.set(declared, as);
+    };
+    for (const fn of functions)
+      for (const parameter of fn.parameters) declare(fn, parameter.name.name, parameter);
+    for (const statement of statements) {
+      const owner = ownerAt(statement.span.start.offset);
+      if (statement.kind === "letStatement") declare(owner, statement.name.name, statement);
+      else if (statement.kind === "forStatement") {
+        declare(owner, statement.variable.name, null);
+        if (statement.valueVariable !== null) declare(owner, statement.valueVariable.name, null);
+      }
+    }
+    resolve = (offset, declared) => {
+      const owner = ownerAt(offset);
+      const own = scopes.get(owner);
+      if (own?.has(declared)) return own.get(declared);
+      return owner === null ? undefined : scopes.get(null)?.get(declared);
+    };
+    SCOPES.set(statements, resolve);
+  }
+  return resolve(at.span.start.offset, name);
 }
 
 export function targetName(expression: Expression): string {
