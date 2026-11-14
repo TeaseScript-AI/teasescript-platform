@@ -386,6 +386,11 @@ function* dictValuesWritten(admission: Admission, value: PlaceId): Reads<boolean
   );
 }
 
+/** The task of a value at a node as a whole, at no strip (`expandRead`). */
+export function expand(admission: Admission, value: PlaceId, node: FlowNode): Expansion {
+  return readNow(expandRead(admission, value, node, []));
+}
+
 /**
  * One task of the store walk, by its value, node and strip alone (`Expansion`), once per pass: what it stands as at
  * its own path and the parts below it, whatever reached it. Through copies: a copy of an unwritten place that may
@@ -394,13 +399,8 @@ function* dictValuesWritten(admission: Admission, value: PlaceId): Reads<boolean
  * into stands by its cells on the path; a projection or another carrier is its own contribution at the path, and
  * below it what it carries, an operation's under the certainty of its own value, its own contribution after
  * what it carries, so a written copy it selects precedes its snapshot; any other value is a stop, a literal's
- * cells below it.
+ * cells below it. It makes the value side's decisions reads (`Read`, #1072).
  */
-export function expand(admission: Admission, value: PlaceId, node: FlowNode): Expansion {
-  return readNow(expandRead(admission, value, node, []));
-}
-
-/** `expand` with the value side's decisions reads (`Read`, #1072). */
 export function* expandRead(
   admission: Admission,
   value: PlaceId,
