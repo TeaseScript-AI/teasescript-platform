@@ -184,7 +184,9 @@ function undecidedProblems(
             ? expression
             : store.kind === "letStatement"
               ? store.initializer
-              : store.value;
+              : store.kind === "assignmentStatement"
+                ? store.value
+                : expression;
         return value.span.start.offset === site.start && value.span.end.offset === site.end;
       });
     }),
