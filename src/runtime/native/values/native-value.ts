@@ -14,6 +14,7 @@ import type {
   SerializableSpeakerReference,
   SerializableTimerHandle,
 } from "../../values/serializable-values.js";
+import type { NativeSet } from "./native-set.js";
 
 /**
  * The native engine's values: what its bindings, temporaries and collections hold while it runs. A canonical value
@@ -22,7 +23,7 @@ import type {
  * - Text, numbers, `true`/`false` and `null` are JavaScript primitives, as in canonical values.
  * - A list is a plain array of native values.
  * - An object and a dict are classes over a `Map`, in insertion order; replacing a value keeps its position.
- * - A set is a `NativeSet`, whose members only `native-set.ts` changes.
+ * - A set is a `NativeSet` (`native-set.ts`), whose storage only its own methods can change.
  * - Every other value (ranges, durations, dates, handles, regexes, ...) is its canonical record, frozen, and shared:
  *   nothing changes it in place.
  *
@@ -75,27 +76,6 @@ export class NativeDict {
   }
 }
 
-/**
- * Unique members by `==`, in insertion order. Only `native-set.ts` changes `items` and `membership`: its operations
- * keep `membership`, once built, an exact index of `items`, and `appendToUnindexedSet` fills a new set before its index
- * exists. A member is never changed in place.
- */
-export class NativeSet {
-  public readonly kind = "set";
-  public readonly items: NativeValue[] = [];
-  /** The index of `items`, built at the first operation that needs it; `null` until then and after a clear. */
-  public membership: NativeSetMembership | null = null;
-}
-
-/**
- * A set's members by key: primitives as themselves (a `Set` compares `-0` and `0` as `==` does), every other member
- * under its key (`nativeValueKey`), or under a hash of a long key with the members whose keys share that hash.
- */
-export interface NativeSetMembership {
-  readonly scalars: Set<SerializableRuntimeScalar>;
-  readonly keyed: Map<string, NativeValue[]>;
-}
-
 /** A list, object, dict or set: a value that holds others. */
 export type NativeComposite = NativeList | NativeObject | NativeDict | NativeSet;
 
@@ -104,6 +84,7 @@ export function isNativeComposite(value: NativeValue): value is NativeComposite 
     Array.isArray(value) ||
     value instanceof NativeObject ||
     value instanceof NativeDict ||
-    value instanceof NativeSet
+    // By its `kind`: `native-set.ts`, which holds the class, imports this module.
+    (typeof value === "object" && value !== null && value.kind === "set")
   );
 }
