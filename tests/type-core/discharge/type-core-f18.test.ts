@@ -671,10 +671,10 @@ const WITNESSES: readonly {
     derived: "number",
   },
   {
-    name: "a sibling binding's written type",
+    name: "a name declared in two sibling blocks",
     source: `if ${FLAG} {\n  let d: number = 0\n} else {\n  let d = 0\n  if load("g", default: false) { d = 1 }\n  @\n}`,
     read: "d",
-    derived: "integer",
+    derived: { refused: "'d' declared more than once in its scope" },
   },
   {
     name: "X2 written, a self-copy in the arm",
