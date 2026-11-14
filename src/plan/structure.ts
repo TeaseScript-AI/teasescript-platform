@@ -272,7 +272,8 @@ function addToRun(constructs: Construct[], index: number): void {
  */
 function takeFrom(current: Sequence, from: number): Construct[] | null {
   if (from === current.pc) return [];
-  if (from < current.from || from > current.pc) return null;
+  // Before the sequence, the search below finds no construct that starts at or before `from`.
+  if (from > current.pc) return null;
   const constructs = current.constructs;
   for (let index = constructs.length - 1; index >= 0; index -= 1) {
     const construct = constructs[index]!;
