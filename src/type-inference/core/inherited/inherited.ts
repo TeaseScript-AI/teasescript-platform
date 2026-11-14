@@ -23,7 +23,7 @@ import { landed, landedKey, passThrough, passThroughKey } from "../admission/lan
 import type { Frontier, Inheriting, Stop, Stops, WaitingAnswer } from "../admission/model.js";
 import { permittedAt, unrestricted } from "../admission/permitted.js";
 import { inputsAt, inputsOf, scanAt } from "../admission/scan.js";
-import { inheritedInto, join, settleCycles, settledCycles } from "./waiting.js";
+import { inheritedInto, join, settleCycles, settleCyclesIfForgotten } from "./waiting.js";
 import { isRead, read, type Read, type Reads } from "./reads.js";
 import type { Proof, ProofDemand, Proven, Work } from "../solver.js";
 import type { WorkLedger } from "../budget.js";
@@ -31,12 +31,10 @@ import { copySources, stopsOfRead } from "../admission/walk.js";
 import { wholeOf } from "../admission/eligibility.js";
 import { positions } from "../positions.js";
 
-// A4 through copies: the written type an unwritten place's decision inherits, from the graph of copies.
-
 /**
  * A copied written type as a place's own decision admits it: with its `null` where the decision is nullable beside the
- * copy (S6-CARRIERS §4.2: a `null` before the written decider, a literal's `null` element), so a copy of the place keeps
- * that too (Astra's F2 on #1049).
+ * copy (a `null` before the written decider, a literal's `null` element), so a copy of the place keeps that too
+ * (#1049).
  */
 export function optionalOf(term: TypeTerm | null, nullable: boolean): TypeTerm | null {
   if (term === null || !nullable || typeTags(term).includes("null")) return term;
@@ -44,9 +42,9 @@ export function optionalOf(term: TypeTerm | null, nullable: boolean): TypeTerm |
 }
 
 /**
- * A4 through copies (ADR 0021 1.3: a copy of a binding with a written type keeps that type, so a copy of that copy does
- * too), from every definition's stores: the unwritten places a copy of a written binding lands in, then
- * those a copy of such a place lands in, at any path (`inheriting`). Only their copies carry an inherited type.
+ * Inheritance through copies (ADR 0021 1.3: a copy of a binding with a written type keeps that type, so a copy of that
+ * copy does too), from every definition's stores: the unwritten places a copy of a written binding lands in, then those
+ * a copy of such a place lands in, at any path (`inheriting`). Only their copies carry an inherited type.
  */
 export function copyGraph(admission: Admission): void {
   const { program, definitions } = admission.pass;
@@ -81,26 +79,26 @@ export function copyGraph(admission: Admission): void {
 }
 
 /**
- * A4 through copies (ADR 0021 1.3, (1a)): the written type an unwritten place's own decision copies at a
- * path, through whatever copy of a written binding it comes (a chain of copies, a projection, a selected carrier, a
- * literal, a parameter's default), at every collection level: `scanAt`'s copied type, with the place's own `null`
- * where its decision is nullable beside the copy (`optionalOf`), `null` where a value decides the path or nothing does. A copy of the place carries that type there. Once per place and path, iteratively: a scan
- * that needs another place's type first is suspended where it stands (`Inheriting`) and goes on from there once that
- * type is known, so a chain of copies never deepens the native stack and a scanned prefix is never scanned again for a
- * sibling resolved later (the owner's reviewer's F1 on #1049). A scan that needs the very place and path
- * whose own scan is waiting closes a cycle of copies: those waiting from there on are joined (`cycles`), and a copy
- * between two of them carries no written type (`cut`): a cycle of copies decides nothing written, whichever of its
- * places is asked first. A scan whose own cycle grew while it waited is taken again from its start, since the cut may
- * now drop a copy it already read; nothing else changes what it read. A place at another path is no cycle (`a.q = a`:
- * `a.q.p` needs `a.p`). Past the deepest path a written type reaches (`reach`) a place inherits only what its path's
- * prefix there leaves below it (an unrestricted part), so a copy nesting a place in itself never deepens without end.
+ * Inheritance through copies (ADR 0021 1.3, (1a)): the written type an unwritten place's own decision copies at a path,
+ * through whatever copy of a written binding it comes (a chain of copies, a projection, a selected carrier, a literal,
+ * a parameter's default), at every collection level: `scanAt`'s copied type, with the place's own `null` where its
+ * decision is nullable beside the copy (`optionalOf`), `null` where a value decides the path or nothing does. A copy of
+ * the place carries that type there. Once per place and path, iteratively: a scan that needs another place's type first
+ * is suspended where it stands (`Inheriting`) and goes on from there once that type is known, so a chain of copies
+ * never deepens the native stack and a scanned prefix is never scanned again for a sibling resolved later (#1049). A
+ * scan that needs the very place and path whose own scan is waiting closes a cycle of copies: those waiting from there
+ * on are joined (`cycles`), and a copy between two of them carries no written type (`cut`): a cycle of copies decides
+ * nothing written, whichever of its places is asked first. A scan whose own cycle grew while it waited is taken again
+ * from its start, since the cut may now drop a copy it already read; nothing else changes what it read. A place at
+ * another path is no cycle (`a.q = a`: `a.q.p` needs `a.p`). Past the deepest path a written type reaches (`reach`) a
+ * place inherits only what its path's prefix there leaves below it (an unrestricted part), so a copy nesting a place in
+ * itself never deepens without end.
  */
 export function inheritedAt(
   admission: Admission,
   place: PlaceId,
   path: readonly string[],
 ): TypeTerm | null {
-  // (a wrapper's family's path is its cursor, G3 stage 1: `inheritedAtKey`)
   const { contract } = admission.pass;
   if (path.length > 0 && keyLane(contract, place, path[0]!) === "cursor")
     return inheritedAtKey(admission, keyIdOf(contract, place, path));
@@ -112,8 +110,8 @@ export function inheritedAt(
 }
 
 /**
- * `inheritedAt` of a key in its identity: a text's as before; a cursor's past the deepest path a written type reaches
- * as its prefix there leaves it (`prefixId`, its rest a span), else resolved by its cursor.
+ * `inheritedAt` of a key in its identity: a text key's by its place and path; a cursor's past the deepest path a
+ * written type reaches as its prefix there leaves it (`prefixId`, its rest a span), else resolved by its cursor.
  */
 function inheritedAtKey(admission: Admission, key: Key): TypeTerm | null {
   if (!isKeyId(key)) return inheritedAt(admission, keyPlace(key), keyPath(key));
@@ -131,9 +129,10 @@ function inheritedAtKey(admission: Admission, key: Key): TypeTerm | null {
 }
 
 /**
- * #1072 A2: a key's inherited written type (A4, ADR 0021 1.3) as a solver proof: its term, optional where its decision
- * is nullable beside the copy (`optionalOf`), or none; and whether the deciding copy reads its written type at its own
- * root (#1901). Its signature spells both, so a changed type or level reruns its readers whatever its items.
+ * A key's inherited written type (ADR 0021 1.3) as a solver proof (#1072):
+ * its term, optional where its decision is nullable beside the copy (`optionalOf`), or none; and whether the deciding
+ * copy reads its written type at its own root (#1901). Its signature spells both, so a changed type or level reruns its
+ * readers whatever its items.
  */
 export class InheritedProof implements Proof {
   public constructor(
@@ -150,11 +149,9 @@ export class InheritedProof implements Proof {
 }
 
 /**
- * A key's inherited proof (#1072 A2): one demand per canonical key, made when asked and asking nothing until it runs.
- * Its run is the key's own scan (`scanOf`), each semantic read it makes yielded (`Read`), each key it waits on read
- * through that key's proof; a key that is a member of a component still being solved, its own included, is a copy
- * the scan's cycle cuts: joined to it (`join`) and read as none, as A4's cycle rule reads a copy between two places
- * that wait on each other (`waiting.ts`).
+ * A key's inherited proof (#1072): one demand per canonical key, made when asked and asking nothing until it runs.
+ * A key that is a member of a component still being solved, its own included, is a copy the scan's cycle cuts: joined
+ * to it (`join`) and read as none, as a copy between two places that wait on each other is read.
  */
 function inheritedProof(admission: Admission, key: CanonicalKey): ProofDemand<InheritedProof> {
   const site = admission.pass.program.places[keyPlace(key)]?.site ?? null;
@@ -216,12 +213,11 @@ function* waitOn(
 
 /**
  * `inheritedAt`'s resolution of a key within the deepest path a written type reaches: its inherited proof's term, read
- * as one top-level run (#1072 A2), and the proof's own-level bit recorded for the scans that read it (#1901).
+ * as one top-level run (#1072), and the proof's own-level bit recorded for the scans that read it (#1901).
  */
 function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
-  // (a key in its identity, as the proofs hold it: G3 stage 1)
   const key = canonicalKey(admission.pass.contract, asked);
-  settledCycles(admission);
+  settleCyclesIfForgotten(admission);
   let proof: InheritedProof | null;
   try {
     ({ proof } = admission.run(admission.pass.solver.proven(inheritedProof(admission, key))));
@@ -244,10 +240,8 @@ function* scanOf(admission: Admission, next: CanonicalKey): Inheriting<WaitingAn
   const place = keyPlace(next);
   const cursor = isKeyId(next) ? next : null;
   const path = isKeyId(next) ? null : keyPath(next);
-  // (a text path's id made only past its first step's wrapper check, as before G3 stage 1)
   const id = (): number => (cursor !== null ? keyIdPath(cursor) : contract.pathIdOf(path!));
   const first = cursor !== null ? keyIdFirst(contract, cursor) : (path![0] ?? null);
-  // (G3 3a: a key past a wrapper inherits what the wrapper's read does below it, from its frontier, `wrapped`)
   const frontier = positions() ? yield* wrappedFrontier(admission, place, id, first) : null;
   const scan =
     frontier !== null
@@ -282,9 +276,10 @@ function ownScanOf(admission: Admission, next: CanonicalKey): Inheriting<Waiting
 }
 
 /**
- * G3 3a: where a key's inherited type stands past wrappers (`Contract.wrapperHop`): the read its path's last wrapper
- * holds, with the path below it, when its first step passes one and each wrapper on the way is one for A2's scan too
- * (`scanHop`); `null` where the first step passes none. Once per place and path (by its id), from its parent's.
+ * Where a key's inherited type stands past wrappers (`Contract.wrapperHop`): the read its path's last wrapper holds,
+ * with the path below it, when its first step passes one and each wrapper on the way is one for the earliest
+ * contribution's scan too (`scanHop`); `null` where the first step passes none. Once per place and path (by its id),
+ * from its parent's.
  */
 function* wrappedFrontier(
   admission: Admission,
@@ -323,7 +318,7 @@ function* wrappedFrontier(
 }
 
 /**
- * G3 3a: a wrapper's step as A2's scan reads it (`scanAt`, `earliestDecider`), or `null`: the binding is a wrapper at
+ * A wrapper's step as the earliest contribution's scan reads it (`scanAt`), or `null`: the binding is a wrapper at
  * the step (`Contract.wrapperHop`) whose declaration is its key's one eligible store, no other definition's class, and
  * its literal's stops at the step are the read's own (a written stop where its binding is written or inherits one, and
  * its value), none at the literal's root or below the read. So the scan of a key `place|step·rest` finds the read's
@@ -402,7 +397,7 @@ function stopSteps(
 }
 
 /**
- * G3 3a: a key's scan past wrappers (`inheritedAt`): its frontier's written type at the rest (the read's binding's own,
+ * A key's scan past wrappers (`inheritedAt`): its frontier's written type at the rest (the read's binding's own,
  * or what it inherits there, `inheritedInto`, into the key's decision), optional where the key's declaration's value at
  * the path holds `null`; each wrapper's scan on the way gives what the one below it does, its value's kinds the same at
  * every one of them, which the value side's position through the same wrappers proves (`Values.valuePosition`). Where it
@@ -424,7 +419,6 @@ function* wrapped(
   const { program, values, contract } = admission.pass;
   // (the hop the frontier found, known by then)
   const decl = admission.scanHops.get(joinParts(place, first))!.decl;
-  // (a cursor's path read by its id: G3 stage 1)
   const position = () =>
     typeof path === "number"
       ? values.valuePositionAt(decl.value!, decl.node, path)
@@ -461,7 +455,6 @@ function* wrapped(
 /** A computation run outside a resolution: each inherited type it waits on resolved by `inheritedAt` first. */
 export function drive<T>(admission: Admission, steps: Inheriting<T>): T {
   let step: IteratorResult<CanonicalKey | Read, T> = steps.next();
-  // (a read answered by its synchronous run: #1072 A2)
   while (step.done !== true)
     step = steps.next(
       isRead(step.value) ? step.value.now() : inheritedAtKey(admission, step.value),
@@ -486,16 +479,8 @@ function* answerOf(
 }
 
 /**
- * Whether a written type a copy decides at a prefix of a path leaves the path unrestricted (A4 through copies, the
- * lead's ruling on #1215: a copied written type is the written type below it too): a prefix copies land at
- * (`landed`) whose decision copies a written type (`inheritedAt`) unrestricted at the rest (`permittedAt`), as an
- * own written type is below it, whatever a store on the path decided before the copy. Only in a place copies land in,
- * walked down from its root one step at a time (`OpenStep`), so each of its paths is asked of the landings once.
- */
-/**
- * `openAbove` of a cursor (G3 stage 1): its path's step of the walk (`OpenStep`) one step below its parent's, each
- * path's kept, so a family's k nested paths take k steps, never k²; each prefix's landing and inherited type asked by
- * its key, as `openAbove` asks them.
+ * `openAbove` of a cursor: its path's step of the walk (`OpenStep`) one step below its parent's, each path's kept, so a
+ * family's k nested paths take k steps, never k²; each prefix's landing and inherited type asked by its key.
  */
 export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): boolean {
   if (!admission.a4Places.has(place)) return false;
@@ -514,22 +499,13 @@ export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): 
       const step = contract.pathLastSteps[id]!;
       let next = node.below.get(step);
       if (next === undefined) {
-        const terms = [...node.carried];
         const above = contract.pathParents[id]!;
         const prefix = above === 0 ? keyOf(place, []) : keyIdAt(place, above);
         const own = landedKey(admission, place, prefix) ? inheritedAtKey(admission, prefix) : null;
-        if (own !== null && !terms.includes(own)) terms.push(own);
-        let carried: TypeTerm[] | true = [];
-        for (const term of terms) {
-          const below = permittedAt(term, [step]);
-          if (below === null) continue;
-          if (unrestricted(below)) {
-            carried = true;
-            break;
-          }
-          if (!carried.includes(below)) carried.push(below);
-        }
-        node.below.set(step, (next = { carried, below: new Map() }));
+        node.below.set(
+          step,
+          (next = { carried: carriedBelow(node.carried, own, step), below: new Map() }),
+        );
       }
       node = next;
     }
@@ -539,6 +515,13 @@ export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): 
   return node.carried === true;
 }
 
+/**
+ * Whether a written type a copy decides at a prefix of a path leaves the path unrestricted (#1215: a
+ * copied written type is the written type below it too): a prefix copies land at (`landed`) whose decision copies a
+ * written type (`inheritedAt`) unrestricted at the rest (`permittedAt`), as an own written type is below it, whatever a
+ * store on the path decided before the copy. Only in a place copies land in, walked down from its root one step at a
+ * time (`OpenStep`), so each of its paths is asked of the landings once.
+ */
 export function openAbove(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
   if (!admission.a4Places.has(place)) return false;
   let at = admission.a4Places.get(place) ?? null;
@@ -547,23 +530,36 @@ export function openAbove(admission: Admission, place: PlaceId, path: readonly s
     const step = path[length]!;
     let next = at.below.get(step);
     if (next === undefined) {
-      const terms = [...at.carried];
       const prefix = path.slice(0, length);
       const own = landed(admission, place, prefix) ? inheritedAt(admission, place, prefix) : null;
-      if (own !== null && !terms.includes(own)) terms.push(own);
-      let carried: TypeTerm[] | true = [];
-      for (const term of terms) {
-        const below = permittedAt(term, [step]);
-        if (below === null) continue;
-        if (unrestricted(below)) {
-          carried = true;
-          break;
-        }
-        if (!carried.includes(below)) carried.push(below);
-      }
-      at.below.set(step, (next = { carried, below: new Map() }));
+      at.below.set(
+        step,
+        (next = { carried: carriedBelow(at.carried, own, step), below: new Map() }),
+      );
     }
     at = next;
   }
   return at.carried === true;
+}
+
+/**
+ * What the step of `openAbove`'s walk below a step whose written types are `carried` carries: what those and the
+ * prefix's own inherited type (`own`) leave at `step` (`permittedAt`), each once; `true` where one leaves it
+ * unrestricted.
+ */
+function carriedBelow(
+  carried: readonly TypeTerm[],
+  own: TypeTerm | null,
+  step: string,
+): TypeTerm[] | true {
+  const terms = [...carried];
+  if (own !== null && !terms.includes(own)) terms.push(own);
+  const found: TypeTerm[] = [];
+  for (const term of terms) {
+    const below = permittedAt(term, [step]);
+    if (below === null) continue;
+    if (unrestricted(below)) return true;
+    if (!found.includes(below)) found.push(below);
+  }
+  return found;
 }

@@ -87,10 +87,8 @@ export function variable(text: string): string | null {
 
 /**
  * Whether a text is a stable path as written, on one line: a variable followed by properties, fixed
- * indexes or keys, or indexes and keys held in plain variables; not `.random`, a call or a computed index. It is the
- * only subject a fix's example names, so code that reads it again reads the same value (#1195, the lead after Astra r1
- * and r2). Any other subject, a literal or another expression, gets its fix's sentence alone; a name is never taken
- * from another declaration or from the place's facts.
+ * indexes or keys, or indexes and keys held in plain variables; not `.random`, a call or a computed index: code that
+ * reads it again reads the same value (#1195).
  */
 export function stablePath(text: string): boolean {
   const fixed = (index: Expression): boolean =>
@@ -206,7 +204,10 @@ export function memberNoun(member: string): string {
     : `property '${member.slice(1)}'`;
 }
 
-/** Whether a member's use sets a property: a store's `use` also marks a method that changes its value, and an element. */
+/**
+ * Whether a member's use sets a property: a store of a property (`.name`), not of a method that changes its value nor
+ * of an element, which a store's `use` also marks.
+ */
 export function setsProperty(rule: DiagnosticRule): boolean {
   return (
     rule.rule === "member" &&
@@ -228,7 +229,7 @@ export const SHOWN_RULE =
 export const SORT_ONE_TYPE = "sort() sorts elements of one type";
 
 /**
- * C13: the conversion that turns an argument of one known kind into what its method takes (the text methods' own fix,
+ * The conversion that turns an argument of one known kind into what its method takes (the text methods' own fix,
  * `argumentFix`), or a set or a range into a list.
  */
 export function argumentFixOf(

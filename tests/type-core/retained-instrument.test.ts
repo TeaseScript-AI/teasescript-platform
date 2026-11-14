@@ -671,7 +671,7 @@ test("a refusal is counted where it is thrown, so one a `catch` swallows is stil
   assert.equal(new RetainedInstrument().report().raised, 0);
 });
 
-test("a module's collection is made by its kind, one per recorder", () => {
+test("a module's collection is made by its kind, one per instrument", () => {
   const made = retainedModule<string, number>("T.module", "map");
   // (production's, or the preload's instrument's where the file runs frozen)
   const outside = made();

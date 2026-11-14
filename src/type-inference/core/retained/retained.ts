@@ -49,20 +49,26 @@ export interface RetainedRecorder {
 }
 
 let active: RetainedRecorder | null = null;
-/** The instrument installed for the whole process (`installRetainedRecorder`), which `withRetainedRecorder` stands over. */
+/**
+ * The instrument installed for the whole process (`installRetainedRecorder`), which `withRetainedRecorder` stands
+ * over.
+ */
 let ambient: RetainedRecorder | null = null;
 
-/** Test-only: installs `recorder` for the whole process (the frozen type-core suites' preload). */
-export function installRetainedRecorder(recorder: RetainedRecorder): void {
+/** Test-only: installs `instrument` for the whole process (the frozen type-core suites' preload). */
+export function installRetainedRecorder(instrument: RetainedRecorder): void {
   if (active !== null) throw new Error("A retained-state instrument is already installed.");
-  ambient = active = recorder;
+  ambient = active = instrument;
 }
 
-/** Test-only: runs `callback` with `recorder` making every retained kind and hearing every mark. */
-export function withRetainedRecorder<T>(recorder: RetainedRecorder, callback: () => T): T {
+/**
+ * Test-only: runs `callback` with `instrument` in place of the process's own (`installRetainedRecorder`), if any,
+ * making every retained kind and hearing every mark and run; refused while another stands over the process's own.
+ */
+export function withRetainedRecorder<T>(instrument: RetainedRecorder, callback: () => T): T {
   if (active !== ambient) throw new Error("A retained-state instrument is already installed.");
   const before = active;
-  active = recorder;
+  active = instrument;
   try {
     return callback();
   } finally {
@@ -70,7 +76,7 @@ export function withRetainedRecorder<T>(recorder: RetainedRecorder, callback: ()
   }
 }
 
-/** The installed recorder, `null` in production: the solver takes it once, when made. */
+/** The installed instrument, `null` in production. */
 export function retainedRecorder(): RetainedRecorder | null {
   return active;
 }
@@ -177,8 +183,8 @@ type ModuleKind = "map" | "set" | "weakMap" | "weakSet";
 
 /**
  * A module's retained collection (a capture) of `kind`, which this makes (#1072 R46): the native one made at its first
- * use, or, while a recorder is installed, the recorder's own for the module's name, made at its first use under that
- * recorder.
+ * use, or, while an instrument is installed, the instrument's own for the module's name, made at its first use under
+ * that instrument.
  */
 export function retainedModule<K, V>(name: string, kind: "map"): () => Map<K, V>;
 export function retainedModule<T>(name: string, kind: "set"): () => Set<T>;
@@ -189,7 +195,7 @@ export function retainedModule<K extends WeakKey, V>(
 export function retainedModule<T extends WeakKey>(name: string, kind: "weakSet"): () => WeakSet<T>;
 export function retainedModule(name: string, kind: ModuleKind): () => object {
   let native: object | undefined;
-  let recorded: { readonly by: RetainedRecorder; readonly value: object } | undefined;
+  let instrumented: { readonly by: RetainedRecorder; readonly value: object } | undefined;
   const make = (): object =>
     kind === "map"
       ? Retained.map(name)
@@ -200,7 +206,7 @@ export function retainedModule(name: string, kind: ModuleKind): () => object {
           : Retained.weakSet(name);
   return () => {
     if (active === null) return (native ??= make());
-    if (recorded?.by !== active) recorded = { by: active, value: make() };
-    return recorded.value;
+    if (instrumented?.by !== active) instrumented = { by: active, value: make() };
+    return instrumented.value;
   };
 }

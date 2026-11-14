@@ -162,12 +162,6 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/inherited/inherited.ts",
-    "kind": "docblock",
-    "text": "Whether a written type a copy decides at a prefix of a path leaves the path unrestricted (A4 through copies, the",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
     "file": "src/type-inference/core/admission/landings/landed.ts",
     "kind": "docblock",
     "text": "The place whose inherited type a place's is at a path (`inheritedAt`): a place whose only store on the",
@@ -243,12 +237,6 @@
     "file": "src/type-inference/core/operator-table.ts",
     "kind": "docblock",
     "text": "The runtime's operator table (checkpoint 9, F16 and C4): for each operator, the operand kinds the runtime accepts and",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/inherited/receiving-domain.ts",
-    "kind": "reference",
-    "text": "#retakenOf",
     "waits": "the O4 lead's cleanup"
   },
   {

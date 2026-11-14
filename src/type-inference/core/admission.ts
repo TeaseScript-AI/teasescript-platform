@@ -235,12 +235,6 @@ export class Admission {
   get inheritedOwn(): ReceivingDomain["inheritedOwn"] {
     return this.pass.receivingDomain.inheritedOwn;
   }
-  get cycles(): ReceivingDomain["cycles"] {
-    return this.pass.receivingDomain.cycles;
-  }
-  get cycleSizes(): ReceivingDomain["cycleSizes"] {
-    return this.pass.receivingDomain.cycleSizes;
-  }
   get reach(): number {
     return this.pass.receivingDomain.reach;
   }

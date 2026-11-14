@@ -21,7 +21,7 @@ import { checkedFiles, fileComments, scriptsOf } from "./comments.mjs";
 // fall. A comment that points at the accepted record
 // (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names an anchor of a record page
 // Git lists, read and slugged as the doc-links check reads them (#2422); that check reads Markdown only and never sees
-// a comment. A label of the port plan or the research design (`S8c`,
+// a comment. A label of the port plan or the research design (`S9b`,
 // `C9`, `AD-1`) in a comment of the type core's modules, or in printed test text (`printedTexts`: a test's title, a
 // `measures` or `authority` value, #2423), has a row in the record's glossary, and every row is still carried by such
 // a comment or text; an id after a reviewer's round ("Codex r2's B1") is a review reference, not a label.

@@ -13,8 +13,6 @@ import { REASON, type Item, type ItemTag } from "../items.js";
 import type { ValueConstraint } from "../program.js";
 import { offendingKinds, type DiagnosticRule } from "../result.js";
 
-// The checks of interactions (S3 §2, groups K and K′): here what a choice's buttons return (TSV029).
-
 /** V30 §19: the kinds a button returns, a choice value, as the runtime's check of a choice takes them (TSR052). */
 const CHOICE_VALUES: readonly ValueKind[] = VALUE_KIND_NAMES.filter(
   (kind) => VALUE_KINDS[kind].choice,
@@ -31,13 +29,12 @@ const isMissing = (item: Item): boolean =>
   item.tag === "unknown" && (item.reasons & REASON.missing) !== 0;
 
 /**
- * TSV029 (V30 §19): what every button of an `askChoice` returns is a choice value: a written choice
- * object's `value`, or its `text` without one; a value option or element itself; a choice object the options hold
- * without writing it, its `value` or its `text` as the answer reads it (`choiceItems`). The C13 rule decides each over
- * its known kinds: every one a choice value, quiet; none and all definite, an error; else a warning whose check is the
- * runtime's own check of the buttons (TSR052) when the choice opens, a value the script cannot know among them (C13, as
- * an argument's), the known misfit alone beside one. A labelled option's buttons return the label. The answer's value
- * side takes only choice values (`choiceItems`), so no record of a button is composed.
+ * TSV029 (V30 §19): what every button of an `askChoice` returns is a choice value: a written choice object's `value`,
+ * or its `text` without one; a value option or element itself; a choice object the options hold without writing it, its
+ * `value` or its `text` as the answer reads it (`choiceItems`). Each is decided over its known kinds: every one a
+ * choice value, quiet; none and all definite, an error; else a warning whose check is the runtime's own check of the
+ * buttons (TSR052) when the choice opens, a button's value the script cannot know among them, the known misfit alone
+ * beside one. A labelled option's buttons return the label.
  */
 export function choiceValues(
   walk: Consumers,
@@ -46,7 +43,6 @@ export function choiceValues(
 ): void {
   const options = c.evidence?.kind === "choice" ? c.evidence.options : [];
   const { program } = walk.pass;
-  // the C13 rule over the value's kinds, a button's value the script cannot know a possible misfit
   const check = (
     value: PlaceId | null,
     need: readonly ItemTag[],
@@ -63,8 +59,6 @@ export function choiceValues(
     }
     program.work.charge("checks");
     const items = domainItems(walk, value, node, rest);
-    // (C13: a value a button returns that the script cannot know warns, as an argument's does; beside a known misfit,
-    // the known one alone, one warning a site; an option or an element the runtime checks as it opens the choice)
     const misfits = items.filter((item) =>
       item.tag === "unknown"
         ? part === "value" && (isOpaque(item) || isExternal(item))
@@ -108,7 +102,6 @@ export function choiceValues(
         items.filter((found) => need.includes(found.tag)),
       );
   };
-  // (a written choice object's button returns its `value`, else its `text`)
   const selected = (object: ChoiceObjectEvidence): void =>
     check(object.value ?? object.text, CHOICE_VALUES, "value");
   // a choice object the options hold without writing it, below `at`, as `choiceItems` reads its buttons: per record
@@ -164,7 +157,6 @@ export function choiceValues(
     // a computed option: a value, a choice object, or a list or set of them (an unknown one owes its option's check,
     // which the runtime makes of its buttons too)
     check(argument, OPTIONS, "option");
-    // (its kinds, or what its type admits where they are unknown, `domainItems`)
     const kinds = domainItems(walk, argument, node, []);
     if (kinds.some((item) => item.tag === "object")) held(argument, []);
     if (kinds.some((item) => item.tag === "list" || item.tag === "set")) {
