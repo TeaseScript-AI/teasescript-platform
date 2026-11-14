@@ -3,11 +3,9 @@ import type { BuildNode, FlowGraphBuilder } from "../flow-graph.js";
 import { edgeKey } from "./keys.js";
 import type { CallSite, FlowNode, FunctionRegion, HandlerRegion } from "./model.js";
 
-// What never runs: the dead edges of decided defaults and of calls that cannot return, unentered code, liveness.
-
 /**
- * P7: a default that every call supplies never runs, and one that no call supplies always runs. Each call's arguments
- * are bound to parameters once, as the lowering binds them (`boundParameterName`), and counted per parameter.
+ * A default that every call supplies never runs, and one that no call supplies always runs. Each call's arguments are
+ * bound to parameters once (`boundParameterName`) and counted per parameter.
  */
 export function decideDefaults(builder: FlowGraphBuilder): void {
   const suppliedBy = new Map<FunctionRegion, Map<string, number>>();
@@ -39,9 +37,9 @@ export function decideDefaults(builder: FlowGraphBuilder): void {
 }
 
 /**
- * Which calls can return (G1(a)(b), L10, L11), by one least fixpoint over three facts, each node taking each fact
- * once. Two are carried backward over each region's own nodes: a node can reach its function's exit (a `return`), or
- * it can reach an `end` of the running file. A file's exit (its `end` statements, and its end, which the compiler's
+ * Which calls can return, by one least fixpoint over three facts, each node taking each fact once. Two are carried
+ * backward over each region's own nodes: a node can reach its function's exit (a `return`), or it can reach an `end`
+ * of the running file. A file's exit (its `end` statements, and its end, which the compiler's
  * closing `end` reaches) and every `end` in a function or block have the second. A call has a fact of the node after
  * it once a callee returns, and the second fact also once a function it calls may end the running file; a `goto` of
  * files has the second once one of them returns, since a started file's `end` returns to the running file's caller; a

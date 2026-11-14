@@ -2,8 +2,6 @@ import { isPathGlob } from "../../../project-paths.js";
 import type { FlowGraphBuilder } from "../flow-graph.js";
 import type { CallSite, FileRegion, FlowNode } from "./model.js";
 
-// Calls and jumps, resolved once every file is walked: the call sites, the targets of `goto` and `call`, their edges.
-
 function addSite(builder: FlowGraphBuilder, site: Omit<CallSite, "id">): CallSite {
   const added: CallSite = { id: builder.sites.length, ...site };
   builder.sites.push(added);
@@ -34,12 +32,11 @@ export function resolveCalls(builder: FlowGraphBuilder): void {
 
 /**
  * A `goto` continues at a label of its file or starts a file at its top; a `call` starts a file and is one call site.
- * A glob may pick the files the name pass picked for it (G1(f): no second scan); a computed target may name any file
- * (L11). A file target's label is an error of the name pass, so the file starts at its top.
+ * A glob may pick the files the name pass picked for it (no second scan); a computed target may name any file. A file
+ * target's label is an error of the name pass, so the file starts at its top.
  */
 export function resolveTransfers(builder: FlowGraphBuilder): void {
   const byPath = new Map(builder.fileRegions.map((region) => [region.path, region]));
-  // Computed targets share one list of every file and its entries.
   const everyFile: readonly FileRegion[] = builder.fileRegions;
   const entriesOf = new Map<readonly FileRegion[], readonly FlowNode[]>();
   for (const transfer of builder.pendingTransfers) {

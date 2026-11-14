@@ -129,23 +129,15 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `N1` | stable-path tests create narrowing definitions that filter kinds without proving collection non-emptiness |
 | `N2` | the nearest valid dominating narrowing answers a read until relevant events invalidate it ([r4-403](contract.md#r4-403)) |
 | `N3` | a route proof promotes an unchecked nullable or written-union use to an error ([r4-444](contract.md#r4-444)), also through an entry ([r4-451](contract.md#r4-451)) |
-| `N3a` | written-union offending members participate in the required-check route proof, as re-derived under AD-1 ([r4-444](contract.md#r4-444)) |
 | `N5` | loop narrowings survive jointly preserving stores solved as one greatest fixpoint ([r4-129](contract.md#r4-129)) |
-| `N8` | constants retain narrowing absent dependency changes; reference-member paths are never narrowed |
 | `N9` | unsupported narrowing forms retain guarded warnings rather than inventing stronger proofs |
 | `N10` | required-check errors identify the producer and missing test; failed narrowings name their invalidating event |
 | `U4a` | stored selections take their element narrowing while emptiness remains a separate proof |
 | `U5` | a lost narrowing names the failing event that prevented keeping its check ([r4-444](contract.md#r4-444)) |
-| `H1` | a read before any handler registration can keep its exact answer |
 | `H6` | registrations reached through file transfers propagate possible handler interference |
 | `H9` | calling a helper that registers a handler counts as a registration in its caller |
-| `L1` | without an entered label, label boundaries do not obstruct the exact path |
-| `L5` | a label reached only by fall-through creates no exact-path boundary |
-| `L6` | jumping to a later label does not revisit the code before it |
 | `L10` | a call whose target cannot return leaves its continuation unreachable |
 | `L11` | computed transfers target every candidate file; glob targets use the name pass’s picks |
-| `L13` | stores reached through a called file’s onward transfer count against the original call |
-| `O4` | historical name of the type-analysis initiative behind the coarse core |
 | `O15` | block-local reads use the contract because handlers can run after intervening stores |
 | `P3` | a present, dominating, unguarded single-kind contract can prove a read definite |
 | `P7` | literal graph facts prove branch feasibility, loop entry, and selected literal elements |
@@ -153,7 +145,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `W19` | the work family for k guarded copies of one record inside a literal |
 | `W24` | the work family for one identity function, in which a guard scope is no identity |
 | `W29` | the work family for N5's preserving stores to k locations in one loop, each evaluated once |
-| `W30` | the work family for long and/or test chains without repeated sibling-test scans |
 | `W32` | the work family for N3's k whole stores of a record with null fields under k branches, read at k fields |
 | `W34` | the whole-copy chain and fan work family sharing source marks across demanded fields ([r4-38](sharing.md#r4-38)) |
 | `W40` | the work family indexing tested paths by callable or file instead of scanning contributions |

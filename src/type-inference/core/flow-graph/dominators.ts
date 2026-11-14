@@ -1,14 +1,13 @@
-import type { FlowGraph, FlowNode } from "../flow-graph.js";
+import type { FlowGraph, FlowNode } from "./model.js";
 
 /*
- * The dominators of the coarse core's flow graph (§3.1): which node every run that reaches another passes first. The
- * exact path takes the nearest dominating definition of a read (X2), compares its boundaries (X4) and loops (X5), and
- * counts the events between two nodes in their intervals of the dominator tree (X6). Lengauer and Tarjan's algorithm
- * with path compression, written with explicit stacks, so deep code does not deepen the native stack.
+ * The dominators of the type core's flow graph: which node every run that reaches another passes first. Lengauer and
+ * Tarjan's algorithm with path compression, written with explicit stacks, so deep code does not deepen the native
+ * stack.
  *
  * Dead code has dominators too: an edge counts unless it leads from dead code, or is dead, into live code. So a dead
  * edge never changes what dominates live code, and every node, dead or live, hangs in one tree below the program's
- * entry (the flow graph joins code that nothing reaches by dead edges).
+ * entry.
  */
 
 export interface Dominators {
@@ -26,8 +25,8 @@ export interface Dominators {
   /** Where a node's interval ends (see {@link dfsIn}). */
   dfsOut(node: FlowNode): number;
   /**
-   * The nearest dominating boundary (X4): a function's entry, a file's entry that something other than the session's
-   * start enters, or a label that some `goto` enters (a label that only the code before it reaches is none, L5).
+   * The nearest dominating boundary: a function's entry, a file's entry that something other than the session's start
+   * enters, or a label that some `goto` enters (a label that only the code before it reaches is none).
    * `null` where no boundary dominates, as in the code of the file the session starts in.
    */
   edom(node: FlowNode): FlowNode | null;
@@ -41,7 +40,6 @@ export function dominators(graph: FlowGraph): Dominators {
   const counts = (from: FlowNode, to: FlowNode): boolean =>
     !(from.dead && !to.dead) && !(graph.isDeadEdge(from, to) && !to.dead);
 
-  // The depth-first search: preorder numbers, the tree's parents, and the reverse postorder.
   const number = new Int32Array(count).fill(-1);
   const vertex: FlowNode[] = [];
   const parent: number[] = [];
@@ -73,7 +71,6 @@ export function dominators(graph: FlowGraph): Dominators {
   }
   const reached = vertex.length;
 
-  // Lengauer–Tarjan over preorder numbers: semidominators, then immediate dominators.
   const semi = new Int32Array(reached);
   const label = new Int32Array(reached);
   const ancestor = new Int32Array(reached).fill(-1);
@@ -124,7 +121,6 @@ export function dominators(graph: FlowGraph): Dominators {
   for (let w = 1; w < reached; w += 1) if (idom[w] !== semi[w]) idom[w] = idom[idom[w]!]!;
   idom[0] = 0;
 
-  // The dominator tree's children in flat arrays, then each node's interval in one walk of it.
   const firstChild = new Int32Array(reached + 1);
   for (let w = 1; w < reached; w += 1) firstChild[idom[w]! + 1]! += 1;
   for (let v = 0; v < reached; v += 1) firstChild[v + 1]! += firstChild[v]!;
@@ -163,7 +159,7 @@ export function dominators(graph: FlowGraph): Dominators {
     }
   }
 
-  // The nearest dominating boundary and block entry, in preorder, where a node's dominator comes first.
+  // (in preorder, so a node's dominator is decided before it)
   const boundary = (node: FlowNode): boolean => {
     if (node.kind === "function-entry") return true;
     if (node.kind === "file-entry")
@@ -203,14 +199,4 @@ export function dominators(graph: FlowGraph): Dominators {
     edom: (node) => byId(edom[node.id]!),
     hdom: (node) => byId(hdom[node.id]!),
   };
-}
-
-/**
- * X5: whether every loop around `read` also encloses `definition`. The loops around a node are nested, outermost
- * first, so it is enough that `definition` lies in `read`'s innermost loop at the same depth; a `for` loop's binding
- * lies in its loop.
- */
-export function insideLoopsOf(definition: FlowNode, read: FlowNode): boolean {
-  const depth = read.loops.length;
-  return depth === 0 || definition.loops[depth - 1] === read.loops[depth - 1];
 }

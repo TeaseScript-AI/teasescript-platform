@@ -6,16 +6,15 @@ import { each, some, sorted, steps } from "../charged-iteration.js";
 import type { CoreProgram } from "../program.js";
 
 /*
- * The statements of a program as N3's corridor composes them (checkpoint 9): per callable body (a
- * file's top level, a function's body, a block's body) its statements in order, each with the blocks of its live
- * alternatives (an `if`'s arms or the way past it, a `switch`'s cases and its `default` or the way past them, a loop's
- * body beside its skip edge where the graph keeps one), and the **shared, key-independent layer** of closed
- * statements, computed once bottom-up: a statement that always leaves, closed for every key; a statement whose
- * compulsory evaluation holds a live call site (one that dominates where its own expressions end), closed for a key
- * with an owner outside its activation (X6's owner predicate); and a branch or loop whose every live alternative is
- * closed by those alone, in either applicability. Per block, the indexes of its closed statements are sorted, so a
- * segment of a block is one binary search per layer. X7's events are the flat veto they are and stay out of the
- * layer; kills and blocking tests are each key's (`routes.ts`).
+ * The statements of a program as the route query's corridor composes them: per callable body (a file's top level, a
+ * function's body, a block's body) its statements in order, each with the blocks of its live alternatives (an `if`'s
+ * arms or the way past it, a `switch`'s cases and its `default` or the way past them, a loop's body beside its skip
+ * edge where the graph keeps one), and the **shared, key-independent layer** of closed statements, computed once
+ * bottom-up: a statement that always leaves, closed for every key; a statement whose compulsory evaluation holds a live
+ * call site (one that dominates where its own expressions end), closed for a key with an owner outside its activation
+ * (`DefinitionIndex.ownedAway`); and a branch or loop whose every live alternative is closed by those alone, in either
+ * applicability. Per block, the indexes of its closed statements are sorted, so a segment of a block is one binary
+ * search per layer. A block's possible interference and each key's kills and blocking tests stay out of the layer.
  */
 
 /** A statement of the tree: where it stands, its alternatives, and whether the shared layer closes it. */
@@ -99,7 +98,7 @@ export class StatementTree {
   readonly blocks: TreeBlock[] = [];
   /** Per file, its statements by their spans: the innermost one holding an offset. */
   readonly #byFile = new Map<number, Laminar<TreeStatement>>();
-  /** Each `switch` statement by its subject's span (N1's cases). */
+  /** Each `switch` statement by its subject's span, for its cases' narrowings (`switchAt`). */
   readonly #switches = new Map<string, SwitchStatement>();
   /** Each alternative by its entry. */
   readonly #arms = new Map<FlowNode, TreeBlock>();
@@ -107,7 +106,7 @@ export class StatementTree {
   readonly #roots = new Map<number, TreeBlock>();
   /** The live call sites' call-ins outside block code by their dominator intervals (the nearest one dominating a node). */
   readonly #calls: Laminar<FlowNode>;
-  /** Where their calls end, by file, sorted (an operand region's calls, N2: a call enters after its arguments). */
+  /** Where their calls end, by file, sorted (an operand region's calls: a call enters after its arguments). */
   readonly callTexts = new Map<number, number[]>();
 
   public constructor(readonly program: CoreProgram) {
@@ -267,7 +266,6 @@ export class StatementTree {
     }
     for (const [file, list] of each(work, "indexSteps", byFile))
       this.#byFile.set(file, new Laminar(work, list));
-    // a live call site outside block code whose call-in every route through its statement's own expressions passes
     const calls: { start: number; end: number; item: FlowNode }[] = [];
     for (const site of each(work, "indexSteps", flow.sites)) {
       const at = site.callIn;
