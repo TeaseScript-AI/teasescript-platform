@@ -444,11 +444,8 @@ regressionCase(
 );
 
 /**
- * #2800: a join's level loop asks an operand's next level while the one above holds lists. A loader that fills a
- * written `list` or a written `dict` with its own result, read into a `+` in a function no one calls, holds lists at every
- * level through its own decision there (`computeDecided` from the contract's kinds, no written decider), which the nesting
- * cut does not reach: the cut leaves out stores in code no run reaches. The loop now continues only while a written type
- * decides the level above (#2763's C1), so it ends; the base asked one level deeper each turn until the allowance.
+ * #2800: a `+` over the result of a loader that fills a written `list` or `dict` with its own result settles far below
+ * the allowance in every mode, also where the function that holds the `+` is never called.
  */
 regressionCase(
   "a join whose operand holds lists at every level by its own decision ends far below the allowance (#2800)",
