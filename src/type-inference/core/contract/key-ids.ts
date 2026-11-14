@@ -1,6 +1,5 @@
 import type { PlaceId } from "../../graph.js";
 import {
-  joinParts,
   joinSteps,
   keptArray,
   keptSlice,
@@ -39,8 +38,8 @@ import { Retained, retainedModule } from "../retained/retained.js";
 /**
  * A key's cursor: its place and its path's id in the pass's one path arena (`pathAt`, which the literal indexes' paths
  * share), written `place#id`. A map or a set holds it by that short text, and two cursors are equal exactly when they
- * name one key of the pass. An id is allocated as the analysis first asks its path, so it orders nothing
- * (`compareKeyIds`), and it never leaves its pass (`exportKeyIds`).
+ * name one key of the pass. An id is allocated as the analysis first asks its path, so it orders nothing, and it
+ * never leaves its pass (`exportKeyIds`).
  */
 export type KeyId = `${number}#${number}`;
 
@@ -608,10 +607,6 @@ function keyAtRefWith(contract: Contract, place: PlaceId, rest: Rest, kept: bool
 
 /** The key `rest` below `key` in its identity: a span below a cursor or a cursor family's root, by path ids alone. */
 export function keyBelowRef(contract: Contract, key: Key, rest: Rest): CanonicalKey {
-  return keyBelowRefWith(contract, key, rest, false);
-}
-
-function keyBelowRefWith(contract: Contract, key: Key, rest: Rest, kept: boolean): CanonicalKey {
   const ref = restRef(contract, rest);
   if (ref.length === 0) return canonicalKey(contract, key);
   if (ref.kind === "span") {
@@ -619,9 +614,9 @@ function keyBelowRefWith(contract: Contract, key: Key, rest: Rest, kept: boolean
       convert(contract, 1, 0, 0);
       return keyIdAt(keyIdPlace(key), joinedId(contract, keyIdPath(key), ref.id()));
     }
-    if (key.endsWith("|")) return keyAtRefWith(contract, keyPlace(key), ref, kept);
+    if (key.endsWith("|")) return keyAtRefWith(contract, keyPlace(key), ref, false);
   }
-  return keyBelowWith(contract, key, ref.steps(), kept);
+  return keyBelowWith(contract, key, ref.steps(), false);
 }
 
 /** An array as a `PathRef`, its views slices and joins of its steps. */
@@ -1119,64 +1114,6 @@ export function memberStepIn(contract: Contract, id: KeyId, from = 0): number {
     return -1;
   }
   return memberStepOf(contract, stepsOfId(contract, id), from);
-}
-
-/**
- * Two cursors in the order of their keys' texts (`keyOfId`, UTF-16 code units), the canonical order (#1398), never
- * their ids': their places' decimal texts, then their paths from the steps where they part, found by climbing to them
- * (each node charged); a path before the paths below it. Exported for the key-id tests.
- */
-export function compareKeyIds(contract: Contract, a: KeyId, b: KeyId): number {
-  if (a === b) return 0;
-  const [placeA, placeB] = [keyIdPlace(a), keyIdPlace(b)];
-  if (placeA !== placeB) return joinParts(placeA, "") < joinParts(placeB, "") ? -1 : 1;
-  const [pathA, pathB] = [keyIdPath(a), keyIdPath(b)];
-  const { pathParents: parents, pathDepths: depths } = contract;
-  let [x, y] = [pathA, pathB];
-  let [belowX, belowY] = [-1, -1];
-  for (; depths[x]! > depths[y]!; x = parents[x]!) {
-    convert(contract, 1, 0, 0);
-    belowX = x;
-  }
-  for (; depths[y]! > depths[x]!; y = parents[y]!) {
-    convert(contract, 1, 0, 0);
-    belowY = y;
-  }
-  for (; x !== y; [x, y] = [parents[x]!, parents[y]!]) {
-    convert(contract, 2, 0, 0);
-    [belowX, belowY] = [x, y];
-  }
-  if (belowX < 0) return -1;
-  if (belowY < 0) return 1;
-  return compareSteps(
-    contract,
-    contract.pathLastSteps[belowX]!,
-    belowX !== pathA,
-    contract.pathLastSteps[belowY]!,
-    belowY !== pathB,
-  );
-}
-
-/**
- * Two distinct steps below one path in the order of their keys' texts, compared in place, no text made: each text goes
- * on with a dot where its path goes deeper (`more`), else ends, and a step holds no dot, so the texts part at or before
- * the shorter step's end; the code units scanned charged.
- */
-function compareSteps(
-  contract: Contract,
-  x: string,
-  moreX: boolean,
-  y: string,
-  moreY: boolean,
-): number {
-  let at = 0;
-  while (at < x.length && at < y.length && x.charCodeAt(at) === y.charCodeAt(at)) at += 1;
-  convert(contract, 0, at + 1, 0);
-  if (at < x.length && at < y.length) return x.charCodeAt(at) < y.charCodeAt(at) ? -1 : 1;
-  // (one step ends here: its text's next code unit is a dot, or none, which sorts first)
-  const dot = 46;
-  if (at === x.length) return !moreX || dot < y.charCodeAt(at) ? -1 : 1;
-  return !moreY || dot < x.charCodeAt(at) ? 1 : -1;
 }
 
 /** A cursor token of a demand's name (`place#id`), and a span's name (`.id`, `PathRef.name`). */

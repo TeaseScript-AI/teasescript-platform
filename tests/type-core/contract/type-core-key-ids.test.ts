@@ -17,7 +17,6 @@ import { Contract } from "../../../src/type-inference/core/contract.js";
 import {
   canonicalRest,
   compareDemandNames,
-  compareKeyIds,
   exportKeyIds,
   exportNames,
   importKeyIds,
@@ -202,12 +201,7 @@ test("a key's cursor names one key of its pass whichever way it is made; its tex
     for (let a = 0; a < inOrder.length; a += 1)
       for (let b = 0; b < inOrder.length; b += 1) {
         const expected = texts[a]! < texts[b]! ? -1 : texts[a]! > texts[b]! ? 1 : 0;
-        assert.equal(
-          compareKeyIds(contract, inOrder[a]!, inOrder[b]!),
-          expected,
-          `${texts[a]} ? ${texts[b]}`,
-        );
-        // (and in demands' names, as the solver orders a component's members: #1398)
+        // (in demands' names, as the solver orders a component's members: #1398)
         assert.equal(
           compareDemandNames(contract, joinParts("c", inOrder[a]!), joinParts("c", inOrder[b]!)),
           expected,
@@ -893,20 +887,6 @@ function sites(n: number): Map<string, { readonly walked: number; readonly charg
   // (a path whose steps are not yet kept: the scan's cold question makes them, its steps walked and charged)
   const scanned = keyIdOf(contract, 14, [...steps, "y"]);
   site("memberStepIn", () => memberStepIn(contract, scanned, n >> 1));
-  const apart = keyIdBelow(contract, rootId(7), "t");
-  site("compareKeyIds", () => compareKeyIds(contract, deepest, apart));
-  // (width and branching, #1454 r1: `n` children below a step `n` code units wide, each compared with a short sibling;
-  // two siblings whose steps share their first `n` code units)
-  const wide = keyIdBelow(contract, rootId(13), "q".repeat(n));
-  const children = Array.from({ length: n }, (_, k) => keyIdBelow(contract, wide, `s${k}`));
-  const short = keyIdBelow(contract, rootId(13), "a");
-  site("compareKeyIds, wide branching", () =>
-    children.map((child) => compareKeyIds(contract, child, short)),
-  );
-  const [left, right] = ["0", "1"].map((end) =>
-    keyIdBelow(contract, rootId(14), `p${"a".repeat(n)}${end}`),
-  );
-  site("compareKeyIds, shared prefix", () => compareKeyIds(contract, left!, right!));
   const packet = site("exportKeyIds", () => exportKeyIds(contract, [deepest]));
   const fresh = narrowingPass(source).contract;
   const { result, work } = probeMade(fresh, () => importKeyIds(fresh, packet));
@@ -1016,7 +996,6 @@ const MADE_LISTED: Readonly<Record<string, readonly [number, string]>> = {
     3,
     "a demand name with its cursors' texts, charged and kept once per name (`compareDemandNames`); a component's names for a replay and back (`exportNames`, `importNames`, the solver's test seam)",
   ],
-  "key-ids.ts joinParts": [2, "two places' decimal texts with their bar (`compareKeyIds`)"],
   "lanes.ts joinParts": [
     2,
     "a family's memo key: charged where kept (`wrapperShape`), looked up (`keyLane`)",

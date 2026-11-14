@@ -141,9 +141,7 @@ export class HandlerIndex {
   /** Whether the key, a prefix or a key below it has a store in block code: a lookup per step of its path. */
   public handlerTouches(key: Key): boolean {
     this.program.work.charge("eventSteps");
-    return (
-      this.#handlerKeys.has(key) || this.#handlerAbove.has(key) || this.#handled.any(key, false)
-    );
+    return this.#handlerKeys.has(key) || this.#handlerAbove.has(key) || this.#handled.any(key);
   }
 
   /**
