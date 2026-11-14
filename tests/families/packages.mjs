@@ -5,7 +5,8 @@
 // mode (`HELD_MODES`, the base's paired with the head's of the same name), on each tree, the package runs twice:
 //   - `analysis`: the core's own analysis of its request (`analyseCore`), past the candidate route's syntax gate: a hash
 //     of every answer (`everyAnswer`), of its diagnostics, its checks and its checked result (`checkedResult`), its
-//     diagnostics' codes with counts, its counters, the limit a ledger stopped at (`stopped`), an error it threw;
+//     diagnostics' codes with counts, its counters, the limit a ledger stopped at (`stopped`), an error it threw (its
+//     class and place, `throwPlace`);
 //   - `route`: the compile with `coreOutcome(request, "past")` as its analysis: hashes of the plan, the diagnostics, the
 //     checked result and the settled facts (`facts()`), an error and, for a `CandidateOutsideSlice`, whether it was a
 //     limit's (`outside`).
@@ -23,6 +24,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { throwPlace } from "./thrown.mjs";
 
 const DEFAULTS = { timeout: 3600, memory: 6500 };
 const GLOBALS = ["hostValue", "hostOther", "hostInit"];
@@ -214,8 +216,8 @@ function observed(tree, make) {
   };
 }
 
-/** An error by its class alone: a message can quote the package's text. */
-const errorText = (error) => (error === null ? null : String(error?.name ?? "thrown"));
+/** An error by its class and the function and file it is thrown from (`throwPlace`): a message can quote the text. */
+const errorText = (error) => (error === null ? null : throwPlace(error));
 
 /** A part of a result as its hash, or as the error that kept it from being made. */
 function part(make) {

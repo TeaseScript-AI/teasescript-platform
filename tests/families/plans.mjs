@@ -51,6 +51,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import { summarize } from "./plans-summary.mjs";
 import { unitsOf } from "./units.mjs";
+import { throwPlace } from "./thrown.mjs";
 
 /** The exit of a worker whose run passed the unit limit, after it posted the run (`over`). */
 const OVER_EXIT = 86;
@@ -443,6 +444,7 @@ if (isMainThread && process.argv[2] === "summary") {
     let result = null;
     let error = null;
     let outside = null;
+    let thrown = null;
     try {
       result = mode.run(() =>
         allowance === undefined
@@ -454,6 +456,7 @@ if (isMainThread && process.argv[2] === "summary") {
     } catch (e) {
       error = `${e?.name}: ${e?.message}`;
       if (e?.name === "CandidateOutsideSlice") outside = e.limit === true ? "limit" : "slice";
+      else thrown = throwPlace(e);
     }
     if (allowance === undefined) tree.natural = meter.allowance;
     meter.run = null;
@@ -476,6 +479,7 @@ if (isMainThread && process.argv[2] === "summary") {
       allowance: meter.allowance,
       stopped: tree.stopped,
       outside,
+      thrown,
     };
   }
 

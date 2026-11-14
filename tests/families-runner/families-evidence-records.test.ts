@@ -57,6 +57,7 @@ interface Classed {
   readonly allowance: number;
   readonly stopped: string | null;
   readonly outside: string | null;
+  readonly thrown: string | null;
 }
 interface AreaRecord {
   readonly source: string;
@@ -194,6 +195,12 @@ export const compileSourceWithBackend = (source) => compileProjectWithBackend([{
   assert.deepEqual(fields("limit"), each({ allowance: 1000, stopped: null, outside: "limit" }));
   assert.deepEqual(fields("slice"), each({ allowance: 1000, stopped: null, outside: "slice" }));
   assert.deepEqual(fields("throws"), each({ allowance: 1000, stopped: null, outside: null }));
+  // (a throw by its class and the function and file it is thrown from, no message; a refusal is no throw)
+  const thrown = (name: string) => records.get(name)!.modes[0]!.base.thrown;
+  assert.deepEqual(
+    [thrown("throws"), thrown("limit"), thrown("fine")],
+    ["Error at compileProjectWithBackend (src/compiler.js)", null, null],
+  );
   // (the summary proves each line's form, the three fields among them)
   const summary = spawnSync(process.execPath, [plansTool, "summary", out], { encoding: "utf8" });
   assert.equal(summary.status, 0, summary.stderr);
@@ -330,7 +337,7 @@ test("the packages' runner compares each package's analysis and route per mode b
       records.get("refused")!.modes[0]!.base.route.outside,
       records.get("refused")!.modes[0]!.base.route.error,
     ],
-    ["limit", "CandidateOutsideSlice"],
+    ["limit", "CandidateOutsideSlice at coreOutcome (src/type-inference/core/backend.js)"],
   );
   const apart = records.get("apart")!;
   assert.deepEqual([apart.differing, apart.modes.every((m) => !m.same)], [4, true]);
