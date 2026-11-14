@@ -328,15 +328,21 @@ output, and the same success or failure at the same place, for every script and 
 or by a measurement over a stated complete domain. The report says in plain words what a maker could notice and in which
 case.
 
-What the type core (`src/type-inference/core/`) does on its test-only candidate route is not yet accepted behavior;
-the coordinator decides it (owner, 2026-11-10). Of its differences from the legacy type checker, only a real error
-blocks a pull request of it (owner, 2026-11-13): a value let through unchecked (#1526's condition 1, in
-[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md#coarse-type-core-bounds)), a crash, a compile error for code the language
-text (V30, the ADRs) does not call wrong, or a run that differs from what the language text says. Any other difference,
-in a message, a warning, or when a wrong source is caught, is a note in the pull request's body, unless it drops or
-worsens a fix the legacy one gives, which is a defect to repair ([`TESTING.md`](TESTING.md#the-shadow-comparison)). A
-choice that shapes the language, the switch itself, or what makers get after the switch still comes to the owner when
-it arises (owner, 2026-11-10).
+What the type core (`src/type-inference/core/`) does on its test-only candidate route is not yet accepted behavior; the
+coordinator decides it (owner, 2026-11-10). Of its differences from the legacy type checker, only a real error blocks a
+pull request of it (owner, 2026-11-13): a value let through unchecked (#1526's condition 1, in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md#coarse-type-core-bounds)), a crash, a compile error for code the language text
+(V30, the ADRs) does not call wrong, or a run that differs from what the language text says. A hang is a crash, and so
+is work the route does not charge, since only a charge lets the work budget end it; a wrong compile error counts on a
+source the base route planned, and a source the base route refused (`CandidateOutsideSlice`, [Static type
+analysis](ARCHITECTURE.md#static-type-analysis)) and the head rejects with a wrong compile error is filed as an issue
+with the number of converted scripts (makers' scripts converted to TeaseScript) it reaches, where the builder has them,
+since they are not in the repository (coordinator, 2026-11-13). A refusal on the route stays only where it keeps a part
+of the analysis that is not right yet away from sources, never to keep the legacy checker's message (coordinator,
+2026-11-13). Any other difference, in a message, a warning, or when a wrong source is caught, is a note in the pull
+request's body, unless it drops or worsens a fix the legacy one gives, which is a defect to repair
+([`TESTING.md`](TESTING.md#the-shadow-comparison)). A choice that shapes the language, the switch itself, or what makers
+get after the switch still comes to the owner when it arises (owner, 2026-11-10).
 
 These rules prevent accidental scope escalation. They do not permit reviewers
 to dismiss reproducible defects or weaken accepted syntax/semantics,
