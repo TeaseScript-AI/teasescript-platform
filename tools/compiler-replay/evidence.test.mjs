@@ -19,7 +19,7 @@ import {
 } from "./evidence.mjs";
 import { ROOT, jobId, ran, standInQueue, tool, write } from "./test-fixtures.mjs";
 
-test("evidence: a run's class reads a limit only from a stop or a limit's refusal, the syntax gate from another refusal", () => {
+test("evidence: a run's class reads a limit only from a stop or a limit's refusal, a refusal by the route from another", () => {
   assert.equal(classOf({ stopped: null, analysed: true }), "completed");
   // (a run the checker never saw, compile errors before it, has no analysis: never completed)
   assert.equal(classOf({ stopped: null, analysed: false }), "unanalysed");
@@ -168,8 +168,16 @@ test("evidence: the set's sources by class on each tree, a class move apart from
     incomplete: 1,
     uncompared: 2,
   });
-  // (the sources refused at the limit on both trees, by name)
-  assert.deepEqual(summary.limitBoth, ["stops elsewhere"]);
+  // (the sources refused at the limit on both trees, by name; those refused by the route, counted)
+  assert.deepEqual([summary.limitBoth, summary.sliceBoth], [["stops elsewhere"], 1]);
+  // (a share carries its source's class on that tree)
+  assert.deepEqual(
+    summary.shares.map((share) => [share.heaviest.name, share.heaviest.class]),
+    [
+      ["repaired", "limit"],
+      ["fine", "completed"],
+    ],
+  );
   // (a move is never one of the differences: a new throw is one, completed → threw; so is, within one class, another
   // outcome in a paired mode; the differences are over sources completed on both trees; a throw alike is listed apart)
   assert.deepEqual(summary.moved, [
@@ -528,14 +536,14 @@ test("evidence: a package's research route compared where it completed on both t
   assert.deepEqual(summary.routeNotCompared, { threw: 1, refused: 1 });
   assert.deepEqual(summary.routeNotComparedList, [
     "threw alike: threw TypeError at g (src/b.js)",
-    "refused alike: refused at the syntax gate CandidateOutsideSlice",
+    "refused alike: refused outside its slice CandidateOutsideSlice",
   ]);
   // (a route outcome in a mode on one tree only, at another place or of another kind, is a move, listed with the class
   // moves; so is the analysis's outcome in a mode, the class alike)
   assert.deepEqual(summary.moved, [
     "throws now: route forward: completed → threw TypeError at g (src/b.js)",
     "throws elsewhere: route forward: threw TypeError at g (src/b.js) → threw TypeError at h (src/c.js)",
-    "refused otherwise: route forward: refused at the syntax gate CandidateOutsideSlice → refused at the limit CandidateOutsideSlice",
+    "refused otherwise: route forward: refused outside its slice CandidateOutsideSlice → refused at the limit CandidateOutsideSlice",
     "refused at another limit: route forward: refused at the limit (work) CandidateOutsideSlice → refused at the limit (read-depth) CandidateOutsideSlice",
     "throws swapped: route forward: threw TypeError at g (src/b.js) → completed",
     "analysis swapped: forward: threw TypeError at f (src/a.js) → completed",

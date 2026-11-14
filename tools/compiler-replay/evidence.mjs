@@ -21,7 +21,8 @@
 //   - each tree's count of sources in seven classes (`classOf`, `sourceClass`): completed (the core analysed it in
 //     every mode; a set or package record without each of the four held modes once, or an area source without each
 //     run its generator's checks owe in each of the four area modes once, is uncompared), no analysis (compile errors,
-//     parse or names, before the checker), refused at the syntax gate, refused at the limit, threw (the checker's own
+//     parse or names, before the checker), refused by the route (a candidate-route refusal outside its slice, at its
+//     syntax gate or after the analysis ran: no plan and no answers), refused at the limit, threw (the checker's own
 //     outcome, by the error's class and the function and file it is thrown from, `throwPlace`), incomplete (what the
 //     infrastructure did: stalled, killed, past the safety net, a run an oracle's bound left unanswered on either tree,
 //     a runner's own exception) and uncompared (no record a class can be read from);
@@ -38,10 +39,12 @@
 //   - the sources with no analysis on both trees, by name with their count, and the differences over them (the set's
 //     and the packages' diagnostics and a plan where none may come out; an area's publication only, its runner
 //     recording no diagnostics);
+//   - how many sources were refused by the route on both trees, and what they are compared on: the refusal in each
+//     mode and the work charged before it, no plan and no answers coming out;
 //   - the sources refused at the limit on both trees, by name;
 //   - the heaviest share of the limit per tree, with every source above half of it, each as a share of the allowance
-//     the code gives it and of the fixed limit (`FIXED_LIMIT`), and whose it is: generated (the set's and the areas')
-//     or a creator's script (the packages');
+//     the code gives it and of the fixed limit (`FIXED_LIMIT`), whose it is (generated, the set's and the areas', or a
+//     creator's script, the packages') and its class on that tree;
 //   - the checks, each step asked (`check-changed`, `pin-suites`, the `--tests` files) by its status.
 // Exit 0 when every part asked ran whole, at least one part was asked, each completed something and nothing differs,
 // moves, is incomplete or uncompared, and every check step asked ran and passed (a throw alike on both trees is listed,
@@ -72,7 +75,7 @@ export const CLASSES = [
 const CLASS_NAMES = {
   completed: "completed",
   unanalysed: "no analysis (compile errors before the checker)",
-  slice: "refused at the syntax gate",
+  slice: "refused by the route (outside its slice)",
   limit: "refused at the limit",
   threw: "threw",
   incomplete: "incomplete",
@@ -84,7 +87,8 @@ const manifestPath = (prefix) => path.join(homedir(), "work", "replay-evidence",
 /**
  * One run's class on one tree, the one place a limit is told from the rest: a ledger stopped at a limit (`stopped`) or
  * a candidate-route refusal a limit made (`outside: "limit"`) is refused at the limit; any other candidate-route refusal
- * is refused at the syntax gate; another error is the checker's own outcome, threw; a run the checker never saw
+ * is refused by the route (outside its slice: at its syntax gate, or after the analysis ran, as in capture); another
+ * error is the checker's own outcome, threw; a run the checker never saw
  * (`analysed: false`: compile errors, parse or names, before it) has no analysis; else, the core having analysed it
  * (`analysed: true`), completed. A run without `stopped` or `analysed` (a runner from before #2796) is uncompared. What
  * the infrastructure did (a stall, a kill, the safety net, a shard unread) is the record's, never a run's: incomplete.
@@ -371,7 +375,7 @@ function packageApart(m, runs = Object.keys(PACKAGE_PARTS)) {
  */
 function routeOutcome(route) {
   if (route.outside != null)
-    return `refused ${route.outside === "limit" ? "at the limit" : "at the syntax gate"}${route.stopped == null ? "" : ` (${route.stopped})`} ${route.error}`;
+    return `refused ${route.outside === "limit" ? "at the limit" : "outside its slice"}${route.stopped == null ? "" : ` (${route.stopped})`} ${route.error}`;
   if (route.stopped != null) return `refused at the limit (${route.stopped})`;
   return route.error == null ? "completed" : `threw ${route.error}`;
 }
@@ -465,6 +469,7 @@ export function partSummary(sources) {
   const limitBoth = sources
     .filter((s) => s.base === "limit" && s.head === "limit")
     .map((s) => s.name);
+  const sliceBoth = sources.filter((s) => s.base === "slice" && s.head === "slice").length;
   // (of the packages completed on both trees, those whose research-route compile threw or refused alike: their
   // route's result is not compared, by kind, and listed by name and place)
   const routeNotCompared = { threw: 0, refused: 0 };
@@ -503,7 +508,7 @@ export function partSummary(sources) {
   const shares = [0, 1].map((at) => {
     const ranked = sources
       .filter((s) => s.share[at] !== null)
-      .map((s) => ({ name: s.name, ...s.share[at] }))
+      .map((s) => ({ name: s.name, class: at === 0 ? s.base : s.head, ...s.share[at] }))
       .sort((a, b) => b.today - a.today);
     const heaviest = ranked[0] ?? null;
     return {
@@ -525,6 +530,7 @@ export function partSummary(sources) {
     routeNotCompared,
     routeNotComparedList,
     limitBoth,
+    sliceBoth,
     shares,
   };
 }
@@ -819,6 +825,11 @@ export function evidenceReportStep({ positional: [prefix], options }) {
     );
     for (const t of p.threwAlike) out(`${name} threw alike on both trees: ${t}`);
     for (const t of p.routeNotComparedList) out(`${name} route result not compared: ${t}`);
+    // (what a refusal by the route is compared on: no plan and no answers come out)
+    if (p.sliceBoth > 0)
+      out(
+        `${name}: ${p.sliceBoth} refused by the route on both trees, compared on the refusal in each mode and the work charged before it; no plan and no answers`,
+      );
     if (p.limitBoth.length > 0)
       out(
         `${name} refused at the limit on both trees (${p.limitBoth.length}): ${p.limitBoth.join(", ")}`,
@@ -834,9 +845,11 @@ export function evidenceReportStep({ positional: [prefix], options }) {
       // (whose a source is: the set's and the areas' are generated, the packages' creators' scripts)
       const origin = name === "packages" ? "creator's script" : "generated";
       if (share.heaviest !== null)
-        out(`${name} ${tree} heaviest (${origin}): ${shareText(share.heaviest)}`);
+        out(
+          `${name} ${tree} heaviest (${origin}, ${CLASS_NAMES[share.heaviest.class]}): ${shareText(share.heaviest)}`,
+        );
       for (const s of share.aboveHalf)
-        out(`${name} ${tree} above half (${origin}): ${shareText(s)}`);
+        out(`${name} ${tree} above half (${origin}, ${CLASS_NAMES[s.class]}): ${shareText(s)}`);
     });
   }
   out(
