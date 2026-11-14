@@ -3,195 +3,202 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { posix } from "node:path";
 
-import { remark } from "remark";
-import remarkGfm from "remark-gfm";
+import { headingText, markdownProcessor } from "./markdown.mjs";
 
-// Checks backticked repository names in the two Player READMEs, the three start-route documents, and only
-// "Repository ownership" in docs/ORCHESTRATION.md against Git's tracked files and folders.
+// The repository names that maps, the start route and the ownership map give, in inline code, name tracked files or
+// folders.
 //
 //   node tools/repository-checks/readme-paths.mjs       (in the repository's top folder; `npm run check:readme-paths`)
 //
-// It runs in `check:pretest` and in `tools/check-changed.mjs`, for every change.
+// It runs in `check:pretest` and in `tools/check-changed.mjs`, for every change. The documents are `DOCUMENTS` below;
+// of `docs/ORCHESTRATION.md` only "Repository ownership", up to the next heading of its level, is read. Markdown is read
+// as `markdown.mjs` reads it, and only inline code (`inlineCode`) is checked, never fenced code. The tracked files and
+// folders are Git's (`git ls-files --cached`), a folder counting when it holds one, the top folder as `.`.
 //
-// In the Player READMEs: each Markdown inline code span (remark's `inlineCode`, with remark-gfm) whose
-// text has no whitespace, does not start with `/` or `@`, and contains `/` or ends in `.ts`, `.vue`, `.mjs`, `.js`,
-// `.json`, `.md` or `.css`. Its text, less one trailing `/`, must be a file Git tracks (`git ls-files --cached`) or a
-// folder holding one, read first from the README's folder and then from the repository's top folder.
-// The route and ownership surfaces additionally admit other file suffixes (area.sh included), tracked globs,
-// and bare names. In an extended surface, every checked span whose name (after its fragment is removed) ends in `/`
-// is a directory context for the bare names after it in the same paragraph, whatever its depth and with or without
-// a leading `./`. The last directory wins, a new paragraph clears it, and diagnostics retain the original token
-// with its fragment. If context does not resolve a name, the document's folder and repository root are tried,
-// then an exact basename only when unique among tracked files/folders.
-// A glob must match a tracked path, or a tracked basename for a bare glob. An inline #fragment is removed before
-// classifying or resolving the path; its heading is not checked (doc-links checks Markdown link targets).
+// The Player READMEs, whose names are paths: a span is checked when its text has no whitespace, does not start with `/`
+// (a URL route, as `/player/`), `@` (a package, as `@vueuse/core`), `~` or a scheme (`https:`), is not a link's whole
+// text (`doc-links.mjs` checks the link's target), and contains `/` or ends in `.ts`, `.vue`, `.mjs`, `.js`, `.json`,
+// `.md` or `.css`. Its text, less one trailing `/`, must name a tracked file or folder from the README's folder or from
+// the top folder. So a script name such as `main.tease` is not checked there.
 //
-// What is skipped, and so not checked: in a Player README, code that is a link's whole text (`doc-links.mjs`
-// checks the link's target); a span starting with `/` (a URL route, as `/player/`) or `@` (a package name, as
-// `@vueuse/core`); a span with whitespace (a command); every other span (an identifier, a type, a call, a script
-// name such as `main.tease` in a Player README); fenced code blocks; and every other file/section. URLs and explicit
-// home/absolute paths are outside the repository claim. Commands and environmental tools are not validated.
-// A path true from one of the stated places passes even if the prose meant another one.
+// The route and ownership documents, which also name files by their bare name: a span is checked under the same
+// exclusions, link text included, when its text before any `#` contains `/`, ends in any `.suffix`, or is a glob
+// (`*`, `?`, `[`, `{`). That text, less a trailing `/` and the `#` fragment (whose heading `doc-links.mjs` checks only
+// in links), resolves when:
 //
-// Exit status: 0 when every checked span names a tracked file or folder, 1 when one does not (each is printed as
-// `README:line: \`token\``), 2 when it cannot run.
+// - it names a tracked file or folder from the document's folder or the top folder, a glob when it matches one;
+// - it is bare (no `/` but a trailing one) and names one under a folder an earlier span of the same paragraph, heading
+//   or table cell resolved to, at any depth and with or without `./`, the latest first (so "`src/plan/` (`model.ts` and
+//   `validation/`)" names `src/plan/model.ts`);
+// - it is bare and exactly one tracked file or folder has that name, or, for a glob, at least one name matches it.
+//
+// Not checked: commands, npm scripts and tool names without a suffix (`check-changed`), URLs and paths outside the
+// repository, and whether a name that resolves is the one the prose meant: a name true from any of the places above
+// passes.
+//
+// Exit status: 0 when every checked span resolves, 1 when one does not (each printed as `document:line: \`text\``), 2
+// when the check cannot run (Git fails, a document or the ownership heading is missing).
 
-const DOCUMENTS = [
+/** The checked documents; `bareNames` marks those whose spans follow the route and ownership rules above. */
+export const DOCUMENTS = [
   { path: "player/README.md" },
   { path: "player/vue/src/README.md" },
-  { path: "README-FIRST.md", extended: true },
-  { path: "docs/agents/README.md", extended: true },
-  { path: "docs/agents/DIRECT-REPOSITORY.md", extended: true },
-  { path: "docs/ORCHESTRATION.md", extended: true, heading: "Repository ownership" },
+  { path: "README-FIRST.md", bareNames: true },
+  { path: "docs/agents/README.md", bareNames: true },
+  { path: "docs/agents/DIRECT-REPOSITORY.md", bareNames: true },
+  { path: "docs/ORCHESTRATION.md", bareNames: true, section: "Repository ownership" },
 ];
+
 const SOURCE = /\.(?:ts|vue|mjs|js|json|md|css)$/u;
-const root = process.cwd();
+const SUFFIX = /\.[\w-]+$/u;
+const GLOB = /[*?[{]/u;
+/** The blocks whose spans share folder context: an earlier span's folder is context for the later ones. */
+const CONTEXT_BLOCKS = new Set(["paragraph", "heading", "tableCell"]);
 
 /** Why the check cannot run: exit 2. */
-class CannotRun extends Error {}
+export class CannotRun extends Error {}
 
-/** The files Git tracks, and every folder that holds one. */
-function trackedPaths() {
-  let listed;
-  try {
-    listed = execFileSync("git", ["ls-files", "-z", "--cached"], {
-      cwd: root,
-      encoding: "utf8",
-      maxBuffer: 1024 * 1024 * 1024,
-    });
-  } catch (error) {
-    throw new CannotRun(`readme-paths: cannot list the tracked files with Git: ${error.message}`);
-  }
-  // (the top folder holds every file: `.`, as a span such as `../` from `player/` reads)
+/** The tracked `files` (paths from the top folder) as the check looks them up. */
+export function trackedPaths(files) {
   const paths = new Set(["."]);
-  for (const file of listed.split("\0").filter(Boolean)) {
+  for (const file of files) {
     paths.add(file);
     for (let folder = posix.dirname(file); folder !== "."; folder = posix.dirname(folder))
       paths.add(folder);
   }
-  return paths;
+  const byName = new Map();
+  for (const path of paths) {
+    if (path === ".") continue;
+    const name = posix.basename(path);
+    if (byName.has(name)) byName.get(name).push(path);
+    else byName.set(name, [path]);
+  }
+  return { paths, byName };
 }
 
-/** Whether a span's file part is shaped like a path the check reads. */
-function isPathShaped(text, extended) {
+function gitFiles() {
+  try {
+    return execFileSync("git", ["ls-files", "-z", "--cached"], {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024 * 1024,
+    })
+      .split("\0")
+      .filter(Boolean);
+  } catch (error) {
+    throw new CannotRun(`readme-paths: cannot list the tracked files with Git: ${error.message}`);
+  }
+}
+
+/** Whether a span's text, its fragment removed for `bareNames`, is one the check reads. */
+function isChecked(text, bareNames) {
+  if (/\s/u.test(text) || /^[/@~]|^[a-z][\w+.-]*:/iu.test(text)) return false;
   return (
-    !/\s/u.test(text) &&
-    !/^[/@~]|^[a-z][\w+.-]*:/iu.test(text) &&
-    (text.includes("/") || SOURCE.test(text) || (extended && /\.[\w-]+$|[*?[{]/u.test(text)))
+    text.includes("/") || SOURCE.test(text) || (bareNames && (SUFFIX.test(text) || GLOB.test(text)))
   );
 }
 
-/** Each checked code span of `markdown`: its text and line. */
-function pathSpans(markdown, { extended, heading }) {
-  let nodes = remark().use(remarkGfm).parse(markdown).children;
-  if (heading !== undefined) {
-    const start = nodes.findIndex(
-      (node) =>
-        node.type === "heading" &&
-        node.children.map((child) => child.value ?? "").join("") === heading,
-    );
-    if (start === -1) throw new CannotRun(`readme-paths: missing section ${heading}`);
-    const end = nodes.findIndex(
-      (node, index) => index > start && node.type === "heading" && node.depth <= nodes[start].depth,
-    );
-    nodes = nodes.slice(start + 1, end === -1 ? undefined : end);
+/** The tracked path `name` names from `folder`, the matched pattern for a glob; undefined when none. */
+function lookUp({ paths }, folder, name) {
+  const path = posix.normalize(posix.join(folder, name));
+  if (path === ".." || path.startsWith("../")) return undefined;
+  if (GLOB.test(path))
+    return [...paths].some((candidate) => posix.matchesGlob(candidate, path)) ? path : undefined;
+  return paths.has(path) ? path : undefined;
+}
+
+/** The tracked path a span's `name` resolves to, under the document's rule; undefined when it resolves to none. */
+function resolve(tracked, document, name, folders) {
+  const places = [posix.dirname(document.path), "."];
+  const bare = !name.includes("/");
+  if (document.bareNames && bare) places.unshift(...folders.toReversed());
+  for (const place of places) {
+    const path = lookUp(tracked, place, name);
+    if (path !== undefined) return path;
   }
-  const spans = [];
-  const visit = (node, parent, directories) => {
-    if (node.type === "paragraph") directories = [];
-    if (node.type === "inlineCode") {
-      const linkText =
-        (parent?.type === "link" || parent?.type === "linkReference") &&
-        parent.children.length === 1;
-      const name = extended ? node.value.split("#", 1)[0] : node.value;
-      if ((!linkText || extended) && isPathShaped(name, extended)) {
-        spans.push({
-          text: node.value,
-          name,
-          line: node.position.start.line,
-          directory: directories.at(-1),
-        });
-        if (extended && name.endsWith("/")) directories.push(name);
-      }
+  if (!document.bareNames || !bare) return undefined;
+  if (!GLOB.test(name)) {
+    const named = tracked.byName.get(name) ?? [];
+    return named.length === 1 ? named[0] : undefined;
+  }
+  return [...tracked.byName.keys()].some((candidate) => posix.matchesGlob(candidate, name))
+    ? name
+    : undefined;
+}
+
+/** The nodes of `markdown` the document reads: all, or its section's. */
+function readNodes(markdown, document) {
+  const nodes = markdownProcessor().parse(markdown).children;
+  if (document.section === undefined) return nodes;
+  const start = nodes.findIndex(
+    (node) => node.type === "heading" && headingText(node) === document.section,
+  );
+  if (start === -1)
+    throw new CannotRun(`readme-paths: ${document.path} has no heading "${document.section}"`);
+  const end = nodes.findIndex(
+    (node, index) => index > start && node.type === "heading" && node.depth <= nodes[start].depth,
+  );
+  return nodes.slice(start + 1, end === -1 ? undefined : end);
+}
+
+/** The checked spans of one document and those that resolve to no tracked file or folder, each with its line. */
+export function checkDocument(tracked, document, markdown) {
+  let checked = 0;
+  const problems = [];
+  const visit = (node, parent, folders) => {
+    if (CONTEXT_BLOCKS.has(node.type)) folders = [];
+    if (node.type !== "inlineCode") {
+      for (const child of node.children ?? []) visit(child, node, folders);
       return;
     }
-    for (const child of node.children ?? []) visit(child, node, directories);
+    const linkText =
+      (parent?.type === "link" || parent?.type === "linkReference") && parent.children.length === 1;
+    const text = node.value;
+    const name = document.bareNames ? text.split("#", 1)[0] : text;
+    if ((linkText && !document.bareNames) || !isChecked(name, document.bareNames)) return;
+    checked += 1;
+    const path = resolve(tracked, document, name.replace(/\/$/u, ""), folders);
+    if (path === undefined) problems.push({ line: node.position.start.line, text });
+    else if (document.bareNames && name.endsWith("/") && !GLOB.test(path)) folders.push(path);
   };
-  for (const node of nodes) visit(node, undefined, []);
-  return spans;
-}
-
-/** Whether `text`, read from `folder` (relative to the top folder), names one of `paths`. */
-function names(paths, folder, text, extended) {
-  const path = posix.normalize(posix.join(folder, text.replace(/\/$/u, "")));
-  if (path.startsWith("../") || path === "..") return false;
-  return (
-    paths.has(path) ||
-    (extended &&
-      /[*?[{]/u.test(path) &&
-      [...paths].some((candidate) => posix.matchesGlob(candidate, path)))
-  );
-}
-
-function resolves(paths, file, { name, directory }, extended) {
-  const bare = !name.replace(/\/$/u, "").includes("/");
-  if (
-    extended &&
-    bare &&
-    directory !== undefined &&
-    [posix.dirname(file), "."].some((folder) =>
-      names(paths, folder, posix.join(directory, name), true),
-    )
-  )
-    return true;
-  if ([posix.dirname(file), "."].some((folder) => names(paths, folder, name, extended)))
-    return true;
-  if (!extended || !bare) return false;
-  const basename = name.replace(/\/$/u, "");
-  const matches = [...paths].filter(
-    (candidate) =>
-      posix.basename(candidate) === basename ||
-      (/[*?[{]/u.test(basename) && posix.matchesGlob(posix.basename(candidate), basename)),
-  );
-  return /[*?[{]/u.test(basename) ? matches.length > 0 : matches.length === 1;
+  for (const node of readNodes(markdown, document)) visit(node, undefined, []);
+  return { checked, problems };
 }
 
 function main() {
-  const paths = trackedPaths();
-  const problems = [];
+  const tracked = trackedPaths(gitFiles());
   let checked = 0;
+  const problems = [];
   for (const document of DOCUMENTS) {
-    const readme = document.path;
     let markdown;
     try {
-      markdown = readFileSync(posix.join(root, readme), "utf8");
+      markdown = readFileSync(document.path, "utf8");
     } catch (error) {
-      throw new CannotRun(`readme-paths: cannot read ${readme}: ${error.message}`);
+      throw new CannotRun(`readme-paths: cannot read ${document.path}: ${error.message}`);
     }
-    for (const span of pathSpans(markdown, document)) {
-      const { text, line } = span;
-      checked += 1;
-      if (!resolves(paths, readme, span, document.extended))
-        problems.push(`${readme}:${line}: \`${text}\` names no tracked file or folder`);
-    }
+    const result = checkDocument(tracked, document, markdown);
+    checked += result.checked;
+    for (const { line, text } of result.problems)
+      problems.push(`${document.path}:${line}: \`${text}\` names no tracked file or folder`);
   }
   if (problems.length === 0) {
     console.log(
-      `readme-paths: all ${checked} backticked names in ${DOCUMENTS.length} document surfaces resolve to tracked files or folders`,
+      `readme-paths: all ${checked} checked names in ${DOCUMENTS.length} documents name a tracked file or folder`,
     );
     return 0;
   }
   for (const problem of problems) console.error(problem);
   console.error(
-    `readme-paths: ${problems.length} backticked paths name no tracked file or folder: write each as its current path from the README's folder or the top folder`,
+    `readme-paths: ${problems.length} names name no tracked file or folder: write each as its current path from the document's folder or the top folder`,
   );
   return 1;
 }
 
-try {
-  process.exitCode = main();
-} catch (error) {
-  if (!(error instanceof CannotRun)) throw error;
-  console.error(error.message);
-  process.exitCode = 2;
+if (import.meta.main) {
+  try {
+    process.exitCode = main();
+  } catch (error) {
+    if (!(error instanceof CannotRun)) throw error;
+    console.error(error.message);
+    process.exitCode = 2;
+  }
 }
