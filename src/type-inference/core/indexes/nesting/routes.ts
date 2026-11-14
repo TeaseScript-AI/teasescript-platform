@@ -1,5 +1,5 @@
 import type { PlaceId, TypeTerm } from "../../../graph.js";
-import type { Operand } from "../../carriers.js";
+import type { CarrierKind, Operand } from "../../carriers.js";
 import type { Definition, DefinitionIndex } from "../../definitions.js";
 import { propertyStep, type CoreProgram } from "../../program.js";
 
@@ -30,6 +30,32 @@ export function writtenAt(program: CoreProgram, place: PlaceId): TypeTerm | null
     return kind.written;
   return null;
 }
+
+/**
+ * How each carrier kind (`carriers.ts`) routes its value, decided here once for every kind, so that a new kind has no
+ * route until it is given one: `below`, the value stands at `below` inside its operand, so the route loses `below`'s
+ * element steps and reads out of its one property; `none`, no route.
+ */
+const CARRIED: Readonly<Record<CarrierKind, "below" | "none">> = {
+  // an element, an index, a selection (-1) or a property (0, out of it) of the owner; a dict's `values` (0)
+  projection: "below",
+  // a loop's element (-1)
+  iteration: "below",
+  // either side (0)
+  otherwise: "below",
+  // the receiver's element (-1), the default (0)
+  get: "below",
+  "load default": "below",
+  "parse default": "below",
+  // `toList`, `toSet`, `take`, `takeLast`: the receiver copied (0)
+  copy: "below",
+  // `removeAt`, `removeFirst`, a dict's `remove`: the receiver's element (-1)
+  removal: "below",
+  // a list `+`'s operand (0)
+  concatenation: "below",
+  // a choice's answer is a scalar button (V30 §19, TSV029): it holds no level an option's could pass on
+  choice: "none",
+};
 
 /**
  * The graph's routes by receiver, each charged as it is read: 0 for a whole copy, an argument, a return, a read and a
@@ -98,8 +124,9 @@ export function routesOf(
     }
   }
   for (const value of [...program.projOf.keys(), ...program.opOf.keys()])
-    for (const { operand, below } of operands(value)) {
+    for (const { kind, operand, below } of operands(value)) {
       work.charge("indexSteps");
+      if (CARRIED[kind] === "none") continue;
       const elements = below.filter((step) => step === "element").length;
       const properties = below.filter((step) => step !== "element");
       if (properties.length === 0) plain(value, operand, -elements);
