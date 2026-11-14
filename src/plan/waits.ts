@@ -10,8 +10,9 @@ import type { ExpressionPlan, Instruction, InstructionPlan } from "./model.js";
  * Sound: a function the plan can reach a wait from is marked. A marked function has a path in the plan to an
  * instruction that can wait, or to one that can start a block that can wait (see `blocksItMayStart`); a pacing that
  * evaluates to `instant`, a lock that never blocks, a branch that never runs, or a store that only names a handle's
- * field still marks. A block's own waits are its own: the runtime starts a block at a wait, or right after an
- * instruction of the script that made it due, and only the latter leaves the script's frames below the block.
+ * field still marks. A block's own waits are its own: the runtime starts a block at a wait, above frames that wait
+ * already, or right after an instruction of the script that made it due, which can bring a wait into an activation
+ * that does not wait otherwise.
  */
 export interface PlanWaits {
   /** The instruction at `index` can leave the session waiting by itself. */
@@ -120,7 +121,8 @@ function blocksItMayStart(instruction: Instruction): {
       (expression.callee.name === "pause" || expression.callee.name === "resume")
     )
       timerBlocks = true;
-    pending.push(...expressionPlanChildren(expression));
+    // One at a time: a list literal may have more elements than a call takes arguments.
+    for (const child of expressionPlanChildren(expression)) pending.push(child);
   }
   return { ownBlock, timerBlocks, timerOrMediaBlocks };
 }

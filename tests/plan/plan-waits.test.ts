@@ -319,6 +319,20 @@ test("at every wait of a played session, each live function, block and file call
   }
 });
 
+test("a list with more elements than a call takes arguments is walked", () => {
+  // The width a source can write is bounded by no rule; this plan widens one compiled list literal past it.
+  const { plan } = analysed(main("function f { let xs = [0] }\nf()\nexit"));
+  const instructions = plan.instructions.map((instruction): Instruction => {
+    if (instruction.kind !== "declareBinding" || instruction.value.kind !== "list")
+      return instruction;
+    const element = instruction.value.elements[0]!;
+    const elements = Array.from({ length: 300_000 }, () => element);
+    return { ...instruction, value: { ...instruction.value, elements } };
+  });
+  const wide = planWaits({ ...plan, instructions });
+  assert.equal(wide.functionMayWait(plan.functions[0]!.id), false);
+});
+
 test("the engine check reports every unmarked live part, also at a wait settled inside one operation", () => {
   const none: PlanWaits = {
     waitsAt: () => false,
