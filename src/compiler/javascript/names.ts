@@ -54,7 +54,8 @@ const NO_VARIABLES: readonly Variable[] = [];
  * The scopes are read from the instruction stream in order: a region starts one, `enterScope` and `leaveScope` open and
  * close one, and a loop's round has one from its `loopStart` to its `target`. A nested scope cannot redeclare a name
  * it sees (V30 §14), so a name refers to the one variable of that name in scope. A top-level `let` that runs again
- * after a `goto` sets the same variable. Each region is walked once, without recursion on nesting.
+ * after a `goto` is the same instruction, so it sets the same variable. Each region is walked once, without recursion
+ * on nesting.
  */
 export function planNames(plan: InstructionPlan, flow = new PlanControlFlow(plan)): PlanNames {
   const variables: Variable[] = [];
@@ -91,11 +92,9 @@ export function planNames(plan: InstructionPlan, flow = new PlanControlFlow(plan
       { names: [], closesAt: null },
     ];
     const bind = (name: string, kind: Variable["kind"]): Variable => {
-      // A top-level `let` that runs again sets its variable anew.
-      const existing = scopes.length === 1 && root !== null ? root.get(name) : undefined;
-      if (existing !== undefined) return existing;
-      const created = variable(name, root !== null && scopes.length === 1 ? "root" : kind);
-      if (root !== null && scopes.length === 1) root.set(name, created);
+      const atRoot = root !== null && scopes.length === 1;
+      const created = variable(name, atRoot ? "root" : kind);
+      if (atRoot) root.set(name, created);
       scopes.at(-1)!.names.push(name);
       visible.set(name, created);
       return created;
