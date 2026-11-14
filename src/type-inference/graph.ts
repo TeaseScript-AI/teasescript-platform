@@ -2,10 +2,6 @@ import type { StaticScalar } from "../static-evaluation.js";
 import type { ScalarValue } from "../static-types.js";
 import type { ValueKind } from "../value-kinds.js";
 
-// The constraint graph of a project: the places that keep a type, the written and known evidence about them, and the
-// relations between them that the source states. Each constraint carries where it stands in the source, what the
-// author sees there, and the code it stands in.
-
 export type PlaceId = number;
 export type FunctionId = number;
 export type HandlerId = number;
@@ -97,10 +93,7 @@ export interface FunctionSignature {
   readonly result: PlaceId;
 }
 
-/**
- * The code a constraint stands in: the start values of the session, a file's top level, a function's parameters and
- * body, or a timer, media, or button block.
- */
+/** The code a constraint stands in. */
 export type RegionRef =
   | { readonly kind: "start" }
   | { readonly kind: "file"; readonly file: number }
@@ -147,7 +140,6 @@ export interface Origin {
   readonly region: RegionRef;
 }
 
-/** A program point: the site of the occurrence. */
 export interface PointRef {
   readonly site: SourceSite;
 }
@@ -198,10 +190,9 @@ export interface ContractRef {
 }
 
 /**
- * What the source says about an operation beyond its operands' types, which the owning result rules read: a written
- * form descriptor is not a computed one, a written `allowSkip: false` proves a photo is taken, an `askChoice` option
- * with a label before `:` returns that label. Built from the branches of those rules, one entry per written element,
- * each with the place of its expression. Collected without reading any type.
+ * What the source says about an operation beyond its operands' types: a written form descriptor is not a computed one,
+ * a written `allowSkip: false` proves a photo is taken, an `askChoice` option with a label before `:` returns that
+ * label. One entry per written element, each with the place of its expression, collected without reading any type.
  */
 export type SyntaxEvidence =
   | {
@@ -225,8 +216,8 @@ export type SyntaxEvidence =
   | { readonly kind: "timer"; readonly form: "short" | "named"; readonly async: boolean }
   | { readonly kind: "media"; readonly media: string; readonly async: boolean }
   /**
-   * The selectors of a list function or of `randomWeighted` (`by:`, `x:`, `y:`, `weight:`) as the result rule reads
-   * them: the text each is written as, or `null` for one that is not written as text (a variable, even a known one).
+   * The selectors of a list function or of `randomWeighted` (`by:`, `x:`, `y:`, `weight:`): the text each is written
+   * as, or `null` for one that is not written as text (a variable, even a known one).
    */
   | {
       readonly kind: "selectors";
@@ -421,7 +412,7 @@ export type Constraint = Origin &
         readonly property: string;
         readonly occurrence: PlaceId;
       }
-    /** A read of an unwritten `let` or `global`, which `KnownValues` follows to its initializer. */
+    /** A read of an unwritten `let` or `global`. */
     | {
         readonly kind: "knownValue";
         readonly occurrence: PlaceId;

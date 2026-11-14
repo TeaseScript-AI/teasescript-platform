@@ -9,11 +9,6 @@ import type {
   OperationResult,
 } from "./relation.js";
 
-/*
- * What every adapter shares: how an operand's view is read, how a result is written, and the rules of the members of
- * one receiver kind.
- */
-
 /** The member rules of the receiver kinds one module owns. */
 export interface MemberRules {
   readonly kinds: readonly ValueKind[];

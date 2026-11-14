@@ -21,14 +21,7 @@ import { noteSharing, rootName, type Sharing } from "../operation-checks.js";
 import { globMatches, MAIN_FILE_PATH } from "../project-paths.js";
 import { placeKey } from "../way-facts.js";
 
-// What the code of a project may change (ADR 0021 rule 5.5): the names that functions and timer, media, and button
-// blocks assign or change in place, what each loop may do before its next test, and which files enter main.tease
-// again. Code found never to run changes nothing.
-
-/**
- * What one iteration of a loop may do before the next test: the variables it assigns or changes in place, and whether
- * other code may run during it.
- */
+/** What one iteration of a loop may do before the next test. */
 export interface LoopEffects {
   readonly writes: ReadonlyMap<string, Sharing>;
   /**
@@ -92,7 +85,7 @@ export function coversDeadCode(found: DeadCode, dead: DeadCode): boolean {
   return true;
 }
 
-/** What the code of a project may change, as the check uses it. */
+/** What the code of a project may change (ADR 0021 rule 5.5). */
 export interface ProjectEffects {
   readonly files: readonly ProgramEffects[];
   readonly loops: ReadonlyMap<Block, LoopEffects>;
