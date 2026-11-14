@@ -2,8 +2,8 @@ import type { SerializableRuntimeScalar } from "../../values/serializable-values
 import { NativeSet, type NativeSetMembership, type NativeValue } from "./native-value.js";
 import { nativeValueKey } from "./value-key.js";
 
-// The members of a `NativeSet`: the only module that changes its `items` and its `membership`. Finding a member keys
-// only that member (its primitive, or `nativeValueKey`), never compares it with every other member.
+// The members of a `NativeSet`: the only module that changes its `items` and its `membership`. Lookups use the scalar
+// index or one keyed bucket; hashed candidates are re-keyed to resolve collisions.
 
 /** Keys up to this long are kept as they are; a longer key is kept as its hash, so a member's key has a bounded size. */
 const EXACT_KEY_LENGTH = 32;
@@ -82,7 +82,6 @@ export function appendToUnindexedSet(set: NativeSet, member: NativeValue): void 
   set.items.push(member);
 }
 
-/** Removes every member. */
 export function nativeSetClear(set: NativeSet): void {
   set.items.length = 0;
   set.membership = null;
