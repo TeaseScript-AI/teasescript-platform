@@ -58,7 +58,10 @@ export class Play {
   #waits = 0;
   #lastForeground: number | null = null;
   #press: { readonly buttonId: number; retried: boolean } | null = null;
+  /** An input refused with `executionPending`, kept across the runs that drain work until an answer is accepted. */
   #pending: HostOperation | null = null;
+  /** The foreground wait an observation answered that has not settled yet: a block may run before it does. */
+  #awaited: number | null = null;
   #lastObserved: { readonly nowMs: number; readonly answers: number | null } | null = null;
 
   public constructor(
@@ -83,10 +86,11 @@ export class Play {
   /**
    * The next operation after `done`, whose outcome today's side gave, or how the play ends. An outcome that refuses an
    * answer ends the play as unanswered, except `executionPending`, after which runnable work drains and the answer is
-   * decided again; the same input refused twice that way ends the play.
+   * decided again; the same input refused that way again, with only draining runs between, ends the play.
    */
   public next(done: HostOperation, outcome: unknown): HostOperation | PlayEnding {
     const kind = outcomeKind(outcome);
+    this.#countSettledWait();
     if (kind === "executionPending" && done.kind === "pressPermanentButton") {
       // A press waits for the running block: it is pressed again once after the work drains, then given up.
       if (this.#press === null || this.#press.retried) this.#press = null;
@@ -96,7 +100,7 @@ export class Play {
         return `unanswered: ${operationLabel(done)}`;
       this.#pending = done;
     } else {
-      this.#pending = null;
+      if (done.kind !== "run") this.#pending = null;
       const refused = this.#accept(done, kind);
       if (refused !== null) return refused;
     }
@@ -117,11 +121,10 @@ export class Play {
       case "observeTime":
         if (kind !== "observed") return "unanswered: time";
         this.#lastObserved = { nowMs: done.nowMs, answers: done.answers };
-        if (
-          done.answers !== null &&
-          this.#session.view().foregroundAction?.actionId !== done.answers
-        )
-          this.#answers += 1;
+        if (done.answers !== null) {
+          this.#awaited = done.answers;
+          this.#countSettledWait();
+        }
         return null;
       case "reportMediaLoad":
         this.#loadsReported.add(done.mediaId);
@@ -132,6 +135,19 @@ export class Play {
       case "run":
         return null;
     }
+  }
+
+  /** Counts the observed wait once it has settled: neither foreground nor suspended by a running block. */
+  #countSettledWait(): void {
+    if (this.#awaited === null) return;
+    const view = this.#session.view();
+    if (
+      view.foregroundAction?.actionId === this.#awaited ||
+      view.suspendedAction?.actionId === this.#awaited
+    )
+      return;
+    this.#awaited = null;
+    this.#answers += 1;
   }
 
   #decide(): HostOperation | PlayEnding {

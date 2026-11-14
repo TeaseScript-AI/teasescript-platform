@@ -51,7 +51,7 @@ export interface ComparisonInput {
   /** A validated plan. */
   readonly plan: InstructionPlan;
   readonly fresh?: FreshRuntimeOptions;
-  /** Called once per side: the session's capabilities. */
+  /** Called once for each side to set up its session: today's session here, the generated one in `generatedSide`. */
   readonly host?: () => RuntimeSessionOptions;
   readonly play?: PlayPolicy;
   readonly end?: { readonly answers?: number; readonly sceneTimeMs?: number };
@@ -92,10 +92,16 @@ export async function compareGenerated(
       span: input.plan.instructions[error.instruction]?.span ?? null,
     };
   }
-  return compareSessions(input, await generatedSide(program, input.plan));
+  return compareSessions(
+    input,
+    await generatedSide(program, input.plan, input.fresh ?? FRESH, input.host?.() ?? {}),
+  );
 }
 
-/** The comparison over a generated side already made: the entry's play, also for stand-ins in tests. */
+/**
+ * The comparison over a generated side already set up by its maker (`input.host` sets up today's session only): the
+ * entry's play, also for stand-ins in tests.
+ */
 export function compareSessions(
   input: ComparisonInput,
   generated: ComparedSession,

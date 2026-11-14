@@ -1,6 +1,7 @@
 import type { InstructionPlan } from "../../../src/plan/model.js";
 import type { ActionCompletionOptions } from "../../../src/runtime/operations/complete-action.js";
-import type { RuntimeSession } from "../../../src/runtime/session.js";
+import type { RuntimeSession, RuntimeSessionOptions } from "../../../src/runtime/session.js";
+import type { FreshRuntimeOptions } from "../../../src/runtime/snapshot/state.js";
 import type { SideRecord } from "./record.js";
 
 /** The stage's output, until S1 lands its `GeneratedProgram`: an ES module's text and its table. */
@@ -59,6 +60,8 @@ export function todaySide(session: RuntimeSession): ComparedSession {
 export function generatedSide(
   _program: GeneratedProgramText,
   _plan: InstructionPlan,
+  _fresh: FreshRuntimeOptions,
+  _options: RuntimeSessionOptions,
 ): Promise<ComparedSession> {
   return Promise.reject(new Error("Generated code has no runtime entries to run on before S1's."));
 }

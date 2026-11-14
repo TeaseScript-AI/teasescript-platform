@@ -87,21 +87,37 @@ function project(value: unknown, topLevel: boolean): PlainData {
         continue;
       const copied = shell(item, false, work);
       if (Array.isArray(into)) into.push(copied);
-      else into[key] = copied;
+      // Defined, not assigned, so that a key such as `__proto__` stays an own key and is compared.
+      else
+        Object.defineProperty(into, key, {
+          value: copied,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
     }
   }
   return root;
 }
 
-/** `value` as it is when it holds nothing, else an empty copy queued on `work` to be filled. */
+/**
+ * `value` as it is when it holds nothing, else an empty copy queued on `work` to be filled. A value outside plain data
+ * (`undefined`, a function, a symbol, a bigint) is a defect of the side that gave it, not something to compare.
+ */
 function shell(
   value: unknown,
   top: boolean,
   work: Array<readonly [object, Container, boolean]>,
 ): PlainData {
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  )
     return value;
-  if (typeof value !== "object" || value === null) return null;
+  if (typeof value !== "object")
+    throw new TypeError(`A compared record holds ${typeof value}, which is not plain data.`);
   const copy: Container = Array.isArray(value) ? [] : {};
   work.push([value, copy, top]);
   return copy;

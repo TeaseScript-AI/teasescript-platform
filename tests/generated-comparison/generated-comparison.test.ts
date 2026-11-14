@@ -24,6 +24,8 @@ import {
   type OperationResult,
   todaySide,
 } from "../helpers/generated-comparison/generated-side.js";
+import { PlayHost } from "../helpers/generated-comparison/fixtures.js";
+import { Play } from "../helpers/generated-comparison/play.js";
 import { projectRecord, type SideRecord } from "../helpers/generated-comparison/record.js";
 
 // Stand-ins for generated code: today's engine with one planted change each. Each test names the comparison clause
@@ -326,6 +328,73 @@ test("no observation passes the scene-time bound (clause 14)", () => {
   });
   assert.equal(media.kind === "matched" && media.ended, "bound");
   assert.ok(observed.length > 0 && observed.every((time) => time <= 5_000));
+});
+
+test("an own key the projection does not list is compared, whatever its name; a value outside plain data is no match", () => {
+  const extra = compare("exit", {
+    state: (state) =>
+      edited(state, (snapshot) => ({ ...snapshot, ...JSON.parse('{"__proto__":1}') })),
+  });
+  assert.equal(extra.kind, "differs");
+  assert.throws(
+    () =>
+      compare("exit", {
+        result: (kind, _input, result) =>
+          kind === "run" ? { ...result, outcome: undefined } : result,
+      }),
+    TypeError,
+  );
+});
+
+test("a wait a block interrupts counts as an answer once it settles", () => {
+  const source =
+    'let t = timer async 1 s {\n  say "tick", instant\n}\nwait 2 s\nlet a = askText "later"\nexit';
+  const verdict = compare(source, {}, { end: { answers: 1 } });
+  assert.deepEqual(verdict.kind === "matched" && [verdict.ended, verdict.answers], ["bound", 1]);
+});
+
+test("the host opens only text it locked itself", () => {
+  const foreign = compare(
+    'let opened = decryptText("bG9ja2VkOmhlbGxv", password: "p", default: "no")\nsay opened, instant\nexit',
+  );
+  assert.equal(foreign.kind === "matched" && foreign.ended, "unanswered: lock");
+  const texts: string[] = [];
+  const plan = compileValidPlan(
+    'let locked = encryptText("hello", password: "p", publicKey: false, timeLock: false)\nlet opened = decryptText(locked, password: "p", default: "no")\nsay opened, instant\nexit',
+  );
+  const verdict = compareSessions({ plan, fresh: FRESH }, sayingSide(plan, texts));
+  assert.equal(verdict.kind === "matched" && verdict.ended, "halted");
+  assert.deepEqual(texts, ["hello"]);
+});
+
+test("an input refused for pending work again after the work drained ends the play", () => {
+  const session = createFreshRuntimeSession(compileValidPlan('let a = askText "?"\nexit'), FRESH);
+  session.run();
+  const play = new Play(session, new PlayHost(), "first", { answers: 10, sceneTimeMs: 60_000 });
+  const answer = {
+    kind: "completeAction",
+    request: { actionId: 1, actionKind: "interaction", interactionKind: "text" },
+  } as const;
+  const pending = { kind: "executionPending" };
+  assert.notEqual(typeof play.next(answer, pending), "string");
+  assert.notEqual(typeof play.next({ kind: "run" }, null), "string");
+  assert.equal(play.next(answer, pending), "unanswered: text");
+});
+
+test("the entry sets up the generated side with its own host call", async () => {
+  let calls = 0;
+  await assert.rejects(
+    compareGenerated({
+      plan: compileValidPlan("exit"),
+      host: () => {
+        calls += 1;
+        return {};
+      },
+      generate: () => ({ module: "", table: null }),
+    }),
+    /no runtime entries/u,
+  );
+  assert.equal(calls, 1);
 });
 
 test("the resource-limit codes are the runtime codes the registry lists", () => {

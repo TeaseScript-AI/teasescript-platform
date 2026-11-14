@@ -7,12 +7,13 @@ import type { RuntimeLockActionSnapshot } from "../../../src/runtime/actions/mod
 // hands out references (each starting with `test-`) and both sides admit them alike.
 
 const PREFIX = "test-";
-const LOCKED = "locked:";
 
 /** A play's host: its admission, its fresh references and its answers for files and locks. */
 export class PlayHost {
   #next = 0;
-  readonly #locked = new Set<string>();
+  /** The files this host locked, and the text it locked by the lock it gave for it. */
+  readonly #lockedFiles = new Set<string>();
+  readonly #lockedTexts = new Map<string, string>();
 
   /** Admits every reference a play's host hands out, as stored media of any kind. */
   public readonly admission: CapturedMediaAdmission = {
@@ -43,14 +44,14 @@ export class PlayHost {
   public lockAnswer(action: RuntimeLockActionSnapshot): Readonly<Record<string, unknown>> | null {
     if (action.phase === "ask") return { kind: "submitted" };
     switch (action.call) {
-      case "encryptText":
-        return {
-          kind: "locked",
-          text: Buffer.from(LOCKED + action.value, "utf8").toString("base64"),
-        };
+      case "encryptText": {
+        const text = Buffer.from(`locked ${this.#lockedTexts.size}`, "utf8").toString("base64");
+        this.#lockedTexts.set(text, action.value);
+        return { kind: "locked", text };
+      }
       case "encryptFile": {
         const file = this.freshReference("file");
-        this.#locked.add(file);
+        this.#lockedFiles.add(file);
         return { kind: "locked", file };
       }
       case "decryptText":
@@ -58,15 +59,15 @@ export class PlayHost {
         if (action.dialogActionId === null && action.password === null && action.key === null)
           return { kind: "ask" };
         if (action.call === "decryptFile")
-          return this.#locked.has(action.value)
+          return this.#lockedFiles.has(action.value)
             ? {
                 kind: "opened",
                 file: this.freshReference("file"),
                 type: "application/octet-stream",
               }
             : null;
-        const text = Buffer.from(action.value, "base64").toString("utf8");
-        return text.startsWith(LOCKED) ? { kind: "opened", text: text.slice(LOCKED.length) } : null;
+        const text = this.#lockedTexts.get(action.value);
+        return text === undefined ? null : { kind: "opened", text };
       }
     }
   }
