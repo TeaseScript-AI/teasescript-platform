@@ -14,8 +14,13 @@ import {
 import { literalRange } from "../../../switch-cases.js";
 import { type TypePlan } from "../../../plan/model.js";
 import { createSourceSpan, type SourcePosition, createSourcePosition } from "../../../source.js";
-import { type KnownValue, KnownValues, isStaticDuration } from "../../../static-evaluation.js";
-import { isCalendar } from "../../../duration.js";
+import {
+  type KnownValue,
+  KnownValues,
+  findVisibleOverflows,
+  isStaticDuration,
+} from "../../../static-evaluation.js";
+import { isCalendar, unitValue } from "../../../duration.js";
 import { type StaticType, members, UNKNOWN_TYPE, union, openType } from "../../../static-types.js";
 import { typeFromAnnotation } from "../../../static-types/annotations.js";
 import { typeKey } from "../../../storage-types.js";
@@ -136,7 +141,12 @@ export function coreCheckResult(
 ): TypeCheckResult {
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
   const { checks, core, contracts, moved } = runtimeChecks(answers, index, request);
-  const known = knownValues(answers, index, (call) => core.expected.get(call));
+  const expected = (call: CallExpression) => core.expected.get(call);
+  const known = knownValues(answers, index, expected);
+  // (on known values of its own, so the known-value work its walk spends is not the checks')
+  const refused = knownAmountRefused(index, knownValuesOf(answers, index, expected), request);
+  if (refused !== null)
+    throw new OutsideContract(refused, `this ${KIND_WORDS[refused.kind] ?? "calculation"}`);
   const fallbacks = fallbackUses(answers, index);
   const result = checkedOf(answers, index, known, fallbacks);
   // (a program the analysis rejects has no plan to let a value through: nothing to decline)
@@ -185,17 +195,25 @@ export function coreCheckResult(
   };
 }
 
-/**
- * The known values of a program (S3 §2, group V): the one constant service, handed to the answers so that a view's
- * known value is the consumer's; a `fromJson` reads its JSON as `expected` gives its type, so its known
- * value is the one the run gets.
- */
+/** The known values of a program (S3 §2, group V), shared with the answers. */
 function knownValues(
   answers: Answers,
   index: SliceIndex,
   expected: (call: CallExpression) => TypePlan | undefined,
 ): (expression: Expression) => KnownValue | undefined {
-  const values = new KnownValues(
+  const values = knownValuesOf(answers, index, expected);
+  const known = (expression: Expression) => values.known(expression);
+  answers.shareKnown(known);
+  return known;
+}
+
+/** A program's known values, not shared with the answers. */
+function knownValuesOf(
+  answers: Answers,
+  index: SliceIndex,
+  expected: (call: CallExpression) => TypePlan | undefined,
+): KnownValues {
+  return new KnownValues(
     (identifier) => {
       const initializer = answers.initializers.get(
         siteKey(index.fileOf(identifier), identifier.span),
@@ -214,9 +232,35 @@ function knownValues(
       return kinds.includes("unknown") || admitsKnown(kinds, value);
     },
   );
-  const known = (expression: Expression) => values.known(expression);
-  answers.shareKnown(known);
-  return known;
+}
+
+/** A step `knownAmountRefused` refuses, in words. */
+const KIND_WORDS: Readonly<Record<string, string>> = {
+  unitExpression: "unit expression",
+  angleExpression: "angle expression",
+};
+
+/** The first step whose known operands give no value a run can hold, or `null`. */
+function knownAmountRefused(
+  index: SliceIndex,
+  values: KnownValues,
+  request: CoreAnalysisRequest,
+): Expression | null {
+  for (const [file, { program }] of request.files.entries()) {
+    const overflow = findVisibleOverflows(program, values)[0];
+    if (overflow !== undefined)
+      return index.expressionAt({
+        file,
+        start: overflow.span.start.offset,
+        end: overflow.span.end.offset,
+      });
+  }
+  for (const unit of index.units) {
+    if (unit.kind !== "unitExpression" || !unit.calendar) continue;
+    const amount = values.quantity(unit.operand);
+    if (typeof amount === "number" && typeof unitValue(amount, unit) === "string") return unit;
+  }
+  return null;
 }
 
 /**
