@@ -143,8 +143,8 @@ export class NarrowingRoutes extends RouteEntries {
    * loop's earlier round, a label, a file's start, a block's body. In a block's body the query above runs inside the
    * body alone, without the handler veto (`#registered`), by r4-451's segment. `flagged`: the use's item carries a
    * test's mark, so the query above is not asked outside a block's body; the ways in are, as they hold the test to
-   * their own segments. In a program the default holds, only a loop's or a label's way in, under the program default
-   * (r4-451, `RouteEntries.standsAt`).
+   * their own segments. In a program the default holds, only a loop's or a label's way in (r4-451,
+   * `RouteEntries.standsAt`).
    */
   public *required(
     value: PlaceId,
