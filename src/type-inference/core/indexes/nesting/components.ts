@@ -16,7 +16,7 @@ export function reach(depth: number, weight: number): number {
 
 /**
  * The strongly connected components of a graph, producers first: each one after every component its members read
- * (Tarjan's order along receiver-to-producer edges), iteratively, each node and edge charged once.
+ * (Tarjan's order along receiver-to-producer edges), iteratively, each edge charged as it is followed.
  */
 export function components<N>(work: WorkLedger, into: ReadonlyMap<N, readonly Edge<N>[]>): N[][] {
   const index = new Map<N, number>();

@@ -149,6 +149,29 @@ test("a choice's answer passes no level on: its options never close a cycle", ()
   );
 });
 
+test("a value whose kind declares its elements enters a cycle with that level", () => {
+  const wrap = "function wrap(x) {\n  return [x]\n}\n";
+  // a range's whole numbers, copied into a list, and a dict's keys, its text: M = 1
+  for (const seed of ["(1..3).toList()", "dict{}.keys"])
+    assert.equal(
+      indexOf(`${wrap}let a0 = ${seed}\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n`).cut("wrap.x"),
+      2,
+      seed,
+    );
+});
+
+test("a growing component that reads another enters at the other's cut", () => {
+  // `a` is cut at 1 (M = 0), so `b` enters at 1 and is cut at 2, `c` at 3, whatever `a` gains a turn
+  for (const nest of ["[[a]]", "[[[a]]]"]) {
+    const index = indexOf(`let a = []\na = ${nest}\nlet b = a\nb = [b]\nlet c = b\nc = [c]\n`);
+    assert.deepEqual(
+      ["a", "b", "c"].map((name) => index.cut(name)),
+      [1, 2, 3],
+      nest,
+    );
+  }
+});
+
 test("a cycle that nests nothing deeper is never cut", () => {
   // whole copies around a ring: weight 0
   const ring = indexOf("let a = [1]\nlet b = a\na = b\n");

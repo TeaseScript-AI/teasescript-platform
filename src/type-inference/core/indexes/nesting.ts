@@ -3,6 +3,7 @@ import type { WorkLedger } from "../budget.js";
 import type { Operand } from "../carriers.js";
 import type { Definition, DefinitionIndex } from "../definitions.js";
 import { makeItem, REASON, type Item } from "../items.js";
+import { dictList } from "../method-categories.js";
 import type { CoreProgram } from "../program.js";
 import { Retained } from "../retained/retained.js";
 import {
@@ -26,12 +27,17 @@ export const CUT: readonly Item[] = Object.freeze([
 /**
  * The depth a place holds by itself, before any route: an expression's own value (a literal, an operation's result,
  * host data, a load) is a kind at its root; a variable, a parameter, a result, a literal's cell, a read, a projection
- * and a call's result hold only what reaches them.
+ * and a call's result hold only what reaches them. A value whose kind declares its elements holds that level too,
+ * whatever its operands: a range's whole numbers (`kindElement`) and a dict's `keys`, its text (`dictList`).
  */
 function ownDepth(program: CoreProgram, place: PlaceId): number {
+  const projection = program.projOf.get(place);
+  if (projection !== undefined) return dictList(projection.step) === "keys" ? 1 : NOTHING;
   if (program.places[place]?.kind.kind !== "value") return NOTHING;
-  if (program.occurrenceOf.has(place) || program.projOf.has(place)) return NOTHING;
-  return program.opOf.get(place)?.kind === "call" ? NOTHING : 0;
+  if (program.occurrenceOf.has(place)) return NOTHING;
+  const op = program.opOf.get(place);
+  if (op?.kind === "operation" && op.contract.family === "range") return 1;
+  return op?.kind === "call" ? NOTHING : 0;
 }
 
 /** The element levels a written type spells: a list's, a set's or a dict's element below each, a union's deepest. */
@@ -74,7 +80,8 @@ export function pathPosition(
 /**
  * Each component of a graph in its order, producers first, with the deepest element level each member reaches:
  * `base`, what reaches it from earlier components, and its own edges; a component that holds a cycle of positive weight
- * has the depth `growing` gives it, from what enters it and the gains on its edges.
+ * has, for each member, the depth `growing` gives it from what enters it and the gains on its edges: the level it is
+ * known to, which the components that read it take.
  */
 function layered<N>(
   work: WorkLedger,
@@ -85,7 +92,7 @@ function layered<N>(
     entering: number,
     gain: number,
     depth: ReadonlyMap<N, number>,
-  ) => number,
+  ) => (node: N) => number,
 ): Map<N, number> {
   const depth = new Map<N, number>();
   for (const component of components(work, into)) {
@@ -109,7 +116,7 @@ function layered<N>(
       : entry;
     if (longest === null) {
       const at = growing(component, entering, gain, depth);
-      for (const node of component) depth.set(node, at);
+      for (const node of component) depth.set(node, at(node));
     } else for (const node of component) depth.set(node, longest.get(node)!);
   }
   return depth;
@@ -122,7 +129,8 @@ function layered<N>(
  *
  * A strongly connected component that holds a cycle of positive weight grows without end under F20 and F21. It is
  * followed one level deeper than what enters it, `M + 1`: `M` the deepest element level that enters it from outside (a
- * literal's structure, a written type's levels, an earlier component's depth); deeper, a value is known only when the
+ * literal's structure, a written type's levels, a kind's declared elements, an earlier component's known level,
+ * a growing one's at its cut); deeper, a value is known only when the
  * script runs. A cycle that gains more than one level a turn (`a = [[a]]`) turns unknown within its first turn.
  * Components are taken producers first, so `M` is finite. The cut depends on the graph alone, never on the order
  * anything is asked in (r4-44).
@@ -174,10 +182,18 @@ export class NestingIndex {
           return written !== null ? writtenDepth(written) : ownDepth(program, place);
         },
         (component, entering, gain, depth) => {
-          // (a bound on every member's known levels, names ignored: what reads the component takes it)
+          // (a bound on every member's levels, names ignored, which a loose route brings inside; what reads a member takes
+          // the level it is known to, its positions' deepest)
           const bound = Math.max(entering, 0) + gain;
-          this.#byName(program, routes, component, depth, Math.max(entering, 0), bound);
-          return bound;
+          const known = this.#byName(
+            program,
+            routes,
+            component,
+            depth,
+            Math.max(entering, 0),
+            bound,
+          );
+          return (place) => known.get(place) ?? NOTHING;
         },
       );
     });
@@ -187,7 +203,8 @@ export class NestingIndex {
   /**
    * A component that grows with every property alike (`members`, `entering` what enters it, names ignored), solved
    * again with one position per place and property its routes name; each position of a cycle that grows there is cut
-   * one level below what enters it. `bound` is the deepest level any member reaches, names ignored.
+   * one level below what enters it. `bound` is the deepest level any member reaches, names ignored. Gives each member's
+   * known level: its positions' deepest, a cut position's at its cut.
    */
   #byName(
     program: CoreProgram,
@@ -196,7 +213,7 @@ export class NestingIndex {
     depth: ReadonlyMap<PlaceId, number>,
     entering: number,
     bound: number,
-  ): void {
+  ): Map<PlaceId, number> {
     const work = program.work;
     const inside = new Set(members);
     const labels = new Set<string>([""]);
@@ -258,7 +275,7 @@ export class NestingIndex {
       }
     }
     for (const at of entry.keys()) if (!graph.has(at)) graph.set(at, []);
-    layered(
+    const reached = layered(
       work,
       graph,
       (at) => entry.get(at) ?? NOTHING,
@@ -273,9 +290,16 @@ export class NestingIndex {
           }
           byLabel.set(label, cut);
         }
-        return cut;
+        return () => cut;
       },
     );
+    const known = new Map<PlaceId, number>();
+    for (const [at, level] of reached) {
+      work.charge("indexSteps");
+      const { place } = positions[at]!;
+      known.set(place, Math.max(known.get(place) ?? NOTHING, level));
+    }
+    return known;
   }
 
   /** Whether some position of `place` is cut: else none of its paths is. */

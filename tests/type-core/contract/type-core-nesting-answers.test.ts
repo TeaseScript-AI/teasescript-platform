@@ -57,6 +57,41 @@ test("a value nested below its cycle's cut depth is the cut's unknown, and known
   );
 });
 
+test("a cycle's entering level counts a kind's declared elements and an upstream cut, alike in every order and sharing", () => {
+  const wrap = "function wrap(x) {\n  return [x]\n}\n";
+  const cases: readonly (readonly [string, string, string, string])[] = [
+    // (a range copied into a list, a dict's keys: `wrap.x` is cut at 2, so `a1` is known to its second element level)
+    [
+      `${wrap}let a0 = (1..3).toList()\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n`,
+      "a1",
+      "integer",
+      "element.element",
+    ],
+    [
+      `${wrap}let a0 = dict{}.keys\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n`,
+      "a1",
+      "string",
+      "element.element",
+    ],
+    // (`a` is cut at 1, so `b` enters at 1, is cut at 2 and known to its second element level)
+    ["let a = []\na = [[a]]\nlet b = a\nb = [b]\n", "b", "list", "element.element"],
+  ];
+  for (const [source, name, known, at] of cases) {
+    const below = `${at}.element`;
+    const answered = MODES.map((mode) =>
+      inMode(mode, () =>
+        kindsAt(source, name, [at, below]).map((items) =>
+          items.map((item) => `${item.tag}/${item.context ?? ""}`),
+        ),
+      ),
+    );
+    for (const other of answered.slice(1)) assert.deepEqual(other, answered[0], source);
+    const [level, cut] = answered[0]!;
+    assert.ok(level!.includes(`${known}/`), `${source}: ${level!.join(" ")}`);
+    assert.deepEqual(cut, ["unknown/unmodelled"], source);
+  }
+});
+
 test("a value put under one property and read from another keeps every level it is known at", () => {
   const kinds = kindsAt("let o = { a: 1, b: [] }\nlet x = o.a\nlet y = [x]\no.b = [[y]]\n", "o", [
     "b",
