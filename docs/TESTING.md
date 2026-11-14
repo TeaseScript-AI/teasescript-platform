@@ -370,7 +370,7 @@ Not covered, each with its reason:
   - a `finally` whose call throws after the write.
 
   No generator `finally` in the core writes retained state today: the six are `core/values.ts:329` and `:964`,
-  `core/contract/value-kinds.ts:247` and `:362`, `core/contract-descriptors.ts:299` and `core/budget.ts:392`;
+  `core/contract/value-kinds.ts:247` and `:360`, `core/contract-descriptors.ts:299` and `core/budget.ts:392`;
 - a prototype set by a `"__proto__"` key from data on an owner, a registered function or a function the program
   reaches (#1072 R65): no core file writes a key from data to one. Of the 93 lines this lists in `src/type-inference/`
   at #2417's head, 88 of them writes, none has an owner (`this`, or `pass` in `answers.ts`) or a function as its
