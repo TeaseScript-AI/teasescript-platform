@@ -403,9 +403,11 @@ function gatedPort(port: Client.ClientPort) {
         listener(data);
       };
       port.listen((data) => {
-        if (!gate.holding) return deliver(data);
-        if (decoded(data)?.id === gate.id) gate.heldTarget = true;
-        buffered.push(data);
+        // Decoding a flat packet replaces its links in place: forward the root, never the consumed envelope.
+        const message = decodeMessage(data);
+        if (!gate.holding) return deliver(message);
+        if (decoded(message)?.id === gate.id) gate.heldTarget = true;
+        buffered.push(message);
       });
     },
   };

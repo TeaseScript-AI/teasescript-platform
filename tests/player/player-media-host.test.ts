@@ -160,7 +160,32 @@ const RERUN = rerunRegistry({
   "scene time, 0 ms": ["in-process"],
   "scene time, 50 ms": TOPOLOGIES,
   "scene time, 250 ms": ["in-process"],
+  "deep recording replies": TOPOLOGIES,
 });
+
+RERUN.rows(
+  "deep recording replies",
+  "a deep recording reaches the client immediately and after a held reply is released",
+  async (context, topology, end) => {
+    const transport = await topologyBridge(context, topology);
+    const { plan } = await sourceStart(
+      transport.bridge,
+      `let nested = ${"[".repeat(150)}1${"]".repeat(150)}\nshowButton "Done"\nexit`,
+    );
+    await transport.bridge.start(plan, { wallClockMs: 0 }, true);
+    const recording = await transport.bridge.readRecording(null);
+    assert.ok(recording !== null, "the deep recording arrived");
+    assert.equal(transport.unanswered(), 0);
+    transport.hold("readRecording");
+    const held = transport.bridge.readRecording(null);
+    await transport.held();
+    assert.equal(transport.unanswered(), 1, "a held reply is still unanswered");
+    transport.release();
+    assert.deepEqual(await held, recording, "the released recording arrived intact");
+    assert.equal(transport.unanswered(), 0);
+    return end();
+  },
+);
 
 for (const delayMs of [0, 50, 250] as const)
   RERUN.rows(
