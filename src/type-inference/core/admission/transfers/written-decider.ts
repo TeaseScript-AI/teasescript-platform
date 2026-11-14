@@ -99,16 +99,12 @@ function summaryCaches(admission: Admission): DeciderCaches {
 }
 
 /**
- * #1444: `earliestDecider`'s answer where a written copy on the path asks a type (`transferredDecider` answered
- * `undefined`), asked outside every decision and into no decision's place (`literalElements`, `joinElements`), from its
- * groups' regions instead of a walk of its stops: each group's answer at a rest of the path once per masks and linked
- * members, its written copies and values compared by their rank in its region, each operand group's answer taken at
- * its rank (a nest's levels each answered once, never each level's whole walk again). The same answer as the scan: an
- * open list join's operand first, else the earlier of the earliest written copy (`copy`) and the earliest deciding
- * value. Its walk is `firstValue`'s (`transferred-decider.ts`) with written copies and open joins added: it reads every
- * entry of a region, keeping the earliest written copy, deciding value and open join, where `firstValue` stops at the
- * first deciding value in rank order. A decision's own scan stays the stops' (`earliestDecider`), so a decision's
- * charges never depend on the summary.
+ * #1444: `earliestDecider`'s answer where a written copy on the path asks a type, asked outside every decision and
+ * into no decision's place, from its groups' regions instead of a walk of its stops: each group's answer at a rest of
+ * the path once per masks and linked members, its written copies and values compared by their rank in its region,
+ * each operand group's answer taken at its rank (a nest's levels each answered once, never each level's whole walk
+ * again). The same answer as the scan: an open list join's operand first, else the earlier of the earliest written copy
+ * (`copy`) and the earliest deciding value.
  */
 export function* writtenDecider(
   admission: Admission,
