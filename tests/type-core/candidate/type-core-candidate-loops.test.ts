@@ -1,6 +1,4 @@
-// `while`, `switch`, `break` and `continue` on the candidate route (#2658, #2488's step 2b): each source compiled by
-// today's checker and by the route in the four held modes, and each plan run over the host domain, through the
-// differential record (`tests/families/differential.mjs`).
+// `while`, `switch`, `break` and `continue` on the candidate route (#2658, #2488's step 2b).
 
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -8,15 +6,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { compileProjectWithBackend } from "../../../src/compiler.js";
+import { compileProject, compileProjectWithBackend } from "../../../src/compiler.js";
+import { run } from "../../../src/runtime/engine.js";
 import { analyseCore } from "../../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
 import { DECLARED_WAY_ERRORS } from "../../helpers/type-core/declared-samples.js";
 import {
   diagnosed,
   type DifferentialRecord,
+  DOMAIN,
   type Entry,
   outcome,
   records,
@@ -121,7 +122,7 @@ const kept = (entry: Entry, dropped: readonly string[]): string[] =>
     .filter((each) => !dropped.some((one) => each.startsWith(`${one} `)))
     .sort();
 
-/** Runs every row through the differential and judges it. */
+/** Fails the test where a row's answer is not its expectation. */
 function check(rows: readonly Row[], context: { after: (fn: () => void) => void }): void {
   const folder = mkdtempSync(join(tmpdir(), "loops-"));
   context.after(() => rmSync(folder, { recursive: true, force: true }));
@@ -144,15 +145,6 @@ test("`while`, `break` and `continue` answer as today's compiler, the false TSV0
       ),
       one("while (true)", "while (true) {\n  exit\n}\n"),
       one("while true, a statement after", 'while true {\n  exit\n}\nsay "unreached"\n'),
-      one("while true, a wait in the body", "while true {\n  wait 1 s\n}\n"),
-      {
-        name: "while true, a wait in the body, in a file a transfer starts",
-        files: [
-          { path: "main.tease", source: 'goto "part.tease"\n' },
-          { path: "part.tease", source: "while true {\n  wait 1 s\n}\n" },
-        ],
-        expect: "equal",
-      },
       one("while false", 'while false {\n  say "never"\n}\nexit\n'),
       one("while true, break", 'while true {\n  break\n}\nsay "after"\nexit\n'),
       one("a host condition", 'while hostValue != null {\n  exit\n}\nsay "after"\nexit\n'),
@@ -319,7 +311,6 @@ test("`switch` answers as today's compiler: each literal kind, a range, a type t
         "an optional type test",
         "switch hostValue {\n  case is integer? {\n    exit\n  }\n}\nexit\n",
       ),
-      // (a signed case value is refused at the unary row)
       one("a negative case value", "switch hostValue {\n  case -1 {\n    exit\n  }\n}\nexit\n", {
         refused: "this unary expression",
       }),
@@ -476,4 +467,39 @@ test("a value case narrows the switched variable on the route, so a typed store 
     ],
     t,
   );
+});
+
+test("a `while true` whose body waits: the run waits, as today's, in every held mode", () => {
+  const loop = "while true {\n  wait 1 s\n  exit\n}\n";
+  for (const files of [
+    [{ path: "main.tease", source: loop }],
+    [
+      { path: "main.tease", source: 'goto "part.tease"\n' },
+      { path: "part.tease", source: loop },
+    ],
+  ]) {
+    const today = compileProject(files, { globals: ["hostValue"] }).plan;
+    assert.ok(today !== null, files[0]!.source);
+    const plans = [
+      today,
+      ...HELD_MODES.map(
+        (mode) =>
+          mode.run(() => compileProjectWithBackend(files, { globals: ["hostValue"] }, CORE_BACKEND))
+            .plan,
+      ),
+    ];
+    for (const [at, plan] of plans.entries())
+      for (const hostValue of DOMAIN) {
+        assert.ok(plan !== null, `${files[0]!.source} [${at}]`);
+        const result = run(
+          plan,
+          createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } }),
+        );
+        assert.deepEqual(
+          [result.snapshot.status, result.events.some((event) => event.kind === "runtimeFailure")],
+          ["waiting", false],
+          `${files[0]!.source} [${at}] with ${JSON.stringify(hostValue)}`,
+        );
+      }
+  }
 });
