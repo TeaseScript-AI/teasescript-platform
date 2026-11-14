@@ -76,12 +76,15 @@ async function compareOne(program, play) {
   const { compareGenerated } = await import(
     pathToFileURL(path.join(root, "dist/tests/helpers/generated-comparison/compare.js")).href
   );
+  const { generateJavaScript } = await import(
+    pathToFileURL(path.join(root, "dist/src/compiler/javascript/generate.js")).href
+  );
   const result = fs.statSync(program).isDirectory()
     ? compileProject(packageFiles(program))
     : compileSource(fs.readFileSync(program, "utf8"));
   if (!result.plan)
     return { kind: "notCompiled", codes: result.diagnostics.map((item) => item.code) };
-  return compareGenerated({ plan: result.plan, play });
+  return compareGenerated({ plan: result.plan, play, generate: generateJavaScript });
 }
 
 /** A package directory's `.tease` files, `main.tease` first, by their paths within it. */

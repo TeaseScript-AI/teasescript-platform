@@ -2,7 +2,8 @@
 
 Decides, for one program and one play, whether code generated from a Tease gives a player what today's engine gives.
 The comparison itself is `tests/helpers/generated-comparison/` (`compareGenerated` in `compare.ts`, which the compiler
-stage's tests await); this command runs it over files and package directories.
+stage's tests await); this command runs it over files and package directories, with the compiler stage's code
+(`generateJavaScript`).
 
 ```sh
 node tools/generated-comparison/run.mjs [--play first|last|seed:N] [--timeout-ms N] PATH...
