@@ -429,7 +429,7 @@ source-to-runtime contract tests
 runtime invariant and checkpoint tests
 external-data and runtime-state validation tests
 deterministic property and bounded source-fuzz tests
-player/host integration tests
+Playroom/host integration tests
 browser E2E tests
 performance benchmarks
 ```

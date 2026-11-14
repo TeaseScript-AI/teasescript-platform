@@ -46,12 +46,12 @@ Public Standard Library
     └── documented typed engine primitives
 
 Privileged platform adapters
-    └── internal engine/player capabilities
+    └── internal engine/Playroom capabilities
         (not importable through the public Standard Library surface)
 
 Typed engine primitives
     └── deterministic runtime state, pending actions, events,
-        checkpoint/restore, and player boundary
+        checkpoint/restore, and Playroom boundary
 ```
 
 Dependencies point toward the engine. A script does not need a package library in order to use the Standard Library. A package library may use the public Standard Library instead of rebuilding its behavior from engine primitives.

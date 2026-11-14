@@ -326,7 +326,7 @@ let elapsed = showButton "Continue", timeout: 30 s
 ```
 
 The form displays one blocking button and has no cancellation path. It is the one-option form of the same Standard
-foreground-control vocabulary as `askChoice`. The Playroom activates it by clicking/tapping the rendered button,
+foreground-control vocabulary as `askChoice`. The player activates it by clicking/tapping the rendered button,
 submitting its exact non-empty stored visible text in the composer, or Space in the empty focused composer, since its
 button is always preselected. Other text and a click/tap on unrelated blank Playroom space do not activate `showButton`.
 Typed matching does not trim, fold case, or normalize Unicode.
