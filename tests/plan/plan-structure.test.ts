@@ -4,7 +4,14 @@ import test from "node:test";
 import type { Instruction, InstructionPlan, PlanSourceLocation } from "../../src/plan/model.js";
 import { planStructure, structureRefusal, type Construct } from "../../src/plan/structure.js";
 import { validateInstructionPlan } from "../../src/plan/validation.js";
+import {
+  createCheckpoint,
+  deserializeCheckpoint,
+  serializeCheckpoint,
+} from "../../src/runtime/snapshot/checkpoint.js";
+import { CheckpointError } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { compileValidPlan } from "../helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
 
 /** Every construct of a tree, outermost first, with the instruction ranges each sequence covers. */
 function constructs(tree: readonly Construct[]): Construct[] {
@@ -148,6 +155,29 @@ test("plan validation accepts a lowered plan and refuses one whose jumps do not 
       ],
     );
   }
+});
+
+test("a saved checkpoint whose plan's jumps do not nest is refused at the instruction", () => {
+  const plan = compileValidPlan("let a = true\nif a { if a { a = false } }\nexit");
+  // EVIDENCE: fixture: a serialized checkpoint holds its plan's instructions, each with its kind; a jumpIfFalse a target.
+  const saved = JSON.parse(
+    serializeCheckpoint(createCheckpoint(plan, createImmediatePacingRuntimeSnapshot(plan))),
+  ) as { plan: { instructions: { kind: string; target?: number }[] } };
+  const [outer, inner] = saved.plan.instructions.flatMap((instruction, index) =>
+    instruction.kind === "jumpIfFalse" ? [{ index, target: instruction.target! }] : [],
+  );
+  assert.ok(outer !== undefined && inner !== undefined);
+  // The inner if's false way now goes past the outer if's end, still inside the region.
+  saved.plan.instructions[inner.index]!.target = outer.target + 1;
+  assert.throws(
+    () => deserializeCheckpoint(JSON.stringify(saved)),
+    (error: unknown) =>
+      error instanceof CheckpointError &&
+      error.info.code === "TSK002" &&
+      error.info.message ===
+        "Jumps must nest: this jumpIfFalse's target lies outside the construct around it." &&
+      error.info.path === `$.plan.instructions[${inner.index}]`,
+  );
 });
 
 test("a plan that fails an earlier check gets no nesting error on top", () => {
