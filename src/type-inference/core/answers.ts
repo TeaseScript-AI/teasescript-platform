@@ -189,12 +189,13 @@ function createPass(
     ),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
-    // (admission's rejected stores route nothing: A6)
     nesting: new NestingIndex(
       program,
       definitions,
-      (d) => !rejected.has(d.uid),
-      (value) => operandsOf(program, value),
+      // (#1072 R26: captures `rejected`, the pass's own, never written after it is given)
+      Retained.closure("NestingIndex.live", (d: Definition) => !rejected.has(d.uid)),
+      // (#1072 R26: captures the indexed program)
+      Retained.closure("NestingIndex.operands", (value: PlaceId) => operandsOf(program, value)),
     ),
     solver: new Solver(program.scope),
     receivingDomain: new ReceivingDomain(),
