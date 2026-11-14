@@ -85,6 +85,8 @@ const EXPRESSION_KINDS = new Set(["literal", "regex", "duration", "calendarDurat
 /** Instruction kinds today's engine may leave waiting (an action with the host), besides a paced `say`. */
 /** A loop body longer than this many instructions is outlined even without an inner loop. */
 const OUTLINE_LENGTH = 120;
+/** A loop body that holds a loop is outlined from this many instructions (a small nest stays in one function). */
+const OUTLINE_WITH_LOOP = 60;
 /** A structured sequence longer than this many instructions is cut into functions between its constructs. */
 const CHUNK_LENGTH = 150;
 const WAITING_KINDS = new Set(["wait", "interaction", "capture", "fileStore", "lock", "storageWrite", "playMedia", "showImage"]);
@@ -199,7 +201,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         return emitRegion(definition.entryInstruction, definition.endInstruction, definition, definition.parameters, definition.global ? new Map() : rootScope, index);
       });
     const vars = [...rootScope.values()];
-    if (vars.length > 0) lines.push(`let ${vars.join(", ")};`);
+    if (vars.length > 0) lines.push(`var ${vars.join(", ")};`);
     lines.push(...functions, root, ...moduleBlocks.values());
     moduleBlocks.clear();
     // The session starts at file 0's start (its speakers' and globals' start values); a goto enters a file at its entry.
@@ -763,7 +765,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         scopes.push(new Map());
       } else throw new Unsupported(`a '${ins.loopKind}' loop`);
       // A body that holds a loop, or a long one, is outlined; in the generator form a body that waits is a generator.
-      if (containsLoop(pc + 1, endLoop) || endLoop - pc > OUTLINE_LENGTH)
+      if ((containsLoop(pc + 1, endLoop) && endLoop - pc > OUTLINE_WITH_LOOP) || endLoop - pc > OUTLINE_LENGTH)
         outlinedBody(ins, pc, endLoop, roundVars, regionYields && containsWait(pc + 1, endLoop));
       else emitRange(pc + 1, endLoop);
       scopes.pop();
@@ -806,7 +808,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       indent = savedIndent;
       out.push(...outer);
       const locals = [...body.lets, ...Array.from({ length: bodyScratch }, (_, i) => `x${i}`), `%TEMPS_${key}%`];
-      const fn = [`function${yields ? "*" : ""} ${key}(${params.join(", ")}) {`, `  let ${locals.join(", ")};`, ...inner, "  return 0;", "}"];
+      // `var`: every name is unique and declared at the function's top, so a closure's read needs no TDZ check.
+      const fn = [`function${yields ? "*" : ""} ${key}(${params.join(", ")}) {`, `  var ${locals.join(", ")};`, ...inner, "  return 0;", "}"];
       return { key, body, fn };
     }
 
@@ -1279,11 +1282,11 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     }
     for (let i = 0; i < out.length; i += 1)
       if (out[i].includes("%TEMPS_"))
-        out[i] = out[i].replace(/(, )?%TEMPS_(\w+)%/g, (_, comma, key) => { const list = bodyTemps.get(key) ?? []; return list.length === 0 ? "" : `${comma ?? ""}${list.join(", ")}`; }).replace("let ;", "");
+        out[i] = out[i].replace(/(, )?%TEMPS_(\w+)%/g, (_, comma, key) => { const list = bodyTemps.get(key) ?? []; return list.length === 0 ? "" : `${comma ?? ""}${list.join(", ")}`; }).replace("var ;", "");
     regionTempNames = regionTemps;
     const header = [];
     const locals = [...regionChunks.lets, ...regionTemps, ...Array.from({ length: scratchMax }, (_, i) => `x${i}`), ...hoisted, ...(usesRV ? ["RV"] : [])];
-    if (locals.length > 0) header.push(`  let ${locals.join(", ")};`);
+    if (locals.length > 0) header.push(`  var ${locals.join(", ")};`);
     if (!flatRegion) {
       if (definition === null) return [`function${generators ? "*" : ""} file${fileIndex}(resume, fromEntry) {`, ...header, ...out, "}"].join("\n");
       return [`function${star(definition.id)} f${definition.id}(${params.join(", ")}) {`, ...header, ...(tick ? [`  ${tick}`] : []), ...out, "  return null;", "}"].join("\n");
