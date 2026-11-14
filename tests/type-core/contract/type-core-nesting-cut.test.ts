@@ -9,7 +9,7 @@ import type { PlaceId } from "../../../src/type-inference/graph.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
 
 /*
- * #2764 (B): the nesting cut. A cycle of copies, arguments, results and list literals that nests a value deeper on each
+ * #2764: the nesting cut. A cycle of copies, arguments, results and list literals that nests a value deeper on each
  * turn is followed one level deeper than what enters it (`M + 1`); a cycle that nests nothing deeper, and a place a
  * written type decides, are never cut.
  */

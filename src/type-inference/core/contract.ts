@@ -718,8 +718,7 @@ export class Contract {
   }
 
   /**
-   * #2764 (B): whether a key lies below its place's cut depth (\`NestingIndex\`): its answer is then the cut's unknown,
-   * never a demand. Only a place in a growing component has its path's element steps counted.
+   * Whether a key lies below its place's cut depth (#2764): its answer is then the cut's unknown, never a demand.
    */
   public cutAt(asked: Key): boolean {
     const key = this.canonicalKey(asked);
