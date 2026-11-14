@@ -43,6 +43,11 @@ export function keyOf(place: PlaceId, path: readonly string[]): Key {
   return `${place}|${path.join(".")}`;
 }
 
+/** `keyOf` of a path one `step` longer, from the key of its first `depth` steps: that key and the step's text. */
+export function keyStep(key: Key, depth: number, step: string): Key {
+  return depth === 0 ? `${key}${step}` : `${key}.${step}`;
+}
+
 /** The code unit of `.`, which joins a key's steps. */
 const DOT = 46;
 

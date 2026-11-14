@@ -23,6 +23,7 @@ import {
   keyOfText,
   keyPath,
   keyPlace,
+  keyStep,
   type Key,
 } from "../definitions.js";
 import { memberStep } from "../method-categories.js";
@@ -316,8 +317,8 @@ export interface KeyWalk {
 
 /**
  * A key's path and its prefixes in its identity, for a question that reads its whole path: a text's from its text
- * (`keyPath`, each prefix `keyOf`); a cursor's steps through the charged boundary (`stepsOfId`), its prefixes
- * its ancestors, climbed once per path and kept (`prefixesOf`, a place's own key its text).
+ * (`keyPath`, each prefix the one before it and a step, `keyStep`); a cursor's steps through the charged boundary
+ * (`stepsOfId`), its prefixes its ancestors, climbed once per path and kept (`prefixesOf`, a place's own key its text).
  */
 export function keyWalk(contract: Contract, key: Key): KeyWalk {
   return walkWith(contract, key, false);
@@ -333,7 +334,18 @@ function walkWith(contract: Contract, asked: Key, kept: boolean): KeyWalk {
   const place = keyPlace(key);
   if (!isKeyId(key)) {
     const path = kept ? keptPath(contract.work, key) : keyPath(key);
-    return { place, path, prefix: (length) => canonicalText(keyOf(place, path.slice(0, length))) };
+    // (each prefix one step below the last, made as the walk first asks it: a walk of L steps makes L texts by a step
+    // each, never a prefix's path again (#2763); as before, nothing kept, nothing charged)
+    const prefixes: Key[] = [keyOf(place, [])];
+    return {
+      place,
+      path,
+      prefix: (length) => {
+        for (let at = prefixes.length; at <= length; at += 1)
+          prefixes.push(keyStep(prefixes[at - 1]!, at - 1, path[at - 1]!));
+        return canonicalText(prefixes[length]!);
+      },
+    };
   }
   const path = stepsOfId(contract, key);
   let prefixes: readonly number[] | null = null;

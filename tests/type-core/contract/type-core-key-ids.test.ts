@@ -22,6 +22,7 @@ import {
   exportNames,
   importKeyIds,
   importNames,
+  isKeyId,
   isSteps,
   keyIdAt,
   keyIdBelow,
@@ -35,6 +36,8 @@ import {
   keyIdStep,
   keyOfId,
   keyPrefixIn,
+  keyWalk,
+  keptKeyWalk,
   memberStepIn,
   PathSteps,
   restSteps,
@@ -546,6 +549,30 @@ test("a span's prefix text is made once, on the prefix's own path, and found aga
   assert.ok(first.work.charged > again.work.charged);
 });
 
+/**
+ * #2763: a text key's walk makes each prefix from the one before it and a step, never from the prefix's path again, and
+ * its prefixes are `keyOf`'s, asked in any order, by either walk; it keeps and charges nothing new (the work pins of
+ * the suites stay as they were).
+ */
+test("a text key's walk makes each prefix from the one before it, its prefixes keyOf's in any order (#2763)", () => {
+  const { contract } = narrowingPass(request("let x = 1\nexit\n"));
+  for (const path of [
+    Array.from({ length: 40 }, () => "element"),
+    ["values", "inner", "element", "x", "element", "keys"],
+    ["a"],
+    [],
+  ])
+    for (const walkOf of [keyWalk, keptKeyWalk]) {
+      const walk = walkOf(contract, keyOf(5, path));
+      const lengths = Array.from({ length: path.length + 1 }, (_, at) => path.length - at);
+      for (const length of [...lengths, ...[...lengths].reverse()]) {
+        const prefix = walk.prefix(length);
+        assert.ok(!isKeyId(prefix), "a text key's walk");
+        assert.equal(prefix, keyOf(5, path.slice(0, length)), `${path.join(".")} at ${length}`);
+      }
+    }
+});
+
 test("a member chain's key asked at each of its offsets in turn, cold, climbs its path once: its member scan and its prefixes cost a unit a question after, linear in the path, and a repeated question its one unit (a member chain's demand asks each offset once)", () => {
   const asks = [
     [
@@ -982,8 +1009,8 @@ const MADE_LISTED: Readonly<Record<string, readonly [number, string]>> = {
     "the cursor's type and text (two numbers); two error messages; a span's name (a path's id after a dot); a replayed name's cursor and span tokens (numbers, `exportNames`)",
   ],
   "key-ids.ts slice": [
-    19,
-    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`); a text key's parent and prefixes as the legacy sites made them (`keyParentIn`, `keyWalk`, `keyPrefixIn`); a text key's first step and place, to ask its lane (`canonicalKey`, one step); an array's views as the legacy sites made them (`stepsFrom`, `stepsTo`, `stepsPrefixText`, `restFrom`, `restTo`); a record's steps' view, plain as an array's slice (`PathSteps.from`, `to`); a demand name's span and cursor tokens read back as numbers (`compareDemandNames`, `exportNames`, `importNames`)",
+    18,
+    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`); a text key's parent and prefix as the legacy sites made them (`keyParentIn`, `keyPrefixIn`); a text key's first step and place, to ask its lane (`canonicalKey`, one step); an array's views as the legacy sites made them (`stepsFrom`, `stepsTo`, `stepsPrefixText`, `restFrom`, `restTo`); a record's steps' view, plain as an array's slice (`PathSteps.from`, `to`); a demand name's span and cursor tokens read back as numbers (`compareDemandNames`, `exportNames`, `importNames`)",
   ],
   "key-ids.ts concatenation": [
     3,
