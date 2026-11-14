@@ -1,7 +1,7 @@
 import type { StaticType } from "../../static-types.js";
 import type { KnownValue } from "../../static-evaluation.js";
 import type { ValueKind } from "../../value-kinds.js";
-import type { ContractRef, DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence } from "../graph.js";
+import type { DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence } from "../graph.js";
 
 /** A reference to one operand of an operation: its receiver, a positional argument, or a named one. */
 export type OperandRef =
@@ -68,16 +68,3 @@ export type OperationResult =
       readonly kind: "byReceiver";
       readonly cases: readonly { readonly receiver: ValueKind; readonly result: OperationResult }[];
     };
-
-export interface OperationRelation {
-  readonly contract: ContractRef;
-  /**
-   * The result for operands known as `inputs` says: a function of its inputs alone, no state and no reading of other
-   * places, so a reader may ask again whenever an operand's view grows.
-   */
-  result(inputs: OperationInputs): OperationResult;
-}
-
-export interface OperationRelations {
-  relation(contract: ContractRef): OperationRelation | undefined;
-}
