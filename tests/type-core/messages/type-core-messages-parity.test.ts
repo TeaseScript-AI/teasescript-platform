@@ -7,11 +7,8 @@ import {
   checkedResult,
   reportedDiagnostics,
 } from "../../../src/type-inference/core/check-result/check-result.js";
-import {
-  coreMessage,
-  messageSource,
-  type MessageSource,
-} from "../../../src/type-inference/core/messages.js";
+import { coreMessage, messageSource } from "../../../src/type-inference/core/messages.js";
+import type { MessageSource } from "../../../src/type-inference/core/messages/site.js";
 import type { CheckedDiagnostic } from "../../../src/type-inference/core/result.js";
 import { kindsInOrder } from "../../../src/type-inference/core/items.js";
 import { parsedExpression, typeText } from "../../../src/type-inference/core/messages/words.js";
@@ -408,7 +405,7 @@ const INTENDED: readonly Intended[] = [
     fixless: true,
   },
   {
-    rule: "S8c's (#1173): a number where a whole number is required, the count's and the written integer's sentences",
+    rule: "#1173: a number where a whole number is required, the count's and the written integer's sentences",
     matches: ({ diagnostic }) =>
       diagnostic.kind !== "written-type" &&
       diagnostic.kind !== "static" &&
@@ -416,7 +413,6 @@ const INTENDED: readonly Intended[] = [
         ((diagnostic.rule.rule === "store" || diagnostic.rule.rule === "fallback") &&
           diagnostic.rule.type.includes("integer") &&
           diagnostic.kinds.includes("number"))),
-    // (its sentences as they stand until S8c: rounding, a whole number, a fallback of the type, an unknown's test)
     replacement: ({ diagnostic, named }) =>
       diagnostic.kind === "written-type" || diagnostic.kind === "static"
         ? exact("Use a whole number here.")
@@ -427,7 +423,7 @@ const INTENDED: readonly Intended[] = [
             : diagnostic.kinds.includes("unknown")
               ? typeTest(named, "integer")
               : exact("Use a whole number here."),
-    // (four fewer since S10 part 2b: those records' stored values take `is integer`'s narrowing, a whole number)
+    // (those records' stored values take `is integer`'s narrowing, a whole number)
     count: 173,
   },
   {

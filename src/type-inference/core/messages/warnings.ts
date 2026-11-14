@@ -207,7 +207,7 @@ function guarded(
   if (statement === null) return null;
   const text = source.text(statement);
   if (!kept) return { statement, read, text };
-  // (the place a store changes, a compound assignment's target among them, is no value a kept one may replace: G2)
+  // (the place a store changes, a compound assignment's target among them, is no value a kept one may replace)
   if (source.target(read)) return null;
   // (its only text in the statement)
   const from = read.start - statement.start;
@@ -225,7 +225,7 @@ function guarded(
  * line before it, which moves its read there: each where `codeAt` proves it in a statement's place, its text clear of
  * the other diagnostics but those of only the types the test rules out; else `null`, and the fix names
  * the check in words. The statement's own reads stay where they stand, the kept one first of all it evaluates
- * (`guards`), so a warning's reads are its own.
+ * (`checkBeforeCoversUse`), so a warning's reads are its own.
  */
 function guardForms(
   use: Use,
@@ -235,7 +235,7 @@ function guardForms(
 ): { readonly check: string; readonly keep: string | null } | null {
   if (!ownText(subject)) return null;
   // (the kept variable's name, free in the whole project: `value`, else the first free `value2`, `value3`, … #1274;
-  // asked only where the fix keeps a value, as its survey is charged, Astra r1 on #1715)
+  // asked only where the fix keeps a value, as its survey is charged, #1715)
   const name = kept ? use.source.freeName("value") : "";
   const held = guarded(use.source, use.site, subject, kept, name);
   if (held === null) return null;
@@ -352,7 +352,7 @@ function stepsBelow(rule: StoreRule, landing: Landing | null): readonly StoreSte
  * #1753: the check of a stored value whose place is an element below it through collections alone (`stepsBelow`): the
  * test of the whole receiving type at the value (ADR 0021 rule 4.2: a collection test checks every element), as code
  * (`hostValue is integer[]?[]`) and in words (`is a list (integer[]?[])`), where the place's root is declared with a
- * written type that proves every layer of it, `null` at each (Codex r1's B1 on #1764: `integer[]?[]`): the declaration's
+ * written type that proves every layer of it, `null` at each (#1764: `integer[]?[]`): the declaration's
  * type followed down the value's landing to the place (`receivingType`). Anywhere else the rule's leaf alone does not
  * prove the layers between (a copy of a written type), so a leaf's words name the elements the check tests, and a layer
  * between keeps its own check. `undefined`
@@ -372,8 +372,8 @@ function wholeCheck(
   if (!rule.steps.some((step) => "collection" in step)) return undefined;
   const landing = source.landing(site);
   const below = stepsBelow(rule, landing);
-  // (a storing method's argument off the place's path, or with no name to its receiver: no level proved, Codex r3 on
-  // #1817: `a.first.add(x)`, `f().add(x)`)
+  // (a storing method's argument off the place's path, or with no name to its receiver: no level proved, #1817:
+  // `a.first.add(x)`, `f().add(x)`)
   if (
     landing?.method !== undefined &&
     (below === null || !below.every((step) => "collection" in step))
@@ -410,8 +410,8 @@ function wholeCheck(
 
 /**
  * The written type a store's value receives (`wholeCheck`): its root's declared type (a `let`'s, a `global`'s or a
- * parameter's, as the parser read the declaration: Codex r2's B2, no text of it is searched), followed down the value's landing, which must
- * reach the place through the collections `below`; else `null`.
+ * parameter's, as the parser read the declaration: no text of it is searched), followed down the value's landing,
+ * which must reach the place through the collections `below`; else `null`.
  */
 function receivingType(
   rule: StoreRule,
@@ -438,7 +438,7 @@ function receivingType(
   };
   let value = declared;
   for (const step of landing.steps) value = element(value, step);
-  // (`addAll` takes a list, never null, whatever its receiver's layer holds: Codex r3 on #1817)
+  // (`addAll` takes a list, never null, whatever its receiver's layer holds: #1817)
   if (landing.method === "elements" && value?.kind === "optionalType") value = value.value;
   let leaf = value;
   for (const step of below) leaf = element(leaf, step);
@@ -467,15 +467,15 @@ function annotationText(type: TypeAnnotation): string {
 
 /**
  * #1468: the fix of a store's place below the warned value, a property of what the value holds (ADR 0021 rule 1.4), in
- * words by construction, with no form and no value of its own (the lead's ruling after Codex r2). Where the checker's
+ * words by construction, with no form and no value of its own. Where the checker's
  * definitions prove the value a load with a default (`originOf`, `loadOrigin`), that load's default given the
  * property by its way from the load, of the place's type, which its reader then takes where the stored property misfits
  * or is missing; anything else
- * gives no check that discharges the warning (a property's check does not reach a copy of the whole object, Astra r1's
- * A1, #1496), so the words say where the type must come from: the narrowest expression that owns the property below
+ * gives no check that discharges the warning (a property's check does not reach a copy of the whole object,
+ * #1496), so the words say where the type must come from: the narrowest expression that owns the property below
  * the value (`MessageSource.owner`, #1495), never the whole literal where a part of it owns it. `null` where the place
  * is the value itself or its element, whose own check is the fix; `strict`, also where the value's landing is unknown
- * or off the place's path, whose own check may be the fix (#1730 Codex r1 N1: `boxes[0].x = hostValue otherwise 1`).
+ * or off the place's path, whose own check may be the fix (#1730: `boxes[0].x = hostValue otherwise 1`).
  */
 function propertyFix(
   rule: StoreRule,
@@ -506,7 +506,11 @@ function propertyFix(
   return `Give ${named} ${type} in the default of '${source.text(found.load)}'.`;
 }
 
-/** The kinds a rule takes, where a value's own kinds that fit are not known (an unknown value). */
+/**
+ * The kinds a type test of an unknown value names, by its rule (the kinds the rule takes, where a value's own kinds
+ * that fit are not known); none for the other rules, such as `iterable`, `shown` and `json`, whose kinds no test here
+ * names.
+ */
 function ruleKinds(rule: DiagnosticRule): readonly ItemTag[] {
   switch (rule.rule) {
     case "count":
@@ -527,22 +531,26 @@ function ruleKinds(rule: DiagnosticRule): readonly ItemTag[] {
 }
 
 /**
- * A warning's fix: a null check for null, the count's rounding for a number (S8c's), the selection's length check; a
- * type test where the value has other kinds that fit or is unknown; else the fix of the error the kind would be.
+ * The warned use a fix is for: its rule; the warned value's text and offending kinds; its other known kinds the rule
+ * takes (`fits`) and those the site's other diagnostics of the rule report (`besides`); why it may be of another type
+ * (`detail`, `context`); its site; and what the place its value lands in takes (`expects`), for a null value's fallback
+ * and an operation's text join or date and time form.
  */
-export function warningFix(
-  rule: DiagnosticRule,
-  text: string,
-  kinds: readonly ItemTag[],
-  fits: readonly ItemTag[],
-  besides: readonly ItemTag[],
-  detail: ContextDetail,
-  context: ContextWord,
-  source: MessageSource,
-  site: SourceSite,
-  expects: SiteExpectation | undefined,
-  diagnosed: Diagnosed,
-): string {
+interface WarnedUse {
+  readonly rule: DiagnosticRule;
+  readonly text: string;
+  readonly kinds: readonly ItemTag[];
+  readonly fits: readonly ItemTag[];
+  readonly besides: readonly ItemTag[];
+  readonly detail: ContextDetail;
+  readonly context: ContextWord;
+  readonly site: SourceSite;
+  readonly expects: SiteExpectation | undefined;
+}
+
+/** A warning's fix sentence, `""` where it has none. */
+export function warningFix(warned: WarnedUse, source: MessageSource, diagnosed: Diagnosed): string {
+  const { rule, text, kinds, fits, besides, detail, context, site, expects } = warned;
   const subject = rule.rule === "member" ? rule.receiver : text;
   // (the elements a call reads, and what toJson writes below its argument: no test of the value read fixes them; join's
   // elements of a known type are selected from)
@@ -552,7 +560,7 @@ export function warningFix(
       : "";
   if (rule.rule === "json" && rule.nested) return WRITABLE_JSON_FIX;
   // (a store's place that is no variable, a compound assignment's target among them, is checked where it stands, in
-  // words: a new variable would take the change instead, G2)
+  // words: a new variable would take the change instead)
   const inPlace = (test: Test): string | null =>
     source.target(site) && variable(subject) === null
       ? `Check that '${subject}' ${test.words} first.`
@@ -598,7 +606,7 @@ export function warningFix(
           ? "receiver"
           : "whole";
     // (beside another type the use does not take, a null check alone leaves the use invalid: the type test of the
-    // value's types the use takes rules out both, else the check in words, #1268 after Codex r4)
+    // value's types the use takes rules out both, else the check in words, #1268)
     const test = besides.every((kind) => fits.includes(kind)) ? NOT_NULL : typeTest(fits);
     const placed = inPlace(test ?? NOT_NULL);
     if (placed !== null) return placed;
@@ -624,7 +632,7 @@ export function warningFix(
   switch (rule.rule) {
     case "selection": {
       // (a check of the collection itself only where reading it again gives the same one; any other is kept first, as
-      // `groups.random` or a call, so the check and the read see one selection, Astra r2; around the read's statement
+      // `groups.random` or a call, so the check and the read see one selection; around the read's statement
       // where it holds there, #1268, the kept value's `let` with it)
       const { collection } = rule;
       const stable = stablePath(collection);
@@ -687,7 +695,7 @@ export function warningFix(
   const test = typeTest(fits);
   // (a store's place below a value part of which fits, a property of what it holds: that property's fix, #1495; but a
   // declared place with no test of what fits keeps the store's own advice, a separate property: the type is the
-  // author's declaration, the lead's ruling on #1730)
+  // author's declaration, #1730)
   if (rule.rule === "store" && kinds.includes("unknown") && !(rule.written && test === null)) {
     const property = propertyFix(rule, site, source, true);
     if (property !== null) return property;
@@ -747,7 +755,7 @@ function memberWarningFix(
   if (speaker && rule.member.startsWith(".")) {
     const name = rule.member.slice(1);
     if (rule.member.endsWith("()"))
-      // (no property named: a speaker has those its script gives it, Codex r4)
+      // (no property named: a speaker has those its script gives it)
       return "A speaker has no methods. Use one of its properties instead.";
     if (rule.use !== "read") return "";
     // (the value to assign is the author's own: no placeholder, #1268; the copy on a line of its own, where the player
@@ -796,7 +804,7 @@ function memberWarningFix(
 }
 
 /** A place the stop names, with its lines: `'tally' (lines 3–9)`, `the top level of 'main.tease' (lines 1–40)`. */
-function placeText(place: WorkPlace, source: MessageSource): string {
+function workPlaceText(place: WorkPlace, source: MessageSource): string {
   const first = source.line(place.lines);
   const last = source.line({
     ...place.lines,
@@ -808,16 +816,15 @@ function placeText(place: WorkPlace, source: MessageSource): string {
 
 /**
  * The stop's warning and its "not checked (budget)" mark (the owner's D4), and the nesting limit's warning in the same
- * form. The warning counts `moved`, the plan's
- * checks the stop moved to the runtime (#2081), not the warnings it deferred, several of which one check at a store may
- * carry; without a count, or with none, it names none.
+ * form. The warning names `count`, the number of the plan's checks the stop moved to the runtime (#2081), not of the
+ * warnings it deferred, several of which one check at a store may carry; without a count, or with none, it names none.
  */
 export function budgetMessage(
   diagnostic: BudgetStop | NotChecked,
   source: MessageSource,
   count: number | null,
 ): string {
-  const place = placeText(diagnostic.place, source);
+  const place = workPlaceText(diagnostic.place, source);
   if (diagnostic.class === "not-checked-budget")
     return `${capitalized(place)} is not checked completely before the script plays, so its checks run while it plays.`;
   const moved =

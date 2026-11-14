@@ -31,7 +31,7 @@ import {
   type Arguments,
   givenBy,
   givenByCall,
-  guards,
+  checkBeforeCoversUse,
   holds,
   inTarget,
   type Landing,
@@ -51,11 +51,11 @@ export type { Landing, MessageSource } from "./messages/site.js";
 export { described, pathPhrase } from "./messages/words.js";
 
 /*
- * The sentences of the coarse core's diagnostics (the port plan's D1–D3): each diagnostic's code is its
- * rule's (D3: one code, both severities where the rule warns), and its message is a first sentence per consumer and
- * obligation, in the source's own text (D2), and the fix the current checker gives (#1195). A warning says what may go
- * wrong, that the Tease then stops at its line, the fix, and a last sentence per context word (§3.4) that says in the
- * author's terms why the value may be of another type; the word itself is never shown. Single quotes for code, no
+ * The sentences of the coarse core's diagnostics: each diagnostic's code is its rule's (one code, both severities where
+ * the rule warns), and its message is a first sentence per consumer and obligation, in the source's own text, and the
+ * fix the current checker gives (#1195). A warning says what may go wrong, that the Tease then stops at its line, the
+ * fix, and a last sentence per context word that says in the author's terms why the value may be of another type; the
+ * word itself is never shown. Single quotes for code, no
  * semicolons, no implementation terms, and "type", never "kind" (`docs/DIAGNOSTICS.md`, "Messages").
  */
 
@@ -121,7 +121,7 @@ export function messageSource(
     return found;
   };
   // what each diagnostic covers for `alone`: its site; a "not checked (budget)" mark's whole region, the stop's
-  // unchecked code, where the checks it moved to the runtime stand unreported (Astra r3); a stop's own warning, which
+  // unchecked code, where the checks it moved to the runtime stand unreported; a stop's own warning, which
   // claims no region, nothing. Each file's in start order, with the furthest end among those before each.
   type Covered = {
     readonly diagnostic: CheckedDiagnostic;
@@ -205,7 +205,7 @@ export function messageSource(
     let at = low - 1;
     while (at !== -1 && !holds(found.statements[at]!.span, use)) at = found.around[at]!;
     const held = at === -1 ? undefined : found.statements[at];
-    return held === undefined || UNGUARDED.has(held.kind) || !guards(held, use, read)
+    return held === undefined || UNGUARDED.has(held.kind) || !checkBeforeCoversUse(held, use, read)
       ? null
       : { file: use.file, start: held.span.start.offset, end: held.span.end.offset };
   };
@@ -247,7 +247,7 @@ export function messageSource(
   // (the declarations, the arguments and `argumentsOf`'s sort and stack are shared setup work, made once per file
   // whatever is asked and uncharged, as the statements' values above are; each landing's search is charged)
   // (a call names its own file's function of that name, else the project's `global function`; a name declared twice
-  // there names none, Codex r1 on #1817)
+  // there names none, #1817)
   let functions:
     | {
         byFile: Map<string, FunctionDeclaration | null>[];
@@ -385,7 +385,7 @@ export function messageSource(
   };
 }
 
-/** The code of a rule (D3): its one code in the registry, an error where proved and a warning where checked. */
+/** The code of a rule: its one code in the registry, an error where proved and a warning where checked. */
 export function codeOf(rule: DiagnosticRule): CoreCode {
   switch (rule.rule) {
     case "store":
@@ -513,16 +513,18 @@ export function coreMessage(
     return [
       requiredSentence(kinds, diagnostic.requiredCheck, source),
       warningFix(
-        rule,
-        text,
-        kinds,
-        fits,
-        [],
-        provenance.detail,
-        provenance.context,
+        {
+          rule,
+          text,
+          kinds,
+          fits,
+          besides: [],
+          detail: provenance.detail,
+          context: provenance.context,
+          site: diagnostic.site,
+          expects: diagnostic.expects,
+        },
         source,
-        diagnostic.site,
-        diagnostic.expects,
         // (its fix is the warning's, whose own reads its program performs where they stand, #1296)
         { ...diagnosed, severity: "warning" },
       ),
@@ -546,27 +548,29 @@ export function coreMessage(
   const sentences = [
     warningSentence(rule, text, kinds, source, context, detail),
     warningFix(
-      rule,
-      text,
-      kinds,
-      diagnostic.fits,
-      diagnostic.besides,
-      detail,
-      context,
+      {
+        rule,
+        text,
+        kinds,
+        fits: diagnostic.fits,
+        besides: diagnostic.besides,
+        detail,
+        context,
+        site: diagnostic.site,
+        expects: diagnostic.expects,
+      },
       source,
-      diagnostic.site,
-      diagnostic.expects,
       diagnosed,
     ),
   ];
   // a warning whose value has no word of its own (an exact value the rule still checks) has no cause; `later`'s first
-  // sentence names the deciding line, and a member's missing property is its first sentence
-  // (a member's missing property is its first sentence, and another rule's at that read repeats the member's warning)
+  // sentence names the deciding line; and a member's missing property is its first sentence, which another rule's
+  // warning at that read repeats
   const missing = context === "missing" && (rule.rule === "member" || detail.direct);
   // (a literal subject has no origin of its own: its warning is its receiver's, `0` in `value.get(0, ...)`)
   const literal = rule.rule !== "member" && isLiteral(text);
   // (a speaker alone: a property store's first sentence says what happens, and a method call's fix that a speaker has
-  // none, which no cause changes; Astra r3, Sol r7)
+  // none, which no cause changes)
   const holder = detail.receiver?.kinds ?? kinds;
   const speaker =
     rule.rule === "member" &&
@@ -604,9 +608,9 @@ const PROPERTY_NAMES: Readonly<Record<string, string>> = {
 /**
  * A name a fix may declare anywhere in a project (#1274): `base`, else `base2`, `base3`, …, the first no identifier of
  * the programs spells (a property's name aside) and `reserved` (the host globals and built-ins) does not hold. One
- * walk of every node, by an explicit worklist (no native call depth, Codex r1), and one selection. Each reserved name,
+ * walk of every node, by an explicit worklist (no native call depth), and one selection. Each reserved name,
  * each syntax node (a file's root among them) and each name tried is charged one `indexSteps` unit to `work` where it
- * is given (Astra r1 and Codex r3 on #1715: the survey grows with the program and its host names). A node's spans and
+ * is given (#1715: the survey grows with the program and its host names). A node's spans and
  * field lists, a bounded constant per node, take no charge of their own.
  */
 export function keptVariableName(
@@ -615,7 +619,6 @@ export function keptVariableName(
   base: string,
   work: WorkLedger | null,
 ): string {
-  // (each reserved name and each file's root, as each node below it, one unit: Codex r3 B1 on #1715)
   const taken = new Set<string>();
   for (const name of reserved) {
     work?.charge("indexSteps");

@@ -159,14 +159,14 @@ export function memberFix(
         : ` Use '${code}'.`;
     }
   }
-  // (each member has its own type, which the read's use may not take: named in words, Codex r4 on #1268)
+  // (each member has its own type, which the read's use may not take: named in words, #1268)
   if (kind === "dict") {
     if (method)
       return name === "add"
         ? " Assign the value to a key of the dict instead."
         : ` Use one of the dict's methods instead: ${either(Object.keys(DICT_METHODS))}.`;
-    // (a key's value is there only where the dict has the key when the script runs, which no fact here proves, Codex
-    // r6: the key in words, for a read and a store)
+    // (a key's value is there only where the dict has the key when the script runs, which no fact here proves: the key
+    // in words, for a read and a store)
     return rule.use === "store"
       ? " To store a value by its key, write the key in brackets."
       : ` Use one of the dict's properties instead: ${either(Object.keys(DICT_PROPERTIES))}.` +
@@ -250,7 +250,7 @@ export function memberFix(
 
 /**
  * An object indexed, which V30 §15 forbids, with the current checker's fix: a dict looks up by a name, and a fixed name
- * written as text is the object's property where the object has it, which no fact here proves (Codex r1): in words,
+ * written as text is the object's property where the object has it, which no fact here proves: in words,
  * naming the receiver where it is a stable path; `text`, the access.
  */
 function objectIndexFix(rule: Extract<DiagnosticRule, { rule: "member" }>, text: string): string {
@@ -263,8 +263,8 @@ function objectIndexFix(rule: Extract<DiagnosticRule, { rule: "member" }>, text:
 
 /**
  * The fix of a value that is not true or false where a condition needs one (#1195's decided text): its advice always,
- * its example only of a stable path (the lead after Astra r3), in place of the value at `at`, where `codeAt` proves it
- * there: every known type of the value one the comparison takes (Codex r4), and true or false where the condition, or
+ * its example only of a stable path, in place of the value at `at`, where `codeAt` proves it
+ * there: every known type of the value one the comparison takes, and true or false where the condition, or
  * the logic operator it is an operand of, takes it.
  */
 export function conditionFix(
@@ -348,7 +348,7 @@ export function keyFix(
 /**
  * How `${...}` shows a value of each kind it cannot show, where one has a fix (#1195's decided texts): code in place of
  * the value at `at` inside its braces, where `codeAt` proves it there (#1268): an object's property that `${...}` shows
- * (the consumer's `property`, whose every type it shows), a set's elements joined where `${...}` shows each (Codex r2);
+ * (the consumer's `property`, whose every type it shows), a set's elements joined where `${...}` shows each;
  * none for an element `${...}` selects from a list, whose text names the list.
  */
 function shownFix(
@@ -542,7 +542,7 @@ function mixedChoiceSentence(
 /**
  * A list `+` that mixes types (#1272): a written union the joined list's elements need, from what they hold at each list
  * level (`levels`): every kind, `null` and numbers among them, so the type holds every value the joined lists bring
- * (Codex r2–r4 on #1310); one union inside the lists, an optional list where a level holds `null` beside lists (V30
+ * (#1310); one union inside the lists, an optional list where a level holds `null` beside lists (V30
  * §13). Where the joined list is a variable's start value, that declaration with the type and its own start value, where
  * `codeAt` proves it there (`declaration`, #1268); else the type in words (a form at its position);
  * values of one type in words where no written type holds them.
@@ -576,7 +576,7 @@ function mixedJoinFix(
  * Each code form stands in place of the operation the diagnostic sits on (`at`), its value converted where it is a
  * variable or a path and the other operand one or a literal, and is offered where `codeAt` proves it there: the
  * operands of the kinds its conversions take, and its result, which the failed operation never gave, one the
- * operation's place takes (`expects`, Codex r6); an operand's diagnostic proves nothing of the operation's place. Else
+ * operation's place takes (`expects`); an operand's diagnostic proves nothing of the operation's place. Else
  * the conversion in words.
  */
 export function temporalFix(
@@ -706,7 +706,7 @@ export function temporalFix(
 /**
  * The current checker's fix of '+' between a list or a set and a value that is not one (V30 §4): a set's union or copy
  * into a list, in words; a range's numbers as a list; else the value in a list for a new one, or added to the list
- * itself on a line of its own (an `add` gives no list, Astra r1). Each code form stands in place of the diagnosed site,
+ * itself on a line of its own (an `add` gives no list). Each code form stands in place of the diagnosed site,
  * the operation or the one operand it names, writes the list where it is a stable path and the value where its code is
  * on one line, and is offered where `codeAt` proves it there: the list's elements' type takes the value (`elements`),
  * and the new list fits what the site takes (`expects`); else the fix in words. Each side's type: the
@@ -962,7 +962,7 @@ export function joined(
   if (rule.pair.length === 2 && rule.pair.includes("string")) {
     const index = rule.pair.findIndex((kind) => kind !== "string");
     const kind = rule.pair[index];
-    return index < 0 || kind === undefined || !SHOWN_KINDS.has(kind) || kind === "null"
+    return index < 0 || kind === undefined || !TEXT_JOIN_KINDS.has(kind) || kind === "null"
       ? null
       : { other: known([kind]), operand: texts[index] ?? null };
   }
@@ -974,7 +974,7 @@ export function joined(
     : rule.domain.includes("string")
       ? own
       : [];
-  if (other.length === 0 || other.some((kind) => !SHOWN_KINDS.has(kind) || kind === "null"))
+  if (other.length === 0 || other.some((kind) => !TEXT_JOIN_KINDS.has(kind) || kind === "null"))
     return null;
   return {
     other,
@@ -986,8 +986,8 @@ export function joined(
  * The text-join fix (#1195): the operand that is not text, in `${...}` as the source writes it (the owner's review),
  * where `codeAt` proves the text it gives in place of the diagnosed site `at` (the operation, `whole`, or the operand
  * an operand's diagnostic sits on): a value of a kind `${...}` shows, and text, which the failed operation never gave,
- * one the place takes (`expects`, Codex r6); else the sentence alone. The chain around it is never rebuilt: a rebuilt chain
- * changed what some chains say (S8d's reviews r3 and r4).
+ * one the place takes (`expects`); else the sentence alone. The chain around it is never rebuilt: a rebuilt chain
+ * changed what some chains say.
  */
 export function joinFix(
   join: { readonly other: readonly ItemTag[]; readonly operand: string | null },
@@ -1018,8 +1018,8 @@ export function joinFix(
     : `Put the value in the text as '\${${join.operand!}}' instead.`;
 }
 
-/** The kinds `${...}` shows as text. */
-const SHOWN_KINDS: ReadonlySet<ItemTag> = new Set([
+/** The kinds other than text that `${...}` shows as text, not in a notation (as a script reference or a regex is). */
+const TEXT_JOIN_KINDS: ReadonlySet<ItemTag> = new Set([
   "integer",
   "number",
   "boolean",

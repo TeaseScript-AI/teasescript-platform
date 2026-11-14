@@ -29,9 +29,9 @@ import { Retained, retainedModule } from "../retained/retained.js";
 // How a message names the source, and the syntax around a site it reads: checks that hold, parts, acts, landings.
 
 /**
- * How a message names the source and what it knows of the analysis: the text at a site, the line it starts on
- * (1-based), its column (0-based), the statement a check may hold, and whether an author's text lies clear of the
- * analysis's other diagnostics, the fact `codeAt` reads of every form that holds it.
+ * What a message reads of the source and of the analysis. Its one implementation is `messageSource` (`messages.ts`),
+ * which imports the sentence modules that take this interface; so it is declared here, beside the syntax its members
+ * read.
  */
 export interface MessageSource {
   readonly text: (site: SourceSite) => string;
@@ -40,7 +40,7 @@ export interface MessageSource {
   /**
    * The statement a check may hold, as in `if n != null { say n + 1 }`, for the use at `use` of the value at `read`
    * inside it: the innermost statement around the use that is one of a block's or a file's statements, on one line,
-   * where a check before it still holds at the use (`evaluation`); else `null`.
+   * where a check before it still holds at the use (`checkBeforeCoversUse`); else `null`.
    */
   readonly statement: (use: SourceSite, read: SourceSite) => SourceSite | null;
   /** Whether a site is the place an assignment on its line stores into, or a receiver on its path (`inTarget`). */
@@ -61,7 +61,7 @@ export interface MessageSource {
   /**
    * Whether no diagnostic of the analysis but `self` lies in the author's text at `held`: none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
-   * runtime stand unreported (Astra r3; a stop's own warning claims no region); apart from one at `self`'s site whose
+   * runtime stand unreported (a stop's own warning claims no region); apart from one at `self`'s site whose
    * every type `rulesOut` rules out (beside a null check a type test, beside a form's value the replaced value's own).
    * `codeAt`'s "no other diagnostic" fact.
    */
@@ -180,14 +180,18 @@ function evaluation(statement: Statement): Evaluation {
 }
 
 /**
- * Whether a check before `statement` still holds at the use at `use` of the value at `read` (#1268, Codex r4 and r5):
+ * Whether a check placed right before `statement` still holds at the use at `use` of the value at `read` (#1268):
  * the statement evaluates the use whenever it runs (not after `and`, `or` or `otherwise`, nor in a `default:`), and
  * nothing it evaluates before the use, apart from the value read, may change or draw anything (`effect-facts.ts`), so
  * the check sees what the use sees and a value kept before it is the one the use would read. A value read that may
  * itself change or draw, the read included, is kept before the statement only where it is the first thing evaluated, so
  * that no draw or read before it, a text's placeholder's included, moves behind it.
  */
-export function guards(statement: Statement, use: SourceSite, read: SourceSite): boolean {
+export function checkBeforeCoversUse(
+  statement: Statement,
+  use: SourceSite,
+  read: SourceSite,
+): boolean {
   const { lazy, first, acting, at } = evaluation(statement);
   const used = at.get(spanKey(use.start, use.end));
   const value = at.get(spanKey(read.start, read.end));
@@ -293,7 +297,7 @@ export interface Landing {
   readonly steps: readonly LandingStep[];
   /**
    * A storing method's argument (`add`'s `element`, `addAll`'s `elements`): a landing that does not reach the place,
-   * or a receiver no name reaches (no `root`), proves no level of it (`wholeCheck`, Codex r3 on #1817).
+   * or a receiver no name reaches (no `root`), proves no level of it (`wholeCheck`, #1817).
    */
   readonly method?: "element" | "elements";
 }
@@ -307,7 +311,6 @@ export interface Given extends Landing {
 function targetSteps(target: Expression): Landing | null {
   const steps: LandingStep[] = [];
   let at = target;
-  // (through parentheses too, Codex r1 on #1817: `(a)[0] = …`)
   for (;;) {
     if (at.kind === "parenthesizedExpression") at = at.expression;
     else if (at.kind === "propertyAccessExpression" || at.kind === "indexExpression") {
@@ -320,11 +323,11 @@ function targetSteps(target: Expression): Landing | null {
 
 /**
  * The values a call gives (#1763): each argument, positional by its place, named by its name, to the parameter of the
- * function the callee names (`resolve`); and the value a list's or a set's storing method stores (`decides`, Astra r1
- * on #1817): `add`'s, a member of its receiver (`{ member: true }`, its element), `addAll`'s, its receiver whole, where
+ * function the callee names (`resolve`); and the value a list's or a set's storing method stores (`decides`,
+ * #1817): `add`'s, a member of its receiver (`{ member: true }`, its element), `addAll`'s, its receiver whole, where
  * the receiver is a variable's place (`targetSteps`), else no name (`root` empty); each marked by its method. A callee
- * is read through parentheses (`(a.add)(x)`, Codex r3 on #1817). A method is never the user function of its name.
- * Appended to `out`, so a source's many arguments are never spread into one call (Codex r1 on #1817).
+ * is read through parentheses (`(a.add)(x)`, #1817). A method is never the user function of its name.
+ * Appended to `out`, so a source's many arguments are never spread into one call (#1817).
  */
 export function givenByCall(
   call: CallExpression,
@@ -363,7 +366,7 @@ export function givenByCall(
   });
 }
 
-/** Each declaration's parameters by name, made on its first named argument (Codex r1 on #1817: no search per one). */
+/** Each declaration's parameters by name (#1817: no search per one). */
 const PARAMETERS = retainedModule<FunctionDeclaration, ReadonlyMap<string, FunctionParameter>>(
   "site.PARAMETERS",
   "weakMap",
@@ -453,7 +456,7 @@ function lastStarting<T>(
 }
 
 /**
- * Where a message's walk of the source counts its work (#1730, Astra r1 B1, Codex r4 B1): one unit per item a search
+ * Where a message's walk of the source counts its work (#1730): one unit per item a search
  * compares, per expression the walk descends through, per parenthesis a selection's list or an owner's step unwraps,
  * per property an owner's index holds and per step it takes.
  */
@@ -465,7 +468,7 @@ const NO_CHARGE: Charge = () => {};
  * The value at `site` among the values statements give (in their start order), with the statement's variable and the
  * steps down to it: in the last value that starts at or before it, each list or set literal's element, object literal's
  * property and dict literal's value down to it (#1827), through parentheses, a list or set literal's selected element
- * and either operand of `otherwise`, each found by its start (#1730 Codex r1 B1: no warning scans the values or a
+ * and either operand of `otherwise`, each found by its start (#1730: no warning scans the values or a
  * literal's parts before it); `null` inside any other expression (#2255), in a dict literal's key, or outside that value
  * (a site after a statement in a handler block that a value holds).
  */

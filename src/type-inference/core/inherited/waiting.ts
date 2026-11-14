@@ -23,7 +23,6 @@ function* inheritedSteps(
   asked: Rest,
   own?: { value: boolean },
 ): Inheriting<TypeTerm | null> {
-  // (a cursor's span read by its paths' ids: its key a cursor, its prefix and rest views, G3 stage 1)
   const { contract } = admission.pass;
   const path = restRef(contract, asked);
   if (path.length > admission.reach) {
@@ -55,7 +54,6 @@ export function* inheritedInto(
 ): Inheriting<TypeTerm | null> {
   // (past the deepest path a written type reaches, the place's path there is what it waits on, `inheritedAt`)
   const { contract } = admission.pass;
-  // (the decision waiting in its identity, as the cycles hold it: G3 stage 1)
   const into = asking === null ? null : canonicalKey(contract, asking);
   const path = restRef(contract, asked);
   const source = keyAtRef(
@@ -75,20 +73,18 @@ export function* inheritedInto(
 
 /** Whether two decisions wait on each other through copies (`cycles`). */
 function cut(admission: Admission, a: CanonicalKey, b: CanonicalKey): boolean {
-  settledCycles(admission);
-  return (
-    admission.cycles.has(a) &&
-    admission.cycles.has(b) &&
-    rootOf(admission, a) === rootOf(admission, b)
-  );
+  settleCyclesIfForgotten(admission);
+  const { cycles } = admission.pass.receivingDomain;
+  return cycles.has(a) && cycles.has(b) && rootOf(admission, a) === rootOf(admission, b);
 }
 
 function rootOf(admission: Admission, key: CanonicalKey): CanonicalKey {
+  const { cycles } = admission.pass.receivingDomain;
   let root = key;
-  while (admission.cycles.get(root) !== root) root = admission.cycles.get(root)!;
+  while (cycles.get(root) !== root) root = cycles.get(root)!;
   for (let at = key; at !== root;) {
-    const parent = admission.cycles.get(at)!;
-    admission.cycles.set(at, root);
+    const parent = cycles.get(at)!;
+    cycles.set(at, root);
     at = parent;
   }
   return root;
@@ -116,28 +112,31 @@ export function settleCycles(admission: Admission): void {
   receivingDomain.joins = receivingDomain.joins.filter(
     ({ reader }) => solver.answer(reader) !== undefined,
   );
-  admission.cycles.clear();
-  admission.cycleSizes.clear();
+  receivingDomain.cycles.clear();
+  receivingDomain.cycleSizes.clear();
   for (const { a, b } of receivingDomain.joins) link(admission, a, b);
   receivingDomain.joinsSettled = solver.forgets;
 }
 
-/** `settleCycles` where the solver forgot answers since `cycles` was last made, between two runs. */
-export function settledCycles(admission: Admission): void {
+/**
+ * `settleCycles` between two solver runs, where the solver forgot answers since `cycles` was last made; else nothing.
+ */
+export function settleCyclesIfForgotten(admission: Admission): void {
   const { receivingDomain, solver } = admission.pass;
   if (!solver.running && solver.forgets !== receivingDomain.joinsSettled) settleCycles(admission);
 }
 
 function link(admission: Admission, a: CanonicalKey, b: CanonicalKey): void {
+  const { cycles, cycleSizes } = admission.pass.receivingDomain;
   for (const key of [a, b])
-    if (!admission.cycles.has(key)) {
-      admission.cycles.set(key, key);
-      admission.cycleSizes.set(key, 1);
+    if (!cycles.has(key)) {
+      cycles.set(key, key);
+      cycleSizes.set(key, 1);
     }
   const x = rootOf(admission, a);
   const y = rootOf(admission, b);
   if (x === y) return;
-  admission.cycles.set(x, y);
-  admission.cycleSizes.set(y, admission.cycleSizes.get(y)! + admission.cycleSizes.get(x)!);
-  admission.cycleSizes.delete(x);
+  cycles.set(x, y);
+  cycleSizes.set(y, cycleSizes.get(y)! + cycleSizes.get(x)!);
+  cycleSizes.delete(x);
 }
