@@ -91,10 +91,6 @@ const CASES: readonly [string, Files][] = [
     ),
   ],
   [
-    "a load whose default reads a written parameter",
-    one('function f(n: integer) {\n  let x = load("x", default: n)\n  say x\n}\nf(1)\nexit\n'),
-  ],
-  [
     "a store into the file's variable from a function",
     one('let top = "a"\nfunction f(v: string) {\n  top = v\n}\nf(hostValue)\nsay top\nexit\n'),
   ],
@@ -384,16 +380,54 @@ test("a parse or a load stored by a function reads its own scope's written type,
   }
 });
 
+test("a parse or a load whose default reads a written parameter takes the parameter's written type, as the route does", () => {
+  // (today's plan holds no checked store for it, at a file's top level too; 4a-1's route holds the one derived here)
+  for (const [call, read] of [
+    ['load("x", default: n)', "load"],
+    ["fromJson(hostValue, default: n, files: false)", "expected"],
+  ] as const) {
+    const source = `function f(n: integer) {\n  let x = ${call}\n  say x\n}\nf(1)\nf(2)\nexit\n`;
+    const files = one(source);
+    const request = coreRequest(files);
+    assert.ok(request !== null, source);
+    const syntax = syntaxOf(source);
+    const derived = {
+      path: "main.tease",
+      syntax,
+      ...derive(syntax, compactAnalysis(request), [syntax]),
+    };
+    const [at, end] = [source.indexOf(call), source.indexOf(call) + call.length];
+    assert.deepEqual(
+      derivedStores(derived.stores),
+      [`x ${source.indexOf("let x")}:${end} ${at}:${end} integer`],
+      source,
+    );
+    assert.deepEqual(
+      derivedContent(derived.content, source),
+      [`${read} ${at}:${end} integer${read === "load" ? " repair=false" : ""}`],
+      source,
+    );
+    const today = compileProject(files, OPTIONS);
+    assert.ok(today.plan !== null, source);
+    for (const inputs of assignments(["hostValue"]))
+      assert.deepEqual(
+        evaluateProject([derived], inputs).run,
+        runGlobals(today.plan, inputs),
+        `${source} with ${JSON.stringify(inputs)}`,
+      );
+  }
+});
+
 // The order of a call, enumerated (V30 §10, §11; `src/runtime/instructions/functions.ts`): every argument is evaluated in
 // source order before any is checked, the supplied ones are checked before an omitted default runs, and the defaults
 // run in parameter order, each checked as it runs. `f` takes three written parameters, each defaulting to a marker that
 // says its own number; every subset of them is supplied, by name in every order, each argument a marker with its own
 // number; and each call runs as it is and with one chosen parameter's argument or default failing its check (`pick`
-// gives text when the host value is `null`). The oracle's whole run, what it says and where it fails, equals the plan's
-// for every case and host value, so a run in any other order differs.
+// returns the host value, untyped). The oracle's whole run, what it says and where it fails, equals the plan's for
+// every case and host value, so a run in any other order differs.
 const ORDER_MARKERS =
   "function mark(x: integer): integer {\n  say x\n  return x\n}\n" +
-  'function pick(x: integer): integer | string {\n  say x\n  if hostValue == null {\n    return "no"\n  }\n  return x\n}\n';
+  "function pick(x: integer) {\n  say x\n  return hostValue\n}\n";
 const PARAMETERS: readonly string[] = ["a", "b", "c"];
 const orders = (names: readonly string[]): string[][] =>
   names.length === 0
