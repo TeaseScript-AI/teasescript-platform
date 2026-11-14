@@ -14,7 +14,7 @@ This note retains adjacent owner-selected work that still needs a detailed accep
 ## Scheduled events and deadlines
 
 Specification [§36](../specifications/accepted-syntaxes-v30.md#36-scheduling) preserves the distinction between
-scene-time timers and absolute events. Final event syntax, execution authority, recovery, and Player presentation
+scene-time timers and absolute events. Final event syntax, execution authority, recovery, and Playroom presentation
 need a joint follow-up design.
 
 Owner direction for that design:
