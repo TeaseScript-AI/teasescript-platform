@@ -12,15 +12,11 @@ import { typedCallKinds, landingIndex, leafIngress, typedIngress } from "./ingre
 import { elementsBelow } from "./structure.js";
 import { keptKeyAt } from "../contract/key-ids.js";
 
-// The boundary checks of external data (at ingress stores, at reads, at typed `load` and `fromJson` calls), and the
-// inventory of the derivations that create an obligation.
-
 /**
- * The resolution of a provenance node, once per node and pass: each leaf's ingress sends its store's
- * boundary, or its own read's check, once; the answer is whether some ingress below the node no walk reached, whose
- * consumer checks it. The nodes of a cycle through a cell reach the same ingresses, so they are answered
- * together once their component closes (Tarjan's), each node entered once (#1364: entered again wherever it was met,
- * a cycle's nodes were walked once per path through them).
+ * The resolution of a provenance node, once per node and pass: each leaf's ingress sends its store's boundary, or its
+ * own read's check, once; the answer is whether some ingress below the node no walk reached, whose consumer checks it.
+ * The nodes of a cycle through a cell reach the same ingresses, so they are answered together once their component
+ * closes (Tarjan's), each node entered once (#1364).
  */
 function resolve(admission: Admission, root: IngressNode): boolean {
   const known = admission.resolved.get(root);
@@ -193,7 +189,6 @@ function unstoredTypedCallKinds(
   c: CorePass["program"]["constraints"][number],
 ): { readonly label: string; readonly tags: readonly ItemTag[] } | null {
   if (!("result" in c) || !typedIngress(c)) return null;
-  // (a typed ingress no store brings, an own read or unreached, is checked where it runs)
   const found = landingIndex(admission).byIngress.get(c.result);
   return found === undefined || found.stores.size === 0 ? typedCallKinds(admission, c) : null;
 }
@@ -201,9 +196,9 @@ function unstoredTypedCallKinds(
 /**
  * The checks of loads and `fromJson` calls that no store brings in, where they run. `skip`, after a stop
  * before admission settled: a call whose records a mark stands for (inside a marked store's value), so the landing
- * index `publish` made there, of the stores into written places alone, answers for the rest. Returns
- * the calls whose expected type a stop left open (`typedCallsOpen`), each with its label, for the consumers to mark: no
- * obligation is declined for a missing answer.
+ * index `publish` made there, of the stores into written places alone, answers for the rest. Returns the calls whose
+ * expected type a stop left open (`typedCallsOpen`), each with its label: no obligation is declined for a missing
+ * answer.
  */
 export function ingressStores(
   admission: Admission,
@@ -378,11 +373,10 @@ function boundaryCheck(
 
 /**
  * Every derivation of admission's that creates an obligation, with its exits after a stop before admission settled:
- * where the fresh pass runs it (`freshStores`, or its walk, which finishes every
- * unit), what it publishes there, what it leaves undecided with a mark, and what it declines and why. A store check
- * comes from a decision (`decide`), which the consumers check. The lint check `check-obligation-inventory` reads the
- * syntax tree: every method here that creates one, and every `Admission` method a consumer method that creates one
- * calls, is an entry here or a read it lists with why.
+ * where the fresh pass runs it (`freshStores`, or its walk, which finishes every unit), what it publishes there, what
+ * it leaves undecided with a mark, and what it declines and why. Every method here that creates an obligation, and
+ * every `Admission` method that a consumer method creating one calls, is an entry here or a read it lists with why
+ * (`check-obligation-inventory`).
  *
  * @public (read by that check from the syntax tree, not imported)
  */

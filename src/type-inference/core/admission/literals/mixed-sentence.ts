@@ -1,5 +1,3 @@
-// A mixed error's sentence: the steps each side shows, and whether each layer of its path may hold null, a dict or a
-// set; and `joinDecider`, the decider of a join's operand at a path (`joinElements`).
 import type { PlaceId } from "../../../graph.js";
 import type { Admission } from "../../admission.js";
 import { joinSteps, keepText, keptSlice, keptText, pathText } from "../../budget.js";
@@ -122,9 +120,8 @@ export function joinDecider(
  * 5. another read or a call's result, by its place's admitted type where admission decides it;
  * 6. any other value (an undecided place's read, an operation's own result), by its own items.
  * Cases 2 and 3 compose: `layersOf` follows them, every layer of a path in one descent. This function answers the
- * others, a value at its own level or one neither a literal nor a carrier holds. An `otherwise`'s operand may be null as
- * `operandNull` reads it. A join has no case of its own: the carrier table gives only its admitted operands (`joined`),
- * so a rejected operand brings nothing (ADR 0021 1.1).
+ * others, a value at its own level or one neither a literal nor a carrier holds. A join has no case of its own: the
+ * carrier table gives only its admitted operands (`joined`), so a rejected operand brings nothing (ADR 0021 1.1).
  */
 function mayHoldNull(
   admission: Admission,
