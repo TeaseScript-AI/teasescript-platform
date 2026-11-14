@@ -90,8 +90,9 @@ test("#2763's variants are cut one level below what enters them", () => {
     ["let a = []\nrepeat 3 {\n  a = [a]\n}\nlet b = a + a\n", "b", null],
     // (an identity function's call is its argument, #2493)
     ["function f(d) {\n  return d\n}\nlet a = [f([])]\na = a + [f(a)]\n", "a", 2],
-    // (a function that calls itself before every return never returns: no route into its result)
-    ["function g(x) {\n  return x + [g(x)]\n}\nlet a = g([[]])\n", "g.result", null],
+    // (a function that calls itself before every return never returns: its return still counts, as the contract counts
+    // code that never runs, and the analysis knows no value there for the cut to hide)
+    ["function g(x) {\n  return x + [g(x)]\n}\nlet a = g([[]])\n", "g.result", 1],
     [
       "function g(x, n) {\n  if n == 0 {\n    return x\n  }\n  return x + [g(x, n - 1)]\n}\nlet a = g([[]], 2)\n",
       "g.result",
@@ -149,12 +150,27 @@ test("a choice's answer passes no level on: its options never close a cycle", ()
   );
 });
 
+/** A function whose result holds its argument's loop values, each wrapped once. */
+const FILL =
+  "function fill(d) {\n  let out = []\n  for value in d {\n    out = [value]\n  }\n  return out\n}\n";
+
 test("a value whose kind declares its elements enters a cycle with that level", () => {
   const wrap = "function wrap(x) {\n  return [x]\n}\n";
-  // a range's whole numbers, copied into a list, and a dict's keys, its text: M = 1
-  for (const seed of ["(1..3).toList()", "dict{}.keys"])
+  // a range's whole numbers, copied into a list, written or not, and a dict's keys, its text: M = 1
+  const seeds = [
+    "let a0 = (1..3).toList()",
+    "let a0 = dict{}.keys",
+    "let r: range = 1..3\nlet a0 = r.toList()",
+    "function numbers(r: range) {\n  return r.toList()\n}\nlet a0 = numbers(1..3)",
+    "function span(n): range {\n  return 1..n\n}\nlet a0 = span(3).toList()",
+    "let rs: range[] = [1..3]\nlet a0 = rs[0].toList()",
+    // a loop's value, wrapped once: a range's number, a dict's key (a loop over an empty literal never runs)
+    "let r: range = 1..3\nlet a0 = []\nfor value in r {\n  a0 = [value]\n}",
+    FILL + "let a0 = fill(dict{})",
+  ];
+  for (const seed of seeds)
     assert.equal(
-      indexOf(`${wrap}let a0 = ${seed}\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n`).cut("wrap.x"),
+      indexOf(`${wrap}${seed}\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n`).cut("wrap.x"),
       2,
       seed,
     );

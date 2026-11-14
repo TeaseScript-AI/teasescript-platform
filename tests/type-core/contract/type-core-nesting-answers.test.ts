@@ -60,7 +60,8 @@ test("a value nested below its cycle's cut depth is the cut's unknown, and known
 test("a cycle's entering level counts a kind's declared elements and an upstream cut, alike in every order and sharing", () => {
   const wrap = "function wrap(x) {\n  return [x]\n}\n";
   const cases: readonly (readonly [string, string, string, string])[] = [
-    // (a range copied into a list, a dict's keys: `wrap.x` is cut at 2, so `a1` is known to its second element level)
+    // (a range copied into a list, written or not, a dict's keys, a loop's value: `wrap.x` is cut at 2, so `a1` is
+    // known to its second element level)
     [
       `${wrap}let a0 = (1..3).toList()\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n`,
       "a1",
@@ -69,6 +70,19 @@ test("a cycle's entering level counts a kind's declared elements and an upstream
     ],
     [
       `${wrap}let a0 = dict{}.keys\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n`,
+      "a1",
+      "string",
+      "element.element",
+    ],
+    [
+      `${wrap}let r: range = 1..3\nlet a0 = r.toList()\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n`,
+      "a1",
+      "integer",
+      "element.element",
+    ],
+    [
+      `${wrap}function fill(d) {\n  let out = []\n  for value in d {\n    out = [value]\n  }\n  return out\n}\n` +
+        "let a0 = fill(dict{})\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n",
       "a1",
       "string",
       "element.element",
