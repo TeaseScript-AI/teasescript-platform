@@ -39,7 +39,7 @@ import {
 } from "../helpers/player/worker-topology.js";
 
 /*
- * How the session's end settles an answer under way (the owner's decisions of 2026-11-11/12, #2430): by the answer's stage
+ * How the session's end settles an answer under way (PLAYER-UI "Composer and foreground interactions"): by the answer's stage
  * at the event. Never posted, a stop or a lost connection undoes it by its origin, without a notice; posted, a stop
  * waits for the final publication, which releases it when it no longer presents the action and undoes it otherwise,
  * and a lost connection undoes it at once without sending it again. A Start of another chat and an unmount drop it,
