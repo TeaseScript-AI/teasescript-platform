@@ -15,7 +15,9 @@ import { type HostOperation, Play, type PlayEnding } from "./generated-compariso
  * At each read: the engine's `"global"` must be a global to `planNames`; a scope the engine finds must carry the label
  * of the very variable `planNames` names, and be labelled at all; a name no scope or global holds (a host value not
  * given, the contextual `speaker`) must be a global to `planNames`, which generated code reads through the runtime.
- * One scope variable labelled with two static variables is a mismatch too. Each mismatch names a defect of the analysis.
+ * One scope variable labelled with two static variables is a mismatch too, as is a static variable declared by two
+ * instructions (two parameter bindings excepted), which would merge two variables the engine keeps apart without any
+ * read telling them apart. Each mismatch names a defect of the analysis.
  */
 
 export interface NameCheck {
@@ -91,6 +93,20 @@ export function checkNamesAgainstEngine(
       for (const variable of names.declaredAt(index)) label(index, variable.name, variable.id);
     },
   };
+  // One variable per declaration: a parameter is bound where it is supplied or where its default is; any other
+  // variable by one instruction, which may run many times.
+  const declarers = new Map<Variable, number[]>();
+  for (let index = 0; index < plan.instructions.length; index += 1)
+    for (const variable of names.declaredAt(index)) {
+      const list = declarers.get(variable) ?? [];
+      list.push(index);
+      declarers.set(variable, list);
+    }
+  for (const [variable, list] of declarers)
+    if (list.length > (variable.kind === "parameter" ? 2 : 1))
+      mismatches.push(
+        `v${variable.id} '${variable.name}' is declared by instructions ${list.join(", ")}`,
+      );
   const host = new PlayHost();
   const play = new Play(session, host, "first", { answers, sceneTimeMs: 6 * 60 * 60 * 1000 });
   let operation: HostOperation = { kind: "run" };

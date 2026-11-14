@@ -49,6 +49,9 @@ const PROGRAMS: readonly Readonly<Record<string, string>>[] = [
     "speaker guide {",
     '    firstName: "Ann"',
     "}",
+    "for k in [1] {",
+    "    let q = k",
+    "}",
     "let base = 10",
     "function add(a: integer, b: integer = base): integer {",
     "    let c = a + b + level",
@@ -66,7 +69,8 @@ const PROGRAMS: readonly Readonly<Record<string, string>>[] = [
     "let y = add(1, 2)",
     "let z = twice(x)",
     "speaker guide",
-    'say as guide "${x} ${y} ${z}", instant',
+    "let biggest = max(x, y)",
+    'say as guide "${x} ${y} ${z} ${biggest}", instant',
     "exit",
   ]),
   // Loops: each round's own variables, `for key, value`, `break` and `continue`, and sibling scopes of one name.
@@ -105,6 +109,8 @@ const PROGRAMS: readonly Readonly<Record<string, string>>[] = [
     "    let a = 2",
     '    say "${a}", instant',
     "}",
+    "let a = 3",
+    'say "${a}", instant',
     "exit",
   ]),
   // Blocks: the variables they share with the code that creates them, a block in a block, and their own `let`.
@@ -207,6 +213,29 @@ test("a block reads the variables it shares as its creator's, and a function its
   });
 });
 
+test("an instruction reads an assignment's target, a speaker and what its block shares, not a builtin's name", () => {
+  const loops = compiled(PROGRAMS[1]!);
+  assert.equal(
+    readOf(loops, PROGRAMS[1]!, "main.tease", "total = r + 1", "total").kind,
+    "variable",
+  );
+  const functions = compiled(PROGRAMS[0]!);
+  assert.deepEqual(readOf(functions, PROGRAMS[0]!, "main.tease", 'say as guide "', "guide"), {
+    kind: "global",
+    name: "guide",
+  });
+  const names = planNames(functions);
+  const call = functions.instructions.findIndex(
+    (instruction) => instruction.kind === "declareBinding" && instruction.name === "biggest",
+  );
+  assert.deepEqual([...names.readsAt(call).keys()].sort(), ["x", "y"]);
+  const blocks = compiled(PROGRAMS[2]!);
+  const button = blocks.instructions.findIndex(
+    (instruction) => instruction.kind === "showPermanentButton",
+  );
+  assert.deepEqual([...planNames(blocks).readsAt(button).keys()].sort(), ["count", "n"]);
+});
+
 test("the engine check reports a name planNames gives the wrong variable", () => {
   const plan = compiled(PROGRAMS[1]!);
   const names = planNames(plan);
@@ -240,4 +269,23 @@ test("the engine check reports a name planNames gives the wrong variable", () =>
       ),
   };
   assert.match(checkNamesAgainstEngine(plan, asGlobal).mismatches[0]!, /not a global/u);
+  // The two sibling `let a` merged into one variable: every read still finds it, so only the declarations tell.
+  const [first, second] = plan.instructions.flatMap((instruction, index) =>
+    instruction.kind === "declareBinding" && instruction.name === "a" ? [index] : [],
+  );
+  const firstA = names.declaredAt(first!)[0]!;
+  const secondA = names.declaredAt(second!)[0]!;
+  const merge = (target: NameTarget): NameTarget =>
+    target.kind === "variable" && target.variable === secondA
+      ? { kind: "variable", variable: firstA }
+      : target;
+  const merged: PlanNames = {
+    ...names,
+    readsAt: (index) =>
+      new Map([...names.readsAt(index)].map(([name, target]) => [name, merge(target)])),
+    declaredAt: (index) => (index === second ? [firstA] : names.declaredAt(index)),
+  };
+  assert.deepEqual(checkNamesAgainstEngine(plan, merged).mismatches, [
+    `v${firstA.id} 'a' is declared by instructions ${first}, ${second}`,
+  ]);
 });
