@@ -8,9 +8,7 @@ import type {
   SerializableRuntimeValue,
 } from "../values/serializable-values.js";
 import { readPreparedReference } from "../scopes/prepared-references.js";
-import { quotedText } from "../values/value-text.js";
-import { messageText } from "../values/text-length.js";
-import { loweredOperand } from "./lowered-operands.js";
+import { planLabel } from "../../plan/operand-labels.js";
 import type { RuntimeTemporarySnapshot } from "../snapshot/state.js";
 import type { Evaluator } from "../evaluator.js";
 import { copySpan } from "../../plan/source-location.js";
@@ -86,23 +84,3 @@ export function readTemporary(
   return temporary.value;
 }
 
-/**
- * The source spelling of a variable, property path, or text literal plan, also one that the lowering kept in a
- * temporary of `program`, or `null` for anything else.
- */
-export function planLabel(plan: ExpressionPlan, program: InstructionPlan): string | null {
-  const names: string[] = [];
-  let current = loweredOperand(program, plan);
-  for (;;) {
-    if (current.kind === "group") current = current.expression;
-    else if (current.kind === "property") {
-      names.push(current.name);
-      current = current.object;
-    } else break;
-  }
-  if (current.kind === "literal" && typeof current.value === "string" && names.length === 0)
-    return quotedText(messageText(current.value));
-  if (current.kind !== "identifier") return null;
-  names.push(current.name);
-  return names.reverse().join(".");
-}

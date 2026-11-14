@@ -190,7 +190,6 @@ import {
 } from "./evaluation/speakers.js";
 import {
   binary,
-  operandLabel,
   notNumber,
   notNumberKind,
   notBoolean,
@@ -198,6 +197,7 @@ import {
   operandText,
 } from "./evaluation/operators.js";
 import { findBindingLocation } from "./evaluation/bindings.js";
+import { operandLabel } from "../plan/operand-labels.js";
 import { copySpan } from "../plan/source-location.js";
 
 export interface RuntimeCapabilityCall {

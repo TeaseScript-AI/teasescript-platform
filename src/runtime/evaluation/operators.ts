@@ -12,7 +12,7 @@ import {
 import { internalFault, RuntimeFault } from "../errors.js";
 import { joinedValue } from "../values/pure-operations.js";
 import { logicalOperandRule, notNumberFix, orderRule } from "../../operand-rules.js";
-import { loweredOperand } from "./lowered-operands.js";
+import { loweredOperand, operandLabel } from "../../plan/operand-labels.js";
 import {
   addDurations,
   compareDurations,
@@ -48,7 +48,7 @@ import {
   valueKindOf,
   type OrderedFamily,
 } from "../../value-kinds.js";
-import { type SourceSpan, fault, planLabel } from "./support.js";
+import { type SourceSpan, fault } from "./support.js";
 import type { Evaluator } from "../evaluator.js";
 
 // Binary operators: arithmetic, comparison, and duration operands.
@@ -191,18 +191,6 @@ function durationBinary(
     `'${operator}' cannot combine ${kindAndValue(left)} and ${kindAndValue(right)}. Add or subtract two durations, or multiply or divide a duration by a number.`,
     span,
   );
-}
-
-/**
- * How the source spells an arithmetic operand: a variable, a property path, or a number, or `null` for anything else. An
- * operand that the lowering kept in a temporary is spelled as written.
- */
-export function operandLabel(plan: ExpressionPlan, program: InstructionPlan): string | null {
-  let current = loweredOperand(program, plan);
-  while (current.kind === "group") current = current.expression;
-  if (current.kind === "literal")
-    return typeof current.value === "number" ? String(current.value) : null;
-  return planLabel(current, program);
 }
 
 /** How the source spells `left operator right`, when it spells both operands, or `null`. */
