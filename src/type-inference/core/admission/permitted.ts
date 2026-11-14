@@ -12,8 +12,8 @@ const OPEN: TypeTerm = { kind: "dynamic", why: "unwritten parts" };
 /**
  * The written type a path stands under (V30 §13: `list`, `set`, `dict` and `object` stand for any list, set, dict or
  * object): its term, or below an unrestricted part (an unwritten element, an `object`'s properties, an optional's or a
- * union's member's too) a part whose every kind fits; `null` where the written type does not reach the path (the lead's
- * ruling on the merged S6's B2). One step at a time, so a path costs its length.
+ * union's member's too) a part whose every kind fits; `null` where the written type does not reach the path. One step
+ * at a time, so a path costs its length.
  */
 export function permittedAt(
   term: TypeTerm,
@@ -46,11 +46,10 @@ export function unrestricted(term: TypeTerm): boolean {
 }
 
 /**
- * ADR 0021 1.3, V30 §13 and §16 (Astra r2's B1 on #1310): what a type an operand's elements have at a path brings into a
+ * ADR 0021 1.3, V30 §13 and §16 (#1310): what a type an operand's elements have at a path brings into a
  * list join, whose joined list follows a literal's element rule: an unrestricted type (`list`'s elements) leaves the
  * joined list open there and below, whichever operand came first, so no conflict is proved from it; a type that holds
  * only `null` decides nothing, its `null` making the joined list optional; any other type decides by its kinds.
- * `joinElements` reads its operands by it, and a place holding a join is decided by it (`earliestDecider`).
  */
 export function joinedDomain(tags: readonly ItemTag[]): "open" | "null" | "kinds" {
   if (tags.includes("unknown")) return "open";
@@ -58,7 +57,7 @@ export function joinedDomain(tags: readonly ItemTag[]): "open" | "null" | "kinds
 }
 
 /**
- * A written type's element levels (A1, A4, A8): the type, its element type, that one's, as deep as the type goes, each
+ * A written type's element levels: the type, its element type, that one's, as deep as the type goes, each
  * one step below the one before (`termAt`), once per type and pass: k copies of a type d levels deep read its levels
  * once, never once per copy and each level from the root (#1194).
  */

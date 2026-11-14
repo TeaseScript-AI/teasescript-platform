@@ -22,14 +22,10 @@ import type { Expansion, Part } from "../model.js";
 import type { Reads } from "../../inherited/reads.js";
 import { partOfRead, TYPED_ROLES } from "../walk.js";
 
-// The carriers' transfers (G3 2c): what a stored value's walk answers, over its tasks' recipes (`expand`): each
-// carrier's operands answer once per pass, whatever value walks to them, a literal's cells with their literal, by path,
-// as a walk lists its stops.
-
 /**
  * A task as the decider enters it (`transferredDecider`): its lanes (`Stop.deep`, `Stop.single`) and what the
  * operations above it give it, each link's own answer (`chooses`, `TYPED_ROLES`) folded in: whether one is a typed
- * default's (a value there decides nothing, F18), whether each gives the operand the walk took, and surely gives it;
+ * default's (a value there decides nothing), whether each gives the operand the walk took, and surely gives it;
  * whether one is a list join (`ViaChain.joined`).
  */
 export interface Member {
@@ -93,7 +89,7 @@ export interface RegionPath {
 
 /**
  * The tasks of a walk that share one evaluation key (`EvaluationKey`), whatever path is decided: a value's own, or the
- * operands at one position of a carrier (a choice's rows of one option, merged in their key's order: S6's interleave),
+ * operands at one position of a carrier (a choice's rows of one option, merged in their key's order),
  * each with what reached it. Made once per pass by its members (`groupOf`), its region when first asked, whether a
  * written copy stands in it or below it at all, and its answers per decided path's rest and mask.
  */
@@ -280,8 +276,8 @@ export function* regionOf(
         else if (stop?.list === "literals") here.literals.push(entry());
         else if (stop?.list === "values") value(here, entry());
         const above = group.members[item.member]!;
-        // (a call a list join carries is read by its written result, as a written copy is, so the scan of the stops
-        // answers there: F20, `earliestDecider`; since #2378 such a call is a written stop too, and this entry answers alike)
+        // (a call a list join carries is read by its written result, as a written copy is; since #2378 such a call is a
+        // written stop too, and this entry answers alike)
         if (stop?.list === "values" && above.joined && writtenResult(admission, item.task.value))
           here.written.push({ ...entry(), call: true });
         for (const [index, part] of item.task.parts.entries()) {
@@ -602,8 +598,8 @@ export function maskName(mask: ReadonlySet<ItemTag> | null): string {
 }
 
 /**
- * A decided path's rest from step `rest`, after a strip: an array's joined as before; a span's a view, its path's id
- * one step from its parent's (`joinedId`), never made (G3 stage 1).
+ * A decided path's rest from step `rest`, after a strip: an array's joined; a span's a view, its path's id one step
+ * from its parent's (`joinedId`), never made.
  */
 export function restAfter(strip: readonly string[], at: PathRef, rest: number): Rest {
   return at.kind === "span"
@@ -637,13 +633,13 @@ export function forEachPath(
   let path: RegionPath | null = region.root;
   for (let length = 0; rest + length <= at.length; length += 1) {
     if (length > 0) path = path?.below.get(at.at(rest + length - 1)) ?? null;
-    // (a span's walk ends past the region's paths, where nothing stands: no visit per step beyond, G3 stage 1)
+    // (a span's walk ends past the region's paths, where nothing stands: no visit per step beyond)
     if (path === null && at.kind === "span") break;
     visit(path, length);
   }
 }
 
-/** `forEachPath` of a visit that makes reads (`Read`), each path visited where `forEachPath` visits it (#1072 A2). */
+/** `forEachPath` of a visit that makes reads (`Read`, #1072). */
 export function* forEachPathRead(
   region: Region,
   at: PathRef,
