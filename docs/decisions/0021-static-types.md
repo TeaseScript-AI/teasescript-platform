@@ -4,7 +4,8 @@
 **Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04); §6: Owner decision, 2026-10-07; the
 rules for the new type checker (O4): Owner decisions of 2026-10-19 to 2026-10-25; where an integer is required and
 what a read of a `number` place gives (rules 1.2, 1.3, 1.5, and 5.2): Owner decisions of 2026-10-27 (#1173, #1174,
-#1181, and #1187, which applies #1181's principle)
+#1181, and #1187, which applies #1181's principle); a list nested deeper on each turn of a cycle (rule 1.1): Owner
+decision of 2026-11-14 (#2764)
 
 The current compiler and runtime still apply the rules this file held before the O4 decisions until the compiler
 switches to the new type checker, as V30's transition note says.
@@ -41,7 +42,10 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    store `c = b`. Where the other type reaches the place only through a cycle of copies that moves an object a level
    deeper or higher each time, such as `a.inner = a` or `a = a.inner`, the property is checked at its first direct read
    or store instead, and the error there names the copy that brought it: following such a cycle would make the
-   compiler's work grow faster than the script. The decided type holds wherever the place is used, also before the
+   compiler's work grow faster than the script. A list that reaches a place through a cycle of copies, arguments, and
+   returns that nests it one level deeper or more on each turn, such as a function that returns its argument in a list
+   and is called on its own result, is known one level deeper than what enters the cycle; below that level, its elements
+   are values the compiler cannot know (rule 1.7). The decided type holds wherever the place is used, also before the
    value that decided it, and a read inside an expression sees the value at that point of evaluation, as the runtime
    does.
 2. `let x = null` without a type takes the type `T?` of the earliest non-null value stored into it. A different non-null
