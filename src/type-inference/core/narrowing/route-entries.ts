@@ -445,7 +445,6 @@ export abstract class RouteEntries extends RouteCandidates {
       // come merged per list, not across them: T_k log T_k charged per key, T_k its jumps tried)
       return sorted(this.#work, "eventSteps", tried, (a, b) => a.order - b.order);
     }
-    // (the key's stores in bodies that make a jump: each list's bodies or the jumps' bodies, whichever are fewer)
     const starts: Candidate[] = [];
     for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
       if (lists.size < byBody.size) {
@@ -718,7 +717,6 @@ export abstract class RouteEntries extends RouteCandidates {
           list.push({ into: this.#entry(root), point, order: -1 });
       }
     }
-    // a label's fall-through: the code before it in its block goes on into it
     for (const [id, labels] of each(this.#work, "indexSteps", this.#labelIndex())) {
       const block = this.tree.blocks[id]!;
       for (const index of each(this.#work, "indexSteps", labels)) {

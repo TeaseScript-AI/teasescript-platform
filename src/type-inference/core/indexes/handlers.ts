@@ -100,8 +100,6 @@ export class HandlerIndex {
       const from = flow.callableOf(jump.node.region);
       if (from !== null) for (const file of jump.files) edge(from, jump.node, file);
     }
-    // a callable that calls or goes to a registering callable registers, at that call or transfer (whose
-    // `end` returns to the transferring file's caller)
     const queue = flow.callables.filter((callable) => this.#facts.get(callable)!.registers);
     while (queue.length > 0) {
       const callee = queue.pop()!;
@@ -123,7 +121,6 @@ export class HandlerIndex {
       facts.events.sort((a, b) => a - b);
       facts.first = facts.events[0] ?? Infinity;
     }
-    // a callable entered, by a call or a file transfer, where a block may have run may itself run after one
     const pending: Callable[] = [];
     const mark = (callable: Callable): void => {
       const facts = this.#facts.get(callable)!;

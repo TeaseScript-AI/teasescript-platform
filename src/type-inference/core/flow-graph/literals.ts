@@ -18,8 +18,8 @@ export const NON_NULL_LITERALS: ReadonlySet<Expression["kind"]> = new Set([
 ]);
 
 /**
- * The value a condition always has by its literals, as the type check reads conditions (`conditionShape`): a
- * boolean literal, `not` of one, or `and` and `or` that their literal operands decide; `null` when a run decides it.
+ * The value a condition always has by its literals (`conditionShape`): a boolean literal, `not` of one, or `and` and
+ * `or` that their literal operands decide; `null` when a run decides it.
  */
 export function literalTruth(
   expression: Expression,
@@ -69,7 +69,7 @@ function* literalTruthTask(
   return value;
 }
 
-/** A `repeat` count or a list index that its literals give, as the type check folds a count, or `null`. */
+/** A `repeat` count or a list index that its literals give, or `null`. */
 export function literalCount(expression: Expression): number | null {
   return staticNumber(expression) ?? null;
 }
@@ -84,7 +84,7 @@ export function literalRounds(count: Expression): LiteralRounds {
   return value <= 0 ? "none" : value === 1 ? "one" : value > 1 ? "some" : null;
 }
 
-/** The rounds of a `for` over a literal collection or a range of constant numbers, as the type check reads it. */
+/** The rounds of a `for` over a literal collection or a range of constant numbers. */
 export function literalCollectionRounds(iterable: Expression): LiteralRounds {
   return isEmptyLiteral(iterable) ? "none" : isNonEmptyLiteral(iterable) ? "some" : null;
 }

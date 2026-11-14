@@ -55,21 +55,20 @@ export { literalRounds, literalTruth, type LiteralRounds } from "./flow-graph/li
  * per expression, and the core's exact path answers a read at the expression that makes it. Every expression is a node,
  * in evaluation order, so a definition and a read can be compared by dominance.
  *
- * Calls are summarized as the lowering's `PlanControlFlow` does: a call's `call-in` node enters the callee's entry, and
- * a summary edge from it to its `call-out` node stands for the return; no edge leads from a callee's exit back. The
- * session starts at the program's entry, runs the session-start values of every global and speaker (the startup
- * region, which dominates every file), and enters the first file. What the graph proves from literals is a dead
- * edge: a literal condition, `switch` subject or lazy operand, a literal `repeat` count (`0`: the body is dead; `1`: no
- * second round; `1` or more: the body runs before the loop is left), a `for` over a literal collection (empty: the body
- * is dead; not empty: the body runs before the loop is left), a `get` on a list literal with a literal index, and a
- * parameter default that every call supplies or none does. A call that cannot return has a dead summary edge.
- * Dead code keeps its nodes, joined to the live code before it by dead edges, so every node has a dominator.
+ * Calls are summarized: a call's `call-in` node enters the callee's entry, and a summary edge from it to its `call-out`
+ * node stands for the return; no edge leads from a callee's exit back. The session starts at the program's entry, runs
+ * the session-start values of every global and speaker (the startup region, which dominates every file), and enters the
+ * first file. What the graph proves from literals is a dead edge: a literal condition, `switch` subject or lazy
+ * operand, a literal `repeat` count (`0`: the body is dead; `1`: no second round; `1` or more: the body runs before the
+ * loop is left), a `for` over a literal collection (empty: the body is dead; not empty: the body runs before the loop
+ * is left), a `get` on a list literal with a literal index, and a parameter default that every call supplies or none
+ * does. A call that cannot return has a dead summary edge. Dead code keeps its nodes, joined to the live code before it
+ * by dead edges, so every node has a dominator.
  */
 
 /**
- * The graph of a project's files, in project order: `main.tease` first, where the session starts, as the lowering
- * orders them (`compileStableProject`), each with the name pass's picks for its glob targets, as the lowering takes
- * them.
+ * The graph of a project's files, in project order: `main.tease` first, where the session starts, each with the name
+ * pass's picks for its glob targets.
  */
 export function buildFlowGraph(files: readonly FlowGraphFile[]): FlowGraph {
   return new FlowGraphBuilder(files).build();

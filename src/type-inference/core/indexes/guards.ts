@@ -140,7 +140,6 @@ export class GuardIndex {
           end: use.operand.span.end.offset,
         });
         if (node === null || !program.reached(node)) continue;
-        // a condition guards the keys its tests test; a switch the key its subject is or holds
         const tested = conditions
           ? this.#testedIn(use.file, use.operand)
           : new Set([this.#testedKey(use.file, use.operand)].filter((key) => key !== undefined));

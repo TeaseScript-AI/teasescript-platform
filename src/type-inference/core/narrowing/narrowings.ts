@@ -114,7 +114,6 @@ function literalOf(expression: Expression, work: WorkLedger): ReturnType<typeof 
   const node = peel(expression, work);
   if (node.kind === "unaryExpression" && (node.operator === "-" || node.operator === "+"))
     peel(node.operand, work);
-  // (a string's parts, read up to its first interpolation)
   if (node.kind === "stringLiteral") work.charge("indexSteps", node.parts.length);
   const literal = caseLiteral(node);
   if (literal !== undefined) keepText(work, literal.key.length);
@@ -661,8 +660,6 @@ export class NarrowingIndex {
       const variables = flatMapped(work, "indexSteps", path.steps, (step) =>
         step.kind === "variable" ? [kept(keyOf(step.place, []))] : [],
       );
-      // G's collections: each element step's, the key's prefix there, where it holds an invalidation; one walk of
-      // the path's steps down the invalidated keys as far as they go, a key made for none (#1640)
       let collections: Key[] = [];
       let below = this.#invalidated.get(path.root);
       let index = 0;
@@ -679,8 +676,6 @@ export class NarrowingIndex {
         );
         index += 1;
       }
-      // the tested path and, for a positive collection test, one more element step per element type it names: each
-      // element step's collection, the tested path's key and those below it, is one of its G's collections too
       let { form, element } = outcome;
       let key = kept(pathKey(path, work));
       let at: PathNode | undefined = this.#tested.get(path.root);
@@ -747,7 +742,6 @@ export class NarrowingIndex {
       }
     };
     const proven: Fact[] = [];
-    // `if` conditions (the then arm, the else arm or the way past) and `while` conditions (the body only)
     for (const use of each(work, "indexSteps", flow.conditionUses))
       for (const [index, branch] of each(work, "indexSteps", use.branches.entries())) {
         if (index > 1) break;
@@ -760,7 +754,6 @@ export class NarrowingIndex {
             end: use.span.end.offset,
           });
       }
-    // `switch` cases: `case null`, a literal case by its value, `default` and later cases after `case null`
     for (const use of each(work, "indexSteps", flow.switchUses)) {
       const statement = statements.switchAt(use.file, use.span.start.offset, use.span.end.offset);
       if (statement === undefined) continue;
@@ -914,7 +907,6 @@ export class NarrowingIndex {
       } else list.push(entry);
     };
     for (const constraint of each(work, "indexSteps", program.constraints)) {
-      // a removal, a clear, and the order-changing `sort`, `shuffle`, `reverse`
       if (
         constraint.kind === "operation" &&
         constraint.contract.family === "method" &&
@@ -922,7 +914,6 @@ export class NarrowingIndex {
         mutates(constraint.contract.name, work)
       )
         add(constraint.receiver, null, program.effectNode(constraint.site), constraint.site);
-      // an add: a store into the collection's elements at its call
       if (constraint.kind === "store" && ADDS.has(constraint.how)) {
         const projection = program.projOf.get(constraint.into);
         if (projection === undefined || projection.step === "index") continue;

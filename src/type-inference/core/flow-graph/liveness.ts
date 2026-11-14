@@ -6,8 +6,8 @@ import type { CallSite, FlowNode, FunctionRegion, HandlerRegion } from "./model.
 // What never runs: the dead edges of decided defaults and of calls that cannot return, unentered code, liveness.
 
 /**
- * A default that every call supplies never runs, and one that no call supplies always runs. Each call's arguments
- * are bound to parameters once, as the lowering binds them (`boundParameterName`), and counted per parameter.
+ * A default that every call supplies never runs, and one that no call supplies always runs. Each call's arguments are
+ * bound to parameters once (`boundParameterName`) and counted per parameter.
  */
 export function decideDefaults(builder: FlowGraphBuilder): void {
   const suppliedBy = new Map<FunctionRegion, Map<string, number>>();

@@ -266,7 +266,6 @@ export class StatementTree {
     }
     for (const [file, list] of each(work, "indexSteps", byFile))
       this.#byFile.set(file, new Laminar(work, list));
-    // a live call site outside block code whose call-in every route through its statement's own expressions passes
     const calls: { start: number; end: number; item: FlowNode }[] = [];
     for (const site of each(work, "indexSteps", flow.sites)) {
       const at = site.callIn;

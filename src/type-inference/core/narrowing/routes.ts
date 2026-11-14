@@ -348,7 +348,6 @@ export class NarrowingRoutes extends RouteEntries {
     const reached = program.blockReachable(node);
     const own = reached && this.inBody(node);
     if ((reached && !own) || node.span === null) return null;
-    // the handler veto: a handler store of the key with a registration before the read
     if (!own && handlers.handlerTouches(key) && this.#registered(node)) return null;
     return yield* this.#examinedAt(key, tag, node, null, node.span.start.offset, others);
   }
@@ -421,8 +420,6 @@ export class NarrowingRoutes extends RouteEntries {
     this.#work.charge("exactQueries");
     const { program, lists } = this.pass;
     const d = found.def;
-    // the exact definitions the route query certifies: a declaration, an assignment with a certain receiver, a
-    // parameter's default; never a weak store, an element or dict key, a loop variable, a return or an argument
     if (
       d.kind !== "whole" ||
       d.weak ||
@@ -433,8 +430,6 @@ export class NarrowingRoutes extends RouteEntries {
       (this.feasible !== null && d.how === "parameter default")
     )
       return false;
-    // a whole store of a prefix answers below it through its literal's properties, else through what its value holds
-    // there
     const full = keyPath(key);
     program.work.charge("exactQueries", full.length);
     const rest: string[] = [];
@@ -464,8 +459,6 @@ export class NarrowingRoutes extends RouteEntries {
           literal === tag || some(program.work, "exactQueries", others, (kind) => kind === literal)
         );
       const c = program.opOf.get(value);
-      // `a otherwise <literal>`: live, and selected where `a` is the literal `null` or its own `null` is certified at
-      // that node
       if (c?.kind === "fallback" && literalTag(program, c.right) === tag) {
         const right = program.places[c.right]?.site;
         const fallback = right === undefined || right === null ? null : program.exprAt(right);
@@ -475,13 +468,11 @@ export class NarrowingRoutes extends RouteEntries {
         if (read !== null) return { key: read.key, tag: "null", node: read.node };
       }
     }
-    // a scalar copy whose source read has a certified witness
     const read = left.length === 0 ? this.#scalarRead(value) : null;
     if (read !== null) return { key: read.key, tag, node: read.node };
     // (in a program the default holds, only a `load`'s literal default proves itself, #1938)
     if (this.feasible !== null) return left.length === 0 && this.#ownLoad(value, tag, others);
-    // any other producer, a whole copy below the copied path among them, by what its value holds there on some run,
-    // neither stopped nor read under a failed test: one answer per read, never a route per field of each copy
+    // (one answer per read, never a route per field of each copy)
     if (yield* this.#valueProduces(value, d.node, left, tag)) return true;
     for (const kind of each(program.work, "exactQueries", others))
       if (yield* this.#valueProduces(value, d.node, left, kind)) return true;
@@ -584,10 +575,10 @@ export class NarrowingRoutes extends RouteEntries {
   }
 
   /**
-   * The corridor from a candidate to the read: (a) the writer side up to the lowest block they share, (b) the read's
-   * statement after the candidate's there, (c) the statements between, (d) each entered block's statements before the
-   * read's, all open in both layers; (e) no call-in a possible overwriter makes between the read's top statement and
-   * the read on every route (the headers entered, the read's own statement); and one boundary.
+   * The corridor from a candidate to the read: the writer side up to the lowest block they share, the read's statement
+   * after the candidate's there, the statements between, and each entered block's statements before the read's, all
+   * open in both layers; no call-in a possible overwriter makes between the read's top statement and the read on every
+   * route (the headers entered, the read's own statement); and one boundary.
    */
   #open(
     key: Key,
@@ -624,11 +615,9 @@ export class NarrowingRoutes extends RouteEntries {
         writer[level]!.index === chain[level]!.index,
     ))
       level += 1;
-    // (b): the read's statement after the candidate's in their lowest shared block, never a sibling arm
     if (level >= writer.length || level >= chain.length) return false;
     const shared = writer[level]!.block;
     if (chain[level]!.block !== shared || chain[level]!.index <= writer[level]!.index) return false;
-    // (a): the writer side, from the candidate's block up to the shared one, out of a loop through its header
     let up = writer.length;
     for (const _ of steps(this.#work, "eventSteps", () => up - 1 > level)) {
       up -= 1;
@@ -642,17 +631,14 @@ export class NarrowingRoutes extends RouteEntries {
       )
         return false;
     }
-    // (c): the statements between
     if (this.closed(shared, writer[level]!.index + 1, chain[level]!.index, layer, layer.calls))
       return false;
-    // (d): each entered block's statements before the read's
     let down = level + 1;
     for (const _ of steps(this.#work, "eventSteps", () => down < chain.length)) {
       const { block, index } = chain[down]!;
       if (this.closed(block, 0, index, layer, layer.calls)) return false;
       down += 1;
     }
-    // (d), (e): a compulsory call before the read inside its top statement (a header entered, an earlier operand)
     if (layer.calls) {
       const call = this.tree.nearestCall(node);
       const top = chain[level]!;
@@ -879,7 +865,6 @@ export class NarrowingRoutes extends RouteEntries {
       );
     };
     const pending: TreeStatement[] = [];
-    // an arm closed here for the first time counts for its statement, which may then close
     const close = (arm: TreeBlock): void => {
       work.charge("indexSteps");
       if (counted.has(arm) || !arm.live || arm.owner === null || armBelow(arm)) return;
