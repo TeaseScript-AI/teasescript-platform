@@ -1,6 +1,4 @@
-// The row guard's declared lists and the declared positions' samples (#2488's reach), over the templates of
-// `row-templates.ts`: the values each operand position is sampled with, the refusals, run differences and rule
-// differences the guard requires, and the contexts it samples a command in.
+// The row guard's declared lists and the declared positions' samples (#2488's reach).
 
 import { operandRules, type SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
 import { CONVERSIONS, isConversion } from "../../../src/conversions.js";
@@ -209,14 +207,12 @@ export function samples(
         host: HOST_VALUES[kind],
       })),
     ),
-    // (the host global carried, or read through a place whose type is undecided)
     ...CARRIERS.map(([prelude, value]) => ({
       kind: "unknown",
       origin: "carrier" as const,
       prelude,
       value,
     })),
-    // (the host global or a literal)
     ...NESTED_KINDS.flatMap((kind) =>
       LITERALS[kind] === undefined
         ? []
@@ -240,7 +236,6 @@ export function samples(
         properties: [{ name: "v", value: HOST_VALUES[kind] }],
       } satisfies SerializableRuntimeValue,
     })),
-    // (a typed ingress narrowed by a test)
     ...NESTED_KINDS.map((kind) => ({
       kind,
       origin: "narrowed" as const,
@@ -409,7 +404,6 @@ export const DECLARED_REFUSALS: readonly {
       gate: "outsideAnswers (src/type-inference/core/backend.ts)",
       text: "this say",
     })),
-  // (a transfer's path the core knows to be no text, written in place)
   ...samples()
     .filter(
       (sample) =>
@@ -487,7 +481,6 @@ export const DECLARED_REFUSALS: readonly {
           }),
     };
   }),
-  // (a host value stored at a written type only `null` fills, at every position)
   ...samples()
     .filter((sample) => sample.origin === "ingress" && sample.kind === "null")
     .map((sample) => ({
@@ -555,7 +548,6 @@ export const DECLARED_REFUSALS: readonly {
       gate: "outsideAnswers (src/type-inference/core/backend.ts)",
       text: "this operand",
     })),
-  // (the guard's nested operands at a position of the command operand table)
   ...Object.entries(OPERAND_TEMPLATES).flatMap(([row, operands]) =>
     Object.entries(operands ?? {}).flatMap(([operand, templates]) =>
       operandRules(row)?.[operand] === undefined
@@ -641,10 +633,7 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
   })),
 ];
 
-/**
- * The control-flow contexts the guard samples a command in (R12, R16): wherever it stands, the route answers as for its
- * fitting twin, but that a run reaching it fails there.
- */
+/** The control-flow contexts the guard samples a command in (R12, R16). */
 export const CONTEXTS: Readonly<Record<string, (command: string) => string>> = {
   straight: (command) => `${command}\nexit\n`,
   "after exit": (command) => `exit\n${command}\n`,
