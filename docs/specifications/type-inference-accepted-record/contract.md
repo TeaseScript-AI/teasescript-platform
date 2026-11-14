@@ -323,16 +323,17 @@ parentheses read through; a test is no place slot), applied by #2493's pull requ
 **Cut a cycle that nests a list, set or dict deeper on each turn one level below what enters it.**
 
 **Rule.** ADR 0021 rule 1.1's nesting cycle. An element level is a list's or a set's element or a dict's value. The
-routes of a pass's places, each weighted by the element levels a value gains along it: a list literal's element and an `add` +1; a copy, an argument, a return, a read and a call's result 0;
-a store through a path its element steps; a projection or an operation the element steps it stands below in its operand
-(`carriers.ts`'s carrier kinds, each given a route or none in one table; a choice's answer none). A strongly connected
-component holding a cycle of positive weight is cut at `M + 1`, `M` the deepest element level entering it from outside (a
-literal's levels, a written type's, the level a range's or a dict's `keys`' kind declares, an earlier component's known
-level, a growing one's at its cut). Property routes are followed by name: a component that
-grows with names ignored is solved again with one position per place and property, and only a cycle that grows there
-is cut; a route through two property steps or more has no position and is never cut. A place with a written type takes
-no route. A key below its place's cut depth answers an opaque unknown (rule 1.7) before any demand is made. The index
-is built on the first key with two element steps, once per pass, as a shared build.
+routes of a pass's places, each weighted by the element levels a value gains along it: a list literal's element and an
+`add` +1; a copy, an argument, a return, a read and a call's result 0; a store through a path its element steps; a
+projection or an operation the element steps it stands below in its operand (`carriers.ts`'s carrier kinds, each given a
+route or none in one table; a choice's answer none). A strongly connected component holding a cycle of positive weight
+is cut at `M + 1`, `M` the deepest element level entering it from outside (a literal's levels, a written type's, the
+level a range's or a dict's `keys`' kind declares, an earlier component's known level, a growing one's at its cut).
+Property routes are followed by name: a component that grows with names ignored is solved again with one position per
+place and property, and only a cycle that grows there is cut; a route through two property steps or more has no position
+and is never cut. A place with a written type takes no route. A key below its place's cut depth answers an opaque
+unknown (rule 1.7) before any demand is made. The index is built on the first key with two element steps, once per pass,
+as a shared build.
 
 **Reason.** Under F20 and F21 a function that wraps its argument in a list and is called on its own result has types
 without end: the candidate route asked ever deeper paths (1.35 million units at two calls) and ended with TSV076 or a
