@@ -69,6 +69,7 @@ import { positionable, positioned, positionOf } from "./positions.js";
 import { summaryCount, summaryItems } from "./prefix-index/summaries.js";
 import { termAt, typeAtPath, typeKinds, writtenOf } from "./terms.js";
 import { members } from "./value-kinds.js";
+import { CUT } from "../indexes/nesting.js";
 
 // The contract of a key: its demand, its stores' and prefixes' contracts, its receivers, a read's contract.
 
@@ -120,6 +121,10 @@ export function* contractOf(
   if (contract.keyStopped(key)) {
     flow?.opaque("stopped");
     return STOPPED;
+  }
+  if (contract.cutAt(key)) {
+    flow?.opaque("cut");
+    return CUT;
   }
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   const slot = joinParts("c", key);
@@ -495,6 +500,10 @@ export function* receiverKinds(
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
   const key = canonicalKey(contract, asked);
+  if (contract.cutAt(key)) {
+    flow?.opaque("cut");
+    return CUT;
+  }
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   // (#1668: included only by a reader whose answer holds its unknowns as they are; its run's answer is the key's)
   const slot = joinParts("rc", key);

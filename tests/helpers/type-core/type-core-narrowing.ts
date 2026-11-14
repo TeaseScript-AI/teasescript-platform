@@ -8,6 +8,8 @@ import {
 import { ExactPath } from "../../../src/type-inference/core/exact-path.js";
 import type { FlowNode } from "../../../src/type-inference/core/flow-graph.js";
 import { GuardIndex } from "../../../src/type-inference/core/indexes/guards.js";
+import { operandsOf } from "../../../src/type-inference/core/carriers.js";
+import { NestingIndex } from "../../../src/type-inference/core/indexes/nesting.js";
 import { HandlerIndex } from "../../../src/type-inference/core/indexes/handlers.js";
 import type { ContextWord, ItemTag } from "../../../src/type-inference/core/items.js";
 import {
@@ -36,6 +38,12 @@ export function narrowingPass(request: CoreAnalysisRequest): CorePass {
     ),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
+    nesting: new NestingIndex(
+      program,
+      definitions,
+      () => true,
+      (value) => operandsOf(program, value),
+    ),
     solver: new Solver(program.scope),
     receivingDomain: new ReceivingDomain(),
     writtenDefaults: new WrittenDefaults(program, definitions),

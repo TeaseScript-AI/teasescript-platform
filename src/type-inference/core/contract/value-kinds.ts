@@ -49,6 +49,7 @@ import { contractOfOp } from "./operations.js";
 import { projected } from "./positions.js";
 import { defaultOf, termAt, typeKinds, writtenOf } from "./terms.js";
 import { writtenDefault } from "./written-default.js";
+import { CUT, pathPosition } from "../indexes/nesting.js";
 
 // The kinds a value can have, by its kind and at a path, mirroring the value side's dispatch.
 
@@ -59,7 +60,19 @@ export function contractOfValueAt(
   rest: Rest,
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
+  // #2764 (B): below a growing component's cut depth, the cut's unknown, before any demand
+  if (contract.pass.nesting.cuts(value)) {
+    const at = pathPosition(stepsArray(restSteps(rest)));
+    const cut = at === null ? null : contract.pass.nesting.cutDepth(value, at.label);
+    if (cut !== null && at!.depth > cut) return cutWork(flow);
+  }
   return through(contract, value, rest, 0, flow);
+}
+
+/** The cut's unknown as a computation that reads nothing; no flow passes through it. */
+function* cutWork(flow: FlowSink | null): Work<readonly Item[]> {
+  flow?.opaque("cut");
+  return CUT;
 }
 
 /**
