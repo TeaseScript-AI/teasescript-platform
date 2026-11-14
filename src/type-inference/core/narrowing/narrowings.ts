@@ -41,8 +41,7 @@ import { Laminar } from "./laminar.js";
  * filter of the read at the test (`narrowedItems`); a read finds the nearest G of its own path text and of each
  * element-step scope by a binary search and a jump up the list's nest (`NarrowingIndex.nearest`), never by scanning
  * sibling paths. The mutating method calls of a collection key are one sorted invalidation list per key. Everything
- * here is built once from the program; what the definitions and the handlers decide is asked per pass (`events.ts`,
- * `routes.ts`).
+ * here is built once from the program.
  */
 
 /** A step of a stable path: a property, a fixed index or key, or an index or key held in a plain variable. */
@@ -336,10 +335,7 @@ export function narrowedItems(
   );
 }
 
-/**
- * Whether a narrowing of this form removes items of kind `tag` (a G of the needed form for the route query's offending
- * kind): a comparison per kind of a type test, charged.
- */
+/** Whether a narrowing of this form removes items of kind `tag`: a comparison per kind of a type test, charged. */
 export function removes(form: NarrowingForm, tag: ItemTag, work: WorkLedger): boolean {
   work.charge("eventSteps");
   switch (form.kind) {
@@ -622,15 +618,12 @@ export class NarrowingIndex {
   readonly #byLocation = new Map<string, Laminar<Narrowing>>();
   /** Per refined location and file, its operand regions' narrowing definitions by their text spans. */
   readonly #byOperand = new Map<string, Map<number, Laminar<Narrowing>>>();
-  /**
-   * Per guarded region's entry and refined location, its narrowing definitions in evaluation order (the route query's
-   * arm tests).
-   */
+  /** Per guarded region's entry and refined location, its narrowing definitions in evaluation order. */
   readonly #atEntry = new Map<string, Narrowing[]>();
   /** Per collection key, its mutating method calls; and those keys as a trie of their steps per root. */
   readonly #invalidations = new Map<Key, Invalidations>();
   readonly #invalidated = new Map<PlaceId, KeyNode>();
-  /** Every narrowing definition, in the order they are made (the solver's component test finds one by its key). */
+  /** Every narrowing definition, in the order they are made. */
   readonly all: Narrowing[] = [];
   private constructor(
     readonly program: CoreProgram,
@@ -1007,7 +1000,7 @@ export class NarrowingIndex {
     return operand ?? this.#byLocation.get(location)?.innermost(program.position(node)) ?? null;
   }
 
-  /** The branches' narrowing definitions of a refined location (the route query's blocking tests). */
+  /** The branches' narrowing definitions of a refined location. */
   public definitionsOf(location: string): readonly Narrowing[] {
     this.program.work.charge("eventSteps");
     return this.#byLocation.get(location)?.items ?? [];

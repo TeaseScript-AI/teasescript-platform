@@ -2,13 +2,9 @@ import { sortCost } from "./definitions.js";
 import type { WorkCounter, WorkLedger } from "./budget.js";
 
 /*
- * The one way the charged modules walk anything (`CHARGED_FILES` of
- * `tools/oxlint/type-core/check-charged-iteration.mjs`: `narrowing/`'s modules and `contract/objects.ts`): every item
- * taken, every step of a search and every element a copy or a test visits charges one unit of a named counter as it
- * happens, and every function body there charges a unit on entry (an arrow handed straight to these functions is
- * charged by them). That lint guards the ordinary forms of any other repetition there (loops, array walks, a body whose
- * first statement does not charge, and any call into the rest of the core or the library that its list does not give
- * a reason for); the forms it does not see are named in its header.
+ * The one way a charged module walks anything: every item taken, every step of a search and every element a copy or a
+ * test visits charges one unit of a named counter as it happens, and every function body there charges a unit on entry
+ * (an arrow handed straight to these functions is charged by them).
  */
 
 /** Each item, one unit of `counter` charged as it is taken. */

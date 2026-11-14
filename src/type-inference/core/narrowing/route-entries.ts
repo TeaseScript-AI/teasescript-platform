@@ -189,11 +189,11 @@ export abstract class RouteEntries extends RouteCandidates {
 
   /**
    * Whether, in a program the default holds, a node at `chain` stands where a route may promote (#1938): at the
-   * program's start (`at` `null`, `NarrowingRoutes.#plain`) or at the entry statement `at` (r4-451, under the program
-   * default). Its chain starts in a file's body and, after `at`, passes it (after a label, into a loop's body); its
-   * boundary is none or `at`'s label; no arm on it is one a run is not proved to enter, none a loop's body but `at`'s
-   * own; no statement of it holds a call in its own expressions (`headed`); and before it in each block nothing a route
-   * may not pass (`hazards`), counted after `at` in `at`'s block.
+   * program's start (`at` `null`) or at the entry statement `at` (r4-451, under the program default). Its chain starts
+   * in a file's body and, after `at`, passes it (after a label, into a loop's body); its boundary is none or `at`'s
+   * label; no arm on it is one a run is not proved to enter, none a loop's body but `at`'s own; no statement of it
+   * holds a call in its own expressions (`headed`); and before it in each block nothing a route may not pass
+   * (`hazards`), counted after `at` in `at`'s block.
    */
   protected clear(
     feasible: Feasibility,

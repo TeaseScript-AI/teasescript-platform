@@ -1,7 +1,7 @@
 /*
- * The route rule's condition tests (`NarrowingRoutes`, routes.ts): the closed set of tests the tested-producer rule
- * reads (`checked`), arm feasibility by entry narrowing and the program default (`defaultHolds`), and where a
- * node's statement stands in the statement tree (`chainOf`).
+ * The route rule's condition tests: the closed set of tests the tested-producer rule reads (`checked`), arm feasibility
+ * by entry narrowing and the program default (`defaultHolds`), and where a node's statement stands in the statement
+ * tree (`chainOf`).
  */
 import type { Expression, Statement } from "../../../ast.js";
 import type { SourceSite } from "../../graph.js";
@@ -149,12 +149,9 @@ export interface Feasibility {
   readonly unentered: ReadonlySet<TreeBlock>;
   /** The statements that own such an arm. */
   readonly owners: readonly TreeStatement[];
-  /**
-   * Of `unentered`, the arms `#infeasible` proves no run enters (not `unavailable`): in `entryHazards` a statement
-   * inside one marks nothing above that arm (r4-451), while a mark from outside it still reaches there.
-   */
+  /** Of `unentered`, the arms `#infeasible` proves no run enters (not `unavailable`). */
   readonly infeasible: ReadonlySet<TreeBlock>;
-  /** The bodies of the program's files: a promoting route stands in one (`NarrowingRoutes.#plain`). */
+  /** The bodies of the program's files: a promoting route stands in one. */
   readonly files: ReadonlySet<TreeBlock>;
   /**
    * Per block, the indexes (sorted) of its statements a promoting route may not pass: one `PASSABLE` refuses, or one
@@ -180,10 +177,7 @@ interface OwnGuards {
   readonly reach: readonly number[];
 }
 
-/**
- * The route rule's condition tests of one pass, each built on its first query; `RouteCandidates` extends it, and
- * through it `RouteEntries` and `NarrowingRoutes`.
- */
+/** The route rule's condition tests of one pass, each built on its first query. */
 export class RouteTests {
   /** Per tested text, the `if`s and `while`s whose conditions test it (`#testing`), made on the first query. */
   #tested: Map<string, TreeStatement[]> | null = null;
@@ -198,10 +192,8 @@ export class RouteTests {
   /** The program's `while`s whose conditions hold a test (`#testing`). */
   readonly #whiles: TreeStatement[] = [];
   /**
-   * In a program the default holds, the arms its corridors pass through none of (`feasibility`), set by the first
-   * `required` there (`NarrowingRoutes`); `null` elsewhere, where every route query is unrestricted. Under it an entry
-   * route is taken only where r4-451's program default admits it (`RouteEntries.standsAt`), and its relation carries no
-   * entry on (r4-451).
+   * In a program the default holds, the arms its corridors pass through none of; `null` elsewhere, where every route
+   * query is unrestricted.
    */
   protected feasible: Feasibility | null = null;
   /** Whether the route rule's default holds (`defaultHolds`), made on the first query. */
@@ -455,11 +447,10 @@ export class RouteTests {
   /**
    * Whether the route rule's default holds (#1937, narrowed by #1938): a live `if` arm of the program's admitted
    * callables that `#infeasible` does not answer `feasible`, infeasible by entry narrowing (the narrowing forms over
-   * the core's items) or with a tested read's answer missing (`unavailable`). Where one is, `NarrowingRoutes.required`
-   * promotes only routes through arms runs enter (`feasibility`), by a certificate its own value proves; every other
-   * use keeps the warning. An uncalled function contributes no live arm. An arm it does not prove counts as feasible: a
-   * comparison that is constant outside the narrowing forms (`o.k == 1`), a loop's exit, a `switch` case, another
-   * location's test. One answer per program, from the `if`s `#testing` finds once.
+   * the core's items) or with a tested read's answer missing (`unavailable`). An uncalled function contributes no live
+   * arm. An arm it does not prove counts as feasible: a comparison that is constant outside the narrowing forms
+   * (`o.k == 1`), a loop's exit, a `switch` case, another location's test. One answer per program, from the `if`s
+   * `#testing` finds once.
    */
   protected *defaultHolds(): Work<boolean> {
     this.#work.charge("eventSteps");
@@ -483,7 +474,7 @@ export class RouteTests {
    * In a program the default holds (#1938): each live arm of a tested `if` and each tested `while`'s body that
    * `#infeasible` does not answer `feasible`, the bodies of the program's files, and the blocks that hold a statement a
    * promoting route may not pass (`PASSABLE`, a call site, a handler's declaration). One walk of the program's
-   * statements, call sites and regions; `required` asks it once and keeps its answer (`feasible`).
+   * statements, call sites and regions.
    */
   protected *feasibility(): Work<Feasibility> {
     this.#work.charge("eventSteps");
@@ -735,7 +726,7 @@ export class RouteTests {
     return chain.length > 0 && chain[0]!.block === body ? chain : [{ block: body, index: -1 }];
   }
 
-  /** `#up` for the classes that extend this one. */
+  /** A statement's places from its callable's body down to it. */
   protected placesOf(statement: TreeStatement): Place[] {
     this.#work.charge("eventSteps");
     return this.#up(statement);

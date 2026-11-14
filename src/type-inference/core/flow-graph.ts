@@ -53,11 +53,7 @@ export { literalRounds, literalTruth, type LiteralRounds } from "./flow-graph/li
 /*
  * The control-flow graph of the type core, built from the ASTs, not from the plan: `plan/control-flow.ts` has no node
  * per expression, and the core's exact path answers a read at the expression that makes it. Every expression is a node,
- * and so is every simple statement (a `statement` node); an `if` or a `switch` is its branches and join, a loop its
- * head (with the loop's span), body and exit; a function or speaker declaration and a `global` have no node where they
- * stand (a `global` with `default:` has its assignment's; each `global` and speaker has one in the startup region).
- * The nodes stand in evaluation order (the shared order helpers of `expression-children.ts`), so a definition and a
- * read can be compared by dominance. type-core-flow-graph.test.ts compares it with the lowering's control flow.
+ * in evaluation order, so a definition and a read can be compared by dominance.
  *
  * Calls are summarized as the lowering's `PlanControlFlow` does: a call's `call-in` node enters the callee's entry, and
  * a summary edge from it to its `call-out` node stands for the return; no edge leads from a callee's exit back. The
@@ -386,7 +382,7 @@ export class FlowGraphBuilder {
     return node;
   }
 
-  /** An edge, once; a dead one is never taken (the header says which edges are dead). */
+  /** An edge, once; a dead one is never taken. */
   public link(from: FlowNode | null, to: FlowNode | null, dead = false): void {
     if (from === null || to === null) return;
     const key = edgeKey(from, to);

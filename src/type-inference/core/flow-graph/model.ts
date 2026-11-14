@@ -59,10 +59,7 @@ export interface FlowNode {
   readonly region: number;
   readonly file: number;
   readonly span: SourceSpan | null;
-  /**
-   * The heads of the loops around it in its function, file or block, outermost first: the exact path answers a read
-   * only from a definition inside every loop around the read.
-   */
+  /** The heads of the loops around it in its function, file or block, outermost first. */
   readonly loops: readonly FlowNode[];
   readonly successors: readonly FlowNode[];
   readonly predecessors: readonly FlowNode[];
@@ -76,10 +73,7 @@ export interface FlowNode {
   readonly enclosing?: FlowNode;
   /** For an assignment through a member or element: the node where its receiver and index are evaluated. */
   readonly prepared?: FlowNode;
-  /**
-   * For a label: the node it follows in the text, or `null` after code that does not go on. A label that only this
-   * node reaches is no boundary (`Dominators.edom`).
-   */
+  /** For a label: the node it follows in the text, or `null` after code that does not go on. */
   readonly fallthrough?: FlowNode | null;
 }
 
@@ -173,7 +167,7 @@ export interface GuardUse extends OperandUse {
 /** A `while`, `repeat` or `for` loop. */
 export interface FlowLoop {
   readonly statement: WhileStatement | RepeatStatement | ForStatement;
-  /** Where a round ends: the body runs again from it, or the loop is left (a node's `loops` names it). */
+  /** Where a round ends: the body runs again from it, or the loop is left. */
   readonly head: FlowNode;
   /** The body's entry, which binds a `for` loop's variables. */
   readonly body: FlowNode;

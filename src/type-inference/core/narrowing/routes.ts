@@ -44,12 +44,7 @@ import { propertyName } from "../program.js";
  * or a scalar copy whose source read has a witness by this same query, memoised per node and key; `#certificate`), then
  * the corridor's remaining segments (the middle and the consumer side), each one binary search per layer, and the
  * consumer's own statement's compulsory calls (the nearest call-in dominating n). An unsuitable candidate yields the
- * warning. The consumers ask it through `required`, the route rule's one decision (`consumers/reports/warnings.ts`).
- *
- * `NarrowingRoutes` is one object per pass whose parts are the classes it extends, each in its file: `RouteTests`
- * (condition tests, the program default's feasibility, statement places) ← `RouteCandidates` (candidate lists and
- * their reach) ← `RouteEntries` (ways into a use). Here: the decision (`required`, `witness`), certification, the
- * layers and the corridor.
+ * warning.
  */
 
 /** A literal's kind as the route query reads it: `null`, a whole or fractional number, text, a truth value. */
@@ -288,8 +283,7 @@ export class NarrowingRoutes extends RouteEntries {
    * asks this same query of its source, one memoised query per node and key, resolved without native recursion.
    * `others`: where `tag` is a member of the written union `key` declares, the union's other kinds the use does not
    * take, which certify the route as `tag` does (#1073: the written domain proves itself). It asks the unrestricted
-   * query until `required` has met a program the default holds (`feasible`), and that program's own queries after;
-   * public for the narrowing tests' `routeAt`.
+   * query until `required` has met a program the default holds, and that program's own queries after.
    */
   public *witness(
     key: Key,
@@ -409,9 +403,7 @@ export class NarrowingRoutes extends RouteEntries {
     return this.#open(key, tag, found, chain, node, into) ? found : null;
   }
 
-  /**
-   * The handler veto's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged.
-   */
+  /** The handler veto's registration-before-read predicate. */
   #registered(node: FlowNode): boolean {
     this.#work.charge("eventSteps");
     this.#work.charge("eventSteps", node.loops.length);

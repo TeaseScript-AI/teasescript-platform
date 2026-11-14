@@ -368,9 +368,8 @@ function termOf(pass: CorePass, ix: Indexed, value: PlaceId): Term | null {
 }
 
 /**
- * A binding whose reads may be closed terms: its one definition a whole initializer of a closed literal (`shapeOf`),
- * live as `definitionsOf` lists it (rejected, unreachable and loop definitions left out), no written type, no test of
- * it (`untested`) and no store below it. `null` otherwise.
+ * A binding whose reads may be closed terms: its one definition, the only one `definitionsOf` lists, a whole
+ * initializer of a closed literal (`shapeOf`), no written type, no test of it and no store below it. `null` otherwise.
  */
 function bindingProof(pass: CorePass, ix: Indexed, binding: PlaceId): Proof | null {
   const known = ix.bindings.get(binding);

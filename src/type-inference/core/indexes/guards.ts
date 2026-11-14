@@ -31,16 +31,7 @@ import { amend, Retained } from "../retained/retained.js";
  * position: through `and`, `or` and `not`; a `switch` on it), in the code after a branch that tests it and always
  * leaves (the way past the test is a branch entry of its own), and in the right operand of an `and` or `or` whose left
  * operand tests it. Guards are indexed per tested key, as definitions are: a read asks its key and each prefix, a
- * binary search each, never a root's other keys and never an `and` chain's other tests. Which reads a guard region
- * holds is asked through `narrowed`, whose callers are: `Values`, which marks a key's read and a failing narrowing's
- * read held there (`marked`); `ExactPath`, which takes a copy chain's root read held there as marked and repeats no add
- * a guard holds (`#repeats`); the fallback check (`consumers/operations/fallbacks.ts`), whose walk to an unwritten
- * parameter's default stops at a guarded read; admission's decision (`admission/decision.ts`), which records it in an
- * alias's answer; and `guardedRead` here. The narrowing definitions join this index: built on their first read, once
- * per program (`NarrowingIndex`: the definitions per refined location and the invalidation lists, with the statements
- * and the route query's shared layer, `StatementTree`), and asked per pass through `narrowings` (the events that end a
- * narrowing, with the stores that preserve it, `NarrowingEvents`; the routes, `NarrowingRoutes`). A read in a stored
- * value takes its narrowing where it holds (`Values`).
+ * binary search each, never a root's other keys and never an `and` chain's other tests.
  */
 
 /** A list of guard regions sorted by where they start, with the running maximum of where they end. */
@@ -96,7 +87,7 @@ export class GuardIndex {
   readonly #operandCallables = Retained.map<Key, Set<Callable | null>>(
     "GuardIndex.#operandCallables",
   );
-  /** The tested keys, as a trie (`narrowed`). */
+  /** The tested keys, as a trie. */
   readonly #tested: KeyTrie;
   /** The keys with a tested key strictly below them: a copy of one carries its read as a mark. */
   readonly belowTested = Retained.set<Key>("GuardIndex.belowTested");
@@ -196,15 +187,15 @@ export class GuardIndex {
   /**
    * The narrowing definitions and invalidations, built on their first read and charged then: an analysis, or a
    * finishing pass after a stop, that reads none pays for none; the program's, shared by every later read, so no
-   * demand's own work (`work.shared`).
+   * demand's own work.
    */
   public get narrowing(): NarrowingIndex {
     return (this.#narrowing ??= this.program.work.shared(() => NarrowingIndex.of(this.program)));
   }
 
   /**
-   * The narrowing queries of the pass this index belongs to, which every caller gives (`pass.guards.narrowings(pass)`),
-   * made on the first call: the events that end a narrowing, with the stores that preserve it, and the routes.
+   * The narrowing queries of the pass this index belongs to: the events that end a narrowing, with the stores that
+   * preserve it, and the routes.
    */
   public narrowings(pass: CorePass): {
     readonly events: NarrowingEvents;
@@ -309,10 +300,7 @@ export class GuardIndex {
     return read === null ? [] : this.guardedBelow(keyOf(read.binding, read.steps), read.node);
   }
 
-  /**
-   * A value's read below its property and element projections: the binding it reads, the steps from the binding down to
-   * the value, and the read's node; `null` where the read has no binding or no node.
-   */
+  /** A value's read below its property and element projections. */
   #readOf(
     value: PlaceId,
   ): { readonly binding: PlaceId; readonly steps: string[]; readonly node: FlowNode } | null {
@@ -590,10 +578,7 @@ export class GuardIndex {
     }
   }
 
-  /**
-   * Whether some region of a sorted list that starts by `at` reaches `at`: a binary search, then the running maximum of
-   * their ends.
-   */
+  /** Whether some region of a sorted list that starts by `at` reaches `at`. */
   public encloses<T>(regions: Regions<T>, start: (entry: T) => number, at: number): boolean {
     let low = 0;
     let high = regions.list.length;
@@ -628,10 +613,9 @@ export class GuardIndex {
 
   /**
    * Whether a test's guard region of `key` or of a prefix holds the read at `node`: a branch the test guards in the
-   * node's own callable that holds it, or an operand region (the right operands of the `and`/`or` whose left the test
-   * stands in) that holds it, a choice's selection step read as its record key; a binary search per key asked, the
-   * key and each prefix. `false` for an unreached node or an untested binding's cursor, an error for a tested binding's
-   * cursor. It reads no narrowing.
+   * node's own callable, or an operand region (the right operands of the `and`/`or` whose left the test stands in), a
+   * choice's selection step read as its record key. `false` for an unreached node or an untested binding's cursor, an
+   * error for a tested binding's cursor. It reads no narrowing.
    */
   public narrowed(key: Key, node: FlowNode): boolean {
     const program = this.program;
@@ -643,7 +627,6 @@ export class GuardIndex {
       throw new Error(`The key cursor '${key}' was asked of a tested binding's guards.`);
     }
     const asked = recordKey(key);
-    // (the tested keys at or above it, by one walk of its steps; an untested one guards nothing)
     for (const tested of this.#tested.above(asked, true)) {
       program.work.charge("eventSteps");
       const branches = this.#branches.get(tested)?.get(program.callableAt(node));
@@ -691,10 +674,7 @@ export class GuardIndex {
     );
   }
 
-  /**
-   * Every branch a test guards: its tested key, the callable it stands in, and its entry (the exact path's copy
-   * forest).
-   */
+  /** Every branch a test guards: its tested key, the callable it stands in, and its entry. */
   public *branchRegions(): Generator<{
     readonly key: Key;
     readonly callable: Callable | null;
@@ -705,7 +685,7 @@ export class GuardIndex {
         for (const entry of regions.list) yield { key, callable, entry };
   }
 
-  /** Every tested key's operand regions in each file, sorted by where they start (the exact path's copy forest). */
+  /** Every tested key's operand regions in each file, sorted by where they start. */
   public *operandRegions(): Generator<{
     readonly key: Key;
     readonly file: number;
@@ -716,8 +696,7 @@ export class GuardIndex {
   }
 
   /**
-   * Whether an operand region of a test of some key of the place holds a node (a copy read there may carry
-   * a mark of its source, which `narrowed` then asks at the read's path): a binary search in the place's regions,
+   * Whether an operand region of a test of some key of the place holds a node: a binary search in the place's regions,
    * merged once from the per-key ones, never a scan of the place's tested paths.
    */
   public operandAround(place: PlaceId, node: FlowNode): boolean {

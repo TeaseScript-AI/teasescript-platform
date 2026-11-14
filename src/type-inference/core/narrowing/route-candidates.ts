@@ -1,8 +1,6 @@
 /*
- * The route rule's candidate lists (`NarrowingRoutes`, routes.ts): definitions by callable body, each with the reach of
- * its writer side over the closed statements of its layers, the nearest one whose writer side reaches a read, and a
- * prefix's whole stores. Which of a key's own definitions are candidates (`#ownCandidates`) and the layers (`#build`)
- * are `routes.ts`'.
+ * The route rule's candidate lists: definitions by callable body, each with the reach of its writer side over the
+ * closed statements of its layers, the nearest one whose writer side reaches a read, and a prefix's whole stores.
  */
 import { joinParts, keepText, type WorkLedger } from "../budget.js";
 import type { Definition, Key } from "../definitions.js";
@@ -76,12 +74,10 @@ export class RouteCandidates extends RouteTests {
   }
 
   /**
-   * The end of the block a definition's open writer side reaches (the corridor's (a), `NarrowingRoutes.#open`): from
-   * its statement up, each block's statements after the one left open; out of a loop's body only where its header
-   * leaves it, its header open. No route with a back edge between them counts: the read never stands before the
-   * candidate in a body they share, and a round's end that reaches the code after the loop is the route out of it (the
-   * set's `3b/loop/nested/changed` errs on a `null` stored in an inner loop's body and read after it); a loop only a
-   * `break` leaves stops the writer side.
+   * The end of the block a definition's open writer side reaches: from its statement up, each block's statements after
+   * the one left open; out of a loop's body only where its header leaves it, its header open. No route with a back edge
+   * between them counts: the read never stands before the candidate in a body they share, and a round's end that
+   * reaches the code after the loop is the route out of it; a loop only a `break` leaves stops the writer side.
    */
   #reach(chain: readonly Place[], layer: Layer | null, calls: boolean): number {
     this.#work.charge("eventSteps");

@@ -1,10 +1,9 @@
 import type { FlowGraph, FlowNode } from "./model.js";
 
 /*
- * The dominators of the type core's flow graph: which node every run that reaches another passes first. The exact path
- * takes the nearest dominating definition of a read, compares the nearest dominating boundaries of the two, and counts
- * the events between two nodes in their intervals of the dominator tree. Lengauer and Tarjan's algorithm with path
- * compression, written with explicit stacks, so deep code does not deepen the native stack.
+ * The dominators of the type core's flow graph: which node every run that reaches another passes first. Lengauer and
+ * Tarjan's algorithm with path compression, written with explicit stacks, so deep code does not deepen the native
+ * stack.
  *
  * Dead code has dominators too: an edge counts unless it leads from dead code, or is dead, into live code. So a dead
  * edge never changes what dominates live code, and every node, dead or live, hangs in one tree below the program's
@@ -26,9 +25,8 @@ export interface Dominators {
   /** Where a node's interval ends (see {@link dfsIn}). */
   dfsOut(node: FlowNode): number;
   /**
-   * The nearest dominating boundary, which an exact read and its definition share: a function's entry, a file's entry
-   * that something other than the session's start enters, or a label that some `goto` enters (a label that only the
-   * code before it reaches is none).
+   * The nearest dominating boundary: a function's entry, a file's entry that something other than the session's start
+   * enters, or a label that some `goto` enters (a label that only the code before it reaches is none).
    * `null` where no boundary dominates, as in the code of the file the session starts in.
    */
   edom(node: FlowNode): FlowNode | null;

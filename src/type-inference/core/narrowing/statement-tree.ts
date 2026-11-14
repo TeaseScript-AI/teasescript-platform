@@ -6,16 +6,15 @@ import { each, some, sorted, steps } from "../charged-iteration.js";
 import type { CoreProgram } from "../program.js";
 
 /*
- * The statements of a program as the route query's corridor composes them (`NarrowingRoutes.#open`): per callable body
- * (a file's top level, a function's body, a block's body) its statements in order, each with the blocks of its live
- * alternatives (an `if`'s arms or the way past it, a `switch`'s cases and its `default` or the way past them, a loop's
- * body beside its skip edge where the graph keeps one), and the **shared, key-independent layer** of closed statements,
- * computed once bottom-up: a statement that always leaves, closed for every key; a statement whose compulsory
- * evaluation holds a live call site (one that dominates where its own expressions end), closed for a key with an owner
- * outside its activation (`DefinitionIndex.ownedAway`); and a branch or loop whose every live alternative is closed by
- * those alone, in either applicability. Per block, the indexes of its closed statements are sorted, so a segment of a
- * block is one binary search per layer. A block's possible interference is the route query's handler veto and stays out
- * of the layer; kills and blocking tests are each key's (`routes.ts`).
+ * The statements of a program as the route query's corridor composes them: per callable body (a file's top level, a
+ * function's body, a block's body) its statements in order, each with the blocks of its live alternatives (an `if`'s
+ * arms or the way past it, a `switch`'s cases and its `default` or the way past them, a loop's body beside its skip
+ * edge where the graph keeps one), and the **shared, key-independent layer** of closed statements, computed once
+ * bottom-up: a statement that always leaves, closed for every key; a statement whose compulsory evaluation holds a live
+ * call site (one that dominates where its own expressions end), closed for a key with an owner outside its activation
+ * (`DefinitionIndex.ownedAway`); and a branch or loop whose every live alternative is closed by those alone, in either
+ * applicability. Per block, the indexes of its closed statements are sorted, so a segment of a block is one binary
+ * search per layer. A block's possible interference and each key's kills and blocking tests stay out of the layer.
  */
 
 /** A statement of the tree: where it stands, its alternatives, and whether the shared layer closes it. */

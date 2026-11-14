@@ -19,21 +19,18 @@ import { countIn, lowerBound } from "./statement-tree.js";
 import type { Work } from "../solver.js";
 
 /*
- * Whether a narrowing definition G still answers a read at n (r4-403): the exact path's conditions as `exact-path.ts`
- * writes them (both live, one nearest boundary, the read's loops, no event between, no block's interference: the read
- * not in code a block may reach, and the handler veto), taken over G's dependency keys with their events: each
- * dependency key's own events (the location's key with the keys below it, each prefix's own definitions, each index or
- * key variable's), the call sites where an owner of one of them, or a callable holding an invalidation of a collection
- * of the path, lies outside its activation, and the invalidation lists of the path's collections. Another narrowing is
- * never an event. Every event is counted in intervals of the dominator walk by binary search in those existing lists,
- * never in a copy per (key × node). For a read inside a loop that does not enclose G, and between G and the read, a
- * **preserving store** to the refined location itself is no event (r4-129): a store whose value keeps its kinds within
- * G's filtered kinds. That value is the store's own value demand (`ExactPath.defVal`), whose reads of a component
- * location take their G (`Values`) and so ask this test again: the stores whose values depend on one another are one
- * component of the solver, solved from bottom (no items: every store preserving) to its greatest fixpoint and published
- * only when stable. A location's stores (its candidates, sorted) carry one tree of union demands, each node the kinds
- * of its range's values, whatever kind set asks: a query over a range checks O(log c) nodes, and a lost fact re-runs
- * only the nodes above its store and their readers.
+ * Whether a narrowing definition G still answers a read at n (r4-403), taken over G's dependency keys with their
+ * events: each dependency key's own events (the location's key with the keys below it, each prefix's own definitions,
+ * each index or key variable's), the call sites where an owner of one of them, or a callable holding an invalidation of
+ * a collection of the path, lies outside its activation, and the invalidation lists of the path's collections. Another
+ * narrowing is never an event. Every event is counted in intervals of the dominator walk by binary search in those
+ * existing lists, never in a copy per (key × node). For a read inside a loop that does not enclose G, and between G and
+ * the read, a **preserving store** to the refined location itself is no event (r4-129): a store whose value keeps its
+ * kinds within G's filtered kinds. The stores whose values depend on one another are one component of the solver,
+ * solved from bottom (no items: every store preserving) to its greatest fixpoint and published only when stable. A
+ * location's stores (its candidates, sorted) carry one tree of union demands, each node the kinds of its range's
+ * values, whatever kind set asks: a query over a range checks O(log c) nodes, and a lost fact re-runs only the nodes
+ * above its store and their readers.
  */
 
 /** An event list of G with the word a first event in it gives. */
@@ -159,9 +156,8 @@ export class NarrowingEvents {
     if (program.dom.edom(g.node) !== boundary)
       return boundary?.statement?.kind === "labelStatement" ? "label" : "call";
     const events = this.#events(g);
-    // the loops: every event of a dependency key inside a loop around the read that does not enclose G, preserving
-    // stores aside; the code of the loops it passes holds no event and no breaking store, so the events between ask
-    // their span without it
+    // the code of the loops the read passes holds no event and no breaking store, so the events between ask their span
+    // without it
     const passed: PositionRange[] = [];
     for (const head of each(program.work, "eventSteps", node.loops)) {
       if (holds(program.work, "eventSteps", g.node.loops, head)) continue;
@@ -171,14 +167,11 @@ export class NarrowingEvents {
       if ((yield* this.#first(g, events, inside, kinds, loop)) !== null) return "loop";
       for (const range of each(program.work, "eventSteps", inside)) passed.push(range);
     }
-    // the events between, preserving stores aside: the events after the test, in the rest of its condition, then
-    // strictly after G and not after the read
     const before = this.#inWindow(g);
     if (before !== null) return before;
     const span = without(this.pass.lists.spanBetween(g.node, node), passed, program.work);
     const word = yield* this.#first(g, events, span, kinds);
     if (word !== null) return word;
-    // block code, and the handler veto: a handler store with a registration before the read
     if (program.blockReachable(node)) return "handler";
     if (this.#touched(g) && this.#registered(node)) return "handler";
     return null;
@@ -403,9 +396,8 @@ export class NarrowingEvents {
   }
 
   /**
-   * The owner rule over G's dependency keys (`DefinitionIndex.ownedAway`): another callable stores the key, a prefix or
-   * a key below, or an index variable; or a callable ordinary code may run, other than a collection's activation,
-   * holds an invalidation of it.
+   * The owner rule over G's dependency keys: another callable stores the key, a prefix or a key below, or an index
+   * variable; or a callable ordinary code may run, other than a collection's activation, holds an invalidation of it.
    */
   #ownedAway(g: Narrowing): boolean {
     this.#work.charge("ownerSteps");
@@ -440,9 +432,7 @@ export class NarrowingEvents {
     return outside;
   }
 
-  /**
-   * The handler veto's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged.
-   */
+  /** The handler veto's registration-before-read predicate. */
   #registered(node: FlowNode): boolean {
     this.#work.charge("eventSteps");
     this.#work.charge("eventSteps", node.loops.length);
