@@ -116,8 +116,8 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
   ];
   const blocks = plan.functions.map((definition) => definition.handler !== null);
 
-  // Nodes: regions, then their `gotoWaits`, then the files' activations, then "some activation may wait" and "every
-  // activation may wait".
+  // Nodes: regions, then whether their goto reaches a wait, then the files' activations, then "some activation may
+  // wait" and "every activation may wait".
   const gotoNode = (region: number): number => regionCount + region;
   const activationNode = (file: number): number => 2 * regionCount + file;
   const someActivation = 2 * regionCount + fileCount;
