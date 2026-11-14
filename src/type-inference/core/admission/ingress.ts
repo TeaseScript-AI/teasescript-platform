@@ -16,19 +16,16 @@ import { sortCost, type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { IngressNode, Item } from "../items.js";
 import { concrete, isExternal } from "./kinds.js";
-import { landingIndex, leafIngresses } from "./landing-index.js";
+import { landingIndex, leafIngresses } from "./ingress-landings.js";
 import type { IngressStop, KeyStops, Level, Siting, Stop, StoreIngresses } from "./model.js";
 import { distinctStops, perLink, selects } from "./scan.js";
 import { sourceOf } from "./structure.js";
 import { compareKeys, contributionSite, RECEIVER_ROLES, stopsOf } from "./walk.js";
 
-// Where the external data a store brings is sited (C1, §3.4): its stops by key, its store's ingresses, its own reads.
-
 /**
  * A store's contributions at `at`, in evaluation order: the stops of the one walk (`stopsOf`, the carrier table's)
  * standing at the path or above it, each with the rest of the path to read into it, the ones its operations may give
- * (S: `chosen`, a live read), each snapshot once (`distinctStops`, S6-CARRIERS §4.5). The obligations come from these,
- * as the decider does (invariant O).
+ * (`chosen`, a live read), each snapshot once (`distinctStops`).
  */
 function contributions(
   admission: Admission,
@@ -37,7 +34,6 @@ function contributions(
 ): readonly { readonly stop: Stop; readonly rest: Steps }[] {
   if (d.value === undefined) return [];
   const out: { stop: Stop; rest: Steps }[] = [];
-  // (a record's prefixes named by their record's texts and its rests its views; an array's as before)
   for (let length = 0; length <= at.length; length += 1)
     for (const stop of keyStops(admission, d, stepsPrefixText(at, length)).distinct()) {
       admission.pass.program.work.charge("checks");
@@ -47,10 +43,10 @@ function contributions(
 }
 
 /**
- * C1's site for external data a store brings at `at` (§3.4): the earliest of its contributions
+ * The store check's site for external data a store brings at `at`: the earliest of its contributions
  * that is an ingress or reads one through projections of it, or named data in a literal cell below a combining or
  * removing operation, at its own expression (`contributionSite`); an operation's own read is no such contribution
- * (C10: the destination's check sits at the store), so the store's own site stands for it, as for named data at a
+ * (the destination's check sits at the store), so the store's own site stands for it, as for named data at a
  * decided place below a selecting operation (the set's sites).
  */
 export function ingressSiteOf(
@@ -62,8 +58,8 @@ export function ingressSiteOf(
   if (d.kind !== "whole" || d.value === undefined) return d.site;
   // (the item's own ingress among them first, where it names one: the contribution that brought it; an item carrying
   // named data the store brings beside its inline data, or a fallback's or a default's own read's data (a typed
-  // default's is its call's), is that data's C1, sited by its rule (an own read's at the store), the inline data owing
-  // only its boundary and a host member beside it its own place's C1). Its
+  // default's is its call's), is that data's store check, sited by its rule (an own read's at the store), the inline
+  // data owing only its boundary and a host member beside it its own place's store check). Its
   // leaves are walked only where they are read, beside the store's landing stops or at a siting that brings an ingress:
   // an item united from its elements in one of many orders is a node of its own, walked by no store that reads neither
   // (#1397)
@@ -77,8 +73,8 @@ export function ingressSiteOf(
     ) ||
       meet(admission, leafIngresses(admission, node), namedBeside(admission, d, at)));
   let first: SourceSite | null = null;
-  // (each prefix's sitings once per store, read in evaluation order only as far as the answer: Codex r23 F1; for named
-  // data only its own sitings, the inline ones it skips never read, Codex r24 F2's neighbours)
+  // (each prefix's sitings once per store, read in evaluation order only as far as the answer; for named data only its
+  // own sitings, the inline ones it skips never read)
   const lists: (readonly Siting[])[] = [];
   for (let length = 0; length <= at.length; length += 1) {
     const stops = keyStops(admission, d, stepsPrefixText(at, length));
@@ -120,9 +116,9 @@ function meet(admission: Admission, a: ReadonlySet<PlaceId>, b: ReadonlySet<Plac
 }
 
 /**
- * A store's stops at one key, once per store and key (Codex r23 F1: a path's readers take its prefixes' lists, never
- * the store's whole walk again): the ones its operations may give (`selects`), in evaluation order, and, on demand,
- * the ones C1 may be sited at (`ingressSiteOf`) and the named data among them (`namedBeside`).
+ * A store's stops at one key, once per store and key (a path's readers take its prefixes' lists, never the store's
+ * whole walk again): the ones its operations may give (`selects`), in evaluation order, and, on demand, the ones the
+ * store check may be sited at (`ingressSiteOf`) and the named data among them (`namedBeside`).
  */
 function keyStops(admission: Admission, d: Definition, key: string): KeyStops {
   const memoKey = joinParts(d.uid, key);
@@ -157,8 +153,8 @@ function keyStops(admission: Admission, d: Definition, key: string): KeyStops {
   const entry: KeyStops = {
     selected,
     distinct: () => (distinct ??= distinctStops(admission, selected)),
-    // an operation's own read is no contribution C1 is sited at (C10); named data below a combining operation or a
-    // member of named data is sited at its own expression (`ingress` null), an ingress where it is read
+    // an operation's own read is no contribution the store check is sited at; named data below a combining operation or
+    // a member of named data is sited at its own expression (`ingress` null), an ingress where it is read
     sitings: () => {
       if (sitings !== null) return sitings;
       const out: Siting[] = [];
@@ -178,7 +174,7 @@ function keyStops(admission: Admission, d: Definition, key: string): KeyStops {
       }
       return (sitings = out);
     },
-    // (a member of host data beside them is its own place's C1, never the merged item's)
+    // (a member of host data beside them is its own place's store check, never the merged item's)
     namedSitings: () =>
       (namedSitings ??= entry
         .sitings()
@@ -207,7 +203,7 @@ function keyStops(admission: Admission, d: Definition, key: string): KeyStops {
         )
           out.push(stop);
       }
-      // (equal snapshots bring equal named data at every path below: each read once, Codex r24 F2's neighbours)
+      // (equal snapshots bring equal named data at every path below: each read once)
       return (named = distinctStops(admission, out));
     },
   };
@@ -218,7 +214,7 @@ function keyStops(admission: Admission, d: Definition, key: string): KeyStops {
 
 /**
  * Whether a contribution is a member of named external data: a property read of it, or what a receiver's operation
- * reads of it (`parcel.field`, `parcel.get(0, default: 1)`): C1 at the member read.
+ * reads of it (`parcel.field`, `parcel.get(0, default: 1)`): the store check at the member read.
  */
 function namedMember(admission: Admission, stop: Stop): boolean {
   const { program, definitions, values } = admission.pass;
@@ -235,7 +231,7 @@ function namedMember(admission: Admission, stop: Stop): boolean {
 
 /**
  * Whether a contribution is named external data in a cell of a literal that a combining or removing operation takes
- * (`[a] + [named]`, `[k, named].removeAt(1)`): the operand that brought the kind, C1's site.
+ * (`[a] + [named]`, `[k, named].removeAt(1)`): the operand that brought the kind, the store check's site.
  */
 function namedBelowCombining(admission: Admission, stop: Stop): boolean {
   const { definitions, values } = admission.pass;
@@ -255,9 +251,9 @@ function namedBelowCombining(admission: Admission, stop: Stop): boolean {
 /**
  * Where a store's value at `at` carries external data another store brought: the first read among its
  * contributions of a source key (`sourceOf`: a binding, a member of one, a call's result) no store validates (its
- * contract there holds no kind), whose items there are external, a member the runtime reads included (F15: C5's
- * obligation on the receiver waives nothing at the destination); `null` where none does. Inline data is the store's
- * own ingress (C9's boundary): it does not count.
+ * contract there holds no kind), whose items there are external, a member the runtime reads included (the receiver's
+ * member check waives nothing at the destination); `null` where none does. Inline data is the store's own ingress
+ * (its boundary check): it does not count.
  */
 export function namedExternalSite(
   admission: Admission,
@@ -266,7 +262,7 @@ export function namedExternalSite(
 ): SourceSite | null {
   const { contract, values } = admission.pass;
   const { inline } = storeIngresses(admission, d);
-  // (each snapshot once: equal reads of one source through one chain hold equal named data, S6-CARRIERS §4.5)
+  // (each snapshot once: equal reads of one source through one chain hold equal named data)
   for (const { stop, rest } of contributions(admission, d, at)) {
     const source = sourceOf(admission, stop.value);
     if (source === null || inline.has(stop.value)) continue;
@@ -281,10 +277,10 @@ export function namedExternalSite(
 }
 
 /**
- * Whether an external item a store brings is an operation's own read's data alone (C10: a fallback's, a default's):
- * each ingress it names reaches the store's value through an own read, as host data or in named data. Its boundary is
- * against `[unknown]`, so A7's whole-store exception never stands in for the destination's check of it.
- * It reads no path: once per store and provenance node (Codex r23 F1).
+ * Whether an external item a store brings is an operation's own read's data alone (a fallback's, a default's): each
+ * ingress it names reaches the store's value through an own read, as host data or in named data. Its boundary is
+ * against `[unknown]`, so a whole external store's check of what lies below it never stands in for the destination's
+ * check of it. It reads no path: once per store and provenance node.
  */
 export function ownReadItem(admission: Admission, item: Item, d: Definition): boolean {
   if (item.ingress === undefined) return false;
@@ -302,7 +298,7 @@ export function ownReadItem(admission: Admission, item: Item, d: Definition): bo
 
 /**
  * The ingresses that reach a store's value through an operation's own read, once per store; `typed` false leaves out
- * those only a typed default reads (F18: its data's C1 at the call's ingress).
+ * those only a typed default reads (its data's store check at the call's ingress).
  */
 function ownLeaves(admission: Admission, d: Definition, typed = true): ReadonlySet<PlaceId> {
   const memoKey = joinParts(d.uid, typed);
@@ -346,7 +342,6 @@ export function wholeBelow(admission: Admission, value: PlaceId, at: Steps): Pla
   let level: Level = { values: [value], whole: program.hasOf.has(value) ? null : value };
   let key = `${value}`;
   for (let index = 0; index + 1 < at.length && level.whole === null; index += 1) {
-    // (a record's prefix named by its record's text, `prefixText`; an array's step by step as before)
     key = isPathSteps(at)
       ? stepText(String(value), at.prefixText(index + 1))
       : stepText(key, at[index]!);
@@ -366,10 +361,9 @@ export function wholeBelow(admission: Admission, value: PlaceId, at: Steps): Pla
 }
 
 /**
- * Whether an item's external data came in at the store `d` itself (C9: its boundary there checks it): data that stands
- * whole in the store's value, with what that ingress holds (a typed default's data is its call's). A member the store
- * brings of host data, or named data the store brings beside the inline data at `at`, owes its own check
- * (Codex r21 B3).
+ * Whether an item's external data came in at the store `d` itself (its boundary check there checks it): data that
+ * stands whole in the store's value, with what that ingress holds (a typed default's data is its call's). A member the
+ * store brings of host data, or named data the store brings beside the inline data at `at`, owes its own check.
  */
 export function ownIngress(admission: Admission, item: Item, d: Definition, at: Steps): boolean {
   if (item.ingress === undefined) return false;
@@ -393,7 +387,7 @@ export function ownIngress(admission: Admission, item: Item, d: Definition, at: 
 
 /**
  * The ingresses of the named external data a store brings at `at` outside every ingress its value holds whole and
- * every operation's own read (C10's): what an item merging them with inline data owes beside its boundary. Once per
+ * every operation's own read: what an item merging them with inline data owes beside its boundary. Once per
  * store and path, reading only its prefixes' named data (`keyStops`).
  */
 function namedBeside(admission: Admission, d: Definition, at: Steps): ReadonlySet<PlaceId> {
@@ -416,7 +410,7 @@ function namedBeside(admission: Admission, d: Definition, at: Steps): ReadonlySe
   return out;
 }
 
-/** A store's answer for a provenance node, once: one that reads no path (Codex r23 F1). */
+/** A store's answer for a provenance node, once: one that reads no path. */
 function perNode<T>(
   memo: Map<number, Map<IngressNode, T>>,
   d: Definition,
@@ -432,7 +426,10 @@ function perNode<T>(
   return value;
 }
 
-/** C9's site for an item a store brings (§3.4): the earliest evaluated of its contributions there, else `site`. */
+/**
+ * The boundary check's site for an item a store brings: the earliest evaluated of its contributions there (its own
+ * expression), else `site`.
+ */
 export function cellSited(
   admission: Admission,
   site: SourceSite,
@@ -443,9 +440,9 @@ export function cellSited(
 }
 
 /**
- * C1's site for an item an add or an `addAll` brings (§3.4): the earliest evaluated of its contributions, what
- * a receiver's operation reads of it at that operation (`xs.add(hostValue.get(0, default: 1))`: the `get`, Codex r21
- * N1), else `site`.
+ * The store check's site for an item an add or an `addAll` brings: the earliest evaluated of its contributions, what a
+ * receiver's operation reads of it at that operation (`xs.add(hostValue.get(0, default: 1))`: the `get`), else
+ * `site`.
  */
 export function contributionSited(
   admission: Admission,
@@ -475,8 +472,8 @@ function firstStop(admission: Admission, item: Item, d: Definition): IngressStop
 }
 
 /**
- * A store's landing stops by ingress, once per store (Codex r24 F1: an item's leaves ask it, never the store's list
- * again): the ingresses it holds whole, those it brings as members, and each ingress's first stop.
+ * A store's landing stops by ingress, once per store (an item's leaves ask it, never the store's list again): the
+ * ingresses it holds whole, those it brings as members, and each ingress's first stop.
  */
 function storeIngresses(admission: Admission, d: Definition): StoreIngresses {
   const known = admission.byIngress.get(d.uid);

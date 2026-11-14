@@ -59,11 +59,9 @@ import { inheritedInto } from "../inherited/waiting.js";
 import { readNow, type Reads } from "../inherited/reads.js";
 import { compareKeys, expandRead, stopsOfRead, viaSignature, viewOfRead } from "./walk.js";
 
-// A2's scan: the stores a path is decided from, and the earliest contribution in evaluation order that decides it.
-
 /**
- * The stores a place's path is decided from (§5): its direct candidates (a store beside an unannotated parameter's
- * default none, F21) and the prefixes of the path whole stores or adds reach; `null` for a literal's own cell or
+ * The stores a place's path is decided from: its direct candidates (a store beside an unannotated parameter's default
+ * none) and the prefixes of the path whole stores or adds reach; `null` for a literal's own cell or
  * property, and where none reaches it.
  */
 export function inputsOf(
@@ -71,22 +69,21 @@ export function inputsOf(
   root: PlaceId,
   path: readonly string[],
 ): Inputs | null {
-  const { program, definitions, contract } = admission.pass;
+  const { definitions, contract } = admission.pass;
   if (!decidesPaths(admission, root)) return null;
   const direct = (definitions.candidates.get(keyOf(root, path)) ?? []).filter(
     (candidate) => !admission.besideDefault(candidate.d),
   );
-  // (G3 3b: the keys whole stores, adds or dead arguments reach along the path, shortest first, by one walk of its
+  // (the keys whole stores, adds or dead arguments reach along the path, shortest first, by one walk of its
   // steps down their trie: never a key made per prefix of the path)
   const prefixes: { readonly key: Key; readonly rest: PathRef }[] = [];
   for (const { key, depth } of admission.stored.along(root, path, false))
     prefixes.push({ key, rest: arrayRef(contract, path.slice(depth)) });
-  void program;
   return direct.length === 0 && prefixes.length === 0 ? null : { direct, prefixes };
 }
 
 /**
- * `inputsOf` for a decided path in its identity (G3 stage 1): a cursor's family holds no definition or candidate below
+ * `inputsOf` for a decided path in its identity: a cursor's family holds no definition or candidate below
  * its place's own key (its shape requires it), so it has no direct store, and its one prefix with stores is that own
  * key, its rest the cursor's whole path as a span, asked of the trie as the path's walk asks it there.
  */
@@ -112,7 +109,7 @@ function decidesPaths(admission: Admission, root: PlaceId): boolean {
 }
 
 /**
- * A2, A4: the earliest contribution in source order that decides a path (`into`, the decision's own place and path),
+ * The earliest contribution in source order that decides a path (`into`, the decision's own place and path),
  * with what it decides: a lazy merge of the direct stores and the prefixes' whole stores and adds, each read only as
  * far as the scan goes; `null` where none decides.
  */
@@ -141,7 +138,7 @@ export function* scanAt(
   const { program, lists } = admission.pass;
   const work = program.work;
   const seen = new Map<string, Item[]>();
-  // (a span's memo by its path's id, `(uid, span)`, never its text: G3 stage 1)
+  // (a span's memo by its path's id, `(uid, span)`, never its text)
   function* evaluate(d: Definition, at: Rest): Reads<Item[]> {
     const memoKey = joinParts(d.uid, restPart(at));
     let items = seen.get(memoKey);
@@ -151,8 +148,8 @@ export function* scanAt(
     }
     return items;
   }
-  // A2: the earliest definite contribution in source order decides, a lazy merge of the direct stores and the
-  // prefixes' whole stores and adds; A4: a copy of a written binding is decided by its type
+  // the earliest definite contribution in source order decides, a lazy merge of the direct stores and the prefixes'
+  // whole stores and adds; a copy of a written binding decides by its type
   // (each list is in source order and read only as far as the scan goes: a prefix's stores are listed once per pass)
   const own = direct.filter(
     (candidate) =>
@@ -214,8 +211,8 @@ export function* scanAt(
     if (first?.cell !== undefined && copied === null) return stoppedScan(d);
     if (copied !== null) {
       // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
-      // 1.3, A8; a list join's, a written operand's or an element's, make the joined list optional, ADR 0021 1.3, V30
-      // §16, Codex r9's B1b on #1310)
+      // 1.3; a list join's, a written operand's or an element's, make the joined list optional, ADR 0021 1.3, V30 §16,
+      // #1310)
       const copiedTags = typeTags(copied);
       const joinedNull =
         first!.joinedNull === true ||
@@ -238,7 +235,7 @@ export function* scanAt(
       };
     }
     // an unknown beside a kind does not decide, unless a literal's own element decides beside it; a null beside one
-    // does (A8)
+    // does
     const items = yield* evaluate(d, at);
     // (#2065: a store holding nothing at the path, which the prefix's index, once made, does not read)
     const holders = scans[best]!.holders;
@@ -260,20 +257,7 @@ export function* scanAt(
   return null;
 }
 
-/**
- * A2, A4, A8 (ADR 0021 1.1–1.3): the earliest contribution in evaluation order that decides a stored value's path: a
- * copy of a written binding (its written type at the rest of the path), or of a place that inherits one there, taken
- * into the decision of `into` (`inheritedInto`; `null` outside a place's decision), or a value whose items there are
- * of definite kinds; a `null` or an unknown decides nothing, and a value an unknown may stand beside (a read, a copy, a call)
- * neither, while a literal's other elements still may (A8: `[1, hostValue]`'s elements are whole numbers, Sol's
- * records for the owner's F1); a later copy never comes before an earlier definite element. The place's decision and
- * the literal's own elements (`literalElements`) both take it, so they cannot pick opposite deciders. A list join's
- * written operands count by `joinedDomain`, each whatever came before or after it: an open one leaves the path open,
- * and one holding `null` makes the copy's type optional (`joinedNull`). `null` where nothing on the path decides.
- * Where no written copy on the path asks a type, the value's carriers' transfers answer (`transferredDecider`), each
- * carrier once; else, outside every decision and into no decision's place, their written-decider summary
- * (`writtenDecider`); else its stops are scanned here.
- */
+/** What `earliestDecider` answers: a deciding copy's type and site, or a deciding value's kinds. */
 export interface DeciderAnswer {
   readonly term: TypeTerm | null;
   readonly site: SourceSite | null;
@@ -292,6 +276,16 @@ export interface DeciderAnswer {
   readonly stopped?: true;
 }
 
+/**
+ * The earliest contribution in evaluation order that decides a stored value's path (ADR 0021 1.1–1.3): a copy of a
+ * written binding (its written type at the rest of the path), or of a place that inherits one there, taken into the
+ * decision of `into` (`inheritedInto`; `null` outside a place's decision), or a value whose items there are of definite
+ * kinds; a `null` or an unknown decides nothing, and a value an unknown may stand beside (a read, a copy, a call)
+ * neither, while a literal's other elements still may (`[1, hostValue]`'s elements are whole numbers); a later copy
+ * never comes before an earlier definite element. A list join's written operands count by
+ * `joinedDomain`, each whatever came before or after it: an open one leaves the path open, and one holding `null` makes
+ * the copy's type optional (`joinedNull`). `null` where nothing on the path decides.
+ */
 export function* earliestDecider(
   admission: Admission,
   value: PlaceId,
@@ -301,21 +295,20 @@ export function* earliestDecider(
 ): Inheriting<DeciderAnswer | null> {
   const { program, contract } = admission.pass;
   const asked = into === null ? path : yield* dictAsked(admission, into, path);
-  // (a cursor's span read one step at a time and by its path's id, never made: G3 stage 1)
+  // (a cursor's span read one step at a time and by its path's id, never made)
   const at = restRef(contract, asked);
   const task = yield* expandRead(admission, value, node, []);
   // #2289: where a literal stands on the path and a declared contribution (a written copy) in the value's region, the
   // literal's cell answers, one contribution, never a summary of its parts; with none declared every cell is inferred,
-  // and the summaries' kinds are B1's (the decision takes the store's own kinds there, `scanAt`)
+  // and the summaries answer (the decision takes the store's own kinds there, `scanAt`)
   const root = deciderRoot(admission, task, asked);
   const literal = yield* literalRoute(admission, root);
   if (!literal) {
-    const written = { root: null, ids: null };
-    const transferred = yield* transferredDecider(admission, task, asked, written, root);
-    // #1444(b,c): outside every decision and into no decision's place, the groups' written-decider summary answers; a
-    // decision's scan stays its stops', so each decision charges what it charged before
+    const transferred = yield* transferredDecider(admission, task, asked, root);
+    // #1444: outside every decision and into no decision's place, the groups' written-decider summary answers; a
+    // decision's scan stays its stops', so a decision's charges never depend on the summary
     if (transferred === undefined && into === null && admission.deciding === 0)
-      return yield* writtenDecider(admission, task, asked, written);
+      return yield* writtenDecider(admission, task, asked, root);
     if (transferred !== undefined)
       return transferred === null
         ? null
@@ -385,14 +378,16 @@ export function* scanView(
     readonly host?: boolean;
   } | null = null;
   // (a list join's written operands by `joinedDomain`, each whatever came before or after it: an open one leaves the
-  // value open there, one holding `null` makes it optional, Codex r9's B1 on #1310)
+  // value open there, one holding `null` makes it optional, #1310)
   let joinedNull = false;
   const self = admission;
-  // (whether the last copy `termOf` answered reads its written type at its own level: a written copy's where no step of
-  // the asked path is left below it, an inheriting copy's as the inheritance pass recorded it, `inheritedInto`'s `own`,
-  // #1901)
-  let ownLevel = false;
-  function* termOf(stop: Stop, length: number): Inheriting<TypeTerm | null> {
+  // (a copy's type at the path, and whether it reads its written type at its own level (`own`): a written copy's where
+  // no step of the asked path is left below it, an inheriting copy's as the inheritance pass recorded it,
+  // `inheritedInto`'s `own`, #1901)
+  function* termOf(
+    stop: Stop,
+    length: number,
+  ): Inheriting<{ readonly term: TypeTerm | null; readonly own: boolean }> {
     // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
     // read out of has it alone, and each operation surely gives it)
     if (
@@ -400,7 +395,7 @@ export function* scanView(
       length === at.length &&
       !(stop.single && (yield* selectsRead(self, stop, true)))
     )
-      return null;
+      return { term: null, own: false };
     const rest: Rest =
       at.kind === "span"
         ? at.from(length).after(stop.strip)
@@ -410,29 +405,32 @@ export function* scanView(
       stop.from === null
         ? permittedAt(stop.term!, rest)
         : yield* inheritedInto(self, stop.from, rest, into, inherited);
-    ownLevel = stop.from === null ? rest.length === 0 : inherited.value;
+    const own = stop.from === null ? rest.length === 0 : inherited.value;
     // (a written copy an operation carries decides only where the operation selects it: an operand it never gives is
-    // no copy of the place, while a selected copy keeps its whole written type, A4)
-    return term !== null && (stop.via === null || (yield* selectsRead(self, stop))) ? term : null;
+    // no copy of the place, while a selected copy keeps its whole written type)
+    return {
+      term: term !== null && (stop.via === null || (yield* selectsRead(self, stop))) ? term : null,
+      own,
+    };
   }
-  // (G3 3b: no stop stands deeper than its value's own paths, `stopDepths`; a join's written calls stand among the
+  // (no stop stands deeper than its value's own paths, `stopDepths`; a join's written calls stand among the
   // values)
   const depths = depthsOf();
   const deepest = Math.min(at.length, Math.max(depths.written, depths.values));
   for (let length = from; length <= deepest; length += 1) {
     program.work.charge("checks");
-    // (a span's prefix text its record's, `textOf`; an array's made plain, as before)
     const prefix = at.text(length);
     const written = snapshots(admission, stops.written.get(prefix), false);
-    // (and a call a join carries by its written result, as `joinElements` reads it: F20; since #2378 such a call is a
-    // written stop too, `writtenSourceRead`, and this read answers alike)
+    // (and a call a join carries, by its written result; since #2378 such a call is a written stop too, and this read
+    // answers alike)
     const calls = joinedOf(admission, snapshots(admission, stops.values.get(prefix), false));
     for (const stop of [...joinedOf(admission, written), ...calls]) {
       program.work.charge("checks");
       let term: TypeTerm | null;
-      if (stop.term !== null || stop.from !== null) term = yield* termOf(stop, length);
+      let own: boolean;
+      if (stop.term !== null || stop.from !== null) ({ term, own } = yield* termOf(stop, length));
       else {
-        ownLevel = false;
+        own = false;
         const key = contract.resultKey(stop.value);
         const result = key === null ? null : writtenOf(program.place(keyPlace(key)).kind);
         term =
@@ -451,15 +449,14 @@ export function* scanView(
       if (domain === "open") return { term, site: siteOf(stop) };
       joinedNull ||= typeTags(term).includes("null");
       if (domain === "kinds" && (copy === null || compareKeys(stop.key, copy.key) < 0))
-        copy = { key: stop.key, term, site: siteOf(stop), joined: true, own: ownLevel };
+        copy = { key: stop.key, term, site: siteOf(stop), joined: true, own };
     }
     for (const stop of written ?? []) {
       program.work.charge("checks");
       if (copy !== null && compareKeys(stop.key, copy.key) > 0) break;
       if (stop.via?.joined === true) continue;
-      const term = yield* termOf(stop, length);
-      if (term !== null)
-        copy = { key: stop.key, term, site: siteOf(stop), joined: false, own: ownLevel };
+      const { term, own } = yield* termOf(stop, length);
+      if (term !== null) copy = { key: stop.key, term, site: siteOf(stop), joined: false, own };
     }
   }
   // #2289: each literal task on the path, in key order, by its cell's answer: a strict one as a written copy, an
@@ -533,7 +530,7 @@ export function* scanView(
   // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
   const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];
   // (a value a projection selects stands for its parts below the path, never at it; of the values of one class the
-  // first alone, the others answering as it does, Astra's review B2)
+  // first alone, the others answering as it does)
   for (let length = from; length <= Math.min(at.length, depths.values); length += 1) {
     const list = snapshots(
       admission,
@@ -569,7 +566,7 @@ export function* scanView(
       cellNext !== null && (stopNext === null || compareKeys(cellNext.key, stopNext.key) < 0)
         ? cellNext
         : stopNext;
-    // (a copy of a place that inherits a written type comes before that copy's own value, A4)
+    // (a copy of a place that inherits a written type comes before that copy's own value)
     if (next === null || (copy !== null && compareKeys(copy.key, next.key) <= 0))
       return copy === null ? null : copied();
     program.work.charge("checks", lists.length + (cellValues.length > 0 ? 1 : 0));
@@ -588,7 +585,7 @@ export function* scanView(
     const nextStop = stopNext!;
     positions[best]! += 1;
     // (a typed default's literal is the call's input, not the stored value's own element: where the default holds host
-    // data it leaves the path open, and the call decides nothing there beside it, F18)
+    // data it leaves the path open, and the call decides nothing there beside it)
     if (nextStop.via?.typed === true) continue;
     const items = withoutEmpty(
       yield* admission.runRead(() =>
@@ -602,7 +599,7 @@ export function* scanView(
       ),
     );
     const definite = items.some((item) => item.tag === "unknown") ? [] : deciding(items);
-    // (an operand its operation does not give decides nothing, F17a, F17b)
+    // (an operand its operation does not give decides nothing)
     if (definite.length === 0 || !(yield* chosen(admission, nextStop.via))) continue;
     // (each chain's operations asked once per set of kinds at the path, whatever stops share them)
     const tags = definite.map((item) => item.tag);
@@ -614,7 +611,7 @@ export function* scanView(
   }
 }
 
-/** A scan that met a stopped literal element (#2289: nothing decides, and the path is undecided. */
+/** A scan that met a stopped literal element (#2289): nothing decides, and the path is undecided. */
 function stoppedScan(decider: Definition) {
   const tags: ItemTag[] = [];
   return {
@@ -683,8 +680,8 @@ function stopDepths(
 /**
  * A list of a walk's stops as the decider reads it, once per list: each snapshot once (one key read here),
  * so of the reads of one key through one chain of operations at one strip that read the same only the
- * first is read, the later ones holding what it holds (k reads of one host global, decided at k paths: Codex r23 F1);
- * so too k calls of one function (Codex r24 F2's neighbours); `shallow` leaves out the values a projection
+ * first is read, the later ones holding what it holds (k reads of one host global, decided at k paths); so too k calls
+ * of one function; `shallow` leaves out the values a projection
  * selects, `classes` all but the first of a class (`classFirsts`).
  */
 function snapshots(
@@ -723,9 +720,9 @@ function joinedOf(admission: Admission, list: readonly Stop[] | undefined): read
 /**
  * Of a decider's values (`earliestDecider`), the first of each value-side class (`Contract.boundClass`) at one node,
  * strip and chain of operations: the values of one class answer alike at every path but for their roles' writers and
- * the leaves or operands they name (C9, F16), none of which decides, so a later one decides as the first does and is
- * never read where the first decides nothing (k loads of one default before a literal's object, decided at its k
- * properties, Astra's review B2; k bindings of them, #1313). Each value of no class as itself.
+ * the leaves or operands they name, none of which decides, so a later one decides as the first does and is never read
+ * where the first decides nothing (k loads of one default before a literal's object, decided at its k properties; k
+ * bindings of them, #1313). Each value of no class as itself.
  */
 function classFirsts(admission: Admission, list: readonly Stop[]): readonly Stop[] {
   if (!sharing() || list.length < 2) return list;
@@ -865,7 +862,7 @@ export function perLink(
   );
 }
 
-/** `perLink` of a test that makes reads (`Read`), each link's test asked as `perLink` asks it (#1072 A2). */
+/** `perLink` of a test that makes reads (`Read`, #1072). */
 function* perLinkRead(
   admission: Admission,
   memo: WeakMap<ViaChain, boolean>,
@@ -889,14 +886,14 @@ function* perLinkRead(
  * Whether a written copy reached through operations is selected: its own read runs, and each operation gives the
  * operand the walk took to it, by the operation's rule, never by what the copy's items say of their writers (a written
  * parameter's have none): a `get` its receiver's element unless the graph's literal proof leaves only its default, and
- * its default only where that is reached (F17b); `otherwise` its own operand only where that may be a value, and its
- * fallback only where the operand may be null (F17a); the other carriers give every operand that runs.
+ * its default only where that is reached; `otherwise` its own operand only where that may be a value, and its
+ * fallback only where the operand may be null; the other carriers give every operand that runs.
  */
 export function selects(admission: Admission, stop: Stop, surely = false): boolean {
   return readNow(selectsRead(admission, stop, surely));
 }
 
-/** `selects` as reads (#1072 A2). */
+/** `selects` as reads (#1072). */
 function* selectsRead(admission: Admission, stop: Stop, surely = false): Reads<boolean> {
   return live(admission, stop.value) && (yield* chosen(admission, stop.via, surely));
 }

@@ -4,24 +4,24 @@ import { joinSteps, keepText, keptParts, keptSlice, type WorkLedger } from "../b
 import type { ContractResult, LevelProof } from "../contract-descriptors.js";
 import type { Definition } from "../definitions.js";
 import type { Unsettled } from "./closure.js";
-import { landingIndex } from "./landing-index.js";
+import { landingIndex } from "./ingress-landings.js";
 import { elementsBelow } from "./structure.js";
 
 /*
- * The receiving obligations of a settled pass (#1526 phase C step 1, Sol's round 1 D1): every check a
+ * The receiving obligations of a settled pass (#1526): every check a
  * store owes its destination, found apart from the diagnostics the walk emitted, so a check whose warning a stop left
  * out (a stopped decision's own marks) or never made (a destination whose decision read a frozen key, the unmarked
  * function result `out = make(); out.nest.n = hostValue`) is still owed. A slot is stable across passes (its site, its
  * role and the store's normalized identity); each pass binds it to its destination's key, its receiving site and the
- * extent it requires (`Extent`), since a pass's store targets and rejections are its own (A6, #1275).
+ * extent it requires (`Extent`), since a pass's store targets and rejections are its own (#1275).
  */
 
-/** What a receiving check requires at a path (D1): the whole contract, or the shape alone (suitability, presence). */
+/** What a receiving check requires at a path: the whole contract, or the shape alone (suitability, presence). */
 export type Extent = "shape" | "complete";
 
 /**
- * Why a slot owes its check: a store's C1 check (a warning the walk made), a stopped decision's store obligation (the
- * marks the stop made, reason `budget`), or an ingress store's C9 boundary (the landing index, no diagnostic read).
+ * Why a slot owes its check: a store check (a warning the walk made), a stopped decision's store obligation (the marks
+ * the stop made, reason `budget`), or an ingress store's boundary check (the landing index, no diagnostic read).
  */
 export type ReceivingRole = "store" | "stopped" | "ingress";
 
@@ -49,18 +49,18 @@ export interface ReceivingObligation {
 export interface ReceivingSources {
   readonly epoch: number;
   /**
-   * The sites of the store checks the walk owes (its store warnings, C1), each with whether a stop made it: a stopped
+   * The sites of the store checks the walk owes (its store warnings), each with whether a stop made it: a stopped
    * decision's stores among them, each by the mark the stop gave it (`Consumers.stoppedStores`).
    */
   readonly storeSites: readonly { readonly site: SourceSite; readonly stopped: boolean }[];
-  /** The sites of the typed ingresses a stop left open (`Admission.ingressStores`, F18), which the capture takes too. */
+  /** The sites of the typed ingresses a stop left open (`Admission.ingressStores`). */
   readonly ingressSites: readonly SourceSite[];
   /** A site's identity text. */
   readonly siteKey: (site: SourceSite) => string;
 }
 
 /**
- * A store's receiving check as D1's extent table reads it: the complete contract at the path it receives at, and the
+ * A store's receiving check by its extents: the complete contract at the path it receives at, and the
  * shape of each level above it (the receiver is suitable and holds the step: `b.f = v` owes `b`'s shape and `b.f`'s
  * contract, never `b`'s other properties' contracts; `b = v` owes `b`'s whole contract; `b[0].f = v` the shapes of
  * `b` and its element and the element's `f`'s contract; host data inside a whole stored value the subpath it lands at).
@@ -130,8 +130,8 @@ export function receivingObligations(
   };
   for (const { site, stopped } of sources.storeSites) atSite(site, stopped ? "stopped" : "store");
   for (const site of sources.ingressSites) atSite(site, "store");
-  // (C9 from the landing index alone: a store whose value brings external data owes its check at the subpath its
-  // ingress stops land at, their common prefix below the destination, whatever the walk's warnings say)
+  // (the boundary checks from the landing index alone: a store whose value brings external data owes its check at the
+  // subpath its ingress stops land at, their common prefix below the destination, whatever the walk's warnings say)
   for (const [d, stops] of landingIndex(admission).byStore) {
     work.charge("checks");
     if (stops.length === 0 || !lists.live(d)) continue;

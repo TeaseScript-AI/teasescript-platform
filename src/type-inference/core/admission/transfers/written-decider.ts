@@ -32,7 +32,7 @@ import {
   type WrittenCandidate,
   type WrittenSummary,
 } from "./regions.js";
-import { rootMember } from "./transferred-decider.js";
+import { rootMember, type DeciderRoot } from "./transferred-decider.js";
 
 /**
  * A region path's written copies as the decider's scan reads them (`earliestDecider`'s `snapshots`): of one member's
@@ -99,19 +99,18 @@ function summaryCaches(admission: Admission): DeciderCaches {
 }
 
 /**
- * #1444(b,c): `earliestDecider`'s answer where a written copy on the path asks a type (`transferredDecider` answered
- * `undefined`), asked outside every decision and into no decision's place (`literalElements`, `joinElements`), from its
- * groups' regions instead of a walk of its stops: each group's answer at a rest of the path once per masks and linked
- * members, its written copies and values in its region's rank order, each operand group's answer taken at its rank
- * (a nest's levels each answered once, never each level's whole walk again). The same answer as the scan: an open list
- * join's operand first, else the earlier of the earliest written copy (`copy`) and the earliest deciding value.
- * A decision's own scan stays the stops' (`earliestDecider`), so each decision charges what it charged before.
+ * #1444: `earliestDecider`'s answer where a written copy on the path asks a type, asked outside every decision and
+ * into no decision's place, from its groups' regions instead of a walk of its stops: each group's answer at a rest of
+ * the path once per masks and linked members, its written copies and values compared by their rank in its region,
+ * each operand group's answer taken at its rank (a nest's levels each answered once, never each level's whole walk
+ * again). The same answer as the scan: an open list join's operand first, else the earlier of the earliest written copy
+ * (`copy`) and the earliest deciding value.
  */
 export function* writtenDecider(
   admission: Admission,
   task: Expansion,
   asked: Rest,
-  found: { readonly root: DeciderGroup | null; readonly ids: ((rest: number) => number) | null },
+  decider: DeciderRoot,
 ): Inheriting<{
   readonly term: TypeTerm | null;
   readonly site: SourceSite | null;
@@ -124,10 +123,10 @@ export function* writtenDecider(
   const { program, contract } = admission.pass;
   const work = program.work;
   const at = restRef(contract, asked);
-  const ids = found.ids!;
+  const ids = decider.ids;
   const root =
     caches.deciders === admission.deciders
-      ? found.root!
+      ? decider.root
       : groupOf(admission, [rootMember(task)], caches);
   type Kind = "written" | "value" | "bound";
   interface Frame {
@@ -357,7 +356,7 @@ export function* writtenDecider(
       own = below.length === 0;
       term = permittedAt(entry.task.stop!.term!, below);
     }
-    // (a copy reached through operations decides only where they select it, A4)
+    // (a copy reached through operations decides only where they select it)
     if (
       term !== null &&
       entry.call !== true &&

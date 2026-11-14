@@ -1,5 +1,5 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
-import { admitted, deciderAt, inheritsWritten, retained } from "./admission/admitted.js";
+import { admitted, inheritsWritten, retained } from "./admission/admitted.js";
 import {
   boundariesAt,
   boundaryAt,
@@ -17,7 +17,7 @@ import {
   decisionStoppedAt,
   stopDecision,
 } from "./admission/decision.js";
-import { groups, stores } from "./admission/groups.js";
+import { groups } from "./admission/groups.js";
 import { atCopy } from "./admission/held.js";
 import {
   cellSited,
@@ -29,7 +29,7 @@ import {
   wholeBelow,
 } from "./admission/ingress.js";
 import { copyGraph, inheritedProofOf } from "./inherited/inherited.js";
-import { typedByDefault } from "./admission/landing-index.js";
+import { typedByDefault } from "./admission/ingress-landings.js";
 import { literalElements } from "./admission/literals/elements.js";
 import { joinElements } from "./admission/literals/join.js";
 import { type MixedOptional } from "./admission/literals/mixed-sentence.js";
@@ -124,19 +124,11 @@ export { requiredKind } from "./admission/boundaries.js";
 export { withoutChains } from "./admission/classes.js";
 export { withMemberOracle } from "./admission/decision.js";
 export { concrete, contributes, deciding, fits, isExternal, isOpaque } from "./admission/kinds.js";
-export type { Candidate, DecidedAt, Decision } from "./admission/model.js";
+export type { DecidedAt, Decision } from "./admission/model.js";
 
 /*
- * Admission (checkpoint 9) and the boundary checks of external data (C9). A place's type is decided once,
- * in source order, at a destination store, from the value that store transfers at its own node (§3): a written type
- * decides (A1, A9); a copy of a written binding is decided by its type (A4); otherwise the earliest definite
- * contribution in source order (A2), where a settled family needs no scan (A3); the candidates a decided type is checked
- * against are the direct stores and the whole stores of a prefix whose source holds an offending kind (A5). A definite
- * contribution that does not fit is an error at the store, which is rejected: its rejection takes effect in the next
- * pass, and the passes repeat until the rejected set is stable (A6, `analyseCore`). The consumers check each candidate
- * against the decided type (C1); here: the decision, the rejections, a literal's elements of one type (A8, ADR 1.3) and
- * where each boundary check of external data stands (C9: one per ingress store at its ingress expression, against the
- * destination's own admitted type; host data no store brought is checked at the consumer that reads it).
+ * Admission and the boundary checks of external data. The rules and their reasons:
+ * `docs/specifications/type-inference-accepted-record/admission.md`.
  */
 
 /** A demanded rest (`demandsOf`): a decided path and the step its rest starts at, kept where the index reads it. */
@@ -150,9 +142,8 @@ export interface AdmissionHost {
   run<T>(work: Work<T>): T;
   /**
    * After a stop, a value's items at a node and a path as the finishing read answers them (the leaf's own kind, the
-   * finished answer and contract, the retained type), else `null`: admission's C1 and its
-   * boundaries read as every consumer does (one derivation). The path as asked: a cursor's span is made
-   * steps only where the finishing read answers (G3 stage 1).
+   * finished answer and contract, the retained type), else `null`, so that admission reads as every consumer does. The
+   * path as asked: a cursor's span is made steps only where the finishing read answers.
    */
   read?(value: PlaceId, node: FlowNode, at: Rest): readonly Item[] | null;
   /** After a program stop, a key's kinds as the finishing path's domains give them, else `null` (a label's step, #1595). */
@@ -167,7 +158,7 @@ function packetPath(packet: KeyPacketMaking, index: number): readonly string[] {
   return steps.reverse();
 }
 
-/** The runs `Admission.run` refused inside a solver run (#1072 A2): none over the corpora. */
+/** The runs `Admission.run` refused inside a solver run (#1072): none over the corpora. */
 let runsInsideSolverRuns = 0;
 
 /** `runsInsideSolverRuns`, for the tests that count them over a corpus. */
@@ -176,58 +167,65 @@ export function admissionRunsInsideSolverRuns(): number {
 }
 
 /**
- * A public method whose body lives in `admission/` delegates to the function of its name there; the members those
- * functions read are public for them, and internal to admission.
+ * Admission's per-pass state and its entry points. The fields are public because the modules in `admission/` read and
+ * write them.
  */
 export class Admission {
-  /** The decider's kinds per key (§5). */
+  /** The decider's kinds per key. */
   readonly decided = new Map<CanonicalKey, readonly ItemTag[]>();
-  /** The stores rejected in this pass, by their definitions' order, with the places and paths they are rejected at (A6). */
+  /**
+   * The stores rejected in this pass, by their definitions' order, and a list `+`'s right operands rejected from their
+   * joins, each with the places and paths it is rejected at.
+   */
   readonly newlyRejected = new Map<number, Set<Key>>();
   /**
-   * Every store and argument C1 rejected in this pass, by their definitions' order: its error stands for its value, so a
-   * stop below it owes no mark there (`enclosingStores`); an argument's rejection takes no effect in the next pass (F21).
+   * Every store and argument the store check rejected in this pass, by their definitions' order: its error stands for
+   * its value, so a stop below it owes no mark there (`enclosingStores`); an argument's rejection takes no effect in
+   * the next pass (the parameter is its callee's).
    */
   readonly refused = new Set<number>();
-  /** The boundary checks of the ingress stores, by the key each enters (C9), published after the consumers ran. */
+  /** The boundary checks of the ingress stores, by the key each enters, published after the consumers ran. */
   readonly boundaries = new Map<CanonicalKey, Obligation[]>();
-  /** The boundary checks no store into a place owes: host data read where it is consumed, an ingress read (C9, F18). */
+  /**
+   * The boundary checks no store into a place owes: an ingress read no store brought, host data read where it is
+   * consumed, and a typed `load`'s or `fromJson`'s result against its expected type.
+   */
   readonly readChecks: Obligation[] = [];
   readonly rejectedKeys = new Set<Key>();
-  /** The previous pass's rejected stores by the place and path each was rejected at (A6). */
+  /** The previous pass's rejected stores by the place and path each was rejected at, candidates there again. */
   readonly retaken = new Map<Key, Definition[]>();
-  get a4Keys(): ReceivingDomain["a4Keys"] {
-    return this.pass.receivingDomain.a4Keys;
+  get copyLandingKeys(): ReceivingDomain["copyLandingKeys"] {
+    return this.pass.receivingDomain.copyLandingKeys;
   }
-  get a4Places(): ReceivingDomain["a4Places"] {
-    return this.pass.receivingDomain.a4Places;
+  get copyLandingPlaces(): ReceivingDomain["copyLandingPlaces"] {
+    return this.pass.receivingDomain.copyLandingPlaces;
   }
   get openSteps(): ReceivingDomain["openSteps"] {
     return this.pass.receivingDomain.openSteps;
   }
   /** The parameters with a default (ADR 0021 1.5). */
   readonly #defaulted = new Set<PlaceId>();
-  get a4Copies(): ReceivingDomain["a4Copies"] {
-    return this.pass.receivingDomain.a4Copies;
+  get writtenCopyLandings(): ReceivingDomain["writtenCopyLandings"] {
+    return this.pass.receivingDomain.writtenCopyLandings;
   }
-  /** Whether each decision admits `null` (a copy of a written type without one does not, A4). */
+  /** Whether each decision admits `null` (a copy of a written type without one does not). */
   readonly nullable = new Map<CanonicalKey, boolean>();
   /**
-   * The decisions a copy of a written type with `null` made: they admit it whatever the stored kinds hold (A4, F17b; ADR
-   * 0021 1.3: the kinds present never narrow a written domain, the lead's ruling on external round 7 B1).
+   * The decisions a copy of a written type with `null` made: they admit it whatever the stored kinds hold (ADR 0021
+   * 1.3: the kinds present never narrow a written domain).
    */
   readonly permitsNull = new Set<CanonicalKey>();
-  /** The paths a copy of a written type decides, not the place's own (A4 through copies). */
+  /** The paths a copy of a written type decides, not the place's own. */
   readonly inheritsWrittenKeys = new Set<CanonicalKey>();
   /** The paths a written type, or a copy of one, leaves unrestricted (`permittedAt`): no decision, every kind fits. */
   readonly unrestricted = new Set<CanonicalKey>();
-  /** The site of the contribution each decision took (S3 §1's admitted answer), `null` for a written type. */
+  /** The site of the contribution each decision took, `null` for a written type. */
   readonly deciderSites = new Map<CanonicalKey, SourceSite | null>();
   get copies(): ReceivingDomain["copies"] {
     return this.pass.receivingDomain.copies;
   }
-  get a4Inherits(): ReceivingDomain["a4Inherits"] {
-    return this.pass.receivingDomain.a4Inherits;
+  get inheritingCopyLandings(): ReceivingDomain["inheritingCopyLandings"] {
+    return this.pass.receivingDomain.inheritingCopyLandings;
   }
   get inheriting(): ReceivingDomain["inheriting"] {
     return this.pass.receivingDomain.inheriting;
@@ -266,7 +264,7 @@ export class Admission {
   /** The store walk's tasks by value, node, strip and whether a carrier's own (`expand`): each task's recipe once. */
   readonly expansions = new Map<string, Expansion>();
   /**
-   * The carriers' transfers over those recipes (`admission/transfers/`): A2's held input per task and lane, the
+   * The carriers' transfers over those recipes (`admission/transfers/`): the held view's input per task and lane, the
    * decider's groups by their members, and per operation link its answers and the kinds it holds at a path.
    */
   readonly heldInputs = new Map<string, HeldInput>();
@@ -276,8 +274,8 @@ export class Admission {
   /** These maps as the decider's groups take them (`DeciderCaches`). */
   readonly deciderCaches: DeciderCaches;
   /**
-   * #1444(b,c): the decisions running (`decide`): the written-decider summary answers outside them only, so each
-   * decision's scan is its own (`writtenDecider`).
+   * The decisions running (`decide`, #1444): the written-decider summary answers outside them only, so each decision's
+   * scan is its own (`writtenDecider`).
    */
   deciding = 0;
   /** The solver's `forgets` when admission began, and the summary's maps for the count they were made at. */
@@ -301,7 +299,7 @@ export class Admission {
   readonly spellings = new Map<string, string>();
   /** Per read (its source and node), its chain's end (`chainEnd`), `null` where it is its own. */
   readonly chains = new Map<string, ChainEnd | null>();
-  /** Per class (its representative), its eligible member at each tested key of its demanded paths (§4.3). */
+  /** Per class (its representative), its eligible member at each tested key of its demanded paths. */
   readonly eligible = new Map<Definition, Map<string, Definition | null>>();
   /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once: each by reference. */
   demands: Map<CanonicalKey, Demand[]> | null = null;
@@ -309,7 +307,7 @@ export class Admission {
   /** The expected types of typed ingresses by identity, and the contract-side classes, for `conflictClass`. */
   readonly termIds = new Map<TypeTerm, string>();
   readonly classIds = new Map<string, number>();
-  /** The own structure of each stored value (`v`) and source key (`k`), and each source key's element depth, F2. */
+  /** The own structure of each stored value (`v`) and source key (`k`), and each source key's element depth. */
   readonly structures = new Map<string, Structure>();
   /** Each value's own structure read below a strip, per side (`composed`), from its parts'. */
   readonly structureParts = new Map<string, Composed>();
@@ -327,7 +325,9 @@ export class Admission {
   readonly pending = new Map<number, Definition>();
   readonly readSeen = new Set<PlaceId>();
   readonly hostSeen = new Set<string>();
-  /** The key each read check took in `readSeen` or `hostSeen`, in `readChecks`' order (`null`: F18's, none). */
+  /**
+   * The key each read check took in `readSeen` or `hostSeen`, in `readChecks`' order (`null`: a typed call's, none).
+   */
   readonly readCheckKeys: (PlaceId | string | null)[] = [];
   /** Per provenance node, the ingresses its leaves name, and whether one of them no walk reached (`resolve`). */
   readonly nodeIngresses = new Map<IngressNode, ReadonlySet<PlaceId>>();
@@ -365,16 +365,17 @@ export class Admission {
   /** Per such snapshot, its stops a list join carries (`earliestDecider`), each asked whatever came before it. */
   readonly joinedLists = new WeakMap<readonly Stop[], readonly Stop[]>();
   readonly resolved = new Map<IngressNode, boolean>();
-  readonly f18 = new Map<
+  /** Per call's result, its `typedCallKinds` answer, once per call. */
+  readonly typedCallKindsByResult = new Map<
     PlaceId,
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
   >();
   groupList: DecidedAt[] | null = null;
-  /** The groups' keys in their identities, once a pass (`admitted.ts`'s pull, #1526 phase C). */
+  /** The groups' keys in their identities, once a pass (#1526). */
   groupKeys: Set<CanonicalKey> | null = null;
   /**
-   * The cursors decision records name, as one packet of their paths made as each record is (`decisionWork`): Sol §4's
-   * compact records, each path's node once, never a path per record, and no arena id past the pass.
+   * The cursors decision records name, as one packet of their paths made as each record is (`decisionWork`): compact
+   * records, each path's node once, never a path per record, and no arena id past the pass.
    */
   readonly decisionPacket: KeyPacketMaking = keyPacket();
   /** Per decided cursor, its label's recipe (`labelOfKey`). */
@@ -433,7 +434,7 @@ export class Admission {
     { readonly place: PlaceId; readonly path: readonly string[] }
   >();
   /**
-   * #2289: the keys A4's copies land at through a literal's cell of more than one element, where the
+   * #2289: the keys copies of written bindings land at through a literal's cell of more than one element, where the
    * literal's type is the one all its elements fit, not the copy's: a seed there or below is never retained.
    */
   readonly literalLandings = new Set<Key>();
@@ -457,11 +458,11 @@ export class Admission {
   get liveCopies(): ReceivingDomain["liveCopies"] {
     return this.pass.receivingDomain.liveCopies;
   }
-  /** Each place's own contributions from its live stores (Astra's B2). */
+  /** Each place's own contributions from its live stores. */
   readonly liveOwns = new Map<PlaceId, HeldOwn | null>();
-  /** Per place, what its live stores definitely hold (`heldOf`, A2). */
+  /** Per place, what its live stores definitely hold (`heldOf`). */
   readonly helds = new Map<PlaceId, Touch | null>();
-  /** The keys where what a place's stores definitely hold meets (`groups`, A2): checked where the copy meets it. */
+  /** The keys where what a place's stores definitely hold meets (`groups`): checked where the copy meets it. */
   readonly atCopies = new Set<CanonicalKey>();
   /** The keys a member of a live group owes where the group's contributions meet (`finishHeld`, read by `groups`). */
   readonly groupMeetings: CanonicalKey[] = [];
@@ -479,12 +480,11 @@ export class Admission {
     readonly host: AdmissionHost,
     /**
      * The stores rejected by the previous pass, each with the places and paths it was rejected at, and those a rejection
-     * cycle changes (A6).
+     * cycle changes.
      */
     readonly rejected: ReadonlyMap<number, ReadonlySet<Key>>,
     readonly cycling: ReadonlySet<number>,
   ) {
-    // (A4's state is the pass's, made afresh for this admission)
     pass.receivingDomain.reset();
     pass.receivingDomain.replayProof = (key) => inheritedProofOf(this, key);
     const { definitions, program } = pass;
@@ -510,10 +510,6 @@ export class Admission {
     }
     for (const d of definitions.transferDefs)
       if (d.how === "parameter default") this.#defaulted.add(d.place);
-    // A4: the copies of written bindings the stores, adds, returns, parameter defaults and single-site arguments bring
-    // (a multi-site argument decides nothing, F21), where they land; and the copies of the unwritten places that may
-    // inherit a written type through them, at any chain length, each decided by the type that place's own
-    // decision copies at the path (`inheritedAt`)
     copyGraph(this);
     for (const d of [...definitions.storeDefs, ...definitions.transferDefs])
       if (
@@ -541,15 +537,15 @@ export class Admission {
             );
             landing = { at, key: keptKey(this.work, d.place, at) };
             landed.set(path, landing);
-            this.a4Keys.add(landing.key);
-            this.a4Places.set(d.place, null);
+            this.copyLandingKeys.add(landing.key);
+            this.copyLandingPlaces.set(d.place, null);
           }
           const { at, key } = landing;
           if (term !== null) {
-            this.a4Copies.push({ place: d.place, path: at, term });
+            this.writtenCopyLandings.push({ place: d.place, path: at, term });
             if (literal) this.literalLandings.add(key);
           } else
-            this.a4Inherits.push({
+            this.inheritingCopyLandings.push({
               place: d.place,
               path: at,
               from: binding,
@@ -559,25 +555,22 @@ export class Admission {
             });
         }
       }
-    for (const { path, term } of this.a4Copies)
+    for (const { path, term } of this.writtenCopyLandings)
       this.reach = Math.max(this.reach, path.length + levelsOf(this, term).length - 1);
-    for (const { path } of this.a4Inherits) this.reach += path.length;
+    for (const { path } of this.inheritingCopyLandings) this.reach += path.length;
   }
 
-  /**
-   * G3 3b: the keys a store was rejected at (A6) or a copy of a written binding lands at (A4), which `isClean` asks
-   * along a path; and the keys whole stores or adds (or dead arguments) reach, `inputsOf`'s prefixes: as tries, each
-   * walked down a decision's path as far as it holds it.
-   */
+  /** The keys a store was rejected at or a copy of a written or inheriting binding lands at, as a trie. */
   public get dirty(): KeyTrie {
     return (this.#dirty ??= new KeyTrie(
       this.work,
       "checks",
-      // (#1072 R26: captures `this`, the admission, whose state is step 1b-ii's to record)
-      Retained.closure("Admission.dirty", () => [...this.rejectedKeys, ...this.a4Keys]),
+      // (#1072 R26: captures `this`, the admission)
+      Retained.closure("Admission.dirty", () => [...this.rejectedKeys, ...this.copyLandingKeys]),
     ));
   }
 
+  /** The keys whole stores or adds, or dead arguments, reach, as a trie. */
   public get stored(): KeyTrie {
     const { definitions } = this.pass;
     return (this.#stored ??= new KeyTrie(
@@ -600,33 +593,28 @@ export class Admission {
 
   public run<T>(work: Work<T>): T {
     // (a run inside a solver run is a read an inherited proof's run did not yield: refused, and counted for the tests'
-    // corpora, #1072 A2)
+    // corpora, #1072)
     if (this.pass.solver.running) {
       runsInsideSolverRuns += 1;
       throw new Error(
-        "Admission ran a computation inside a solver run (#1072 A2): yield it as a read.",
+        "Admission ran a computation inside a solver run (#1072): yield it as a read.",
       );
     }
     return this.host.run(work);
   }
 
-  /** `run` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072 A2). */
+  /** `run` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072). */
   public *runRead<T>(work: () => Work<T>): Reads<T> {
     return yield* read(() => this.run(work()), work);
   }
 
-  /**
-   * A6: a definite contribution that does not fit at a place's path is rejected, a return against its own result's
-   * decision too (F23), so it leaves the result's contract (an argument stays: the parameter is its callee's); in the
-   * next pass it is decided again there.
-   */
-  /** The rejections made in this pass, counted (C1 asks whether a candidate left one). */
+  /** The rejections made in this pass, counted. */
   public rejections = 0;
 
   /** Hears each store rejected for the next pass while set (`hearingRejections`). */
   #rejecting: ((d: Definition) => void) | null = null;
 
-  /** Runs `run`, hearing each store it rejects for the next pass (a receiving completion's own check, #1526 phase C). */
+  /** Runs `run`, hearing each store it rejects for the next pass (a receiving completion's own check, #1526). */
   public hearingRejections<T>(hear: (d: Definition) => void, run: () => T): T {
     const outer = this.#rejecting;
     this.#rejecting = hear;
@@ -637,6 +625,10 @@ export class Admission {
     }
   }
 
+  /**
+   * A definite contribution that does not fit at a place's path is rejected, a return against its own result's decision
+   * too, so it leaves the result's contract (an argument stays: the parameter is its callee's).
+   */
   public reject(d: Definition, root: PlaceId, path: readonly string[]): void {
     this.rejections += 1;
     this.refused.add(d.uid);
@@ -649,7 +641,7 @@ export class Admission {
 
   /**
    * ADR 0021 1.6: source order, in which a declaration's start value comes before every other store into its place; a
-   * single-site parameter's is its argument (F21).
+   * single-site parameter's is its argument.
    */
   public sourceOrder(d: Definition): number {
     return d.how === "initializer" || (d.how === "argument" && this.pass.lists.singleSite(d.fn))
@@ -658,10 +650,10 @@ export class Admission {
   }
 
   /**
-   * F21, ADR 0021 1.5: an argument for an unannotated parameter with a default. Each call types such a parameter from
-   * its argument, and the default is the parameter's start value, checked once at the function against the body: the
+   * ADR 0021 1.5: an argument for an unannotated parameter with a default. Each call types such a parameter from its
+   * argument, and the default is the parameter's start value, checked once at the function against the body: the
    * argument decides nothing and is no candidate, so the two never constrain each other. Without a default a single-site
-   * argument is the start value (F21); a written parameter checks every argument (A9, C7).
+   * argument is the start value; a written parameter checks every argument.
    */
   public besideDefault(d: Definition): boolean {
     return (
@@ -675,12 +667,12 @@ export class Admission {
     return atCopy(this, root, path);
   }
 
-  /** A store's value at the path below its destination, by §3 at its node. */
+  /** A store's value at the path below its destination, at the store's node. */
   public valueAt(d: Definition, at: Rest): Item[] {
     return readNow(this.valueAtRead(d, at));
   }
 
-  /** `valueAt` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072 A2). */
+  /** `valueAt` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072). */
   public *valueAtRead(d: Definition, at: Rest): Reads<Item[]> {
     this.pass.program.work.charge("checks");
     if (d.kind === "const")
@@ -734,9 +726,8 @@ export class Admission {
   }
 
   /**
-   * `labelOf` for a decided cursor (G3 stage 1): its parent's recipe one step on, each cursor's once (`keyLabels`),
-   * an element step's kinds asked of its parent's key as `labelOf` asks them, shallowest first; its place is unwritten
-   * (its family's shape requires it).
+   * `labelOf` for a decided cursor: its parent's recipe one step on, each cursor's once (`keyLabels`), an element
+   * step's kinds asked of its parent's key, shallowest first; its place is unwritten (its family's shape requires it).
    */
   public labelOfKey(key: KeyId): Label {
     const { contract } = this.pass;
@@ -780,10 +771,6 @@ export class Admission {
     return labelPlainText(this.labelOf(place, path, written));
   }
 
-  public stores(): readonly Definition[] {
-    return stores(this);
-  }
-
   storeList: readonly Definition[] | null = null;
 
   public groups(): readonly DecidedAt[] {
@@ -794,7 +781,7 @@ export class Admission {
     compareLanded(this);
   }
 
-  /** `stopDecision` of a decided path in its identity (`DecidedAt`: a cursor's key alone, G3 stage 1). */
+  /** `stopDecision` of a decided path in its identity (`DecidedAt`: a cursor's key alone). */
   public stopDecision(at: DecidedAt): void {
     stopDecision(this, at);
   }
@@ -849,8 +836,8 @@ export class Admission {
   }
 
   /**
-   * A decision's work record (`consumers/stores/stores.ts`): a cursor's path not made but named by its key, its steps exported
-   * with every other cursor decision's of the pass through one packet (`exportDecisionPaths`), read only from it.
+   * A decision's work record: a cursor's path not made but named by its key, its steps kept in the pass's one packet of
+   * cursor decisions' paths (`decisionPacket`).
    */
   public decisionWork(
     at: DecidedAt,
@@ -911,11 +898,10 @@ export class Admission {
     return inheritsWritten(this, place, path);
   }
 
-  public deciderAt(place: PlaceId, path: readonly string[]): SourceSite | null {
-    return deciderAt(this, place, path);
-  }
-
-  /** §3.3: a value's contract kinds, `null` with an unknown. */
+  /**
+   * A value's contract kinds for the quiet path, `null` with an unknown. A kind possible only through external data
+   * (`Item.extOnly`) is returned like any other (#2727).
+   */
   public quietKinds(value: PlaceId | undefined): ItemTag[] | null {
     if (value === undefined) return null;
     const items = withoutEmpty(this.run(this.pass.contract.contractOfValueAt(value, [])));
@@ -953,19 +939,19 @@ export class Admission {
     return arrayStrip(this.pass.program, steps);
   }
 
-  /** Whether the receiver's or the key's decision leaves a value's operation its own value (F19a, F19: `keepsOwn`). */
+  /** Whether the receiver's or the key's decision leaves a value's operation its own value. */
   public keepsOwn(value: PlaceId): boolean {
     return keepsOwn(this.pass.program, value, this.#dispatch);
   }
 
-  /** `keepsOwn` with the receiver's decision a read (`Read`, #1072 A2). */
+  /** `keepsOwn` with the receiver's decision a read (`Read`, #1072). */
   public keepsOwnRead(value: PlaceId): Reads<boolean> {
     return keepsOwnRead(this.pass.program, value, (receiver) =>
       this.#dispatchReads.reference(receiver),
     );
   }
 
-  /** `carriersOf` with the value side's decisions reads (`Read`, #1072 A2). */
+  /** `carriersOf` with the value side's decisions reads (`Read`, #1072). */
   public *carriersOfRead(
     value: PlaceId,
     strip: readonly string[],
@@ -979,7 +965,7 @@ export class Admission {
     )).map(([operand, below, role, position]) => [operand, below.steps, role, position] as const);
   }
 
-  /** `#dispatch` with its decisions reads (`Read`, #1072 A2): run now outside a solver run, yielded inside one. */
+  /** `#dispatch` with its decisions reads (`Read`, #1072): run now outside a solver run, yielded inside one. */
   readonly #dispatchReads: DispatchReads = ((admission) => ({
     *kinds(of) {
       const items = yield* admission.runRead(() => admission.pass.contract.contractOfValue(of));
@@ -1097,7 +1083,7 @@ export class Admission {
     return typedByDefault(this, value);
   }
 
-  /** A store's destination: the stored value's path; an added value's the collection's element (C9). */
+  /** A store's destination: the stored value's path; an added value's the collection's element. */
   public destPath(d: Definition): readonly string[] {
     return d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
   }
@@ -1130,8 +1116,8 @@ export class Admission {
     boundariesAt(this, items, here);
   }
 
-  /** The typed calls whose expected type the finishing read left open after a stop (`f18Kinds`). */
-  readonly f18Open = new Set<PlaceId>();
+  /** The typed calls whose expected type the finishing read left open after a stop (`typedCallKinds`). */
+  readonly typedCallsOpen = new Set<PlaceId>();
 
   public ingressStores(
     skip?: (site: SourceSite) => boolean,
