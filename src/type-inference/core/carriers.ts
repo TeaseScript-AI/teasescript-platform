@@ -17,7 +17,6 @@ import { readNow, type Reads } from "./inherited/reads.js";
  * its cells stand at its element or property step, read through the literal index.
  */
 
-/** The carrier kinds, each a row of `operandsOf`. */
 export const CARRIER_KINDS = [
   "projection",
   "iteration",
@@ -76,7 +75,7 @@ export interface Operand {
   readonly when: "list or set" | "object" | "dict" | "elements" | null;
 }
 
-/** The table: a value's carrier operands by its syntax alone, before any decision. */
+/** A value's carrier operands by its syntax alone, before any decision. */
 export function operandsOf(program: CoreProgram, value: PlaceId): readonly Operand[] {
   const operand = (
     role: CarrierRole,
@@ -238,13 +237,11 @@ export interface Strip<S> {
   under(below: readonly string[]): S;
 }
 
-/** An array as a `Strip`. */
 export interface StepsStrip extends Strip<StepsStrip> {
   readonly kind: "steps";
   readonly steps: readonly string[];
 }
 
-/** An array of steps as a `Strip`. */
 export function arrayStrip(program: CoreProgram, steps: readonly string[]): StepsStrip {
   return {
     kind: "steps",

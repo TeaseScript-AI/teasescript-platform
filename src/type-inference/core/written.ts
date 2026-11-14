@@ -22,8 +22,7 @@ import type { WrittenTypeError } from "./result.js";
  * can follow `let x:`, ADR 0021 4.1), also inside another type (a list or set element, a dict value). `null` beside a
  * collection is its optional form (`integer[] | null` is `integer[]?`) and stays allowed. This check reads the written
  * types alone, independent of the flow, so a written type in code that never runs or in a function no call reaches errs
- * too. A place keeps its written type as the collector reads it, which decides the place (A1) and checks its stores and
- * reads as any written type does; the error adds nothing there.
+ * too.
  */
 
 /** The type names that stand for any list, set or dict (V30 §13). */

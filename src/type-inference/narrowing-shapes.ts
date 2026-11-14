@@ -8,9 +8,9 @@ import type {
 import { unwrap } from "../expression-children.js";
 
 /**
- * The shape of a condition, as the branch rules read it: what the top of the condition is after the parentheses around
- * it, and nothing below: one classification, so that the rule of which conditions narrow is written once. Every shape
- * but `other` keeps the node it was read from, so that a report or a note at the condition keeps its site.
+ * The shape of a condition's top, after the parentheses around it, and nothing below: one classification, so that the
+ * rule of which conditions narrow is written once. Every shape but `other` keeps the node it was read from, so that a
+ * report or a note at the condition keeps its site.
  */
 export type ConditionShape =
   | { readonly kind: "literal"; readonly node: BooleanLiteral }
@@ -39,10 +39,8 @@ export type ConditionShape =
 const OTHER: ConditionShape = { kind: "other" };
 
 /**
- * Classifies a condition by its top: a boolean literal, `not`, `and`/`or`, a comparison with the `null` literal on
- * either side (`==` or `!=`), a type test (`is`, `is not`), or anything else. The parentheses around the condition are
- * read through; those around an operand are left to the consumer, which unwraps what it narrows. Whether the tested
- * expression narrows anything is the consumer's rule.
+ * The parentheses around the condition are read through, those around an operand are not. Whether the tested
+ * expression narrows anything is not decided here.
  */
 export function conditionShape(expression: Expression): ConditionShape {
   const node = unwrap(expression);

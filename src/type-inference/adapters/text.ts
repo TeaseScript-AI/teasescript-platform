@@ -10,10 +10,6 @@ import type { ValueKind } from "../../value-kinds.js";
 import type { OperationResult } from "./relation.js";
 import { typeResult, type MemberAnswer, type MemberRules } from "./views.js";
 
-/**
- * The members of text: `length` is an integer, and each method of `TEXT_METHODS` gives a new value of its result.
- * `join` is a method of lists.
- */
 const TEXT_RESULTS: Readonly<Record<TextResult, StaticType>> = {
   string: STRING_TYPE,
   integer: INTEGER_TYPE,

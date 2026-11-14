@@ -1,11 +1,7 @@
 /**
- * The work budget of the core: every unit of work the analysis does is charged to one counter as it runs, and the
- * charged total is checked against the program's allowance at each charge, so an analysis stops proving at the unit
- * that crosses it. The allowance is the larger of a fixed floor and a coefficient per syntax node; statement nesting
- * and a read chain's depth have their own limits. A stop is no compile error (D4): the ledger then only finishes, every
- * later charge counted apart and none stopping it, and each unit before the stop is counted to the place that spent it,
- * so one warning can name the heaviest. A demand's own allowance, its measure and its signal are here
- * (`demandAllowanceFor`, `own`, `DemandExhausted`).
+ * Every unit of work the analysis does is charged as it runs and the total checked against the program's allowance at
+ * each charge, so an analysis stops proving at the unit that crosses it. A stop is no compile error (D4); each unit
+ * before it is counted to the place that spent it, so one warning can name the heaviest.
  */
 
 /** The allowance every program has, however small. */
@@ -20,15 +16,10 @@ export const WORK_PER_NODE = 256;
  */
 export const NESTING_LIMIT = 256;
 
-/** The work allowance of a program with `syntaxNodes` parsed nodes: max(30,000,000, 256 × nodes). */
 export function allowanceFor(syntaxNodes: number): number {
   return Math.max(WORK_FLOOR, WORK_PER_NODE * syntaxNodes);
 }
 
-/**
- * Every counter the analysis charges, by the part of the analysis that charges it. A counter that several parts share
- * says what it counts.
- */
 export type WorkCounter =
   // the program's size, charged once as setup
   | "syntaxNodes"
@@ -63,9 +54,8 @@ export type WorkCounter =
   | "eventSteps"
   // the contract per demanded path and its source indexes
   | "invSteps"
-  // #1747: the objects query's own work (`contract/objects.ts`, through `charged-iteration.ts`'s charged helpers):
-  // each function entry, proof node, entry, group, store, writer, list, child edge, copied element, joined part and
-  // sort step
+  // #1747: the objects query's own work: each function entry, proof node, entry, group, store, writer, list, child
+  // edge, copied element, joined part and sort step
   | "objectSteps"
   // what the literal indexes, their identities and structures keep, charged before they keep it: each entry, scheduled
   // task and element of a sorted copy, and each text (a signature, a structure) by its size; and each path, key or
@@ -264,8 +254,8 @@ export class CapReached extends Error {
 }
 
 /**
- * The analysis's stop at a limit: the analysis catches it and stops proving. A statement nested past the nesting limit
- * stops nothing: it is checked when the script runs (`nesting`).
+ * The analysis's stop at a limit. A statement nested past the nesting limit stops nothing: it is checked when the
+ * script runs (`nesting`).
  */
 export class BudgetExhausted extends Error {
   public constructor(public readonly limit: BudgetLimit) {
@@ -361,9 +351,9 @@ export class WorkLedger {
   }
 
   /**
-   * Runs `callback`, the first build of an index every later read of the program shares (the narrowing index): its
-   * units count to the analysis as any, but to no demand's allowance, as the read that happened to ask first did not
-   * make them its own work.
+   * Runs `callback`, the first build of an index every later read of the program shares: its units count to the
+   * analysis as any, but to no demand's allowance, as the read that happened to ask first did not make them its own
+   * work.
    */
   public shared<T>(callback: () => T): T {
     if (this.#sharing) return callback();
@@ -567,9 +557,6 @@ export function checkReadDepth(depth: number): void {
 let testAllowance: number | null = null;
 let testDemandAllowance: number | null = null;
 
-/**
- * A demand's allowance: 256 × `nodes`, or a test's (`withTestDemandAllowance`).
- */
 export function demandAllowanceFor(nodes: number): number {
   return testDemandAllowance ?? WORK_PER_NODE * nodes;
 }

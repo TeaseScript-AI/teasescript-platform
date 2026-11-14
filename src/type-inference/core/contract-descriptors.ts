@@ -18,10 +18,6 @@ import { REASON, type Item, type ItemTag } from "./items.js";
 import { propertyStep, type CoreProgram } from "./program.js";
 import { retainedModule } from "./retained/retained.js";
 
-// The contract proof/descriptor service (#1526): a store's required contract, assembled level by
-// level from the stable admission pass's proofs, as an immutable descriptor one per distinct contract, with whether its
-// proof is complete, proved open or lost.
-
 /**
  * The deepest nesting of collections whose element types the slice's facts follow: a place or a written type with a
  * collection at this depth is outside the slice, so no fact is cut short. The candidate's cut,
@@ -565,9 +561,8 @@ export function captureDescriptors(
  * The capture of the contracts the stores owing a check require (#1526): each request's contract
  * from `reader` over the settled admission pass, in order, kept in `into`, its levels decided and their contracts
  * solved while nothing stops the solver, so a later stop finds them retained. The first request deeper than the slice
- * follows ends the capture: the program has left the slice there, as the lowering's check of that store leaves it and
- * requests nothing more, so that request and every later one stay unrecorded, as outside the slice's syntax (no `Lost`,
- * no diagnostic; the second half of the one gate, `slice-syntax.ts` the first). A stop while it runs (`isStop`;
+ * follows ends the capture: the program has left the slice there, so that request and every later one stay
+ * unrecorded, as outside the slice's syntax (no `Lost`, no diagnostic). A stop while it runs (`isStop`;
  * `charge` the work of finding the requests, charged first) leaves the request it cut and every later one lost with the
  * cause `extraction`, and is thrown on: nothing is reclassified. The request at which the program left the slice, or
  * `null`.
