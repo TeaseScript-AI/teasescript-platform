@@ -62,7 +62,10 @@ interface Classed {
 }
 interface AreaRecord {
   readonly source: string;
-  readonly runs: readonly { readonly stopped: readonly (string | null)[] }[];
+  readonly runs: readonly {
+    readonly stopped: readonly (string | null)[];
+    readonly unparsed: readonly boolean[];
+  }[];
 }
 interface PlansRecord {
   readonly name: string;
@@ -102,9 +105,13 @@ const jsonLines = <T>(text: string): T[] =>
 test("an area run records the limit each tree's ledger stopped at, null where none stopped (#2796)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-evidence-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
-  const library = `import { WorkLedger } from "../../src/type-inference/core/budget.js";
+  // (the head alone has no request for `unparsed`)
+  const library = (
+    head: boolean,
+  ) => `import { WorkLedger } from "../../src/type-inference/core/budget.js";
 export const MODES = [false, true].flatMap((reversed) => [false, true].map((unshared) => ({ reversed, unshared })));
 export function publicationHashes(files) {
+  if (${head} && files[0].source === "unparsed") return null;
   const ledger = new WorkLedger(1000);
   ledger.charge("frames", 300);
   if (files[0].source === "stops") ledger.stop("work");
@@ -114,20 +121,21 @@ export function publicationHashes(files) {
   const trees = ["base", "head"].map((name) =>
     tree(join(folder, name), {
       "src/type-inference/core/budget.js": LEDGER,
-      "tests/helpers/type-core-oracles.js": library,
+      "tests/helpers/type-core-oracles.js": library(name === "head"),
     }),
   );
   const area = join(folder, "area");
   mkdirSync(area);
   writeFileSync(
     join(area, "g.mjs"),
-    `export const cases = [["fine", "fine"], ["stops", "stops"]];\n`,
+    `export const cases = [["fine", "fine"], ["stops", "stops"], ["unparsed", "unparsed"]];\n`,
   );
   const work = join(folder, "area.work.jsonl");
   const ran = spawnSync(process.execPath, [runner, area, ...trees, "--work", work], {
     encoding: "utf8",
   });
-  assert.equal(ran.status, 0, ran.stderr);
+  // (the unparsed source differs between the trees)
+  assert.equal(ran.status, 1, ran.stderr);
   const records = new Map(
     jsonLines<AreaRecord>(readFileSync(work, "utf8"))
       .slice(1, -1)
@@ -136,6 +144,11 @@ export function publicationHashes(files) {
   assert.deepEqual(
     ["fine", "stops"].map((name) => records.get(name)!.runs.map((run) => run.stopped)),
     [Array(4).fill([null, null]), Array(4).fill(["work", "work"])],
+  );
+  // (each tree's own: whether its oracle had no request)
+  assert.deepEqual(
+    ["fine", "unparsed"].map((name) => records.get(name)!.runs.map((run) => run.unparsed)),
+    [Array(4).fill([false, false]), Array(4).fill([false, true])],
   );
 });
 
@@ -233,7 +246,7 @@ export const compileSourceWithBackend = (source, options, backend) =>
 
 /**
  * A built tree for the packages' runner: its analysis stops for a package whose main file says `stops`, never ends for
- * `hang`; its files give no request for `unparsed`; its route refuses at a limit for `refused`; the head's answers
+ * `hang`; its files give no request for `unparsed`; an answer throws when it is first asked for `lazy`; its route refuses at a limit for `refused`; the head's answers
  * differ for `apart`. Each answer names the
  * mode it ran in, so modes paired by position would differ.
  */
@@ -260,6 +273,7 @@ class Answers {
     this.checks = [];
   }
   place() {
+    if (this.request.files[0].source.includes("lazy")) throw new TypeError("asked late");
     return globalThis.mode;
   }
 }
@@ -306,6 +320,7 @@ test("the packages' runner compares each package's analysis and route per mode b
   pack("apart", "apart");
   pack("hang", "hang");
   pack("unparsed", "unparsed");
+  pack("lazy", "lazy");
   const out = join(folder, "packages.jsonl");
   const ran = spawnSync(
     process.execPath,
@@ -315,7 +330,7 @@ test("the packages' runner compares each package's analysis and route per mode b
   assert.equal(ran.status, 1, ran.stderr);
   assert.deepEqual(jsonLines<Readonly<Record<string, string | number>>>(ran.stdout).at(-1), {
     packages: "0/1",
-    sources: 6,
+    sources: 7,
     differing: 1,
     incomplete: 1,
     timeout: 5,
@@ -359,6 +374,11 @@ test("the packages' runner compares each package's analysis and route per mode b
   assert.deepEqual(
     [unparsed.analysis, unparsed.route.error],
     [{ analysed: false, error: null, stopped: null, units: 0, allowance: 0 }, null],
+  );
+  // (an answer that throws when its digest asks it is the analysis's throw, never a digest)
+  assert.equal(
+    records.get("lazy")!.modes[0]!.base.analysis.error,
+    "TypeError at Answers.place (src/type-inference/core/answers.js)",
   );
   const apart = records.get("apart")!;
   assert.deepEqual([apart.differing, apart.modes.every((m) => !m.same)], [4, true]);

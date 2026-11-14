@@ -14,21 +14,27 @@
 // writes what it queued to `~/work/replay-evidence/<prefix>.json`, which the report reads. It runs no mutants and no
 // stop-position search: neither `--stops` nor `--demands`.
 //
-// `evidence-report` first says what the run covered and what it left out (areas not asked or not run, the modes, the
-// package folders with their packages' counts, the bound and how many packages reached it), then, per part (the set,
-// each area, the packages), each tree's count of sources in seven classes (`classOf`, `sourceClass`): completed (the
-// core analysed it in every mode), no analysis (compile errors, parse or names, before the checker), refused at the
-// syntax gate, refused at the limit, threw (the checker's own outcome, by the error's class and the function and
-// file it is thrown from, `throwPlace`), incomplete (what the infrastructure did: stalled, killed, past the safety net,
-// a runner's own exception) and uncompared (no record a class can be read from); the sources whose class differs
-// between the trees, by name; the differences over sources completed on both trees, each with its first differing
-// part, and over those that threw on both, where the class or place of the throw differs; every source that threw
-// alike on both trees, by name, each time; the sources with no analysis on both trees, by name with their count, and the
-// differences over them (their diagnostics, and a plan where none may come out); and the heaviest share of the limit per tree, with every source above half
-// of it, each as a share of the allowance the code gives it and of the fixed limit (`FIXED_LIMIT`). Exit 0 when every
-// part asked ran, each completed something and nothing differs, moves class, is incomplete or uncompared, and the
-// checks passed (a throw alike on both trees is listed, never a reason); 3 when a part asked did not run; else 1; 2 on
-// a usage error.
+// `evidence-report` first says what the run covered and what it left out (areas not asked or not run, shards whose
+// records fall short of the sources their summaries count, the modes, the package folders with their packages' counts,
+// the bound and how many packages reached it), then, per part (the set, each area, the packages):
+//   - each tree's count of sources in seven classes (`classOf`, `sourceClass`): completed (the core analysed it in
+//     every mode), no analysis (compile errors, parse or names, before the checker), refused at the syntax gate,
+//     refused at the limit, threw (the checker's own outcome, by the error's class and the function and file it is
+//     thrown from, `throwPlace`), incomplete (what the infrastructure did: stalled, killed, past the safety net, a
+//     question an oracle's bound left unanswered on either tree, a runner's own exception) and uncompared (no record a
+//     class can be read from);
+//   - the sources whose class differs between the trees, by name;
+//   - the differences over sources completed on both trees, each with its first differing part (an area's charged
+//     work among them), and over those that threw on both, where the class or place of the throw differs;
+//   - every source that threw alike on both trees, by name, each time (what came before the throw is not compared);
+//     for the packages, every research-route compile that threw alike, by place;
+//   - the sources with no analysis on both trees, by name with their count, and the differences over them (their
+//     diagnostics where the runner records them, and a plan where none may come out);
+//   - the heaviest share of the limit per tree, with every source above half of it, each as a share of the allowance
+//     the code gives it and of the fixed limit (`FIXED_LIMIT`).
+// Exit 0 when every part asked ran whole, each completed something and nothing differs, moves class, is incomplete or
+// uncompared, and the checks passed (a throw alike on both trees is listed, never a reason); 3 when a part asked did
+// not run whole; else 1; 2 on a usage error.
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -140,10 +146,11 @@ export function setSources(records) {
 
 /**
  * An area's sources from `run.mjs`'s `--work` records and `--out` differences: a source whose own counts hold a stall,
- * a safety net or an unanswered run is incomplete, as is one whose runner threw outside its runs; one unparsed has no
- * analysis, one uncompared so; a tree on which a run threw (`--out`'s exception records, each tree's
- * stack read by `throwPlace`) threw; else each tree's class from its runs' `stopped`. `apart` is the first difference's
- * place (`apartText`).
+ * a safety net or a run unanswered (on one tree or alike) is incomplete, as is one whose runner threw outside its runs;
+ * one uncompared so; a tree on which a run threw (`--out`'s exception records, each tree's stack read by `throwPlace`)
+ * threw; else each tree's class from its runs' `stopped` and `unparsed` (no analysis: the oracle had no request; the
+ * runner records no diagnostics, and an unparsed run publishes nothing). `apart` is the first difference's place
+ * (`apartText`), else the first run whose trees charged other work.
  */
 export function areaSources(work, differences) {
   const apartOf = new Map();
@@ -165,19 +172,24 @@ export function areaSources(work, differences) {
     .filter((w) => w.generator !== undefined && w.source !== undefined)
     .map((w) => {
       const name = `${w.generator} ${w.source}`;
-      const apart = apartOf.get(`${w.generator}\0${w.source}`) ?? null;
+      const worked = (w.runs ?? []).find(
+        (run) => Array.isArray(run.work) && run.work[0] !== run.work[1],
+      );
+      const apart =
+        apartOf.get(`${w.generator}\0${w.source}`) ??
+        (worked === undefined
+          ? null
+          : `${worked.mode}: ${worked.check} charged work ${worked.work[0]}/${worked.work[1]}`);
       const counts = w.counts ?? {};
       const thrown = thrownOf.get(`${w.generator}\0${w.source}`);
       const both =
-        ["stalled", "uncharged", "unanswered"].some((key) => counts[key] > 0) ||
+        ["stalled", "uncharged", "unanswered", "unansweredAlike"].some((key) => counts[key] > 0) ||
         thrown?.runner === true ||
         (counts.exceptions > 0 && thrown === undefined)
           ? "incomplete"
-          : counts.unparsed > 0
-            ? "unanalysed"
-            : counts.uncompared > 0
-              ? "uncompared"
-              : null;
+          : counts.uncompared > 0
+            ? "uncompared"
+            : null;
       const runs = w.runs ?? [];
       const threw = [0, 1].map((at) =>
         thrown === undefined || thrown.sides[at].size === 0
@@ -189,7 +201,12 @@ export function areaSources(work, differences) {
         (threw[at] !== null
           ? "threw"
           : sourceClass(
-              runs.map((run) => classOf({ stopped: run.stopped?.[at], analysed: true })),
+              runs.map((run) =>
+                classOf({
+                  stopped: run.stopped?.[at],
+                  analysed: run.unparsed === undefined ? undefined : !run.unparsed[at],
+                }),
+              ),
             ));
       const share = [0, 1].map((at) =>
         runs.reduce(
@@ -236,7 +253,10 @@ function packageApart(m) {
   return `${m.mode}: apart`;
 }
 
-/** The packages from `packages.mjs` records: each tree's class is its analysis's; `share` its analysis's too. */
+/**
+ * The packages from `packages.mjs` records: each tree's class is its analysis's (the core analysed it: completed); a
+ * throw of its research-route compile is compared as a part, and `routeThrew` lists it; `share` its analysis's too.
+ */
 export function packageSources(records) {
   return records.map((r) => {
     const name = r.root === 0 ? r.name : `${r.name} (folder ${r.root + 1})`;
@@ -270,6 +290,11 @@ export function packageSources(records) {
       share,
       threw,
       planned: modes.some((m) => m.base.route.plan != null || m.head.route.plan != null),
+      // (where each tree's research-route compile threw, by place: compared as a part, and listed where alike)
+      routeThrew: ["base", "head"].map((tree) => {
+        const places = [...new Set(modes.map((m) => m[tree].route.error).filter((e) => e != null))];
+        return places.length === 0 ? null : places.sort().join("; ");
+      }),
     };
   });
 }
@@ -290,6 +315,10 @@ export function partSummary(sources) {
   // (the sources the checker saw on neither tree, and what differs over them: never counted completed)
   const unanalysed = [];
   const unanalysedDifferences = [];
+  // (the packages whose research-route compile threw alike on both trees, by place)
+  const routeThrewAlike = sources
+    .filter((s) => s.routeThrew?.[0] != null && s.routeThrew[0] === s.routeThrew[1])
+    .map((s) => `${s.name}: ${s.routeThrew[0]}`);
   let completed = 0;
   let threwBoth = 0;
   for (const s of sources) {
@@ -311,7 +340,8 @@ export function partSummary(sources) {
         threwBoth += 1;
         threwAlike.push(`${s.name}: ${s.threw[0]}`);
       }
-      if (s.apart !== null)
+      // (a throw alike is the same outcome: what came before it is a partial output, never compared, #2801)
+      if (s.apart !== null && s.base !== "threw")
         apartElsewhere.push(`${s.name} (${CLASS_NAMES[s.base]} on both): ${s.apart}`);
     }
   }
@@ -337,6 +367,7 @@ export function partSummary(sources) {
     threwAlike,
     unanalysed,
     unanalysedDifferences,
+    routeThrewAlike,
     shares,
   };
 }
@@ -500,24 +531,35 @@ export function evidenceReport(manifest, results) {
   );
   const parts = {};
   const { setShards, areaShards } = shardsRead(prefix, results);
-  if (manifest.areas.asked.includes("set"))
+  // (each shard's records against the sources its summary says it ran: a record missing is never left out silently)
+  const reconciled = (name, reads, records) => {
+    const declared = reads.reduce((sum, read) => sum + (read.summary?.sources ?? 0), 0);
+    if (records.length < declared)
+      notRun.push(`${name}: ${records.length} of ${declared} sources read`);
+    return records;
+  };
+  if (manifest.areas.asked.includes("set")) {
+    const reads = setShards.filter((s) => s.read !== null).map((s) => s.read);
     parts.set = partSummary(
       setSources(
-        setShards.flatMap(({ read }) =>
-          read === null ? [] : lines(path.join(read.out, "plans.jsonl")),
+        reconciled(
+          "set",
+          reads,
+          reads.flatMap((read) => lines(path.join(read.out, "plans.jsonl"))),
         ),
       ),
     );
+  }
   for (const area of manifest.areas.asked.filter((name) => name !== "set")) {
     const reads = areaShards
       .filter((s) => s.name.startsWith(`${area}-`) && s.read !== null)
-      .map((s) => s.read.out);
-    parts[area] = partSummary(
-      areaSources(
-        reads.flatMap((out) => lines(path.join(out, `${area}.work.jsonl`))),
-        reads.flatMap((out) => lines(path.join(out, `${area}.differences.jsonl`))),
-      ),
+      .map((s) => s.read);
+    const sources = areaSources(
+      reads.flatMap((read) => lines(path.join(read.out, `${area}.work.jsonl`))),
+      reads.flatMap((read) => lines(path.join(read.out, `${area}.differences.jsonl`))),
     );
+    reconciled(area, reads, sources);
+    parts[area] = partSummary(sources);
   }
   const { packages, checks } = otherShards(prefix, results);
   let reached = 0;
@@ -525,8 +567,11 @@ export function evidenceReport(manifest, results) {
     for (const s of packages) if (s.read === null) notRun.push(s.name);
     if (packages.length < manifest.packageShards)
       notRun.push(`packages: ${packages.length} of ${manifest.packageShards} shards`);
-    const records = packages.flatMap(({ read }) =>
-      read === null ? [] : lines(path.join(read.out, "packages.jsonl")),
+    const reads = packages.filter((s) => s.read !== null).map((s) => s.read);
+    const records = reconciled(
+      "packages",
+      reads,
+      reads.flatMap((read) => lines(path.join(read.out, "packages.jsonl"))),
     );
     const sources = packageSources(records);
     reached = sources.filter((s) => s.bound?.startsWith("safety net")).length;
@@ -539,8 +584,8 @@ export function evidenceReport(manifest, results) {
   if (ran === null) notRun.push("checks");
   const reasons = [];
   for (const [name, p] of Object.entries(parts)) {
-    if (p.sources > 0 && p.completed === 0)
-      reasons.push(`${name}: nothing completed on both trees`);
+    // (a part asked that completed nothing, empty or not, is never equal)
+    if (p.completed === 0) reasons.push(`${name}: nothing completed on both trees`);
     for (const c of ["incomplete", "uncompared"])
       if (p.counts.base[c] + p.counts.head[c] > 0)
         reasons.push(
@@ -589,6 +634,8 @@ export function evidenceReportStep({ positional: [prefix], options }) {
       `${name}: ${p.differences.length} differences over ${p.completed} completed on both trees and ${p.threwBoth} that threw on both; ${p.moved.length} moved class`,
     );
     for (const t of p.threwAlike) out(`${name} threw alike on both trees: ${t}`);
+    for (const t of p.routeThrewAlike)
+      out(`${name} research-route compile threw alike on both trees: ${t}`);
     if (p.unanalysed.length > 0) {
       out(
         `${name}: ${p.unanalysedDifferences.length} differences over ${p.unanalysed.length} with no analysis on both trees (their diagnostics, and no plan)`,

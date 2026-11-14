@@ -1,6 +1,7 @@
 // The families runner's child process (`run.mjs` forks this module with `--child`): each source's runs in the four
-// modes on each tree, each run's charged units, the limit its ledger stopped at and its stall over the unit limit; and
-// what the runner shares with it, each tree's library and ledger and the stall's marker on stderr.
+// modes on each tree, each run's charged units, the limit its ledger stopped at, whether it had nothing to analyse
+// (`unparsed`) and its stall over the unit limit; and what the runner shares with it, each tree's library and ledger
+// and the stall's marker on stderr.
 import { existsSync, writeFileSync, writeSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -177,6 +178,8 @@ if (process.argv[2] === "--child") {
     used.work.push(measured ? spent : null);
     used.allowance.push(measured ? allowance : null);
     used.stopped.push(measured ? stopped : null);
+    // (whether this tree's oracle had no request to analyse: its files do not parse or name, #2796's no analysis)
+    used.unparsed.push(result.value?.unparsed === true);
     used.ms.push(ms);
     // (what its oracle reported of its own questions, which its limit and its stored run hold, #1837)
     used.questions.push((measured ? reportedBy(trees[tree], check) : undefined) ?? null);
@@ -217,7 +220,15 @@ if (process.argv[2] === "--child") {
           continue;
         }
         // compared by hash, so that the base's text is not held while the head runs
-        const used = { work: [], allowance: [], stopped: [], ms: [], questions: [], peak: [] };
+        const used = {
+          work: [],
+          allowance: [],
+          stopped: [],
+          unparsed: [],
+          ms: [],
+          questions: [],
+          peak: [],
+        };
         const results = [];
         for (const tree of trees.keys()) {
           // (with the peaks of the trees that ended this run, so that a stall on a later tree keeps them)
