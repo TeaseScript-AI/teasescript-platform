@@ -322,7 +322,7 @@ function openBelow(admission: Admission, place: PlaceId, path: readonly string[]
  * binding), `null` where no store decides it. A path settled without a scan (a settled single-family contract, a plain
  * scalar root) has its earliest definite contribution found here, once, where an answer asks for it.
  */
-export function deciderAt(
+function deciderAt(
   admission: Admission,
   place: PlaceId,
   path: readonly string[],
