@@ -455,35 +455,81 @@ async function transcriptNativeWheelChecks(page) {
   return "PASS native transcript wheel ownership across text, margins and thumb, malformed input, burst and drag";
 }
 
-// A refused answer shows the composer's notice, which a press or touch outside it dismisses.
+// A refused answer shows the composer's notice, which floats above the question's buttons and the field, covering
+// neither: they and the last messages stay where they are while it shows and once it went. A press or touch dismisses it.
 async function composerNoticeChecks(page) {
   const baseUrl = page.url().split("?")[0];
+  // Read once the entrances and glides have ended.
+  const layout = () =>
+    page.evaluate(async () => {
+      const finite = document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity);
+      await Promise.all(finite.map((animation) => animation.finished.catch(() => {})));
+      return JSON.stringify(
+        [
+          ...document.querySelectorAll("[data-foreground-controls] button"),
+          document.querySelector("[data-composer-shell]"),
+          ...[...document.querySelectorAll(".transcript-entry")].slice(-2),
+        ].map((element) => {
+          const { x, y, width, height } = element.getBoundingClientRect();
+          return [x, y, width, height];
+        }),
+      );
+    });
+  let before;
   const invalidAnswer = async () => {
     await page.getByRole("button", { name: "Stay by the water", exact: true }).waitFor();
     const input = page.locator("[data-runtime-interaction] textarea");
     await input.fill("Not an option");
+    before = await layout();
     await input.press("Enter");
     // The composer's own feedback; the Player notice live regions are separate status regions.
     await page.locator("[data-runtime-interaction] .composer-notice[role='status']").waitFor();
+    if ((await layout()) !== before) throw new Error("The composer's notice moved the layout");
+    const covers = await page.evaluate(() => {
+      const notice = document.querySelector(".composer-notice").getBoundingClientRect();
+      return [
+        ...document.querySelectorAll("[data-foreground-controls] button"),
+        document.querySelector("[data-composer-input]"),
+      ].some((element) => {
+        const box = element.getBoundingClientRect();
+        return (
+          box.top < notice.bottom &&
+          box.bottom > notice.top &&
+          box.left < notice.right &&
+          box.right > notice.left
+        );
+      });
+    });
+    if (covers) throw new Error("The composer's notice covers an answer button or the field");
+  };
+  const unmoved = async () => {
+    const after = await layout();
+    if (after !== before)
+      throw new Error(`The composer's notice left the layout moved: ${before} → ${after}`);
   };
   await page.setViewportSize({ width: 920, height: 560 });
   await page.goto(baseUrl);
   await invalidAnswer();
   await page.locator(".player-stage").click();
   await page.locator(".composer-notice").waitFor({ state: "hidden", timeout: 2000 });
+  await unmoved();
   await page.setViewportSize({ width: 390, height: 700 });
+  // Touch first: a coarse pointer gives the composer wider edge gutters, which the notice must not be blamed for.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   await page.goto(baseUrl);
   await invalidAnswer();
   const stage = await page.locator(".player-stage").boundingBox();
   const touch = { x: stage.x + stage.width / 2, y: stage.y + stage.height / 2 };
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   // Well before the notice's own expiry, so only the touch can have dismissed it.
   await page.locator(".composer-notice").waitFor({ state: "hidden", timeout: 2000 });
+  await unmoved();
   await page.setViewportSize({ width: 1440, height: 900 });
-  return "PASS a refused answer shows the composer's notice, and an outside press or touch dismisses it";
+  return "PASS a refused answer's composer notice moves nothing, and a press or touch dismisses it";
 }
 
 async function composerMouseFocusChecks(page) {

@@ -870,11 +870,11 @@ The Standard Player uses one persistent composer at the bottom of the conversati
 the answer field for `askText` and `askNumber`; `askChoice` and `showButton` controls appear after the latest message
 inside the same vertically scrolling transcript. The composer stays at the bottom. Its shell has a 12px gap above and
 below in the normal viewport; a larger bottom safe-area inset takes precedence where needed.
-Invalid submissions show a short red notice just above the composer input, without changing the input's height. The
-notice is part of the composer's area, so the conversation makes room for it as for a taller composer: it never covers
-a question's controls while the conversation shows its end. It clears when typing resumes, the interaction changes,
-after a brief delay, or when the player clicks or taps outside it; it clears on the click, not the press, so a control
-under a press still held does not move away.
+Invalid submissions show a short red notice floating just above the composer input, or, when the question shows
+answer controls, just above those, over the conversation or the Stage; it takes no room, so nothing on the screen moves when it shows
+or goes. It covers neither the controls nor the input, except where the session's area has no room above the controls: it
+then stops below that area's top and may cover the upper ones. A press passes through it to what it covers. It
+clears when typing resumes, the interaction changes, after a brief delay, or at the player's next press anywhere.
 
 While Debug runs ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)), one small muted status line below the foreground
 controls counts down the current foreground wait, also while the Debug panel is closed: **Debug · Continues in 4 s**,
