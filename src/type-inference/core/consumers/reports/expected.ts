@@ -33,7 +33,7 @@ const UNPROVED: SiteExpectation = {
 const SAID: readonly ValueKind[] = [...SHOWN_KINDS, "list", "set", "dict", "object"];
 
 /**
- * what the place the value at `site` lands in takes, read from what consumes it
+ * What the place the value at `site` lands in takes, read from what consumes it
  * (`CoreProgram.consumersOf`): a store's, an argument's or a result's place, its admitted type and its elements' (where
  * this value decides it, unwritten, what every read of it takes); a use, the kind it requires; nothing, where `say` shows
  * the value, what `say` shows (V30 §8: text, numbers and the other shown kinds, a list, set, dict or object in
@@ -44,7 +44,7 @@ const SAID: readonly ValueKind[] = [...SHOWN_KINDS, "list", "set", "dict", "obje
  * value an operation, a member, a fallback or a default computes its result from where that result divides.
  */
 export function expected(walk: Consumers, site: SourceSite): SiteExpectation {
-  // (one task per site or place, on the driver's own stack: a long chain of them is no native call depth, Codex r8)
+  // (one task per site or place, on the driver's own stack: a long chain of them is no native call depth)
   return runCompileTask(expectedTask(walk, site));
 }
 
@@ -54,7 +54,7 @@ function* expectedTask(walk: Consumers, site: SourceSite): CompileTask<SiteExpec
   const known = walk.expectations.get(key);
   if (known !== undefined) return known;
   // (once per site, shared by every diagnosis below it and charged; a consumer that leads back to the site, as a `for`
-  // loop's iterable does, proves nothing, Codex r6)
+  // loop's iterable does, proves nothing)
   walk.expectations.set(key, UNPROVED);
   program.work.charge("checks");
   const place = program.placeBySite.get(key);
@@ -121,7 +121,7 @@ function* readsTakeTask(walk: Consumers, place: PlaceId): CompileTask<SiteExpect
 
 /**
  * A place's admitted type, and its elements' where it holds a collection; where this value decides it, unwritten, what
- * its reads take (Codex r7); beside values of other types, or below the place's root, nothing proved.
+ * its reads take; beside values of other types, or below the place's root, nothing proved.
  */
 function* placeTakesTask(
   walk: Consumers,
@@ -191,7 +191,6 @@ function* consumerTakesTask(walk: Consumers, consumer: Consumption): CompileTask
     case "operand": {
       const c = consumer.operation;
       const { family } = c.contract;
-      // (its result's own site: an interpolation's is its text's, not the interpolated value's, Codex r10)
       const outer = yield* compileChild(expectedTask(walk, program.place(c.result).site ?? c.site));
       if (family === "interpolation") return computed(SHOWN_KINDS, "whole", outer);
       if (family === "logic") return computed(["boolean"], "operand", outer);
@@ -199,8 +198,6 @@ function* consumerTakesTask(walk: Consumers, consumer: Consumption): CompileTask
       if (family === "range") return computed(["integer"], "operand", outer);
       const operator = operatorOf(c);
       const node = program.exprAt(c.site);
-      // (an operation the table does not hold, or whose operands have no flow point, as a compound assignment's have
-      // not: nothing proved of what it takes, Codex r8)
       if (operator === null || node === null) return computed([], "operand", outer);
       const operands = c.arguments.map((argument) => kindsOf(walk, argument, node));
       const rows = OPERATOR_ROWS.filter((row) => row.operator === operator);
@@ -283,8 +280,8 @@ function* consumerTakesTask(walk: Consumers, consumer: Consumption): CompileTask
       };
     }
     case "part": {
-      // (a side of `otherwise`, a default, a named argument: its type must also fit the value it stands beside (C10),
-      // which no fact here proves, Codex r9; it divides where the result does)
+      // (a side of `otherwise`, a default, a named argument: its type must also fit the value it stands beside, which
+      // no fact here proves; it divides where the result does)
       const site = program.place(consumer.result).site;
       const outer = site === null ? UNPROVED : yield* compileChild(expectedTask(walk, site));
       return computed([], "operand", outer);

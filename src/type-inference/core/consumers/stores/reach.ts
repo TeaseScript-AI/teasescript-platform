@@ -6,7 +6,7 @@ import { propertyStep } from "../../program.js";
 import type { KeyReach, Reach } from "../model.js";
 import { ownSpan } from "../names.js";
 
-// A2, ADR 0021 1.1: the first direct read or store of a path, and what reaches a place only through copies.
+// ADR 0021 rule 1.1: the first direct read or store of a path, and what reaches a place only through copies.
 
 const LITERAL_NODES: ReadonlySet<string> = new Set([
   "objectLiteral",
@@ -17,7 +17,7 @@ const LITERAL_NODES: ReadonlySet<string> = new Set([
 
 /**
  * The first direct read or store of a place's path in source order (ADR 0021 rule 1.1): where an error about a property
- * that reached the place only through copies of whole objects is reported, the copy its related site (A2).
+ * that reached the place only through copies of whole objects is reported, the copy its related site.
  */
 export function firstDirect(
   walk: Consumers,
@@ -57,13 +57,13 @@ export function firstDirect(
 }
 
 /**
- * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects, where they were not
+ * ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects, where they were not
  * found to meet at the copy (a cycle of copies that adds or takes steps,
  * docs/specifications/type-inference-accepted-record/admission.md#r4-154), is checked at its first direct read or
  * store, the copy that brought the other type its related site (`copy`, else `site`); any other error stays at `site`.
  * `eligible`: the error is that property's, its offending contribution through whole copies.
  */
-export function deferred(
+export function copiedErrorSite(
   walk: Consumers,
   site: SourceSite,
   root: PlaceId,
@@ -114,7 +114,7 @@ function childrenOf(
   walk: Consumers,
   literal: PlaceId,
 ): ReadonlyMap<string, readonly PlaceId[]> | undefined {
-  if (walk.literalChildren === null) {
+  if (walk.childValuesByLiteral === null) {
     const { program, definitions } = walk.pass;
     const index = new Map<PlaceId, Map<string, PlaceId[]>>();
     for (const place of program.places) {
@@ -129,9 +129,9 @@ function childrenOf(
       for (const d of definitions.cellDefs.get(place.id) ?? [])
         if (d.value !== undefined) values.push(d.value);
     }
-    walk.literalChildren = index;
+    walk.childValuesByLiteral = index;
   }
-  return walk.literalChildren.get(literal);
+  return walk.childValuesByLiteral.get(literal);
 }
 
 /** The values standing at one level, after `above`: each a whole copy, a literal, or another value. */
@@ -193,7 +193,7 @@ function below(walk: Consumers, reach: Reach, step: string): Reach {
 }
 
 /**
- * What a value brings at `steps` (A2): `brought` where it brings the property the last step names only through whole
+ * What a value brings at `steps`: `brought` where it brings the property the last step names only through whole
  * copies (a copy, or literals whose children reach copies above the property's level, none giving the property
  * itself, none of another kind on the way), and `copy` the one copy that does, if one. Once per value and level.
  */
@@ -226,7 +226,7 @@ export function storeReach(
 }
 
 /**
- * Whether a property reaches a place only through copies of whole objects (ADR 0021 rule 1.1, A2): along its path,
+ * Whether a property reaches a place only through copies of whole objects (ADR 0021 rule 1.1): along its path,
  * at each key the stores into it and what the keys above bring there, no literal gives the property itself and no
  * value on the way is of another kind (the stores at the path itself are its direct stores). Each level of a place's
  * paths is made once, so paths that share a prefix share it.

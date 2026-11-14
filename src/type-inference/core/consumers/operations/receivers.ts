@@ -39,9 +39,10 @@ import {
   type Owner,
 } from "../reports/warnings.js";
 
-// C5a–c, F19a: a method's or a member's receiver, and the receiver of every store through a member and every add.
+// A method's or a member's receiver, and the receiver of every store through a member and every add: not null, has the
+// member, a property present; a reference's member (a speaker's, a timer's, a handle's, `REFERENCE`) is the runtime's.
 
-/** C5a, C5b, F19a: a method call's receiver, `get` and `clear` as any other; ADR 1.5's null default first. */
+/** A method call's receiver, `get` and `clear` as any other; ADR 1.5's null default first. */
 export function methodReceiver(
   walk: Consumers,
   site: SourceSite,
@@ -49,7 +50,6 @@ export function methodReceiver(
   receiver: PlaceId,
   name: string,
 ): void {
-  // §3.3: a receiver that is never null and has the method (a reference's method is F19a's)
   const quiet = quietKinds(walk, receiver);
   if (
     quiet !== null &&
@@ -60,8 +60,6 @@ export function methodReceiver(
   }
   const kinds = receiverKinds(walk, receiver, node);
   const label = shownLabel(walk, keyLabel(walk, receiver));
-  // C9: the receiver's external data brings its boundary checks, whichever member check follows; a domain's those the
-  // member check's warning owns
   const send = walk.boundariesBefore(kinds, () => {
     const text = label();
     return obligation(
@@ -90,14 +88,10 @@ export function methodReceiver(
 }
 
 /**
- * C5a–c, F19a, §4: a member access's receiver kinds at the whole access's span (§3.4). An error when every kind is
- * definite and null, or definite and without the member; else one warning and member obligation per offending kind:
- * a possible null, each kind without the member, each reference, an unknown receiver (its `on` names the kinds that
- * have the member, A7), and the `extra` ones (an object without the property, an object's own selection). An
- * `extra` one is the property's own answer at the access and explains its unknown kind, which an unknown receiver is
- * too: that receiver owes no second warning there, and its own absence is its own access's (#1469). Gives which receiver
- * items a stop's discharge left out with their owners (`leftOutBy`, #1448): the receiver's unknown items are owned by
- * its one unknown warning, or by the `extra` one that stands for it.
+ * A member access's receiver kinds at the whole access's span; `extra` are its further offending items (an object
+ * without the property, an object's own selection). An `extra` one is the property's own answer at the access and
+ * explains its unknown kind, which an unknown receiver is too: that receiver owes no second warning there, and its own
+ * absence is its own access's (#1469).
  */
 export function memberChecks(
   walk: Consumers,
@@ -155,7 +149,6 @@ export function memberChecks(
   const offending: Offending[] = [
     ...nulls.slice(0, 1).map((item): Offending => [item, `is not null before the ${use}`]),
     ...offendingKinds(lacking).map(({ item }): Offending => [item, has]),
-    // F19a: a reference's member is the runtime's, `unmodelled` first (§3.4)
     ...offendingKinds(others.filter((item) => REFERENCE.has(item.tag))).map(
       ({ item }): Offending => [{ ...item, context: "unmodelled" }, has],
     ),
@@ -196,7 +189,7 @@ export function memberChecks(
 }
 
 /**
- * C5c for a store: whether the receiver's sources have the property, once per receiver key and property: `none` (every
+ * For a store: whether the receiver's sources have the property, once per receiver key and property: `none` (every
  * known source lacks it), `some`, `all`; the sources are those the contract reads at the property's path, and the
  * earliest literal that lacks it, where the store's error points (ADR 1.4); and whether one gives an unknown there, which
  * an object the analysis cannot list gives at every property (#1436).
@@ -249,7 +242,7 @@ function propertyPresence(
   return presence;
 }
 
-/** Every store through a member and every add: its receiver (C5a–c, F19a). */
+/** Every store through a member and every add: its receiver. */
 export function receivers(walk: Consumers): void {
   const { program, definitions, values } = walk.pass;
   walk.enter(2);
@@ -258,7 +251,7 @@ export function receivers(walk: Consumers): void {
       (found) => found.recv !== null && (found.kind === "whole" || found.kind === "add"),
     ),
   )) {
-    if (!walk.runs(d.site)) continue;
+    if (!walk.startUnit(d.site)) continue;
     walk.reading = d.prep ?? d.node;
     const receiver = withoutEmpty(
       walk.finishing
@@ -268,7 +261,6 @@ export function receivers(walk: Consumers): void {
           ),
     );
     const owner = d.into === undefined ? undefined : program.projOf.get(d.into)?.owner;
-    // §3.4: the whole member or element access, including a mutator's call.
     const at = d.into !== undefined ? ownSpan(walk, d.into, d.site) : d.site;
     const recvPath = keyPath(d.recv!);
     const label = shownLabel(
@@ -280,7 +272,6 @@ export function receivers(walk: Consumers): void {
             labelRoot(walk.pass.contract, d.place),
           ),
     );
-    // C9: the receiver's external data brings its boundary checks, whichever member check follows
     for (const item of receiver)
       walk.admission.boundaryFor(item, () => {
         const text = label();
@@ -292,8 +283,6 @@ export function receivers(walk: Consumers): void {
           `check that ${text} accepts the store`,
         );
       });
-    // what the store needs of its receiver: a property store an object, an element store a list or a dict, an add
-    // its method (C5b: `x.missing = 2` with x a whole number fails at runtime)
     const property = d.kind === "whole" ? (d.path.at(-1) ?? null) : null;
     const method =
       d.kind === "add"
@@ -315,7 +304,6 @@ export function receivers(walk: Consumers): void {
         : property === "element"
           ? "an element store"
           : `a store of .${property === null ? property : propertyName(property)}`;
-    // D1: the receiver in its own text, and the member as the access writes it
     const receiverText =
       owner !== undefined ? () => program.textAt(ownSpan(walk, owner, d.site)) : label;
     const member =
@@ -324,7 +312,7 @@ export function receivers(walk: Consumers): void {
         : property === "element"
           ? "[i]"
           : `.${property === null ? "" : propertyName(property)}`;
-    // C5c, ADR 1.4: a store of a property into objects: every known source lacks it, an error at the literal; some
+    // ADR 1.4: a store of a property into objects: every known source lacks it, an error at the literal; some
     // lacks it, its member obligation; every source has it, nothing
     const extra: Offending[] = [];
     if (
@@ -334,7 +322,6 @@ export function receivers(walk: Consumers): void {
     ) {
       const presence = propertyPresence(walk, d.recv!, property);
       const alone = receiver.every((item) => item.tag === "object");
-      // never an error under a guard of the receiver (§3.2)
       if (presence.state === "none" && alone && !receiver.some((item) => item.guarded === true)) {
         error(
           walk,

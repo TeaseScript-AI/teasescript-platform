@@ -15,19 +15,9 @@ import { placeText, storeRoot, storeSteps, storeWarning } from "../reports/warni
 // The fresh pass: the stores' obligations where admission had not settled, and the marks it leaves.
 
 /**
- * The stores' obligations in the finishing path where admission had not settled, reading no
- * decision (A6: a later pass may admit a store this one rejected, so its decisions may be narrower than the settled
- * ones). It runs every derivation of admission's that creates an obligation (`OBLIGATION_SITES`, with each one's
- * exits), as admission runs it, reading what the stop retained as every consumer does (one
- * derivation): C1 against a written type at a store's path (`admittedStores`); ADR 0021 1.3's mixed literal elements
- * (`literalElements`), a literal whose element needs a decision marked through its holders or itself (`markHolder`);
- * F18's typed calls no store takes in (`ingressStores`); the ingress stores' boundaries against written types
- * (`publish`); the walk, which finishes every unit, the read boundaries. Every store and transfer into an inferred
- * place is marked at its site, its type undecided; a mark stands for its records within its value.
- * A list join's mixed operands (`joinElements`, #1272) where its operands' own kinds decide them, a join with an
- * operand read through a decision marked as a literal is (`markValue`). No syntax decision is made here:
- * admission decides an inferred place from its contract, which a fresh pass has not solved, so only a settled
- * stop's finishing read asks the stores' syntax, after the decision admission retained.
+ * The stores' obligations in the finishing path where admission had not settled, reading no decision (a later admission
+ * pass may admit a store this one rejected, so its decisions may be narrower than the settled ones). No syntax decision
+ * is made here: admission decides an inferred place from its contract, which a fresh pass has not solved.
  */
 export function freshStores(walk: Consumers): void {
   const { program, definitions } = walk.pass;
@@ -41,8 +31,8 @@ export function freshStores(walk: Consumers): void {
     if (written !== null && termAt(written, path) !== null) continue;
     storeMark(walk, d, path);
   }
-  // (ranked as admission's own stages, C1 before the mixed elements; run after them, so C1 reads the elements they
-  // keep, as unstopped admission's passes converge on: A6)
+  // (ranked as admission's own stages, the store check before the mixed elements; run after them, so the store check
+  // reads the elements they keep, as unstopped admission's passes converge on)
   walk.rule = 3;
   walk.admission.literalElements(
     walk.order,
@@ -56,7 +46,8 @@ export function freshStores(walk: Consumers): void {
   );
   walk.rule = 1;
   admittedStores(walk, true);
-  // (the publication first: its landing index, of the stores into written places alone, is the one F18's asks)
+  // (the publication first: its landing index, of the stores into written places alone, is the one `ingressStores`
+  // asks)
   walk.admission.publish(true);
   walk.rule = 2;
   const open = walk.admission.ingressStores((site) => inMarkedValue(walk, site));
@@ -66,8 +57,8 @@ export function freshStores(walk: Consumers): void {
 }
 
 /**
- * Whether a literal's element stands (A6, ADR 0021 1.3): no pass's admission rejected it, nor this fresh pass's mixed
- * elements whole, as the unstopped values read it.
+ * Whether a literal's element stands (ADR 0021 1.3): no pass's admission rejected it, nor this fresh pass's mixed
+ * elements whole.
  */
 export function stands(walk: Consumers, d: Definition): boolean {
   if (!walk.pass.lists.live(d)) return false;

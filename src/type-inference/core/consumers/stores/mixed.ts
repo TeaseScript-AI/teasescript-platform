@@ -16,10 +16,9 @@ import { placeText, storeRoot, storeSteps } from "../reports/warnings.js";
 // `askChoice`'s answer where its type would be inferred (V30 §19, #1352).
 
 /**
- * Where a literal lands (A2): the place and the key path that a whole store, an add (an added list as the collection
+ * Where a literal lands: the place and the key path that a whole store, an add (an added list as the collection
  * itself, an added element one step below), or the literals around it (a collection's cell as `element`, an object's
- * property by name) put it at; `null` where nothing stores it. Each literal is placed once, from the nearest literal
- * above it already placed.
+ * property by name) put it at; `null` where nothing stores it.
  */
 function landingOf(walk: Consumers, literal: PlaceId): Landing | null {
   const { program, definitions } = walk.pass;
@@ -129,8 +128,8 @@ function landingPath(walk: Consumers, node: Landing): readonly string[] {
 }
 
 /**
- * ADR 0021 1.3, A8: a literal's element of another type than the earliest element's (`Admission.literalElements`): an
- * error at the offending element, also where a copy brought it into a property and the copies meet there (A2); where
+ * ADR 0021 1.3: a literal's element of another type than the earliest element's (`Admission.literalElements`): an
+ * error at the offending element, also where a copy brought it into a property and the copies meet there; where
  * they were not found to meet (a cycle of copies that adds or takes steps,
  * docs/specifications/type-inference-accepted-record/admission.md#r4-154), at the property's first direct read or
  * store.
@@ -304,10 +303,10 @@ const REACHED = new WeakMap<Consumers, Map<PlaceId, Stored | null>>();
 
 /**
  * The first store of `value` itself (a store, an argument, a return, an add, or a literal holding it where the literal
- * lands, `landingOf`) into a place with no written type there whose type would be a union: its admitted type (A2: the
+ * lands, `landingOf`) into a place with no written type there whose type would be a union: its admitted type (the
  * decision, else every type stored there; `unknown` below an unrestricted written part, the place's own or a copy's)
- * holds more than one type and comes from no copy of a written type (A4); a place another store decides as one type
- * keeps that store's check (C1). An argument's call alone types its parameter (V30 §11): its own value's known types
+ * holds more than one type and comes from no copy of a written type; a place another store decides as one type keeps
+ * that store's check. An argument's call alone types its parameter (V30 §11): its own value's known types
  * decide it, whatever another call passes. The union to declare is every type the place takes, this value's among them.
  */
 function storedUnion(walk: Consumers, value: PlaceId): Stored | null {
@@ -355,7 +354,7 @@ function storedUnion(walk: Consumers, value: PlaceId): Stored | null {
 /**
  * The first store whose place's type would be a union of `value`'s, or of what it passes on (`passedOperands`), its
  * own stores first, then each value it reaches in order: each value once per pass (`REACHED`), however many choices
- * reach it, in an explicit post-order, so a chain of `otherwise`s costs its length (Codex r2's B4 on #1660).
+ * reach it, in an explicit post-order, so a chain of `otherwise`s costs its length (#1660).
  */
 function reachedUnion(walk: Consumers, start: PlaceId): Stored | null {
   const { program } = walk.pass;
@@ -408,8 +407,7 @@ function mixedChoice(
 ): void {
   // (the choice's answer: one known type from a settled read, nothing to record; more than one, the error where it
   // lands, proved whether its read settled or stopped, since a stop only hides types. A stopped read of one known type
-  // proves neither: it records what it reaches, each value's own read settled or stopped, and makes no error, Codex r7
-  // on #1660)
+  // proves neither: it records what it reaches, each value's own read settled or stopped, and makes no error, #1660)
   const read = answerRead(walk, c.result);
   if (oneType(read.kinds) && !read.stopped) return;
   const stored = reachedUnion(walk, c.result);
@@ -422,11 +420,9 @@ function mixedChoice(
 }
 
 /**
- * #1352's stage (`Consumers.check`): `mixedChoice` of every `askChoice` outside the units past the nesting limit, in
- * the consumers' order, each read with its choice's demand allowance and each its own unit (`Consumers.runs`: a stop
- * takes back the running choice's findings alone, Codex r10 on #1660); run after every other consumer's read and the
- * publication, so no read of the pass that can stop at its demand allowance comes after its reads (Codex r9).
- * A choice past the nesting limit has no published warning that reads its record (TSV076 defers them).
+ * The mixed choices' check (#1352), each choice its own unit (a stop takes back the running choice's findings alone,
+ * #1660); run after every other consumer's read and the publication, so no read of the pass that can stop at its
+ * demand allowance comes after its reads.
  */
 export function mixedChoices(walk: Consumers): void {
   const { program } = walk.pass;
@@ -435,8 +431,8 @@ export function mixedChoices(walk: Consumers): void {
       c.kind === "operation" && c.evidence?.kind === "choice",
   );
   for (const c of walk.order(choices)) {
-    // (each choice its own unit: a stop takes back the running choice's findings alone, Codex r10 on #1660)
-    if (!walk.runs(c.site)) continue;
+    // (each choice its own unit: a stop takes back the running choice's findings alone, #1660)
+    if (!walk.startUnit(c.site)) continue;
     const node = program.exprAt(c.site);
     if (node === null) continue;
     walk.reading = node;

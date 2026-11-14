@@ -16,7 +16,9 @@ import { elementStep } from "../result.js";
 import { unsettledItem } from "./kinds.js";
 import { Retained } from "../retained/retained.js";
 
-// The names obligations use: an operand's span, a key's label, a chain's derived or anonymous start, quiet kinds.
+// Two jobs. The names obligations use: a read's key (`readKey`), an operand's span, a key's label and its text, a
+// chain's derived or anonymous start, an index projection's owner. And a value's kinds as consumers read them
+// (`kindsOf`, `receiverKinds`, `quietKinds`, `domainItems`, `unlistedObject`, the written number type).
 
 /**
  * A read's key: its binding's root and path, then a step per projection, each value's kept once and made from its
@@ -60,10 +62,9 @@ export function ownSpan(walk: Consumers, value: PlaceId, fallback: SourceSite): 
 }
 
 /**
- * An obligation's target (§10.5) as a label's recipe (`contract/labels.ts`): the key path a value reads in the
+ * An obligation's target as a label's recipe (`contract/labels.ts`): the key path a value reads in the
  * contract's vocabulary (`box.n`, every selection or index `xs.element`, a dict's `d.entry`, a parameter `use.data`, a
- * result `f.result`), else its text. One recipe per value, kept, each one step below its owner's with the step spelled
- * here, as `Admission.labelOf` spells it; its text is made only where a check or a diagnostic shows it (`shownLabel`).
+ * result `f.result`), else its text. One recipe per value, kept, each one step below its owner's.
  */
 export function keyLabel(walk: Consumers, value: PlaceId): Label {
   const { program, contract } = walk.pass;
@@ -85,12 +86,11 @@ export function keyLabel(walk: Consumers, value: PlaceId): Label {
       const result = walk.resultOfCall.get(at);
       label = result !== undefined ? labelRoot(contract, result) : ownLabel(walk, site);
     }
-    // §10.5: an anonymous target, a read below a value no place holds (a literal's, an operation's) or through a dict's
+    // an anonymous target, a read below a value no place holds (a literal's, an operation's) or through a dict's
     // `values` or `keys` (a new list each read), is named by its own text
     else if ((derived(walk, at) || anonymous(walk, at)) && site !== null)
       label = ownLabel(walk, site);
     else {
-      // a selection, index or `get` is `element` (an object's own `first` too, F11), a dict's value `entry`
       below.push([
         at,
         stepName(projection.step) === "element" && projection.step !== "element"
@@ -219,10 +219,11 @@ function anonymousChain(walk: Consumers, value: PlaceId): boolean {
 }
 
 /**
- * What a content-specific check reads of `value` at `rest` (Sol r1 B2, the owner's review F2; ADR 0021 1.8, 1.10): its
- * answer's items, and where they hold what the core cannot know, the kinds its contract admits there instead, else the
- * admitted type of the place it reads (a written host collection, a copy of one, a typed load or parse), each possible: a domain constrains what the value may hold
- * and proves nothing of it, a collection it admits may be empty, so a misfit there owes the use's check, never an error.
+ * What a content-specific check reads of `value` at `rest` (ADR 0021 1.8, 1.10): its answer's items, and where they
+ * hold what the core cannot know, the kinds its contract admits there instead, else the admitted type of the place it
+ * reads (a written host collection, a copy of one, a typed load or parse), each possible: a domain constrains what the
+ * value may hold and proves nothing of it, a collection it admits may be empty, so a misfit there owes the use's check,
+ * never an error.
  */
 export function domainItems(
   walk: Consumers,
@@ -241,7 +242,7 @@ export function domainItems(
       ];
 }
 
-/** The admitted type at `rest` of the place a read reads (a copy's of a written type, A4), `null` with an unknown. */
+/** The admitted type at `rest` of the place a read reads (a copy's of a written type), `null` with an unknown. */
 function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[]): ItemTag[] | null {
   const key = readKey(walk, value);
   if (key === null) return null;
@@ -252,7 +253,7 @@ function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[])
 }
 
 /**
- * #1173 (the owner's option C): a value's written type where it is `number` or a written union with it (`number?`),
+ * #1173: a value's written type where it is `number` or a written union with it (`number?`),
  * else `null`. The written type a value carries (`writtenTermOf`) is its own written type alone, so no decision and no
  * charged key is asked for it and no counter or stop moves.
  */
@@ -346,7 +347,7 @@ function below(term: TypeTerm | null, step: string): TypeTerm | null {
   return found;
 }
 
-/** §3.3, the quiet path: a value's contract kinds, asked before any read is evaluated; `null` with an unknown. */
+/** The quiet path: a value's contract kinds, asked before any read is evaluated; `null` with an unknown. */
 export function quietKinds(
   walk: Consumers,
   value: PlaceId | undefined,
@@ -401,15 +402,16 @@ export function unlistedObject(
   );
 }
 
+/** A value's items at a node, without `empty`. */
 export function kindsOf(walk: Consumers, value: PlaceId, node: FlowNode | null): Item[] {
   return withoutEmpty(walk.valueItems(value, node, []));
 }
 
 /**
- * A member's or a method's receiver: its kinds at the node, and F19a before them
- * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): where the shared decision on the
- * receiver's contract holds a reference the exact value lacks, its reference kinds too, whose members the consumer's
- * member obligations cover, the two in their one order (`inItsOrder`, #1398).
+ * A member's or a method's receiver: its kinds at the node and, where they hold no reference kind, the receiver's
+ * reference test (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): where the shared
+ * decision on the receiver's contract holds a reference the exact value lacks, its reference kinds too, whose members
+ * the consumer's member obligations cover, the two in their one order (`inItsOrder`, #1398).
  */
 export function receiverKinds(walk: Consumers, value: PlaceId, node: FlowNode | null): Item[] {
   const kinds = kindsOf(walk, value, node);

@@ -10,19 +10,14 @@ import { unrestricted } from "../../admission/permitted.js";
 import { markNames, storeMark, type MarkNames } from "./fresh.js";
 import { storeWarning } from "../reports/warnings.js";
 
-// The stores at, below and above a stopped decision (S3 §5, #1416, #1440): each one's obligation kept whole, or its
+// The stores at, below and above a stopped decision (#1416, #1440): each one's obligation kept whole, or its
 // value marked.
 
 /**
- * A decision that stopped stands for its obligations (S3 §5), the stores' above its key among them: a whole store, an
+ * A decision that stopped stands for its obligations, the stores' above its key among them: a whole store, an
  * argument or an add into the same place at a path above the key, whose value holds it, and whose own path's decision
  * checks nothing below that path. Each such store owes its check when the script runs, at its own site with the stop's
- * context, as `requiredStores` resolves it. A store at or below a stopped key is that key's own (#1275,
- * `stoppedStores`, resolved alike), a sibling's path no store of the stop's. Found by one walk down each stopped path
- * that no other stop lies above (`outermost`), through the stored keys' trie (`Admission.stored`), each destination
- * resolved once a pass whatever number of stops lie below it. Run after the pass's decisions, in every pass that
- * carries a stop: a restarted pass rebuilds it from the stopped set, the fresh pass from the written
- * types alone (`freshStores`).
+ * context. A store at or below a stopped key is that key's own (#1275), a sibling's path no store of the stop's.
  */
 export function enclosingStores(walk: Consumers): void {
   const { program, definitions, contract } = walk.pass;
@@ -122,7 +117,7 @@ export function requiredStores(
   if (requirement !== null && unrestricted(requirement)) return;
   if (requirement !== null)
     walk.requirements.set(keptKey(walk.pass.program.work, place, path), requirement);
-  // (what the marks name, the destination's, made once for all its stores: Codex r1's N1 on #1434; a store at or below
+  // (what the marks name, the destination's, made once for all its stores, #1434; a store at or below
   // the stop names it per store from the contract, as #1310's marks did, so the stops a later decision meets are
   // unchanged)
   let names: MarkNames | undefined;
@@ -131,19 +126,19 @@ export function requiredStores(
       ? markNames(walk, place, path)
       : (names ??= markNames(walk, place, path, stepsOf(walk, place, path)));
   for (const d of stores)
-    // (a store this pass rejected has its error, which stands: A6)
+    // (a store this pass rejected has its error, which stands)
     if (d.value === undefined || walk.admission.refused.has(d.uid)) continue;
     else if (requirement === null) storeMark(walk, d, path, named);
     else requiredMark(walk, d, requirement, named);
 }
 
 /**
- * A destination's steps (`StoreStep`) by one walk down its path, asking no contract (Astra's B1 and Codex r2's
- * blocker on #1434: a contract question per prefix decodes and formats each whole prefix again): a property by its
- * name, an element step by the collection the written type there holds, its place's own or the copy's that the first
- * prefix a copy decides retained (A4: the copied type is the place's below it), else by the kinds this pass decided or
- * A3 settled the prefix by, else labelled a list, conservatively, where this pass retains no collection name for it
- * (its contract may hold a set or a dict there, Codex r3: the label names no type and changes no message). Each
+ * A destination's steps (`StoreStep`) by one walk down its path, asking no contract (#1434: a contract question per
+ * prefix would decode and format each whole prefix again): a property by its name, an element step by the collection
+ * the written type there holds, its place's own or the copy's that the first prefix a copy decides retained (the
+ * copied type is the place's below it), else by the kinds this pass decided the prefix by or its settled single-family
+ * contract gives (`Admission.kindsAt`), else labelled a list, conservatively, where this pass retains no collection
+ * name for it (its contract may hold a set or a dict there: the label names no type and changes no message). Each
  * prefix's key is made once, one step longer than the one before, only while no written type names the steps. No
  * prefix is stopped: a destination lies above its stop, and no other stop lies at or above it (`outermost`).
  */
