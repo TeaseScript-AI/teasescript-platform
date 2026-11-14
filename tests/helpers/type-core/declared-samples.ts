@@ -635,10 +635,9 @@ export const DECLARED_REFUSALS: readonly {
  * A `switch` without `default` whose cases take every value its subject's type holds, with nothing after it that ends
  * the file: today's checker plans it, the route gives TSV052 and no plan (#2660: a compile error the route gives on
  * valid code, V30 §32, since its ways do not read the values a subject's type holds; the same cause changes other
- * plan-analysis diagnostics where both plan, #2660's own list). The boolean
- * and `askChoice` forms, which have no twin without a `switch`, are declared here; the type-case form is inherited
- * (`if s is integer { exit }` gives it on the route without a `switch`). `type-core-candidate-loops.test.ts` asserts
- * the route's side of each, in every mode.
+ * plan-analysis diagnostics where both plan, #2660's own list). The boolean and `askChoice` forms, which have no twin
+ * without a `switch`, are declared here; the type-case form is inherited (`if s is integer { exit }` gives it on the
+ * route without a `switch`).
  */
 export const DECLARED_WAY_ERRORS: readonly {
   readonly form: string;
