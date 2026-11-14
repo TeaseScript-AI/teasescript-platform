@@ -68,10 +68,7 @@ import { conditionShape } from "./narrowing-shapes.js";
 import { interactionEvidence, selectorsEvidence } from "./syntax-evidence.js";
 
 // The collector of the constraint graph: one walk over the project's programs, which emits the places and constraints
-// of `graph.ts` and decides nothing. Its order is `TypeChecker`'s (`type-checker.ts`), except that it walks every
-// function body after its file's top level instead of at the first call. It mirrors `TypeChecker`'s scoping rules to
-// resolve names (`type-inference-graph.test.ts` compares its reads with the legacy facts' on every repository source);
-// it reads no type and reports no diagnostic. The type core (`core/`) decides every type from the graph it makes.
+// of `graph.ts` and decides nothing; it reads no type and reports no diagnostic.
 
 /**
  * Collects the constraint graph of the project of `request`. Names resolve, since the type analysis runs after name
@@ -152,16 +149,13 @@ class Collector {
   readonly #speakers: ReadonlyMap<Identifier, string>;
   readonly #builtins: ReadonlySet<string>;
   readonly #handlers: Handler[] = [];
-  // The walk's position (`#region`, `#file`, `#outer`, `#function`, `#body`): `collect` sets it where the walk of the
-  // session's declarations, of a file's top level and of each block starts; `#functionBody` sets it for a body's walk
-  // and restores it after; `#declareFunction` and `#speaker` swap `#file` alone around a node of another file.
   /** The code the walk is in, which every constraint names. */
   #region: RegionRef = { kind: "start" };
   /** The name of the `let` whose value is being walked, which a media block binds to its own handle. */
   #selfHandle: string | null = null;
   /** The file of the node the walk is at, which every site names. */
   #file = 0;
-  /** The scope a block's handlers see names down to (`#pendHandlers`, `Scope.visibleAbove`). */
+  /** The scope a block's handlers see names down to. */
   #outer: Scope = this.#project;
   /** The function whose body is walked, whose `return`s are recorded; `null` outside a body. */
   #function: FunctionId | null = null;
@@ -449,8 +443,7 @@ class Collector {
     }
     this.#function = id;
     yield* compileChild(this.#statements(declaration.body.statements, scope));
-    // The end of the body: the collector does not decide whether it is reached, so that the function completes without
-    // a value.
+    // (whether the end of the body is reached is not decided here)
     this.#add({ ...this.#origin(declaration.body, "return"), kind: "exit", fn: id });
     this.#function = outerFunction;
     this.#body = outerBody;
@@ -814,10 +807,7 @@ class Collector {
     });
   }
 
-  /**
-   * The binding of a plain variable: the subject of a `test` constraint, which the graph records for plain variables
-   * only (the type core's narrowing reads stable paths from the syntax, `core/narrowing/`).
-   */
+  /** The binding of a plain variable: the subject of a `test` constraint, which the graph records for no other. */
   #plainVariable(expression: Expression, scope: Scope): PlaceId | undefined {
     const node = unwrap(expression);
     if (node.kind !== "identifier") return undefined;

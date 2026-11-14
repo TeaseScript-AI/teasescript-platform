@@ -10,8 +10,8 @@ import type {
 } from "./relation.js";
 
 /*
- * What every adapter shares: how an operand's view is read, how a result is written, and the rules of
- * the members of one receiver kind, which `members.ts` composes over a receiver that may be of several kinds.
+ * What every adapter shares: how an operand's view is read, how a result is written, and the rules of the members of
+ * one receiver kind.
  */
 
 /** The member rules of the receiver kinds one module owns. */
