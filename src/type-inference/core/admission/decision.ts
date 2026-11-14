@@ -225,7 +225,6 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
   }
 }
 
-/** `decide`'s body. */
 function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): Decision | null {
   const { program, definitions, lists, contract } = admission.pass;
   const work = program.work;
