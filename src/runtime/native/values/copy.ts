@@ -2,11 +2,10 @@ import {
   isNativeComposite,
   NativeDict,
   NativeObject,
-  NativeSet,
   type NativeComposite,
   type NativeValue,
 } from "./native-value.js";
-import { appendToUnindexedSet } from "./native-set.js";
+import { NativeSet } from "./native-set.js";
 
 /**
  * An independent copy of a value: every list, object, dict and set in it is new, and primitives and leaf records, which
@@ -35,7 +34,7 @@ export function copyNativeValue(value: NativeValue): NativeValue {
     } else if (source instanceof NativeSet) {
       // EVIDENCE: invariant: `emptyCopy` pairs each set with a new set; copies of unique members are unique.
       const set = target as NativeSet;
-      for (const item of source.items) appendToUnindexedSet(set, copyPart(item));
+      for (const item of source.items) set.appendUnindexed(copyPart(item));
     } else {
       const from = source instanceof NativeObject ? source.properties : source.entries;
       // EVIDENCE: invariant: `emptyCopy` pairs each object with a new object and each dict with a new dict.

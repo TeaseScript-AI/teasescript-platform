@@ -6,12 +6,11 @@ import type {
 import {
   NativeDict,
   NativeObject,
-  NativeSet,
   type NativeComposite,
   type NativeLeaf,
   type NativeValue,
 } from "./native-value.js";
-import { appendToUnindexedSet } from "./native-set.js";
+import { NativeSet } from "./native-set.js";
 
 // The two directions between canonical values (`SerializableRuntimeValue`, the form snapshots, checkpoints and hosts
 // use) and native values (`native-value.ts`). Neither direction validates: `fromCanonical` takes a value that was
@@ -79,7 +78,7 @@ export function fromCanonical(value: SerializableRuntimeValue): NativeValue {
       case "set": {
         // EVIDENCE: invariant: `convert` pairs a set with a new `NativeSet`; a valid set's items are unique.
         const set = target as NativeSet;
-        for (const item of source.items) appendToUnindexedSet(set, part(item));
+        for (const item of source.items) set.appendUnindexed(part(item));
         break;
       }
       case "object": {

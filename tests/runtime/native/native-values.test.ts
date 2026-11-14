@@ -4,17 +4,10 @@ import test from "node:test";
 import { fromCanonical, toCanonical } from "../../../src/runtime/native/values/codec.js";
 import { copyNativeValue } from "../../../src/runtime/native/values/copy.js";
 import { nativeEquals } from "../../../src/runtime/native/values/equality.js";
-import {
-  nativeSetAdd,
-  nativeSetClear,
-  nativeSetHas,
-  nativeSetOf,
-  nativeSetRemove,
-} from "../../../src/runtime/native/values/native-set.js";
+import { NativeSet } from "../../../src/runtime/native/values/native-set.js";
 import {
   NativeDict,
   NativeObject,
-  NativeSet,
   type NativeValue,
 } from "../../../src/runtime/native/values/native-value.js";
 import { nativeValueKey } from "../../../src/runtime/native/values/value-key.js";
@@ -187,7 +180,7 @@ function changeEverything(value: NativeValue): void {
     } else if (current instanceof NativeSet) {
       // Its members are changed too, which a set never does, to find a member shared with another value.
       work.push(...current.items);
-      nativeSetAdd(current, "changed-member");
+      current.add("changed-member");
     }
   }
 }
@@ -258,28 +251,28 @@ test("sets add, find, remove and clear members as today's sets do", () => {
   for (let round = 0; round < 40; round += 1) {
     const items = Array.from({ length: next(30) }, () => pool[next(pool.length)]!);
     const canonical: SerializableRuntimeSet = createCapturedSerializableSet(items);
-    const native = nativeSetOf(items.map(fromCanonical));
+    const native = NativeSet.of(items.map(fromCanonical));
     assert.equal(json(toCanonical(native)), json(canonical));
     for (let step = 0; step < 60; step += 1) {
       const member = pool[next(pool.length)]!;
       const operation = next(10);
       if (operation < 4)
         assert.equal(
-          nativeSetAdd(native, fromCanonical(member)),
+          native.add(fromCanonical(member)),
           addSerializableSetValue(canonical, member),
         );
       else if (operation < 7)
         assert.equal(
-          nativeSetRemove(native, fromCanonical(member)),
+          native.remove(fromCanonical(member)),
           removeSerializableSetValue(canonical, member),
         );
       else if (operation < 9)
         assert.equal(
-          nativeSetHas(native, fromCanonical(member)),
+          native.has(fromCanonical(member)),
           serializableSetContains(canonical, member),
         );
       else {
-        nativeSetClear(native);
+        native.clear();
         clearSerializableSet(canonical);
       }
       assert.equal(json(toCanonical(native)), json(canonical));
@@ -300,46 +293,46 @@ test("members whose long keys share a hash stay apart, as in today's sets", () =
   const [first, second] = COLLIDING;
   assert.notEqual(valueKey(first), valueKey(second));
   const canonical = createCapturedSerializableSet([first]);
-  const native = nativeSetOf([fromCanonical(first)]);
+  const native = NativeSet.of([fromCanonical(first)]);
   const steps: Array<readonly [string, () => boolean, () => boolean]> = [
     [
       "has second",
-      () => nativeSetHas(native, fromCanonical(second)),
+      () => native.has(fromCanonical(second)),
       () => serializableSetContains(canonical, second),
     ],
     [
       "add second",
-      () => nativeSetAdd(native, fromCanonical(second)),
+      () => native.add(fromCanonical(second)),
       () => addSerializableSetValue(canonical, second),
     ],
     [
       "add first again",
-      () => nativeSetAdd(native, fromCanonical(first)),
+      () => native.add(fromCanonical(first)),
       () => addSerializableSetValue(canonical, first),
     ],
     [
       "add second again",
-      () => nativeSetAdd(native, fromCanonical(second)),
+      () => native.add(fromCanonical(second)),
       () => addSerializableSetValue(canonical, second),
     ],
     [
       "remove first",
-      () => nativeSetRemove(native, fromCanonical(first)),
+      () => native.remove(fromCanonical(first)),
       () => removeSerializableSetValue(canonical, first),
     ],
     [
       "has second after",
-      () => nativeSetHas(native, fromCanonical(second)),
+      () => native.has(fromCanonical(second)),
       () => serializableSetContains(canonical, second),
     ],
     [
       "has first after",
-      () => nativeSetHas(native, fromCanonical(first)),
+      () => native.has(fromCanonical(first)),
       () => serializableSetContains(canonical, first),
     ],
     [
       "remove first again",
-      () => nativeSetRemove(native, fromCanonical(first)),
+      () => native.remove(fromCanonical(first)),
       () => removeSerializableSetValue(canonical, first),
     ],
   ];
@@ -350,7 +343,7 @@ test("members whose long keys share a hash stay apart, as in today's sets", () =
   const both: SerializableRuntimeValue = { kind: "set", items: [first, second] };
   const restored = fromCanonical(both);
   assert.ok(restored instanceof NativeSet);
-  assert.ok(nativeSetRemove(restored, fromCanonical(second)));
+  assert.ok(restored.remove(fromCanonical(second)));
   assert.equal(json(toCanonical(restored)), json({ kind: "set", items: [first] }));
   assert.equal(
     nativeEquals(
@@ -380,9 +373,29 @@ test("values 10,000 deep convert, copy, compare and key without native recursion
   assert.equal(nativeValueKey(copy), valueKey(value));
 });
 
+test("a set's members and index change only through its methods", () => {
+  const set = NativeSet.of([1]);
+  assert.ok(set.has(1));
+  // Writes from outside that compiled before the storage was private; they never run.
+  const typed = () => {
+    // @ts-expect-error -- `items` is a read-only view.
+    set.items.push(2);
+    // @ts-expect-error -- `items` has no setter.
+    set.items = [];
+    // @ts-expect-error -- the index is private.
+    set.membership = null;
+  };
+  assert.equal(typeof typed, "function");
+  // Past the types, a `membership` written from outside is a property the set never reads.
+  Object.assign(set, { membership: { scalars: new Set([2]), keyed: new Map() } });
+  assert.equal(set.has(2), false);
+  assert.ok(set.add(2));
+  assert.deepEqual(set.items, [1, 2]);
+});
+
 test("a set of 10,000 distinct lists keeps each once", () => {
   const items: NativeValue[] = Array.from({ length: 10_000 }, (_, at) => [at, "z".repeat(at % 50)]);
-  const set = nativeSetOf([...items, ...items.map(copyNativeValue)]);
+  const set = NativeSet.of([...items, ...items.map(copyNativeValue)]);
   assert.equal(set.items.length, 10_000);
-  for (const item of items) assert.ok(nativeSetHas(set, copyNativeValue(item)));
+  for (const item of items) assert.ok(set.has(copyNativeValue(item)));
 });
