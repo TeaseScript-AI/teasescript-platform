@@ -1,11 +1,20 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Definition, DefinitionIndex } from "../definitions.js";
+import { makeItem, REASON, type Item } from "../items.js";
 import { selectsElement } from "../method-categories.js";
 import type { CoreProgram } from "../program.js";
 import { Retained } from "../retained/retained.js";
 
 // #2764 (B): the nesting cut. A list nested a level deeper on each turn of a cycle of copies, arguments and results is
 // known to a depth fixed by the program, and below it only when the script runs.
+
+/**
+ * The cut's answer (#2764, B): a value known only when the script runs (rule 1.7), opaque, at every step below a
+ * growing component's cut depth.
+ */
+export const CUT: readonly Item[] = Object.freeze([
+  makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled", cert: "pos" }),
+]);
 
 /** A route from a producer into a receiver, with the element levels the producer's value gains there. */
 interface Edge {
@@ -74,10 +83,11 @@ export function elementDepth(path: readonly string[]): number {
  * elements; −1 for an element, an index, a loop's element, a selection and a `get`'s element (its default: 0). A place with a written type takes no edge: the written type decides it.
  * A route the graph does not name makes no edge, so a cycle through it is never cut.
  *
- * A strongly connected component that holds a cycle of positive weight grows without end under F20 and F21. Its cut
- * depth is `M + G`: `M` the deepest element level that enters it from outside (a literal's structure, a written type's
- * levels, an earlier component's depth), `G` the number of +1 edges inside it, which covers one turn of every cycle in
- * it. Components are taken producers first, so `M` is finite. The cut depends on the graph alone, never on the order
+ * A strongly connected component that holds a cycle of positive weight grows without end under F20 and F21. It is
+ * followed one level deeper than what enters it, `M + 1`: `M` the deepest element level that enters it from outside (a
+ * literal's structure, a written type's levels, an earlier component's depth); deeper, a value is known only when the
+ * script runs. A cycle that gains more than one level a turn (`a = [[a]]`) turns unknown within its first turn.
+ * Components are taken producers first, so `M` is finite. The cut depends on the graph alone, never on the order
  * anything is asked in (r4-44).
  */
 export class NestingIndex {
@@ -99,6 +109,7 @@ export class NestingIndex {
       // what enters from outside, and the base a written type gives
       const entry = new Map<PlaceId, number>();
       let entering = NOTHING;
+      // (the +1 edges inside: a simple path gains at most these, the bound of the positive-cycle test)
       let gain = 0;
       for (const place of component) {
         const written = writtenAt(program, place);
@@ -120,8 +131,8 @@ export class NestingIndex {
         ? longestWithin(program, into, members, entry, Math.max(entering, 0) + gain)
         : entry;
       if (longest === null) {
-        // a positive cycle: every member is known to `M + G` levels, and so is what reads it
-        const cut = Math.max(entering, 0) + gain;
+        // a positive cycle: every member is known one level deeper than what enters it, and so is what reads it
+        const cut = Math.max(entering, 0) + 1;
         for (const place of component) {
           this.#cut.set(place, cut);
           depth.set(place, cut);
