@@ -42,16 +42,13 @@ their executable or topic sources rather than this task router.
 
 ## Documentation routing
 
-Start with applicable `AGENTS.md` instructions and the assigned issue or pull
-request. Select the capability route and the
-[workflow startup sections for your role](docs/agents/README.md#workflow-reading-before-starting), then load only
-the task-controlling sources required by that route. Before
-implementation, final self-review, or an explicitly assigned pull-request review,
-read `docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`. Read
-`docs/review-and-audit/AUDIT.md` only for an explicitly assigned audit; ordinary
-work does not load both routes. Read `CURRENT-DESIGN.md` for
-architecture-affecting or broad cross-component work and `PHASE-STATUS.md` for
-milestone, gate, integration-status, or current-capability work.
+Start with applicable `AGENTS.md` instructions and the assigned issue or pull request. Select the capability route in
+`docs/agents/README.md` and read the [workflow sections it names for your role](docs/agents/README.md#workflow-reading-before-starting),
+then load only the task-controlling sources that route requires. Before implementation, final self-review, or an
+explicitly assigned pull-request review, read `docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`. Read
+`docs/review-and-audit/AUDIT.md` only for an explicitly assigned audit; ordinary work does not load both routes. Read
+`CURRENT-DESIGN.md` for architecture-affecting or broad cross-component work and `PHASE-STATUS.md` for milestone, gate,
+integration-status, or current-capability work.
 
 - `CURRENT-DESIGN.md`: current architecture and implementation boundaries.
 - `PHASE-STATUS.md`: current phase, gate, and high-level implemented-capability status.

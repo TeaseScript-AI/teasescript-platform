@@ -1,270 +1,191 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { isolateGit } from "../fixture-git.mjs";
+import { DOCUMENTS, checkDocument, trackedPaths } from "./readme-paths.mjs";
 
 isolateGit();
 
-// The Player maps and start/ownership route must reject stale names without treating commands as files.
-
-const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const tool = fileURLToPath(new URL("./readme-paths.mjs", import.meta.url));
+const documentAt = (path) => DOCUMENTS.find((document) => document.path === path);
+const PLAYER = documentAt("player/README.md");
+const ROUTER = documentAt("docs/agents/README.md");
+const OWNERSHIP = documentAt("docs/ORCHESTRATION.md");
 
-/** A committed Git checkout holding `files` (path to text), with the repository's `node_modules`; its folder. */
+/** The spans of `markdown` in `document` that resolve to none of the tracked `files`, as `line: text`. */
+function problems(document, markdown, files) {
+  return checkDocument(trackedPaths(files), document, markdown).problems.map(
+    ({ line, text }) => `${line}: ${text}`,
+  );
+}
+
+const ownership = (text) => `# Orchestration\n\n## Repository ownership\n\n${text}\n`;
+
+test("a Player README's path resolves from its folder or the top folder; a stale or bare one fails", () => {
+  const files = ["player/runtime/runtime-adapter.ts", "tools/debug-export.mjs"];
+  const markdown = [
+    "`runtime/runtime-adapter.ts`, `tools/debug-export.mjs`, `runtime/`, `vue/` and `../`",
+    "`runtime-adapter.ts` and `runtime/gone.ts`",
+  ].join("\n\n");
+  assert.deepEqual(problems(PLAYER, markdown, [...files, "player/vue/x.vue"]), [
+    "3: runtime-adapter.ts",
+    "3: runtime/gone.ts",
+  ]);
+});
+
+test("a Player README checks no identifier, script name, URL route, package, command, link text or fence", () => {
+  const markdown = [
+    "`PlayerSession`, `askImage(...)`, `main.tease`, `/player/`, `@vueuse/core`, `npm run ./gone.ts`",
+    "[`DEBUGGER.md`](../docs/DEBUGGER.md#rewind) and [`absent.ts`][ref]",
+    "[ref]: README.md",
+    "```md\n`gone.ts`\n```",
+  ].join("\n\n");
+  assert.deepEqual(problems(PLAYER, markdown, ["player/README.md"]), []);
+});
+
+test("a false name on the route and ownership documents fails, with its whole text", () => {
+  const files = [
+    "tests/families/run.mjs",
+    "src/plan/model.ts",
+    "src/runtime/model.ts",
+    "tools/real.mjs",
+  ];
+  assert.deepEqual(
+    problems(
+      OWNERSHIP,
+      ownership(
+        "The families runner (`tests/families/run.mjs`, `area.sh`, `stalls.mjs#runner`), `model.ts`, " +
+          "`tools/gone/`, `nowhere/*.ts` and [`missing.mjs`](../tools/real.mjs).",
+      ),
+      files,
+    ),
+    [
+      "5: area.sh",
+      "5: stalls.mjs#runner",
+      "5: model.ts",
+      "5: tools/gone/",
+      "5: nowhere/*.ts",
+      "5: missing.mjs",
+    ],
+  );
+});
+
+test("a path, a unique bare name, a glob and a fragment resolve on the route documents", () => {
+  const files = ["tests/families/stalls.mjs", "docs/agents/DIRECT-REPOSITORY.md", "AGENTS.md"];
+  const markdown =
+    "`stalls.mjs#runner`, `tests/families/*`, `*.mjs`, `tests/`, `DIRECT-REPOSITORY.md`, " +
+    "`../../AGENTS.md`, `AGENTS.md` and `docs/agents/README.md#heading`";
+  assert.deepEqual(problems(ROUTER, markdown, [...files, "docs/agents/README.md"]), []);
+});
+
+test("a bare name resolves under any folder an earlier span of its block named, at any depth", () => {
+  const files = [
+    "src/plan/model.ts",
+    "src/plan/validation/index.ts",
+    "src/runtime/model.ts",
+    "src/runtime/validation/index.ts",
+    "tests/plan/one.test.ts",
+  ];
+  for (const folder of ["src/plan/", "./src/plan/", "src/plan/#map"])
+    assert.deepEqual(
+      problems(
+        OWNERSHIP,
+        ownership(
+          `- \`${folder}\` (\`validation/\`, \`model.ts\`, \`index.ts\`, \`*.ts\`), as \`tests/plan/\` holds \`one.test.ts\`.`,
+        ),
+        files,
+      ),
+      [],
+      folder,
+    );
+  const table = "| Owner | Files |\n| --- | --- |\n| plan | `src/plan/` and `model.ts` |";
+  assert.deepEqual(problems(ROUTER, table, files), []);
+});
+
+test("folder context ends with its paragraph, heading or table cell and reaches no earlier name", () => {
+  const files = ["src/plan/model.ts", "src/runtime/model.ts"];
+  const markdown = [
+    "`model.ts` before `src/plan/`.",
+    "`src/plan/` in one paragraph; `model.ts` in the next:",
+    "`model.ts`",
+    "## `src/plan/`",
+    "`model.ts`",
+    "| a | b |\n| --- | --- |\n| `src/plan/` | `model.ts` |",
+  ].join("\n\n");
+  assert.deepEqual(problems(ROUTER, markdown, files), [
+    "1: model.ts",
+    "5: model.ts",
+    "9: model.ts",
+    "13: model.ts",
+  ]);
+});
+
+test("in docs/ORCHESTRATION.md only Repository ownership and its subsections are read, without commands or URLs", () => {
+  const markdown = [
+    "## Elsewhere",
+    "`untracked.mjs`",
+    "## Repository ownership",
+    "`git diff -M`, `check-changed`, `node tools/absent.mjs`, `https://example.test/absent.md`, `~/notes.md`, `/opt/x.md`",
+    "### Child",
+    "`tools/absent.mjs`",
+    "## After",
+    "`other.sh`",
+  ].join("\n\n");
+  assert.deepEqual(problems(OWNERSHIP, markdown, []), ["11: tools/absent.mjs"]);
+});
+
+/** A committed Git checkout holding `files` (path to text); its folder. */
 function checkout(files) {
   const root = mkdtempSync(join(tmpdir(), "readme-paths-"));
-  for (const [path, text] of Object.entries({ ".gitignore": "node_modules\n", ...files })) {
+  for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
   }
-  symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
-  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
-  git("init", "-q");
-  git("add", "-A");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "files");
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "-A"], { cwd: root });
+  execFileSync("git", ["commit", "-q", "-m", "files"], { cwd: root });
   return root;
 }
 
-function runCheck(root) {
-  const run = spawnSync(process.execPath, [tool], { cwd: root, encoding: "utf8" });
-  const problems = run.stderr.split("\n").filter((line) => line.includes(": `"));
-  return { status: run.status, problems };
-}
-
-/** The check run over the Player README `player` and the component map `component`, with the tracked `files`. */
-function check({ player = "", component = "" }, files = {}) {
-  const root = checkout({
-    "player/README.md": player,
-    "player/vue/src/README.md": component,
-    "README-FIRST.md": "",
-    "docs/agents/README.md": "",
-    "docs/agents/DIRECT-REPOSITORY.md": "",
-    "docs/ORCHESTRATION.md": "# Orchestration\n\n## Repository ownership\n",
-    ...files,
-  });
-  try {
-    return runCheck(root);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-}
-
-const FILES = {
-  "player/runtime/runtime-adapter.ts": "",
-  "player/vue/src/app/PlayerApp.vue": "",
-  "tools/debug-export.mjs": "",
-};
-
-test("a stale path fails, naming the README, the line and the token", () => {
-  const result = check(
+test("the check reads Git's tracked files and exits 0, 1 with each problem, or 2 when it cannot run", () => {
+  const documents = Object.fromEntries(DOCUMENTS.map(({ path }) => [path, ""]));
+  const cases = [
     {
-      player: "# Player\n\n- `runtime-adapter.ts` translates.\n- `runtime/gone.ts` went.\n",
-      component: "`PlayerApp.vue` composes.\n",
+      files: { "docs/ORCHESTRATION.md": ownership("`tools/real.mjs`"), "tools/real.mjs": "" },
+      status: 0,
     },
-    FILES,
-  );
-  assert.equal(result.status, 1);
-  assert.deepEqual(result.problems, [
-    "player/README.md:3: `runtime-adapter.ts` names no tracked file or folder",
-    "player/README.md:4: `runtime/gone.ts` names no tracked file or folder",
-    "player/vue/src/README.md:1: `PlayerApp.vue` names no tracked file or folder",
-  ]);
-});
-
-test("area.sh in ownership and a stale name in each route document fail with their locations", () => {
-  const result = check(
-    {},
     {
-      "docs/ORCHESTRATION.md": "# Orchestration\n\n## Repository ownership\n\n`area.sh`\n",
-      "README-FIRST.md": "`docs/absent.md`\n",
-      "docs/agents/README.md": "[`missing.mjs`](../../tools/real.mjs)\n",
-      "docs/agents/DIRECT-REPOSITORY.md": "`nowhere/*.ts`\n",
-      "tools/real.mjs": "",
+      files: { "docs/ORCHESTRATION.md": ownership("`area.sh`") },
+      status: 1,
+      stderr: /^docs\/ORCHESTRATION\.md:5: `area\.sh` names no tracked file or folder$/mu,
     },
-  );
-  assert.equal(result.status, 1);
-  assert.deepEqual(result.problems, [
-    "README-FIRST.md:1: `docs/absent.md` names no tracked file or folder",
-    "docs/agents/README.md:1: `missing.mjs` names no tracked file or folder",
-    "docs/agents/DIRECT-REPOSITORY.md:1: `nowhere/*.ts` names no tracked file or folder",
-    "docs/ORCHESTRATION.md:5: `area.sh` names no tracked file or folder",
-  ]);
-});
-
-test("tracked globs, unique basenames and file fragments resolve", () => {
-  const result = check(
-    {},
     {
-      "README-FIRST.md":
-        "`tests/families/*`, `stalls.mjs`, `tests/`, `docs/agents/README.md#heading`\n",
-      "tests/families/stalls.mjs": "",
+      files: { "docs/ORCHESTRATION.md": "# Orchestration\n" },
+      status: 2,
+      stderr: /has no heading/u,
     },
-  );
-  assert.deepEqual(result, { status: 0, problems: [] });
-});
-
-test("stale bare filenames with fragments fail on every extended surface, retaining their full token", () => {
-  const result = check(
-    {},
     {
-      "README-FIRST.md": "`no-first.md#start`\n",
-      "docs/agents/README.md": "`no-guide.mjs#start`\n",
-      "docs/agents/DIRECT-REPOSITORY.md": "`no-direct.sh#start`\n",
-      "docs/ORCHESTRATION.md": "## Repository ownership\n\n`area.sh#start`\n",
+      files: { "docs/ORCHESTRATION.md": ownership(""), "player/README.md": undefined },
+      status: 2,
+      stderr: /cannot read player\/README\.md/u,
     },
-  );
-  assert.equal(result.status, 1);
-  assert.deepEqual(result.problems, [
-    "README-FIRST.md:1: `no-first.md#start` names no tracked file or folder",
-    "docs/agents/README.md:1: `no-guide.mjs#start` names no tracked file or folder",
-    "docs/agents/DIRECT-REPOSITORY.md:1: `no-direct.sh#start` names no tracked file or folder",
-    "docs/ORCHESTRATION.md:3: `area.sh#start` names no tracked file or folder",
-  ]);
-});
-
-test("file parts with fragments resolve as unique names and globs", () => {
-  const result = check(
-    {},
-    {
-      "README-FIRST.md": "`stalls.mjs#runner`\n",
-      "docs/agents/README.md": "`helper.mjs#notes`\n",
-      "docs/ORCHESTRATION.md": "## Repository ownership\n\n`tests/families/*#helpers`\n",
-      "tests/families/stalls.mjs": "",
-      "tools/helper.mjs": "",
-    },
-  );
-  assert.deepEqual(result, { status: 0, problems: [] });
-});
-
-test("directory context covers depth, ./ and fragments, stays in its paragraph and preserves stale tokens", () => {
-  const directories = [
-    { span: "src/", folder: "src" },
-    { span: "./src/", folder: "src" },
-    { span: "src/plan/", folder: "src/plan" },
-    { span: "./src/plan/", folder: "src/plan" },
-    { span: "src/#map", folder: "src" },
   ];
-  const surfaces = [
-    { path: "README-FIRST.md", prefix: "", offset: 0 },
-    { path: "docs/agents/README.md", prefix: "", offset: 0 },
-    { path: "docs/agents/DIRECT-REPOSITORY.md", prefix: "", offset: 0 },
-    { path: "docs/ORCHESTRATION.md", prefix: "## Repository ownership\n\n", offset: 2 },
-  ];
-  for (const { span, folder } of directories) {
-    const root = checkout({
-      "player/README.md": "",
-      "player/vue/src/README.md": "",
-      ...Object.fromEntries(surfaces.map(({ path, prefix }) => [path, prefix])),
-      [`${folder}/member.mjs`]: "",
-      "elsewhere/member.mjs": "",
-      [`${folder}/nested/one.ts`]: "",
-      "elsewhere/nested/two.ts": "",
-      "empty/keep.ts": "",
-    });
+  for (const { files, status, stderr } of cases) {
+    const merged = { ...documents, ...files };
+    const root = checkout(
+      Object.fromEntries(Object.entries(merged).filter(([, text]) => text !== undefined)),
+    );
     try {
-      const cases = [
-        {
-          name: "last directory resolves",
-          text: `\`empty/\` and \`${span}\` are directories; the latter owns \`member.mjs#member\` and \`nested/#members\`.`,
-          line: 1,
-        },
-        {
-          name: "ambiguous control",
-          text: "`member.mjs#member`",
-          token: "member.mjs#member",
-          line: 1,
-        },
-        {
-          name: "next paragraph",
-          text: `\`${span}\` owns \`member.mjs#member\`.\n\n\`member.mjs#member\``,
-          token: "member.mjs#member",
-          line: 3,
-        },
-        {
-          name: "stale token",
-          text: `\`${span}\` owns \`stale.mjs#missing\`.`,
-          token: "stale.mjs#missing",
-          line: 1,
-        },
-      ];
-      for (const scenario of cases) {
-        for (const { path, prefix } of surfaces)
-          writeFileSync(join(root, path), prefix + scenario.text + "\n");
-        const problems =
-          scenario.token === undefined
-            ? []
-            : surfaces.map(
-                ({ path, offset }) =>
-                  `${path}:${offset + scenario.line}: \`${scenario.token}\` names no tracked file or folder`,
-              );
-        assert.deepEqual(
-          runCheck(root),
-          { status: scenario.token === undefined ? 0 : 1, problems },
-          `${span}: ${scenario.name}`,
-        );
-      }
+      const run = spawnSync(process.execPath, [tool], { cwd: root, encoding: "utf8" });
+      assert.equal(run.status, status, run.stdout + run.stderr);
+      if (stderr !== undefined) assert.match(run.stderr, stderr);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   }
-});
-
-test("ownership checks stop at the next peer heading and exclude commands, URLs and external paths", () => {
-  const result = check(
-    {},
-    {
-      "docs/ORCHESTRATION.md": [
-        "## Elsewhere",
-        "`untracked.mjs`",
-        "## Repository ownership",
-        "`git diff -M`, `node tools/absent.mjs`, `https://example.test/absent.md`, `~/external.md`, `/opt/external.md`",
-        "### Child",
-        "`tools/real.mjs`",
-        "## After",
-        "`other.sh`",
-        "",
-      ].join("\n"),
-      "tools/real.mjs": "",
-    },
-  );
-  assert.deepEqual(result, { status: 0, problems: [] });
-});
-
-test("a true path passes, from the README's folder or the top folder, and so does a tracked folder", () => {
-  const result = check(
-    {
-      player:
-        "`runtime/runtime-adapter.ts`, `tools/debug-export.mjs`, `runtime/`, `vue/src/` and `../`\n",
-      component: "`app/PlayerApp.vue` and `player/runtime/runtime-adapter.ts`\n",
-    },
-    FILES,
-  );
-  assert.deepEqual(result, { status: 0, problems: [] });
-});
-
-test("a span that is no path, a link's text, and a fenced block are not checked", () => {
-  const result = check(
-    {
-      player: [
-        "`restorePlayerRuntimeSessionAt`, `PlayerSession`, `askImage(...)`, `main.tease` and `claim`",
-        "`/player/`, `@vueuse/core` and `npm run ./gone.ts`",
-        "[`DEBUGGER.md`](../docs/DEBUGGER.md#rewind), [`absent.ts`][ref] and [`gone.md`][]",
-        "",
-        "[ref]: README.md",
-        "[`gone.md`]: README.md",
-        "",
-        "```md",
-        "`gone.ts`",
-        "```",
-        "",
-      ].join("\n"),
-    },
-    FILES,
-  );
-  assert.deepEqual(result, { status: 0, problems: [] });
 });

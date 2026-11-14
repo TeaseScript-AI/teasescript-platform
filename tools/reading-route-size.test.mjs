@@ -28,13 +28,10 @@ test("every document the route lists exists in this checkout", () => {
   );
 });
 
-test("every workflow heading the canonical route names exists, including conditional sections", () => {
-  const router = readFileSync(join(root, ROUTE.workflow.route), "utf8");
-  assert.ok(sectionsOf(router).has("workflow-reading-before-starting"));
-  const selected = workflowSections(router);
-  assert.notEqual(selected, undefined);
-  const headings = sectionsOf(readFileSync(join(root, ROUTE.workflow.path), "utf8"));
-  assert.deepEqual(selected.map(({ anchor }) => anchor).sort(), [...headings.keys()].sort());
+test("the route table names each workflow section once, so none is renamed or added without a row", () => {
+  const rows = workflowSections(readFileSync(join(root, ROUTE.workflow.router), "utf8"));
+  const sections = sectionsOf(readFileSync(join(root, ROUTE.workflow.path), "utf8"));
+  assert.deepEqual(rows.map(({ anchor }) => anchor).sort(), [...sections.keys()].sort());
 });
 
 /** A repository holding `files` (path → text or Buffer) in one commit; its directory and that commit. */
@@ -85,7 +82,7 @@ const allRouted = () => ({
     [...ROUTE.everyTask, ...ROUTE.whenNeeded.map((document) => document.path)].map((p) => [p, "a"]),
   ),
   [ROUTE.workflow.path]: WORKFLOW,
-  [ROUTE.workflow.route]: ROUTER,
+  [ROUTE.workflow.router]: ROUTER,
 });
 
 const commonSize = (files) =>
@@ -168,7 +165,7 @@ test(
 );
 
 test(
-  "a listed document missing at the revision is named, left out of the total, and exits 1",
+  "a listed document or a named workflow section missing at the revision is named, left out of the totals, and exits 1",
   { timeout: 30_000 },
   () => {
     const routed = allRouted();
@@ -183,35 +180,60 @@ test(
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+    for (const title of ["Build", "Child"]) {
+      const { directory: renamed } = repository({
+        ...allRouted(),
+        [ROUTE.workflow.path]: WORKFLOW.replace(`# ${title}\n`, "# Renamed\n"),
+      });
+      try {
+        const { status, out } = run(renamed);
+        assert.equal(status, 1, out);
+        assert.match(out, new RegExp(`^missing at HEAD: .*#${title.toLowerCase()}`, "mu"));
+      } finally {
+        rmSync(renamed, { recursive: true, force: true });
+      }
+    }
   },
 );
 
-test("a renamed startup or conditional workflow heading fails instead of disappearing from the route", () => {
-  for (const title of ["Build", "Child"]) {
-    const { directory } = repository({
-      ...allRouted(),
-      [ROUTE.workflow.path]: WORKFLOW.replace(title, "Renamed"),
-    });
-    try {
-      const { status, out } = run(directory);
-      assert.equal(status, 1, out);
-      assert.ok(out.includes(`${ROUTE.workflow.path}#${title.toLowerCase()}`), out);
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
+test("a section missing at the base is printed and left out of its totals, without changing the exit", () => {
+  const files = allRouted();
+  const { directory, commit: base } = repository({
+    ...files,
+    [ROUTE.workflow.path]: WORKFLOW.replace("## Build", "## Renamed"),
+  });
+  try {
+    commit(directory, { [ROUTE.workflow.path]: WORKFLOW });
+    const { status, out } = run(directory, ["--base", base]);
+    assert.equal(status, 0, out);
+    assert.match(out, /^missing at [0-9a-f]+, left out of its totals: .*#build$/mu);
+    assert.match(
+      out,
+      new RegExp(
+        `^  A .*: ${commonSize(files) + workflowSize("A")} \\(before ${commonSize(files) + [...INTRO].length}, `,
+        "mu",
+      ),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("a renamed route-table heading or unknown role is reported as invalid", () => {
+test("a route table without its heading, a heading without a table, or a row naming an unknown or repeated role exits 2", () => {
   for (const router of [
     ROUTER.replace(ROUTE.workflow.heading, "Renamed"),
+    ROUTER.replace("| Workflow section |", "| Section |"),
     ROUTER.replace("A B |", "X |"),
+    ROUTER.replace("A B |", "A A |"),
   ]) {
-    const { directory } = repository({ ...allRouted(), [ROUTE.workflow.route]: router });
+    const { directory } = repository({ ...allRouted(), [ROUTE.workflow.router]: router });
     try {
       const { status, out } = run(directory);
       assert.equal(status, 2, out);
-      assert.match(out, /missing route heading|invalid workflow route row/u);
+      assert.match(
+        out,
+        /^reading-route-size: (route table without|no route table|unreadable route table row)/u,
+      );
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -219,15 +241,15 @@ test("a renamed route-table heading or unknown role is reported as invalid", () 
 });
 
 test("--base measures the earlier whole-workflow route and each later role's section route", () => {
-  const files = { ...allRouted(), [ROUTE.workflow.route]: "# Capabilities\n" };
+  const files = { ...allRouted(), [ROUTE.workflow.router]: "# Capabilities\n" };
   const { directory, commit: base } = repository(files);
   try {
-    commit(directory, { [ROUTE.workflow.route]: ROUTER });
+    commit(directory, { [ROUTE.workflow.router]: ROUTER });
     const { status, out } = run(directory, ["--base", base]);
     assert.equal(status, 0, out);
     const before = commonSize(files) + [...WORKFLOW].length;
     for (const role of Object.keys(ROUTE.roles)) {
-      const after = commonSize({ ...files, [ROUTE.workflow.route]: ROUTER }) + workflowSize(role);
+      const after = commonSize({ ...files, [ROUTE.workflow.router]: ROUTER }) + workflowSize(role);
       assert.equal(roleTotal(out, role), after);
       assert.match(
         out,
