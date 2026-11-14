@@ -149,6 +149,7 @@ import type { Callable, FlowNode } from "./flow-graph.js";
 import type { ContextWord, IngressNode, Item, Writer } from "./items.js";
 import type { PlusIndex } from "./indexes/plus-index.js";
 import type { ValueConstraint } from "./program.js";
+import { pathPosition } from "./indexes/nesting.js";
 import { everyRecordKept, type Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";
 export { choiceItems, choiceLabels, WIDE } from "./contract/choices.js";
@@ -714,6 +715,22 @@ export class Contract {
       return this.keyStopped(keyIdOf(this, place, path));
     this.#asked(place, () => keyAt(this, place, path));
     return this.#stoppedAt(place, path);
+  }
+
+  /**
+   * #2764 (B): whether a key lies below its place's cut depth (\`NestingIndex\`): its answer is then the cut's unknown,
+   * never a demand. Only a place in a growing component has its path's element steps counted.
+   */
+  public cutAt(asked: Key): boolean {
+    const key = this.canonicalKey(asked);
+    const place = keyPlace(key);
+    if (!this.pass.nesting.cuts(place)) return false;
+    const at = pathPosition(
+      isKeyId(key) ? stepsArray(stepsOfId(this, key)) : keptPath(this.work, key),
+    );
+    if (at === null) return false;
+    const cut = this.pass.nesting.cutDepth(place, at.label);
+    return cut !== null && at.depth > cut;
   }
 
   /** `stopped` for a key in its identity: a cursor's asked as itself, its stopped prefixes found in the arena. */
