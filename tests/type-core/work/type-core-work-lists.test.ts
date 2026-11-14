@@ -453,7 +453,7 @@ regressionCase(
 regressionCase(
   "a join whose operand holds lists at every level by its own decision ends far below the allowance (#2800)",
   {
-    pr: 0,
+    pr: 2813,
     atBase:
       /a join over a recursive loader's levels: the level loop ends below the allowance in .+/,
   },
