@@ -1,0 +1,141 @@
+import type { PlaceId, TypeTerm } from "../../../graph.js";
+import type { CarrierKind, Operand } from "../../carriers.js";
+import type { Definition, DefinitionIndex } from "../../definitions.js";
+import { propertyStep, type CoreProgram } from "../../program.js";
+import { NOTHING } from "./components.js";
+import { definedLevel } from "./levels.js";
+
+/**
+ * A route into a receiver from a producer: `weight` the element levels the producer's value gains there. A `plain`
+ * route moves a value at every property below it alike; a `property` route moves it into a property of the receiver
+ * (`to`: a literal's property, a store through one property) or out of one of the producer (`from`: a property's
+ * read), the other side its root (`""`); a `loose` route goes through two property steps or more, which the graph does
+ * not follow by name.
+ */
+export type Route =
+  | { readonly kind: "plain" | "loose"; readonly producer: PlaceId; readonly weight: number }
+  | {
+      readonly kind: "property";
+      readonly producer: PlaceId;
+      readonly weight: number;
+      readonly from: string;
+      readonly to: string;
+    };
+
+/** The type written at a place: a variable's, a parameter's or a result's; `null` where none is written. */
+export function writtenAt(program: CoreProgram, place: PlaceId): TypeTerm | null {
+  const kind = program.places[place]?.kind;
+  if (kind === undefined) return null;
+  if (kind.kind === "binding" || kind.kind === "parameter" || kind.kind === "result")
+    return kind.written;
+  return null;
+}
+
+/**
+ * How each carrier kind routes its value, decided here once for every kind, so that a new kind has no route until it is
+ * given one: `below`, the value stands at `below` inside its operand, so the route loses `below`'s element steps and
+ * reads out of its one property; `none`, no route.
+ */
+const CARRIED: Readonly<Record<CarrierKind, "below" | "none">> = {
+  projection: "below",
+  iteration: "below",
+  otherwise: "below",
+  get: "below",
+  "load default": "below",
+  "parse default": "below",
+  copy: "below",
+  removal: "below",
+  concatenation: "below",
+  // a choice's answer is a scalar button (V30 §19, TSV029): it holds no level an option's could pass on
+  choice: "none",
+};
+
+/**
+ * The graph's routes by receiver, each charged as it is read: 0 for a whole copy, an argument, a return, a read and a
+ * call's result; +1 for a list literal's element and an `add`; a store through a path, the path's element steps; a
+ * literal's property, 0 into that property; a projection and an operation, the carrier table's routes (`operands`,
+ * `CARRIED`). A place with a written type takes its routes like any other, as the contract reads the stores into it
+ * (a value that holds `unknown` is admitted into a closed type with a check); its written levels are its own depth
+ * (`termLevel`), so no cut lands inside them. A form not named here makes no route, so a cycle through it is never cut.
+ * A fixed value's definition (`const`) makes no route: its level is the place's own, set in `fixed`.
+ */
+export function routesOf(
+  program: CoreProgram,
+  definitions: DefinitionIndex,
+  live: (d: Definition) => boolean,
+  operands: (value: PlaceId) => readonly Operand[],
+  fixed: Map<PlaceId, number>,
+): Map<PlaceId, Route[]> {
+  const work = program.work;
+  const into = new Map<PlaceId, Route[]>();
+  const add = (receiver: PlaceId, route: Route): void => {
+    const list = into.get(receiver);
+    if (list === undefined) into.set(receiver, [route]);
+    else list.push(route);
+  };
+  const plain = (receiver: PlaceId, producer: PlaceId, weight: number): void =>
+    add(receiver, { kind: "plain", producer, weight });
+  const store = (d: Definition): void => {
+    work.charge("indexSteps");
+    // (a store in code that never runs too: the contract counts it, as ADR 0021 checks all code, reachable or not)
+    if (!live(d)) return;
+    if (d.kind === "const") {
+      fixed.set(d.place, Math.max(fixed.get(d.place) ?? NOTHING, definedLevel(d)));
+      return;
+    }
+    if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) return;
+    const elements = d.path.filter((step) => step === "element").length;
+    const weight = elements + (d.kind === "add" ? (d.how === "elements" ? 0 : 1) : 0);
+    const properties = d.path.filter((step) => step !== "element");
+    if (properties.length === 0) plain(d.place, d.value, weight);
+    else if (properties.length === 1)
+      add(d.place, { kind: "property", producer: d.value, weight, from: "", to: properties[0]! });
+    else add(d.place, { kind: "loose", producer: d.value, weight });
+  };
+  for (const list of definitions.byKey.values()) for (const d of list) store(d);
+  for (const list of definitions.cellDefs.values()) for (const d of list) store(d);
+  for (const [cell, owner] of program.cellOwner) {
+    work.charge("indexSteps");
+    const kind = program.places[cell]?.kind;
+    if (owner.kind === "cell") plain(owner.owner, cell, 1);
+    else if (kind?.kind === "property")
+      add(owner.owner, {
+        kind: "property",
+        producer: cell,
+        weight: 0,
+        from: "",
+        to: propertyStep(kind.name),
+      });
+  }
+  for (const constraint of program.constraints) {
+    work.charge("indexSteps");
+    switch (constraint.kind) {
+      case "read":
+        plain(constraint.occurrence, constraint.binding, 0);
+        break;
+      case "call":
+        plain(constraint.result, program.functionOf(constraint.fn).result, 0);
+        break;
+      default:
+        break;
+    }
+  }
+  for (const value of [...program.projOf.keys(), ...program.opOf.keys()])
+    for (const { kind, operand, below } of operands(value)) {
+      work.charge("indexSteps");
+      if (CARRIED[kind] === "none") continue;
+      const elements = below.filter((step) => step === "element").length;
+      const properties = below.filter((step) => step !== "element");
+      if (properties.length === 0) plain(value, operand, -elements);
+      else if (properties.length === 1)
+        add(value, {
+          kind: "property",
+          producer: operand,
+          weight: -elements,
+          from: properties[0]!,
+          to: "",
+        });
+      else add(value, { kind: "loose", producer: operand, weight: -elements });
+    }
+  return into;
+}

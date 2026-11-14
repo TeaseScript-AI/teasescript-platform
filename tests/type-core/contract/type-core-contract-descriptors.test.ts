@@ -12,8 +12,11 @@ import {
   type ContractReader,
 } from "../../../src/type-inference/core/contract-descriptors.js";
 import { propertyStep } from "../../../src/type-inference/core/program.js";
+import { createSerializableList as list } from "../../../src/runtime/values/serializable-values.js";
+import { planCheckList } from "../../helpers/plan-checks.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
 import { heldStops, HELD_MODES } from "../../helpers/type-core-held-host.js";
+import { runGlobals } from "../../helpers/type-core-route.js";
 
 /*
  * The contract proof/descriptor service (#1526 phase A): a store's required contract is one descriptor per
@@ -179,18 +182,40 @@ function sliceExit(source: string): string | null {
   }
 }
 
-test("lists that hold themselves leave the slice at its depth instead of failing the compile (#1646)", () => {
-  // (found on main: each nests its lists without end, and the facts' walk threw past the slice's depth and failed the
-  // compile. The facts' walk now leaves the slice at its depth cut, at the read it types, with the sentence the
-  // lowering's depth cut gives and no plan: `l` read in `[l]`, `a.f` read in `[a.f]`)
-  assert.equal(
-    sliceExit('let l=[[1]]\nl=[l]\nl=hostValue\nsay "AFTER"\nexit\n'),
-    "The candidate type analysis does not cover a value whose structure the slice does not follow yet (main.tease, offset 15).",
-  );
-  assert.equal(
-    sliceExit("let a={f:[[1]]}\na.f=[a.f]\na.f=hostValue\nexit\n"),
-    "The candidate type analysis does not cover a value whose structure the slice does not follow yet (main.tease, offset 21).",
-  );
+test("lists that hold themselves compile under the nesting cut, warned and checked when the script runs (#1646, #2764)", () => {
+  // (each nests its lists without end, #1646. The nesting cut (#2764) knows `l`, and `a.f`, two levels deep (`[[1]]`'s),
+  // so the store of `[l]` meets a level the compiler cannot know: the analysis's three warnings, and a check at each
+  // store, of which the one at `[l]` fails whatever the host gives, as the warning says it may. Today's checker gives a
+  // TSV041 error at `[l]` instead: a compile error the new analysis does not give, #2720)
+  for (const [source, place, at] of [
+    ['let l=[[1]]\nl=[l]\nl=hostValue\nsay "AFTER"\nexit\n', "'l'", 14],
+    ["let a={f:[[1]]}\na.f=[a.f]\na.f=hostValue\nexit\n", "'a.f'", 20],
+  ] as const) {
+    const { plan, diagnostics } = compileSourceWithBackend(
+      source,
+      { globals: GLOBALS },
+      CORE_BACKEND,
+    );
+    assert.ok(plan !== null, source);
+    assert.deepEqual(
+      diagnostics.map((d) => `${d.span.start.line + 1} ${d.severity} ${d.code}`),
+      ["2 warning TSV041", "2 warning TSV041", "3 warning TSV041"],
+      source,
+    );
+    assert.deepEqual(
+      planCheckList(plan).map(({ line, type, place: checked }) => ({ line, type, place: checked })),
+      [
+        { line: 2, type: "list<list<integer>>", place },
+        { line: 3, type: "list<list<integer>>", place },
+      ],
+      source,
+    );
+    for (const host of [list([list([list([1])])]), "s"]) {
+      const run = runGlobals(plan, { hostValue: host });
+      assert.equal(run.failure?.startsWith(`TSR058@${at}:`), true, `${source}: ${run.failure}`);
+      assert.deepEqual(run.said, [], source);
+    }
+  }
 });
 
 test("a store whose contract's lists nest past the slice's depth leaves the slice at the lowering's depth cut (#1646)", () => {

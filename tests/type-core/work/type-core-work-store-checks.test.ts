@@ -99,7 +99,8 @@ test("a long copied key's store check grows with its copy chain in every mode (#
  * comparison (8,257 / 7,346, 8,971 / 8,098 and 10,707 / 9,617 (10,709 reversed) before), and since #1251 they make no
  * narrowing index for these programs without a test (8,257 / 7,344, 8,963 / 8,088 and 10,690 / 9,598 before), and since
  * #1822 a read signature's prefixes come from its charged trie walk (`rdWalk`: 7,986 / 7,073, 8,689 / 7,814 and
- * 10,411 / 9,319 (10,413 reversed) before).
+ * 10,411 / 9,319 (10,413 reversed) before), and since #2764 they build the nesting index for the long key's first path
+ * with two element steps (213, 218 and 238 `indexSteps` more in each analysis; the checks' work is unchanged).
  */
 test("a long copied key's store check charges its positions' work, in every mode (#1605)", () => {
   const measured = COPY_CHAIN_FAMILIES.map((family) => {
@@ -113,22 +114,22 @@ test("a long copied key's store check charges its positions' work, in every mode
   });
   assert.deepEqual(measured, [
     [
-      [7995, 60],
-      [7081, 60],
-      [7995, 60],
-      [7081, 60],
+      [8208, 60],
+      [7294, 60],
+      [8208, 60],
+      [7294, 60],
     ],
     [
-      [8698, 274],
-      [7822, 236],
-      [8698, 274],
-      [7822, 236],
+      [8916, 274],
+      [8040, 236],
+      [8916, 274],
+      [8040, 236],
     ],
     [
-      [10420, 64],
-      [9327, 64],
-      [10422, 64],
-      [9327, 64],
+      [10658, 64],
+      [9565, 64],
+      [10660, 64],
+      [9565, 64],
     ],
   ]);
 });

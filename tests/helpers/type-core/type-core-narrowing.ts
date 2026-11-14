@@ -8,6 +8,8 @@ import {
 import { ExactPath } from "../../../src/type-inference/core/exact-path.js";
 import type { FlowNode } from "../../../src/type-inference/core/flow-graph.js";
 import { GuardIndex } from "../../../src/type-inference/core/indexes/guards.js";
+import { operandsOf } from "../../../src/type-inference/core/carriers.js";
+import { NestingIndex } from "../../../src/type-inference/core/indexes/nesting.js";
 import { HandlerIndex } from "../../../src/type-inference/core/indexes/handlers.js";
 import type { ContextWord, ItemTag } from "../../../src/type-inference/core/items.js";
 import {
@@ -20,6 +22,7 @@ import { ReceivingDomain } from "../../../src/type-inference/core/inherited/rece
 import { Retained } from "../../../src/type-inference/core/retained/retained.js";
 import { Solver, withSolverSeam } from "../../../src/type-inference/core/solver.js";
 import { Values } from "../../../src/type-inference/core/values.js";
+import type { PlaceId } from "../../../src/type-inference/graph.js";
 
 /** A pass of the analysis of `request`, its indexes built and nothing asked. */
 export function narrowingPass(request: CoreAnalysisRequest): CorePass {
@@ -36,6 +39,14 @@ export function narrowingPass(request: CoreAnalysisRequest): CorePass {
     ),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
+    nesting: new NestingIndex(
+      program,
+      definitions,
+      // (#1072 R26: captures nothing)
+      Retained.closure("NestingIndex.live", () => true),
+      // (#1072 R26: captures the indexed program)
+      Retained.closure("NestingIndex.operands", (value: PlaceId) => operandsOf(program, value)),
+    ),
     solver: new Solver(program.scope),
     receivingDomain: new ReceivingDomain(),
     writtenDefaults: new WrittenDefaults(program, definitions),

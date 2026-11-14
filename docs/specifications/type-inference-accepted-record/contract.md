@@ -317,3 +317,31 @@ run code that changes the path; an identity call runs its argument and nothing e
 **Source.** The lead's rulings R22 to R26 on #2493's plan (AST view; the predicate; the widening a named gap; narrowing
 kept), R34 (a guarded argument's mark through such a call), R41, R42, R45 and R49 (a call in a place slot stays a call,
 parentheses read through; a test is no place slot), applied by #2493's pull request, 2026-11-12.
+
+### r4-455
+
+**Cut a cycle that nests a list, set or dict deeper on each turn one level below what enters it.**
+
+**Rule.** ADR 0021 rule 1.1's nesting cycle. An element level is a list's or a set's element or a dict's value. The
+routes of a pass's places, each weighted by the element levels a value gains along it: a list literal's element and an
+`add` +1; a copy, an argument, a return, a read and a call's result 0; a store through a path its element steps; a
+projection or an operation the element steps it stands below in its operand (`carriers.ts`'s carrier kinds, each given a
+route or none in one table; a choice's answer none). The routes are the stores the contract reads: a store in code no
+run reaches is one, and a place with a written type takes its routes, its written levels its own depth, so no cut lands
+inside them. A strongly connected component holding a cycle of positive weight is cut at `M + 1`, `M` the deepest
+element level entering it from outside: the level a value brings by itself (a written or literal type's, a kind's
+declared elements', a dict's `keys`', at least 0 for an expression's value), an earlier component's known level, a
+growing one's at its cut. Property routes are followed by name: a component that grows with names ignored is solved
+again with one position per place and property, and only a cycle that grows there is cut; a route through two property
+steps or more has no position and is never cut. A key below its place's cut depth answers an opaque unknown (rule 1.7)
+before any demand is made. The index is built on the first key with two element steps, once per pass, as a shared build.
+
+**Reason.** Under F20 and F21 a function that wraps its argument in a list and is called on its own result has types
+without end: the candidate route asked ever deeper paths (1.35 million units at two calls) and ended with TSV076 or a
+slice refusal. A recursive function that fills a written `dict` with its own result nests the same way below the
+`dict`'s written level, where the contract reads the stores: below an open element, and below a closed one where the
+store has a runtime check (#2771, #2814). The cut depends on the graph alone, never on the order anything is asked in.
+
+**Source.** The owner's decisions of 2026-11-14 on rule 1.1, among them its clause for a written type that leaves a
+level open, and the lead's rulings on #2764's plan (rule B, the cut at `M + 1`, property routes by name, the carrier
+table's routes) and of 2026-11-14 (the index routes the stores the contract reads), applied by #2764's pull request.

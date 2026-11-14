@@ -63,6 +63,8 @@ import {
 import type { Dominators } from "./flow-graph/dominators.js";
 import { ExactPath, withoutEmpty } from "./exact-path.js";
 import type { Callable, FlowGraph, FlowNode } from "./flow-graph.js";
+import { operandsOf } from "./carriers.js";
+import { NestingIndex } from "./indexes/nesting.js";
 import { GuardIndex } from "./indexes/guards.js";
 import { HandlerIndex } from "./indexes/handlers.js";
 import {
@@ -116,6 +118,8 @@ export interface CorePass {
   readonly lists: DefinitionLists;
   readonly handlers: HandlerIndex;
   readonly guards: GuardIndex;
+  /** The cut depths of the cycles that nest a list deeper on each turn (#2764). */
+  readonly nesting: NestingIndex;
   readonly exact: ExactPath;
   readonly contract: Contract;
   readonly values: Values;
@@ -153,6 +157,7 @@ function createPass(
     lists: DefinitionLists;
     handlers: HandlerIndex;
     guards: GuardIndex;
+    nesting: NestingIndex;
     solver: Solver;
     receivingDomain: ReceivingDomain;
     writtenDefaults: WrittenDefaults;
@@ -172,6 +177,14 @@ function createPass(
     ),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
+    nesting: new NestingIndex(
+      program,
+      definitions,
+      // (#1072 R26: captures `rejected`, the pass's own, never written after it is given)
+      Retained.closure("NestingIndex.live", (d: Definition) => !rejected.has(d.uid)),
+      // (#1072 R26: captures the indexed program)
+      Retained.closure("NestingIndex.operands", (value: PlaceId) => operandsOf(program, value)),
+    ),
     solver: new Solver(program.scope),
     receivingDomain: new ReceivingDomain(),
     writtenDefaults: new WrittenDefaults(program, definitions),
