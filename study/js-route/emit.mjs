@@ -558,6 +558,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     function saved() {
       return [...params, ...hoisted, ...(isRoot ? [...rootScope.values()] : []), ...(regionTempNames ?? [...temps].map((id) => `t${id}`))];
     }
+    /** A block that waits while this wait stands saves this frame outside its own: the closure pushes it. */
+    function afterWait(resumeAt) {
+      return `rt.afterWait(() => rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: ${resumeAt}, v: [%SAVED%] }))`;
+    }
     function suspendHere(resumeAt) {
       return `{ pc = ${resumeAt}; rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: ${resumeAt}, v: [${"%SAVED%"}] }); throw rt.SUSPEND; }`;
     }
@@ -1068,7 +1072,6 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         if (resumable) {
           // A save holds no closure: a block is a module function over its file's variables, registered at load.
           if (ins.captures.length > 0) throw new Unsupported("a block that shares a function's variables (resumable form)");
-          if (canWait.has(id)) throw new Unsupported("a block that waits (resumable form)");
           if (!moduleBlocks.has(id))
             moduleBlocks.set(id, `${emitRegion(block.entryInstruction, block.endInstruction, block, [], rootScope, fileIndex)}\nrt.blocks.set(${id}, f${id});`);
           continue;
@@ -1295,7 +1298,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
             // resume comes back to the same check, so a block due while it waits runs from the save too.
             line(`${said};`);
             line(`case ${1e6 + pc}:`);
-            line(`if (rt.afterWait()) ${suspendHere(1e6 + pc)}`);
+            line(`if (${afterWait(1e6 + pc)}) ${suspendHere(1e6 + pc)}`);
           } else line(`if (${said}) ${waitHere()};`);
           return;
         }
@@ -1361,7 +1364,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       if (flat) {
         line(`${call};`);
         line(`case ${1e6 + pc}:`);
-        line(`if (rt.afterWait()) ${suspendHere(1e6 + pc)}`);
+        line(`if (${afterWait(1e6 + pc)}) ${suspendHere(1e6 + pc)}`);
       } else line(`if (${call}) ${waitHere()};`);
       for (const id of writes) line(`${temp(id)} = rt.takeTemporary(${id});`);
     }

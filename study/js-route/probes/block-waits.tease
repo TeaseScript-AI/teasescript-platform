@@ -1,0 +1,20 @@
+// A timer block that waits while the script waits, and calls a function that waits: the resumable form saves the
+// block's frames beside the script's. The block shares a file variable with the script.
+let beats = 0
+function pause(n: integer) {
+  wait 1 s
+  say "pause ${n}"
+}
+timer async hidden 2 s {
+  beats += 1
+  say "beat ${beats}"
+  pause(beats)
+  say "beat ${beats} done"
+}
+let rounds = 0
+while rounds < 4 {
+  rounds += 1
+  wait 3 s
+  say "round ${rounds}, beats ${beats}"
+}
+exit

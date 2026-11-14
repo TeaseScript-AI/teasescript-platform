@@ -540,10 +540,15 @@ export class Runtime {
    * The resumable form's wait, at first arrival and at each resume: catch-up toward the observed time and the blocks
    * due (none of which waits) run; true while the session still waits, so the program saves there.
    */
-  afterWait() {
+  afterWait(saveHere) {
     const snapshot = this.snapshot;
-    if (snapshot.status !== "waiting") return false;
-    this.runBlocks();
+    if (snapshot.status !== "waiting" && !this.resuming) return false;
+    try {
+      this.runBlocks();
+    } catch (signal) {
+      if (signal === SUSPEND) saveHere();
+      throw signal;
+    }
     return snapshot.status === "waiting";
   }
   /**
@@ -590,13 +595,22 @@ export class Runtime {
     if (snapshot.status === "waiting" && snapshot.currentSessionTimeMs <= snapshot.observedSessionTimeMs && !executionRunnable(snapshot))
       processDueWork(this.plan, snapshot, this.events, null, null);
     let ran = false;
+    // The resumable form: frames left after the wait that resumed belong to a block that waited inside; it goes on.
+    if (this.resuming) {
+      const frame = snapshot.callFrames.at(-1);
+      this.depth += 1;
+      this.blocks.get(frame.functionId)(this.resumeFrame());
+      this.depth -= 1;
+      returnFromTimerHandler(this.plan, snapshot, frame, this.events, null, null);
+      ran = true;
+    }
     while (timerHandlerDispatchable(snapshot)) {
       startTimerHandler(this.plan, snapshot, null);
       const frame = snapshot.callFrames.at(-1);
       const block = this.blocks.get(frame.functionId);
       if (block === undefined) throw new Error("study: a block whose creating instruction did not run in this drive");
       this.depth += 1;
-      block();
+      block(null);
       this.depth -= 1;
       returnFromTimerHandler(this.plan, snapshot, frame, this.events, null, null);
       ran = true;
