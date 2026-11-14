@@ -215,8 +215,8 @@ export function computedMarks(from: readonly Item[]): {
 export const EMPTY: Item = Object.freeze(makeItem("empty"));
 
 /**
- * Every value's answer once the analysis stopped (D4): `unknown` with the reason `budget`, the terminal contract
- * every key has, so each consumer owes its check when the script runs and no further proof is made.
+ * The answer that stands for a value the analysis stopped before answering (D4): `unknown` with the reason `budget`,
+ * the terminal contract every key has.
  */
 export const STOPPED: readonly Item[] = Object.freeze([
   makeItem("unknown", null, { reasons: REASON.budget, context: "budget", cert: "pos" }),
