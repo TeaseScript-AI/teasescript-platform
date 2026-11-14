@@ -10,9 +10,9 @@ reject a non-empty body without buffering the complete payload. Unsupported meth
 and unsafe paths receive structured errors without stack traces. Remaining tooling guards are tracked in
 [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). This is neither a public API nor a production backend.
 
-- Run the complete player and package code in a sandboxed cross-origin iframe, preferably on a separate player origin.
-- Keep main-site cookies host-only and unavailable to the player.
-- Validate every parent/player message, checkpoint, package manifest, server response, and future integration result.
+- Run the complete Playroom and package code in a sandboxed cross-origin iframe, preferably on a separate Playroom origin.
+- Keep main-site cookies host-only and unavailable to the Playroom.
+- Validate every parent/Playroom message, checkpoint, package manifest, server response, and future integration result.
 - Validate instruction plans, runtime snapshots, checkpoints, globals, and serializable values for supported shape,
   format/version, representation domains, references, control flow, and cross-state invariants before they can affect
   canonical execution. Live JavaScript input is stabilized into plain data as needed; current capture rejects accessors,
@@ -44,21 +44,21 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 - [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) owns resource-limit classification, coupling evidence, and follow-up routing; this security document owns the trust-boundary behavior.
 - Interaction-result handoff validation is a fixed local structural check and does not add another control-flow fixed point, future-writer scan, or settlement-provenance cache.
 - Package code has no unrestricted external network access; published media uses platform-managed storage/CDN.
-- For a lock's time lock ([`ENCRYPTION.md`](ENCRYPTION.md#drand)) the Player itself, never package code, fetches drand
+- For a lock's time lock ([`ENCRYPTION.md`](ENCRYPTION.md#drand)) the Playroom itself, never package code, fetches drand
   quicknet beacons from four pinned relays without credentials and verifies each against the pinned chain key; a lock is
-  untrusted data, and its PBKDF2 work is bounded. A password typed in a lock dialog, and every key, stays in the Player.
+  untrusted data, and its PBKDF2 work is bounded. A password typed in a lock dialog, and every key, stays in the Playroom.
 - Future external APIs use platform-managed typed integrations.
 - LLM output is untrusted input and may not directly rewrite canonical state or bypass deterministic rules.
-- Authored Standard-chat message markup crosses into the Player as validated typed blocks and spans. Angle-bracket HTML
+- Authored Standard-chat message markup crosses into the Playroom as validated typed blocks and spans. Angle-bracket HTML
   remains literal text, controlled style values cannot carry arbitrary CSS, and only canonical HTTP(S) targets become
-  links. The Player renders this structure without a raw-HTML path and opens links with opener isolation. `openUrl`
-  takes only such a target, which the compiler or the runtime checks; the Player opens it in a new tab that loses its
+  links. The Playroom renders this structure without a raw-HTML path and opens links with opener isolation. `openUrl`
+  takes only such a target, which the compiler or the runtime checks; the Playroom opens it in a new tab that loses its
   opener before it loads the address, only from the player's activation or click, never by itself after a restore.
 - A debug export ([`DEBUGGER.md`](DEBUGGER.md#debug-export)) is untrusted external data wherever it is read. The
   offline tool bounds decompression (64 MiB by default) and parses it as plain data, validates every field, restores its
   checkpoint and replay anchor only through checkpoint validation, passes recorded arguments only to the engine's public
   operations, answers media-store questions only from recorded answers, and replays in a worker with a time limit; it
-  never evaluates, imports, or fetches anything the file names. Exports are neither encrypted nor signed. The Player
+  never evaluates, imports, or fetches anything the file names. Exports are neither encrypted nor signed. The Playroom
   writes one only on the player's request and downloads it only from the player's press, with no upload; personal
   content is off until chosen for that export. Cookies, browser credentials, storage outside the session, DOM, and host
   objects are never read; text the player entered can still contain a secret. Recognizing credentials and paths in
@@ -66,7 +66,7 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
   category choice and the preview the dialog asks the player to check.
 - Saved script data moves between browsers only by the player's own hand ([transfer](DATA-AND-API.md#saved-data-transfer)):
   an export stays in the browser until the player downloads or copies it, with no upload, URL, or clipboard read. It is
-  neither encrypted nor signed and can contain private photos, which the Player says when exporting. An import is
+  neither encrypted nor signed and can contain private photos, which the Playroom says when exporting. An import is
   external data: it is decoded and validated completely, photos included, before the player confirms, writes each chosen
   script only into the storage scope it names, turns into photos only the references that script lists as its own,
   and gets media references only from the trusted media store.
@@ -76,7 +76,7 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 ADR 0016 adds these requirements:
 
 - Canonical `currentSessionTimeMs`, pending-action state, IDs, deadlines, continuation positions, expected result types, and `lastSettlement` remain runtime-owned.
-- The player may report a typed time observation or typed capability result, but may not mutate arbitrary snapshot fields, directly replace `currentSessionTimeMs`, or select a continuation.
+- The Playroom may report a typed time observation or typed capability result, but may not mutate arbitrary snapshot fields, directly replace `currentSessionTimeMs`, or select a continuation.
 - A time observation, including any media progress reports, is validated and applied atomically: persist `observedSessionTimeMs = max(observedSessionTimeMs, suppliedNow)` and the accepted progress samples, then settle due work toward that horizon as defined in `RUNTIME.md`; a malformed observation changes nothing.
 - Every completion is correlated to one persisted action ID and is validated before any state mutation, result storage, event emission, RNG use, handler, or continuation.
 - Completion lookup searches active foreground and background actions before matching `lastSettlement`, classifying an issued inactive ID as stale, or classifying an unissued ID as unknown.
@@ -109,24 +109,24 @@ it is removed immediately. `lastSettlement` remains bounded replay data and is n
 
 Browser permission is the external permission boundary for camera and microphone. First activation requests device
 access according to the browser's current permission state; the browser may later revoke access, ask again, or fail.
-Other capture use, such as the microphone, is author-controlled after the browser grants access and adds no Player-level
-permission or per-use approval. When the package or session has the camera capability, the Player acquires the selected
+Other capture use, such as the microphone, is author-controlled after the browser grants access and adds no Playroom-level
+permission or per-use approval. When the package or session has the camera capability, the Playroom acquires the selected
 or default camera immediately after the user presses Start and before ordinary TeaseScript execution begins, so any
 browser permission request happens there, and keeps the stream open for the entire running session. Direct capture such
 as `takePhoto()` only captures from that open stream: except to replace a dead stream (below), it never opens the
-camera, closes it afterwards, or otherwise reveals the capture moment, and it has no Player indicator, capture flash,
+camera, closes it afterwards, or otherwise reveals the capture moment, and it has no Playroom indicator, capture flash,
 per-photo message, preview, stop
-control, or per-use approval. Separately, a script's camera view (`showCamera`, [Player UI](ui/PLAYER-UI.md#stage-and-media-presentation))
+control, or per-use approval. Separately, a script's camera view (`showCamera`, [Playroom UI](ui/PLAYER-UI.md#stage-and-media-presentation))
 may show the user a live local preview of that open stream, for example before a photo; it is shown only when the script
 asks for it, never captures, and showing or hiding it neither opens nor closes the camera. Native camera indicators stay on while the stream is open, so they do not reveal
-individual captures. Normal session teardown, unmount, navigation, and `exit` release the Player-owned camera
-resources. For platform-brokered acquisition, the Player owns the underlying browser resources for sandbox isolation,
+individual captures. Normal session teardown, unmount, navigation, and `exit` release the Playroom-owned camera
+resources. For platform-brokered acquisition, the Playroom owns the underlying browser resources for sandbox isolation,
 revocation, and cleanup, but adds no permission prompt, camera or microphone indicator, or stop control of its own;
 native browser, OS, and device privacy indicators are sufficient. Complete revocation of package-created derivatives of
 raw resources, such as cloned tracks, relies on the sandbox teardown or lifecycle contract (ADR 0017). A captured-media
-reference grants access only when the trusted Player media store resolves it within the owning package namespace; a
+reference grants access only when the trusted Playroom media store resolves it within the owning package namespace; a
 well-formed string, including one returned by `load`, is ordinary data. A file the player chooses for `askImage(...)`
-is external data: the Player identifies the image type from the file's bytes and has the browser decode it before
+is external data: the Playroom identifies the image type from the file's bytes and has the browser decode it before
 storing it as session media, and only its reference reaches the runtime. An image request (`askImage(...)`) that
 allows the camera may open the camera when the player chooses "Open camera", also when the session camera was not
 opened at Start, so the browser may ask permission then; it shows its viewfinder while the player frames the photo,
@@ -134,7 +134,7 @@ takes a photo only from the player's "Take photo" or "Self-timer", and turns a c
 the camera step ends. Such a camera serves only that request, never `takePhoto()` or a script's camera view, and a
 photo or file reaches the runtime only through "Use image". `takePhoto()` stays
 silent and uses only the camera opened at Start. When the browser or the system ends or stops that stream, as when
-another app takes the camera while the page is in the background, the Player opens the same camera again by itself once
+another app takes the camera while the page is in the background, the Playroom opens the same camera again by itself once
 the page is shown, a few times at most and never after a refusal. A capture waits for that rather than capturing a dead
 picture, and starts it itself when it finds the stream dead first, so the camera indicator may then come on at that
 capture. A recording contains exactly the sources the author requests; whether
@@ -145,7 +145,7 @@ manifest field, remains open, as do capability declaration metadata, the microph
 recovery (the camera's are built: #909, #911), reload and restore, simultaneous-device policy, captured-media retention, encryption, and persistent collections; see
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
-Exact iframe sandbox flags and frame permissions (the Player's screen wake lock needs `allow="screen-wake-lock"` in a
+Exact iframe sandbox flags and frame permissions (the Playroom's screen wake lock needs `allow="screen-wake-lock"` in a
 frame of another origin; the framing page needs `interactive-widget=resizes-content`, see
 [`PLAYER-UI.md`](ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior)), CSP, message schemas, capability negotiation, signing, moderation workflows, captured-media
 privacy policy, and time-integrity policy remain to be specified.
