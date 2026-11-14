@@ -376,8 +376,7 @@ export const COMMAND_OPERANDS = {
           : [[`${ask}.hint`, shown(SHOWN_TEXT)]]),
       ]),
     ),
-    // (an `askChoice`'s buttons, V30 §19: an option, a list's element, a label and a labelled list's element; a choice
-    // object written there has a choice object's shape, `choiceObjectShape`)
+    // (an `askChoice`'s buttons, V30 §19)
     "askChoice.option": choice([...CHOICE_VALUES, "object", "list", "set"], "returns"),
     "askChoice.element": choice([...CHOICE_VALUES, "object"], "returns"),
     "askChoice.label": choice([...SHOWS, "object", "list", "set"], "labelled"),
