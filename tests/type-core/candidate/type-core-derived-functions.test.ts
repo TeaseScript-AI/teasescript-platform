@@ -224,7 +224,8 @@ test("the derived oracle refuses a check into an untyped parameter or result", (
 test("another file's function: each file's stores are its own, and a run that would read entries by offset is underivable", () => {
   // a written result returned by another file's function, beside a store of the calling file; a body without checks
   // whose `let` lies at the offsets of a store of the calling file, at its span and at its start only; a parse in a type
-  // test whose site is that of a parse the calling file's content holds
+  // test whose site is that of a parse the calling file's content holds, also with the calling file's store outside it;
+  // a written result's check in a call from a file without entries
   for (const files of [
     [
       {
@@ -259,6 +260,22 @@ test("another file's function: each file's stores are its own, and a run that wo
         path: "helpers.tease",
         source: "global function show {\n  say fromJson(hostValue, default: null) is string\n}\n",
       },
+    ],
+    // (the same parse, the calling file's store now starting before the function: only its content entry is inside)
+    [
+      {
+        path: "main.tease",
+        source: 'let mmmmmmmmmmmmm: integer? = fromJson("2"      , default: null)\nshow()\nexit\n',
+      },
+      {
+        path: "helpers.tease",
+        source: "\nglobal function show {\n  say fromJson(hostValue, default: null) is string\n}\n",
+      },
+    ],
+    // (a calling file without entries, and a written result's check inside the other file's function)
+    [
+      { path: "main.tease", source: "say get()\nexit\n" },
+      { path: "helpers.tease", source: "global function get: integer {\n  return hostValue\n}\n" },
     ],
   ]) {
     const name = files[1]!.source;
