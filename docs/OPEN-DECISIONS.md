@@ -85,7 +85,7 @@ Current constraints: [`CODE-EDITOR.md`](CODE-EDITOR.md), [`ARCHITECTURE.md`](ARC
 - Source storage, version history, Git-backed workflows, collaboration, conflict resolution, and Laravel persistence.
 - Final package/import/library linkage and metadata transport.
 
-## Player and interactions
+## Playroom and interactions
 
 Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
 [`ui/PLAYER-UI.md`](ui/PLAYER-UI.md),
@@ -95,23 +95,23 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
 [ADR 0018](decisions/0018-first-standard-library-poc-contract.md). Owner-selected release-stage design outcomes
 remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 
-- Exact Player presentation for absolute deadlines and long/upcoming scheduled events; see specification §36 and
+- Exact Playroom presentation for absolute deadlines and long/upcoming scheduled events; see specification §36 and
   [`planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md`](planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md).
-- Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and Content Security Policy.
+- Cross-origin parent/Playroom message schemas, capability negotiation, sandbox flags, and Content Security Policy.
 - Advanced timeout, cancellation, and recovery policies beyond ADR 0018's mandatory basic interactions and the
   media playback contract in [`RUNTIME.md`](RUNTIME.md#stage-image-and-media-playback).
 - Stable text-output target handles beyond the first Standard chat target.
 - Exact author-facing theme schema/registration API. `ui/PLAYER-UI.md` fixes the default light/dark theme intents,
   precedence, standalone/light/dark theme semantics, missing-variant fallback, and the no-arbitrary-CSS boundary.
-- Exact author-facing data/API form for supported Standard Player per-control base/fill colours. The Player already owns
+- Exact author-facing data/API form for supported Standard Playroom per-control base/fill colours. The Playroom already owns
   derived interaction styling and automatic readable black/white control-label text; syntax, serialization, and which
   Standard control kinds expose the colour input remain unresolved.
-- Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
+- Remaining Standard Playroom accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
   readable scaling/zoom behavior, minimum control sizing, contrast thresholds, and browser/platform responsibility.
-- Player UI preference persistence beyond Player Settings: which panel/tool/theme/media-fit/text-display preferences
-  survive reload or session changes, and whether account settings take over or synchronize the browser-local Player
+- Playroom UI preference persistence beyond Playroom Settings: which panel/tool/theme/media-fit/text-display preferences
+  survive reload or session changes, and whether account settings take over or synchronize the browser-local Playroom
   Settings that `ui/PLAYER-UI.md` already keeps across reloads.
-- Exact developer-facing declaration for a Player-generated Standard tool that combines a title, ordered static
+- Exact developer-facing declaration for a Playroom-generated Standard tool that combines a title, ordered static
   content, and typed controls such as toggles, numeric/text fields, and selects, including value binding, updates,
   submission, persistence, accessibility metadata, and the boundary with fully custom tools.
 - Exact Standard/runtime API, data shapes, persistence binding, names, and author syntax for the owner-resolved
@@ -128,7 +128,7 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   transformation; a wrapper API or manifest field alone cannot.
 - The public advanced-TypeScript media surface for arbitrary local image, video, and audio processing, author-facing
   recording APIs and results, how authors request recording composition (it is explicit; see `SECURITY.md`), and
-  explicit session-media deletion. The Player capture foundation's shapes are implementation details, not this API;
+  explicit session-media deletion. The Playroom capture foundation's shapes are implementation details, not this API;
   ephemeral handles are not restored after reload (ADR 0017).
 - Captured-media quotas and reclamation timing; captured media stored on a server. Saved-reference durability is
   accepted in the specification (§33); a kept session stores and restores the photos only it uses
@@ -136,7 +136,7 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   (`DATA-AND-API.md`).
 - Motion detection, sampling, camera resource limits, and scene ownership.
 - User control of media playback: whether players may seek, pause, or skip script media, whether authors can allow or
-  forbid it per media, and its Player UI. The Player currently offers no media controls; accepted controls would enter
+  forbid it per media, and its Playroom UI. The Playroom currently offers no media controls; accepted controls would enter
   the runtime as typed host input like script seeks
   ([`RUNTIME.md`](RUNTIME.md#stage-image-and-media-playback)).
 - Layered-scene media (backgrounds, overlays, blur, drawings, transitions) and its reconciliation with the Stage image
