@@ -11,7 +11,7 @@ checks that every code in `src/` is registered and reported only by its owners, 
 reported or marked as retired. A retired code stays registered, so that it is never given to another problem.
 
 This document lists the compiler's codes. The other runtime errors (`TSR`) are listed in
-[Runtime errors](RUNTIME.md#runtime-errors), checkpoint errors (`TSK`) in
+[Runtime error codes](runtime/ERRORS.md), checkpoint errors (`TSK`) in
 [Checkpoint boundary](RUNTIME.md#checkpoint-boundary), and each developer warning (`TSW`) in the section of its
 feature.
 
@@ -363,7 +363,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 A shared code is one problem that each owner finds in another place and reports with the same text. Where an entry below
 gives the runtime the same text, that is the compile-time error's message text, except for details that depend on the
 source as written or on static types, which the runtime does not have, such as the unit the compiler suggests for a
-number. Every other runtime check uses a `TSR` code of [Runtime errors](RUNTIME.md#runtime-errors), also where the
+number. Every other runtime check uses a `TSR` code of [Runtime error codes](runtime/ERRORS.md), also where the
 compiler checks the same rule, such as `TSR058` for a value that does not fit its receiving place and `TSR024` for a
 list index that is not a whole number. Two problems need a code each.
 
