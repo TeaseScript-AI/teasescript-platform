@@ -22,7 +22,9 @@ const PART = `function part(value) {
 `;
 
 /** The nesting index of a program's source, every definition live, and its places by name. */
-function indexOf(source: string): { readonly cut: (name: string) => number | null } {
+function indexOf(source: string): {
+  readonly cut: (name: string, property?: string) => number | null;
+} {
   const request = coreRequest([{ path: "main.tease", source }], []);
   assert.ok(request !== null, source);
   const program = new CoreProgram(request);
@@ -43,7 +45,7 @@ function indexOf(source: string): { readonly cut: (name: string) => number | nul
     assert.ok(found !== undefined, `no place ${name}`);
     return found.id;
   };
-  return { cut: (name) => index.cutDepth(place(name)) };
+  return { cut: (name, property = "") => index.cutDepth(place(name), property) };
 }
 
 test("a chain of calls of a helper that wraps its argument is cut one level below what enters it", () => {
@@ -128,4 +130,29 @@ test("a cycle that nests nothing deeper is never cut", () => {
 
 test("a place a written type decides takes no route into it, so its cycle is not cut", () => {
   assert.equal(indexOf("let a: list[][] = [[]]\na = a + [a]\n").cut("a"), null);
+});
+
+test("a cycle through a property is cut at that property", () => {
+  // ToyExpanded's shape: a function that wraps its argument's property in a list, under the same property
+  const wrap = indexOf(
+    "function wrap(o) {\n  return { arg: [o.arg] }\n}\nlet b0 = { arg: 1 }\nlet b1 = wrap(b0)\nlet b2 = wrap(b1)\n",
+  );
+  assert.equal(wrap.cut("wrap.o", "arg"), 1);
+  assert.equal(wrap.cut("wrap.result", "arg"), 1);
+  // (the object itself does not nest: its root is not cut)
+  assert.equal(wrap.cut("wrap.o"), null);
+  // an event's argument stored under a property of a dict's value and read back into a list
+  const events = indexOf(
+    "let events = dict{}\nfunction setEvent(name, arg) {\n  events[name] = { arg: arg }\n}\n" +
+      'function fire(args) {\n  setEvent("again", args)\n}\nsetEvent("start", 1)\n' +
+      "for name in events.keys {\n  let e = events[name]\n  fire([e.arg])\n}\n",
+  );
+  assert.equal(events.cut("setEvent.arg"), 1);
+});
+
+test("a value put under one property and read from another closes no cycle", () => {
+  // with property names ignored, `o.a` -> `x` -> `[x]` -> `[[y]]` -> `o.b` would be a cycle gaining three levels
+  const index = indexOf("let o = { a: 1, b: [] }\nlet x = o.a\nlet y = [x]\no.b = [[y]]\n");
+  for (const property of ["", "a", "b"]) assert.equal(index.cut("o", property), null, property);
+  assert.equal(index.cut("x"), null);
 });
