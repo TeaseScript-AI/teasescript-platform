@@ -54,9 +54,10 @@ const CARRIED: Readonly<Record<CarrierKind, "below" | "none">> = {
  * The graph's routes by receiver, each charged as it is read: 0 for a whole copy, an argument, a return, a read and a
  * call's result; +1 for a list literal's element and an `add`; a store through a path, the path's element steps; a
  * literal's property, 0 into that property; a projection and an operation, the carrier table's routes (`operands`,
- * `CARRIED`). A place with a written type takes no route: the written type decides it. A form not named here makes no
- * route, so a cycle through it is never cut. A fixed value's definition (`const`) makes no route: its level is the
- * place's own, set in `fixed`.
+ * `CARRIED`). A place with a written type takes its routes like any other, as the contract reads the stores into it
+ * (a value that holds `unknown` is admitted into a closed type with a check); its written levels are its own depth
+ * (`termLevel`), so no cut lands inside them. A form not named here makes no route, so a cycle through it is never cut.
+ * A fixed value's definition (`const`) makes no route: its level is the place's own, set in `fixed`.
  */
 export function routesOf(
   program: CoreProgram,
@@ -68,7 +69,6 @@ export function routesOf(
   const work = program.work;
   const into = new Map<PlaceId, Route[]>();
   const add = (receiver: PlaceId, route: Route): void => {
-    if (writtenAt(program, receiver) !== null) return;
     const list = into.get(receiver);
     if (list === undefined) into.set(receiver, [route]);
     else list.push(route);
