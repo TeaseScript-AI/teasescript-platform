@@ -1,9 +1,10 @@
 # Orchestration: rules of thumb for coordinators
 
 Practice for a coordinator ([Roles](DEVELOPMENT-WORKFLOW.md#roles)) who starts without context. These are rules of
-thumb, not requirements. The accepted workflow is [`DEVELOPMENT-WORKFLOW.md`](DEVELOPMENT-WORKFLOW.md), which this
-document does not repeat and which wins where the two differ. Practice specific to one machine or tool belongs in that
-environment's documentation, and live state in the coordinators' repository.
+thumb, not requirements, except [Repository ownership](#repository-ownership), which records an owner's decision. The
+accepted workflow is [`DEVELOPMENT-WORKFLOW.md`](DEVELOPMENT-WORKFLOW.md), which this document does not repeat and which
+wins where the two differ. Practice specific to one machine or tool belongs in that environment's documentation, and
+live state in the coordinators' repository.
 
 ## State
 
@@ -190,3 +191,63 @@ premise, correct it in the open.
 - Tell the other coordinator when you change a file both of you depend on.
 - Say when a campaign of yours will take more than its share of the queue or the model budget, before it starts.
 - A question to another coordinator carries your own answer, so the reply is a yes or a correction.
+
+## Repository ownership
+
+Owner's decision of 2026-11-09, agreed by both coordinators the same day. Rules and handoffs point here instead of
+restating it. The owner decides what the product and the language are; ownership here is who schedules, builds and
+reviews a file's structure and changes.
+
+### The two scopes
+
+- **The compiler coordinator owns the whole compiler:** parser, lexer, semantics, reachability, speaker flow,
+  operation checks, lowering, the compiler entry point (`src/compiler.ts`), type inference, the V2 core and families,
+  and the compiler's tests, helpers and fixtures (`tests/type-*`, `tests/helpers/type-core*`,
+  `tests/helpers/type-core/adapter-cases/adapter-case-tables.ts`, `tests/fixtures/type-core/`,
+  `tests/language-tooling/probe-tool.test.ts`, `tests/runtime/language/otherwise-fallback.test.ts`). Also
+  `tools/oxlint/*`, `tools/probe.mjs`, the compiler-differential tool, the families runner (`tests/families/run.mjs`,
+  `area.sh`, `stalls.mjs`, `baselines.mjs`, the baseline store's format), and the two language specification documents
+  (`docs/TEASESCRIPT-REFERENCE.md`, `docs/specifications/accepted-syntaxes-v30.md`): the compiler's canonical text;
+  new syntax still needs the owner's acceptance.
+- **The runtime and Player coordinator owns runtime, Player and everything general:** `src/runtime/`, `player/`, the
+  bridge, their tests; `tools/` as repo-wide tooling (`check-changed`, `measure-test-files`, the costly table,
+  `pin-suites.mjs`, `check-shas`, the test runners, the browser tools, `tools/local-agent/*`,
+  `tools/chatgpt-project-agent/*`), where the compiler entries inside such a tool (the pin-suite list, the compiler's
+  costly entries) are the compiler coordinator's; docs as a tree; examples; benchmarks; `playground/`; the central
+  queue the families runner runs on; `package-lock.json`; and the top-level grouping of `tests/`, `src/` and `tools/`
+  (see the folder-move refinement).
+
+### The plan format and language tooling
+
+- **`src/plan/` is the compiler coordinator's, whole** (`model.ts` and `validation/`), with the runtime and Player
+  coordinator as required reviewer of every change. The format changes when the language changes, and model and
+  validation change together then. The runtime's own boundaries (checkpoint, host, package data) stay the runtime and
+  Player coordinator's. `tests/plan/instruction-plan-validation.test.ts` follows the folder.
+- **Language and editor tooling is compiler side:** `src/language-tooling.ts`, its tests, and the editor adapters
+  beside it. A grammar change breaks it, so the one who changes the grammar owns it.
+
+### The rule for shared entries
+
+A file under `src/` that parses, analyses, lowers or types the language is the compiler coordinator's.
+`src/message-markup.ts` is the runtime and Player coordinator's: a value the runtime and the Player read, whose
+persisted-tree validation is a runtime boundary. Feature suites that compile source and run the engine
+(`compact-interactions`, `file-transfers`, `project-globals`, `regex`, `list-functions`, `value-check-forms`) are the
+runtime and Player coordinator's while they are one file; when one is split at its families, the parsing half goes to
+the compiler coordinator with the split.
+
+### The folder-move refinement
+
+The runtime and Player coordinator executes the top-level grouping moves of `tests/`, `src/` and `tools/` (the folder
+plan, the test-runner change that lets `tests/` have one level of folders, the pure-move PRs decided by `git diff -M`,
+tsc, `check:imports`, knip and equal test counts). The names and membership of the compiler's folders are the compiler
+coordinator's. One folder plan, approved by both coordinators before its HEAD 0; the other coordinator is required
+reviewer of the move PR.
+
+### Instructions that steer agents
+
+Skills, the reading route and process documents have no fixed owner. What changes how the owner works with agents, or
+frustrates the owner when it goes wrong, is agreed with the owner first. What does not touch the owner, a coordinator
+fixes when hitting the problem; when unsure, ask.
+
+**Open:** `src/regex.ts` and `src/regex-engine.ts` have no single owner (shared by the compiler, validation and the
+runtime per the docblock); noted 2026-11-09 at the regex test split, to be decided when a change to them needs an owner.

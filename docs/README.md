@@ -50,7 +50,8 @@ ADRs.
   implementation/review guidance or explicitly assigned audit guidance.
 - `DEVELOPMENT-WORKFLOW.md` owns the universal issue, branch, pull-request, documentation, merge, and verification
   workflow.
-- `ORCHESTRATION.md`: coordinators' rules of thumb; guidance, not workflow.
+- `ORCHESTRATION.md`: coordinators' rules of thumb, guidance, not workflow; and the owner's decision on which
+  coordinator owns which part of the repository.
 - `FRICTION.md`: the classes of friction reports, who owns each, and how a filed one is labelled.
 - `PATCH-PUBLICATION.md` owns the verified patch protocol and security contract.
 - `../tools/chatgpt-project-agent/docs/LOCAL-AGENT-BOOTSTRAP.md` owns the project-agent source and installed-layout

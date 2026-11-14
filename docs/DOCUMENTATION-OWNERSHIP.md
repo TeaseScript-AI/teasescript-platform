@@ -81,6 +81,8 @@ name marker such as `SUPERSEDED-`, and identify the current replacement inside t
   [`docs/planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md), while [`PHASE-STATUS.md`](../PHASE-STATUS.md) records
   verified current state. The roadmap does not replace accepted decisions, specifications, or topic contracts.
 - **Unresolved product or technical choices:** [`docs/OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
+- **Which coordinator schedules, builds and reviews which part of the repository:**
+  [Repository ownership](ORCHESTRATION.md#repository-ownership) in `docs/ORCHESTRATION.md`.
 - **Concrete execution tasks:** GitHub issues; pull requests are implementation handoffs and review evidence.
 
 A product or technical decision by the Owner becomes durable implementation authority only after an accepted ADR,
