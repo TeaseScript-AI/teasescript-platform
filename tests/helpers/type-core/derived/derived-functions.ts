@@ -186,9 +186,9 @@ export function transferStore(
 
 /**
  * The values `statements` store into a place of one of their functions with a written type, with that type: each
- * argument of a call naming the function, each default, each returned value into a written result, and each assignment
- * of a parameter in its function's body. Only the functions among `statements` (a file's, as `allStatements` lists
- * them): a `global function` of another file is not one.
+ * argument of a call naming the function, each default and each returned value into a written result (an assignment of
+ * a parameter in its body is a store statement, `declaredIn`'s). Only the functions among `statements` (a file's, as
+ * `allStatements` lists them): a `global function` of another file is not one.
  */
 export function functionLandings(
   statements: readonly Statement[],
@@ -203,15 +203,6 @@ export function functionLandings(
       for (const returned of returnsOf(fn))
         if (returned.value !== null)
           found.push({ value: returned.value, written: fn.returnTypeAnnotation });
-    for (const statement of bodyOf(fn))
-      if (statement.kind === "assignmentStatement" && statement.target.kind === "identifier") {
-        const name = statement.target.name;
-        const written = fn.parameters.find(
-          (parameter) => parameter.name.name === name,
-        )?.typeAnnotation;
-        if (written !== undefined && written !== null)
-          found.push({ value: statement.value, written });
-      }
   }
   for (const expression of expressions(statements)) {
     if (expression.kind !== "callExpression") continue;
@@ -295,7 +286,6 @@ export function functionCalls(context: CallContext): FunctionCalls {
     context.project.map((file) => file.syntax),
   );
   const { env, stores, fail, value } = context;
-  // (a file's entries, stores and content, as the sites a run reads them by)
   const entries = (
     held: readonly DerivedStore[],
     content: DerivedContent | undefined,
