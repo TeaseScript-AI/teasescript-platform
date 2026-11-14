@@ -1,4 +1,6 @@
 import { getArgumentsProblem } from "../../../argument-rules.js";
+import { isConversion } from "../../../conversions.js";
+import { isListFunction } from "../../../list-function-rules.js";
 import { isNumericFunction } from "../../../numeric-functions.js";
 import type { CallExpressionPlan } from "../../../plan/model.js";
 import { isRandomFunction } from "../../../random-functions.js";
@@ -10,7 +12,11 @@ import { notWholeIndex } from "../../evaluation/access.js";
 import { fault } from "../../evaluation/support.js";
 import { checkCollectionLength } from "../../values/collection-size.js";
 import { listHasPosition } from "../../values/collection-operations.js";
-import { numericFunction } from "../../values/pure-operations.js";
+import { speakerById } from "../../evaluation/speakers.js";
+import { currentTemporalContext } from "../../snapshot/state.js";
+import { listFunctionValue } from "../../values/list-statistics.js";
+import { conversionResult, numericFunction } from "../../values/pure-operations.js";
+import { visibleText } from "../../values/value-text.js";
 import { temporalNow } from "../../values/temporal-operations.js";
 import type { SerializableRuntimeValue } from "../../values/serializable-values.js";
 import { callStringMethod } from "../../values/string-operations.js";
@@ -18,7 +24,7 @@ import { assertValueType } from "../../values/value-types.js";
 import { fromCanonical } from "../values/codec.js";
 import type { NativeValue } from "../values/native-value.js";
 import { shown } from "./access.js";
-import { NativeNotImplementedError } from "./not-implemented.js";
+import { NOT_NATIVE } from "./not-implemented.js";
 
 /** The result a call gives, or that it needs its lazy `default:` (a list's `get` of an index the list does not have). */
 export const NEEDS_DEFAULT: unique symbol = Symbol("needs the default");
@@ -26,7 +32,8 @@ export const NEEDS_DEFAULT: unique symbol = Symbol("needs the default");
 /**
  * A call of a builtin or a method on native values whose arguments were evaluated and copied in written order, its lazy
  * `default:` left out: random, numeric and clock builtins, text methods, and a list's `add` and `get`, each through
- * today's helpers and checks. Every other callee is not implemented.
+ * today's helpers and checks, and conversions and list functions without a lazy `default:`. Every other
+ * callee gives `NOT_NATIVE`.
  */
 export function nativeCall(
   context: EvaluationContext,
@@ -35,7 +42,7 @@ export function nativeCall(
   positional: readonly NativeValue[],
   named: Readonly<Record<string, NativeValue>>,
   hasLazyDefault: boolean,
-): NativeValue | typeof NEEDS_DEFAULT {
+): NativeValue | typeof NEEDS_DEFAULT | typeof NOT_NATIVE {
   const span = expression.span;
   const callee = expression.callee;
   if (callee.kind === "identifier") {
@@ -46,14 +53,25 @@ export function nativeCall(
       );
     if (isNumericFunction(name))
       return fromCanonical(numericFunction(name, positional.map(shown), shownRecord(named), span));
+    if (isConversion(name) && name !== "fromJson" && !hasLazyDefault) {
+      const converted = conversionResult(name, positional.map(shown), shownRecord(named), false, {
+        span,
+        text: (value) => visibleText(value, span, currentTemporalContext(context.snapshot)),
+        speakerProperties: (speaker) => speakerById(context, speaker.speakerId, span).properties,
+      });
+      // No result is a fault, whose message today's evaluator writes.
+      return converted === undefined ? NOT_NATIVE : fromCanonical(converted);
+    }
+    if (isListFunction(name))
+      return fromCanonical(listFunctionValue(name, positional.map(shown), shownRecord(named), span));
     if (isClockFunction(name)) {
       const now = context.snapshot.currentSessionTimeMs;
       const capture = temporalCaptureAt(context.snapshot.temporalCaptures, now);
       return fromCanonical(temporalNow(name, positional.map(shown), shownRecord(named), capture, now, span));
     }
-    throw new NativeNotImplementedError(`the builtin '${name}'`);
+    return NOT_NATIVE;
   }
-  if (callee.kind !== "property") throw new NativeNotImplementedError("a call of this callee");
+  if (callee.kind !== "property") return NOT_NATIVE;
   const method = callee.name;
   if (typeof receiver === "string")
     return fromCanonical(callStringMethod(receiver, method, positional.map(shown), span));
@@ -61,7 +79,7 @@ export function nativeCall(
     switch (method) {
       case "add": {
         if (positional.length !== 1 || Object.keys(named).length > 0)
-          throw new NativeNotImplementedError("add(...) with other than one positional argument");
+          return NOT_NATIVE;
         const added = positional[0]!;
         if (expression.typeCheck !== undefined)
           assertValueType(shown(added), expression.typeCheck, expression.arguments.at(-1)!.value.span);
@@ -89,10 +107,10 @@ export function nativeCall(
           : NEEDS_DEFAULT;
       }
       default:
-        throw new NativeNotImplementedError(`the list method '${method}'`);
+        return NOT_NATIVE;
     }
   }
-  throw new NativeNotImplementedError(`the method '${method}' of this value`);
+  return NOT_NATIVE;
 }
 
 function shownRecord(

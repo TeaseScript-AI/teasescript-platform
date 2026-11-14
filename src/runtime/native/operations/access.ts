@@ -12,7 +12,7 @@ import { listHasPosition } from "../../values/collection-operations.js";
 import type { SerializableRuntimeList } from "../../values/serializable-values.js";
 import { toCanonical } from "../values/codec.js";
 import { isNativeComposite, NativeDict, NativeSet, type NativeValue } from "../values/native-value.js";
-import { NativeNotImplementedError } from "./not-implemented.js";
+import { NOT_NATIVE } from "./not-implemented.js";
 
 /**
  * `object[index]`: a list's element at a whole index it has, a dict's value under a text key it has; the faults of
@@ -65,8 +65,12 @@ export function assertNativeIndexable(
     assertIndexable(context, shown(object), receiver, span);
 }
 
-/** `.length` of a list, set, dict or text; a text's other members fail as today's; any other property is not implemented. */
-export function nativeProperty(value: NativeValue, name: string, span: ExpressionPlan["span"]): NativeValue {
+/** `.length` of a list, set, dict or text; a text's other members fail as today's; any other property gives `NOT_NATIVE`. */
+export function nativeProperty(
+  value: NativeValue,
+  name: string,
+  span: ExpressionPlan["span"],
+): NativeValue | typeof NOT_NATIVE {
   if (typeof value === "string") {
     if (name === "length") return stringLength(value);
     throw fault("TSR017", unknownTextMemberMessage(name, "property"), span);
@@ -76,7 +80,7 @@ export function nativeProperty(value: NativeValue, name: string, span: Expressio
     if (value instanceof NativeSet) return value.items.length;
     if (value instanceof NativeDict) return value.entries.size;
   }
-  throw new NativeNotImplementedError(`the property '${name}' of this value`);
+  return NOT_NATIVE;
 }
 
 /** A value as today's helpers take it: composites in their canonical form, for a fault's message. */

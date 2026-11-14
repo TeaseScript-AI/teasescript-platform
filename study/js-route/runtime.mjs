@@ -15,7 +15,7 @@ import { DICT_ACCESS } from "../../dist/src/dict-operations.js";
 import { isRepeatCount } from "../../dist/src/loop-rules.js";
 import { badRepeatCount } from "../../dist/src/runtime/instructions/loops.js";
 import { collectionTooLong, MAX_COLLECTION_LENGTH } from "../../dist/src/runtime/values/collection-size.js";
-import { NativeNotImplementedError } from "../../dist/src/runtime/native/operations/not-implemented.js";
+import { NOT_NATIVE } from "../../dist/src/runtime/native/operations/not-implemented.js";
 import { randomIntegerInRange } from "../../dist/src/runtime/evaluation/draws.js";
 import { nextXorShift32 } from "../../dist/src/runtime/random/random.js";
 import { loweredLogicalOperator } from "../../dist/src/runtime/evaluation/lowered-operands.js";
@@ -161,13 +161,11 @@ export class Runtime {
       const found = value.properties.get(name);
       if (found !== undefined) return found;
     }
-    try {
-      return nativeProperty(value, name, span);
-    } catch (error) {
-      if (!(error instanceof NativeNotImplementedError) || synthetic === undefined) throw error;
-      this.bridged += 1;
-      return this.bridge(synthetic, [value], -1);
-    }
+    const found = nativeProperty(value, name, span);
+    if (found !== NOT_NATIVE) return found;
+    if (synthetic === undefined) throw new Error(`study: the property '${name}' has no fallback`);
+    this.bridged += 1;
+    return this.bridge(synthetic, [value], -1);
   }
   list(...items) {
     return items;
@@ -224,19 +222,17 @@ export class Runtime {
       if (argument.kind === "positional") positional.push(value);
       else named[argument.name] = value;
     });
-    try {
-      return nativeCall(this, expression, receiver, positional, named, lazy !== -1);
-    } catch (error) {
-      if (!(error instanceof NativeNotImplementedError) || synthetic === null) throw error;
-      this.bridged += 1;
-      if (expression.callee.kind === "property" && (Array.isArray(receiver) || receiver instanceof NativeSet || receiver instanceof NativeDict))
-        return this.collectionMethod(expression, synthetic, receiver, positional, named, lazy !== -1, args);
-      // Today's evaluator would run the lazy default itself, which reads the program.
-      if (lazy !== -1) throw error;
-      return expression.callee.kind === "property"
-        ? this.bridge(synthetic, [receiver, ...args], 0)
-        : this.bridge(synthetic, args, -1);
-    }
+    const called = nativeCall(this, expression, receiver, positional, named, lazy !== -1);
+    if (called !== NOT_NATIVE) return called;
+    if (synthetic === null) throw new Error("study: a call with no fallback");
+    this.bridged += 1;
+    if (expression.callee.kind === "property" && (Array.isArray(receiver) || receiver instanceof NativeSet || receiver instanceof NativeDict))
+      return this.collectionMethod(expression, synthetic, receiver, positional, named, lazy !== -1, args);
+    // Today's evaluator would run the lazy default itself, which reads the program.
+    if (lazy !== -1) throw new Error("study: a bridged call with a lazy default");
+    return expression.callee.kind === "property"
+      ? this.bridge(synthetic, [receiver, ...args], 0)
+      : this.bridge(synthetic, args, -1);
   }
   /**
    * A list, set or dict method by today's collection code, on the receiver's canonical form, whose changes the receiver
@@ -316,8 +312,12 @@ export class Runtime {
     return this.randRange(expression, name, this.range(rangeExpression, start, end));
   }
   randRange(expression, name, range) {
-    if (!isRange(range))
-      return nativeCall(this, expression, null, [range], {}, false);
+    if (!isRange(range)) {
+      // Not a range: today's helpers fail the call as they do for any other argument.
+      const called = nativeCall(this, expression, null, [range], {}, false);
+      if (called === NOT_NATIVE) throw new Error("study: randomInteger fell back");
+      return called;
+    }
     return randomIntegerInRange(this, range, expression.span, `${name}(range)`, name);
   }
   enter(span) {

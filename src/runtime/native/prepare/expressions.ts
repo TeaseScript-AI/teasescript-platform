@@ -14,7 +14,7 @@ import {
   shown,
 } from "../operations/access.js";
 import { NEEDS_DEFAULT, nativeCall } from "../operations/calls.js";
-import { NativeNotImplementedError } from "../operations/not-implemented.js";
+import { NativeNotImplementedError, NOT_NATIVE } from "../operations/not-implemented.js";
 import { nativeBinary, nativeUnary } from "../operations/operators.js";
 import { fromCanonical } from "../values/codec.js";
 import { copyNativeValue } from "../values/copy.js";
@@ -105,7 +105,11 @@ export function compileExpression(expression: ExpressionPlan, scope: ExpressionS
       const object = compileExpression(expression.object, scope);
       const name = expression.name;
       const span = expression.span;
-      return (machine) => nativeProperty(object(machine), name, span);
+      return (machine) => {
+        const value = nativeProperty(object(machine), name, span);
+        if (value === NOT_NATIVE) throw new NativeNotImplementedError(`the property '${name}' of this value`);
+        return value;
+      };
     }
     case "index": {
       const object = compileExpression(expression.object, scope);
@@ -256,6 +260,7 @@ function compileCall(
     if (changes && machine.liveReferences !== 0)
       throw new NativeNotImplementedError("a change while a prepared reference it may reach is held");
     const called = nativeCall(machine, expression, target, values, record, fallback !== null);
+    if (called === NOT_NATIVE) throw new NativeNotImplementedError("this callee");
     if (called !== NEEDS_DEFAULT) return called;
     if (fallback === null || operation === null)
       throw new NativeNotImplementedError("a call that needs a default it does not have");
