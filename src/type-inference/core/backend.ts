@@ -261,7 +261,7 @@ export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: 
   check: { file: "src/runtime/evaluator.ts", function: "evaluate" },
 };
 
-/** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
+/** The first answer of the analysis that leaves the slice, or `null`. */
 function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
     index.spanAt(site);
