@@ -104,7 +104,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `F12` | element projections follow literal structure; copied descendants take the contract answer ([section-2-f12](contract.md#section-2-f12)) |
 | `F13` | stores and mutations through element steps are weak and never exact definitions |
 | `F14` | built-in length reads produce integers on supported text and collection receivers |
-| `F15` | member access on unknown data preserves its reasons and owes receiver and destination checks |
 | `F16` | arithmetic and comparison results and obligations follow the runtime operator table |
 | `F17a` | otherwise removes the left operand’s null and joins fallback kinds, retaining them even when the graph never evaluates the fallback |
 | `F17b` | get returns possible elements unchanged, including null, alongside its default |
