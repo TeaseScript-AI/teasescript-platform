@@ -154,8 +154,6 @@ test("every operand of a `say` is indexed with what it holds (B1): a name, a loa
     'say bubble(color: fromJson(hostValue, default: "red")) "Text"\nexit\n',
     'say prose(color: hostValue) "Text", hostValue\nexit\n',
   ];
-  // a pacing a load's default or a `get`'s carries from the host: the command operand table declines it at its site,
-  // where today plans (#2488's step 1½, R10)
   const declined: readonly (readonly [string, string])[] = [
     ['say "Hi", load "p", default: hostValue\nexit\n', 'load "p", default: hostValue'],
     [

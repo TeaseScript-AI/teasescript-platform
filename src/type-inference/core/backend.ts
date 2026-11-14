@@ -181,8 +181,7 @@ function outsideSlice(request: CoreAnalysisRequest, outside: Outside): Candidate
  * The kinds a call's arguments may have without the built-in signature check (C13, S9b) having anything to say, or
  * `null` for any: a conversion's value one of its kinds or text and its default one of its result's, also `null` where
  * it takes one (`fitsDefault`'s domain, which the core's C10 does not check yet); every other argument of a slice call
- * text; an unknown, which the runtime checks. A transfer's path (`transferCall`) is a command operand, the table's
- * (`COMMAND_OPERANDS`).
+ * text; an unknown, which the runtime checks. A transfer's path is a command operand (`COMMAND_OPERANDS`).
  */
 function argumentKinds(call: CallExpression, argument: CallArgument): readonly string[] | null {
   const kind = sliceCall(call);
@@ -384,8 +383,6 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           };
       }
     }
-  // a command's or an ask's operand that may hold a value its instruction does not take (`COMMAND_OPERANDS`, #2488's
-  // step 1½); last, after the values' own refusals
   for (const node of [...index.statements, ...index.asks]) {
     const rules = operandRules(node.kind);
     if (rules === undefined) continue;
@@ -399,7 +396,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
         };
     }
     if (node.kind !== "interactionExpression" || node.interactionKind !== "choice") continue;
-    // (a computed choice object whose text no value of it shows; #2720)
+    // (a refusal that stands in for today's compile error: #2720)
     const unshown = unshownChoiceText(answers, index, node, rules["askChoice.text"]!.takes);
     if (unshown !== null)
       return {
@@ -407,7 +404,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
         span: unshown.span,
         what: "an operand its instruction does not take",
       };
-    // (a choice of more buttons than a request shows, or of none; #2720)
+    // (refusals that stand in for today's compile error: #2720)
     if (
       node.options.every((option) => {
         const written = unwrap(option.expression);
@@ -516,8 +513,8 @@ function unshownChoiceText(
 
 /**
  * Whether the route admits an operand: each value it may hold is of a kind its rule takes (`OperandRule`, or a unit's
- * amount, `UNIT_AMOUNT`), or external data beside the cited check. An operand that only a narrowing or an `otherwise`
- * shows to fit is declined: a read of `n: integer?` under `n != null`, `(n otherwise 1) s`.
+ * amount, `UNIT_AMOUNT`), or external data, which the run checks. It deliberately declines an operand only a narrowing
+ * or an `otherwise` shows to fit (`n: integer?` under `n != null`, `(n otherwise 1) s`).
  */
 function operandAdmitted(
   answers: Answers,

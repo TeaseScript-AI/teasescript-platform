@@ -1,6 +1,5 @@
 /*
- * The asks' part of the row guard's tables: their operand templates (`row-templates.ts`), and their prefills and the
- * buttons the route refuses (`declared-samples.ts`).
+ * The asks' part of the row guard's tables.
  */
 
 /** The basic asks with a `prefill:` (`askPassword` takes none), by the name an ask's position starts with. */
