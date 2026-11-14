@@ -341,7 +341,7 @@ function defaultSource(
       visited.push(memoKey);
       program.work.charge("checks");
       const place = program.place(keyPlace(step.key)).kind;
-      if (guards.guarded(step.key, step.at)) found = null;
+      if (guards.narrowed(step.key, step.at)) found = null;
       else if (place.kind === "parameter" && walk.pass.contract.keyDepth(step.key) === 0)
         found = place.written === null ? step : null;
       else {

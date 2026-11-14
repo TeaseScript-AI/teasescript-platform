@@ -955,7 +955,7 @@ export class ExactPath {
     if (
       stop === null &&
       root.top.kind === "fail" &&
-      guards.guarded(keyOf(root.source, rest), root.read)
+      guards.narrowed(keyOf(root.source, rest), root.read)
     )
       return true;
     // the copies an operand region of a test of their source at the path or a prefix holds: per prefix one search
@@ -1288,7 +1288,7 @@ export class ExactPath {
       return null;
     const cls = contract.classOf(d.value, true);
     if (cls === null || contract.classOf(p.value, true) !== cls) return null;
-    if (guards.guarded(key, d.node) || guards.guardedBelow(key, d.node).length > 0) return null;
+    if (guards.narrowed(key, d.node) || guards.guardedBelow(key, d.node).length > 0) return null;
     const [first, later] = [definitions.writerOf(p), definitions.writerOf(d)];
     if (first !== null && later !== null && firstWriter(first, later) !== first) return null;
     return p;

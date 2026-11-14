@@ -564,7 +564,7 @@ function compareMembers(
     const alias = admission.aliases.get(d)!;
     const key = aliasKeyAt(admission.pass.contract, alias, rest);
     return {
-      guard: key !== null && guards.guarded(key, alias.read),
+      guard: key !== null && guards.narrowed(key, alias.read),
       domain: JSON.stringify(
         key === null ? null : writtenDomainAt(admission, alias, rest.slice(alias.at.length)),
       ),
