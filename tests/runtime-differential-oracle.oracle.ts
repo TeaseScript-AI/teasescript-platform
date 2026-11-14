@@ -41,7 +41,8 @@ import {
 
 // The oracle binding of the differential harness (docs/TESTING.md "Differential harness"): the lockstep driver over two
 // roots' runners, the pinned oracle root (left) against this checkout's build (right), each in a process of its own
-// behind 0a's guard. It runs in `npm run oracle:test` (CI's check-1), after the oracle root is materialized.
+// behind 0a's guard. It runs on demand in `npm run oracle:test`, outside every CI job, after the oracle root is
+// materialized.
 
 const tools = path.join(checkout, "tools");
 

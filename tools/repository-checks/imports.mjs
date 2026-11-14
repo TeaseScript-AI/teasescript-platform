@@ -41,11 +41,11 @@ import extractTSConfig from "dependency-cruiser/config-utl/extract-ts-config";
 //
 // Cycles (`IMPLEMENTATION-AND-REVIEW.md` "Code structure": "dependencies run one way, without cycles"): a group of files
 // that reach each other through value imports is refused. The groups are the strongly connected components of
-// dependency-cruiser's graph, computed here: its `circular` rule judges one cycle per module, and named 4 of
-// runtime-v2's 10-file group. One exception: `player/vue/src/components/ui/` is shadcn-vue's generated code
-// (`player/vue/components.json`), whose `<dir>/index.ts` re-exports `<dir>/X.vue` while `X.vue` imports its variants
-// from `"."`. A group of one `components/ui/<dir>/index.ts` and `.vue` files directly in that `<dir>` is admitted; any
-// other group there is refused.
+// dependency-cruiser's graph, computed here: its `circular` rule judges one cycle per module, and named 4 files of a
+// 10-file group in `player/engine-bridge/ops/` (#2026). One exception: `player/vue/src/components/ui/` is shadcn-vue's
+// generated code (`player/vue/components.json`), whose `<dir>/index.ts` re-exports `<dir>/X.vue` while `X.vue` imports
+// its variants from `"."`. A group of one `components/ui/<dir>/index.ts` and `.vue` files directly in that `<dir>` is
+// admitted; any other group there is refused.
 //
 // `imports-waiting.json` lists what waits for other work, which each entry's `waits` cites: a cycle group, exactly, or
 // one boundary crossing (the importing file, and the file or package dependency-cruiser resolves its import to:
