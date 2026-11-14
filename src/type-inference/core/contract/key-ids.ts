@@ -614,8 +614,6 @@ function keyBelowRefWith(contract: Contract, key: Key, rest: Rest, kept: boolean
 
 /** An array as a `PathRef`, its views slices and joins of its steps. */
 export function arrayRef(contract: Contract, steps: Steps): PathRef {
-  // (each view a slice or a join of the steps, plain and uncharged; a record's steps their own views, spelled by their
-  // record)
   const view = (made: Steps): PathRef => arrayRef(contract, made);
   const below = (from: number): PathRef => view(stepsFrom(steps, from));
   const above = (length: number): PathRef => view(stepsTo(steps, length));

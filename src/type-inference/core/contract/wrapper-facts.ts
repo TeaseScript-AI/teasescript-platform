@@ -5,8 +5,8 @@ import { propertyStep } from "../program.js";
 import { Retained } from "../retained/retained.js";
 import { writtenOf } from "./terms.js";
 
-// The facts of the program that leave a binding a wrapper possible, read and charged nothing, so a key's
-// lane (`lanes.ts`) and the marks (`marks.ts`) can ask them at any time.
+// The facts of the program that leave a binding a wrapper possible, read and charged nothing, so they can be asked at
+// any time.
 
 /**
  * Whether the program's facts leave a binding a wrapper possible at `step` (any step where `null`), read and charged

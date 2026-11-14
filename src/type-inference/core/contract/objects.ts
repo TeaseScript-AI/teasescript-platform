@@ -415,7 +415,6 @@ function* literalObjects(
         if (!out.complete) return;
       }
     }
-    // a reference here answers an opaque member below it, beside any `missing`
     if (node.reference) {
       out.complete = false;
       return;
@@ -449,7 +448,6 @@ function* entryObjects(
   }
   // a clear's or a removal's emptiness mark holds no property
   if (entry.empty === true) return;
-  // an add's element, only below an element step
   if (entry.elem !== undefined) {
     if (rest[0] === "element")
       yield* out.from(
