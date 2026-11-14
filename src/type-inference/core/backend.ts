@@ -394,7 +394,6 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
     if (rules === undefined) continue;
     for (const [position, operand] of commandOperands(node)) {
       const rule = rules[position];
-      // (a position the table has no rule for is outside)
       if (rule === undefined || !operandAdmitted(answers, index, operand, rule))
         return {
           file: index.fileOf(operand),
@@ -519,12 +518,10 @@ function unshownChoiceText(
 }
 
 /**
- * Whether an operand holds only values its rule takes (`OperandRule`, or a unit's amount, `UNIT_AMOUNT`): as written,
- * it passes the rule's `form`; each kind the core gives it is one the rule takes; a read of a place whose type is
- * written or decided holds that type's kinds (a typed ingress's read is the unknown its store's check stands for); an
- * unknown is admitted only of an external origin, as the host global itself or a direct read of a place whose type is
- * undecided, beside the cited check; a missing property is no value there, its read fails first. Any other unknown (one
- * an element, a call or an operation carries, a stop's) is not shown to fit.
+ * Whether an operand holds only values its rule takes (`OperandRule`, or a unit's amount, `UNIT_AMOUNT`), beside the
+ * cited check for an external value. A missing property's unknown is no value there, as its read fails first; a typed
+ * ingress's read is the unknown its store's check stands for. An operand that only a narrowing or an `otherwise` shows
+ * to fit is declined: a read of `n: integer?` under `n != null`, `(n otherwise 1) s`.
  */
 function operandAdmitted(
   answers: Answers,
