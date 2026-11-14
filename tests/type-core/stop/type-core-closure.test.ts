@@ -246,6 +246,8 @@ test("the copied and direct nested stores owe their checks at every mode's stop"
  * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1–6 units more on four rows; a regression oracle of this gate only), and the route rule's queries since #1073 PR 4 (AD-1: a possible null's route asked at its use, on the rows that have one), and its ways into the use since #2497 (r4-451: the program's jump index, made once, 11 to 44 units on three rows), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
  * then 64's).
  */
+// (the last three rows: 542 to 594 units more at demand 16 and two or three times that at demand 64 since #2764, the
+// nesting index each admission pass builds for `b.f`'s paths with two element steps, all `indexSteps`)
 const frozen = `let a = {f: [[1]]}\nlet b = a\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\nb.f = hostValue`;
 const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
   ["the C-R1 chain", chain(16), [11837, 12196, 11837, 12196, 19438, 13621, 19459, 13621]],
@@ -273,17 +275,17 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
   [
     "a list join",
     `${frozen}\nlet xs = [1]\nlet ys = ["s"]\nb.f = [xs + ys]`,
-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],
+    [20638, 21846, 20412, 21603, 34702, 36171, 33852, 35230],
   ],
   [
     "a compound assignment",
     `${frozen}\nlet n = 1\nn += 1`,
-    [18994, 19136, 18864, 19006, 20720, 22181, 20460, 21814],
+    [19554, 19696, 19424, 19566, 21840, 23301, 21580, 22934],
   ],
   [
     "an interpolation",
     `${frozen}\nsay "n \${b.f}"`,
-    [19238, 19354, 19108, 19224, 20963, 22390, 20703, 22030],
+    [19780, 19896, 19650, 19766, 22047, 23474, 21787, 23114],
   ],
 ];
 
