@@ -6,7 +6,7 @@
 - Advanced reusable programming logic uses real TypeScript in `.ts`.
 - `.ts` libraries are not randomly selected content modules.
 - Normal TypeScript named exports are the accepted public-library direction.
-- Package libraries execute inside the player sandbox and have no unrestricted external network access.
+- Package libraries execute inside the Playroom sandbox and have no unrestricted external network access.
 
 The temporary exact-token catalog, TypeScript-export extractor, external
 metadata validator, and tooling facade have been removed. They had no selected
@@ -16,7 +16,7 @@ TypeScript library code.
 The exact `.tease` import/linkage syntax, package identity and versioning,
 metadata format and transport, validation boundary, automatic export linkage,
 and library-aware editor integration remain future consumer-driven work.
-Ordinary runtime and Player startup paths do not import or bundle TypeScript
+Ordinary runtime and Playroom startup paths do not import or bundle TypeScript
 compiler tooling. Historical examples using the rejected procedure concept,
 explicit ordinary-function invocation keywords, or procedure-based scheduling
 are not authoritative.
@@ -39,7 +39,7 @@ A package library may import and reuse public Standard Library exports. It shoul
 
 Package-library-to-package-library dependencies are not accepted by ADR 0017. Exact dependency declarations, transitive resolution, cycles, lock data, moderation, capability interaction, and version conflicts remain separate open decisions.
 
-The Standard Library is platform-owned TypeScript distributed and versioned with the compatible engine/player. It may compose typed engine capabilities but may not bypass runtime validation, checkpointing, the player sandbox, or security boundaries.
+The Standard Library is platform-owned TypeScript distributed and versioned with the compatible engine/Playroom. It may compose typed engine capabilities but may not bypass runtime validation, checkpointing, the Playroom sandbox, or security boundaries.
 
 ## Accepted responsibility split
 
@@ -53,7 +53,7 @@ The engine retains behavior that must be canonical and security-relevant:
 - opaque engine-managed references;
 - typed sequenced events;
 - checkpoint, restore, cleanup, and resume equivalence;
-- typed and bounded host/player data boundaries;
+- typed and bounded host/Playroom data boundaries;
 - stable speaker/output provenance required by runtime history;
 - serializable continuations for workflows crossing pending-action or checkpoint boundaries;
 - validation of the exact Standard Library identity/version required by a plan when behavior was not fully lowered into that plan.
@@ -75,8 +75,8 @@ ADR 0018 accepts the first concrete subset described below. Listing another cand
 ### Resumability boundary
 
 Ordinary TypeScript library code may run synchronously between engine instruction boundaries. It may calculate values,
-validate arguments, and call synchronous capabilities. Inside the Player sandbox, package code may also await ephemeral
-local work, such as a camera frame, as Player-local execution detail. Such promises and capture or recording handles are
+validate arguments, and call synchronous capabilities. Inside the Playroom sandbox, package code may also await ephemeral
+local work, such as a camera frame, as Playroom-local execution detail. Such promises and capture or recording handles are
 not restored after a reload; a reconstructible TeaseScript pending interaction may be rebuilt from canonical state
 instead.
 
@@ -93,15 +93,15 @@ Promises, callbacks, closures, generators, suspended JavaScript/TypeScript stack
 
 Package libraries may import only the public, capability-safe Standard Library surface.
 
-Privileged platform adapters may exist internally for player integration or capability brokering, but they are separate
+Privileged platform adapters may exist internally for Playroom integration or capability brokering, but they are separate
 modules and are not transitively exported. Calling a public helper must not grant access to privileged adapters,
-internal host capabilities, the parent DOM, account cookies, or unrestricted networking. Inside the Player sandbox,
+internal host capabilities, the parent DOM, account cookies, or unrestricted networking. Inside the Playroom sandbox,
 capability-authorized package code may receive and use ephemeral live browser and media objects and APIs through an
 accepted capability surface, which may expose raw objects such as streams or tracks where deliberately supported, for
 arbitrary local image, video, and audio processing, including pixel- and sample-level work, recording, and custom UI.
-They never enter canonical runtime, checkpoint, or persisted state or cross the parent/Player boundary as raw objects,
+They never enter canonical runtime, checkpoint, or persisted state or cross the parent/Playroom boundary as raw objects,
 and derived pixel, image, and sample buffers stay inside the sandbox unless a later explicit validated boundary admits
-them. Player cleanup is guaranteed for resources the Player owns; complete revocation of package-created derivatives of
+them. Playroom cleanup is guaranteed for resources the Playroom owns; complete revocation of package-created derivatives of
 raw resources, such as cloned tracks, relies on the sandbox teardown or lifecycle contract (ADR 0017).
 
 ### Deterministic version binding
@@ -200,7 +200,7 @@ over-limit data without truncation or partial state mutation.
 
 `askNumber` trims surrounding whitespace, parses the accepted TeaseScript decimal/scientific forms on one line, returns a finite `number`, canonicalizes negative zero to `0`, and preserves the trimmed submitted number text in the transcript. It adds no first-POC range parameters.
 `askInteger` is its whole-number counterpart ([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#askinteger)).
-`askDate`, `askTime`, and `askDateTime` return date and time values from the Player's controls
+`askDate`, `askTime`, and `askDateTime` return date and time values from the Playroom's controls
 ([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)).
 
 `askChoice` returns the value of the selected button; an option without a value written before its `:` returns itself, with its own type. List options, choice objects, and repeated values follow [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices). Identifier values return `string`; numeric values return their `integer` or `number`; mixed value types are kept only by a place declared with a union type.
@@ -238,19 +238,19 @@ Smart autoplay computes the reading time from account settings captured when the
 A positive gate is an ADR 0016 `chatPacingGate` action, the message's [reading time](RUNTIME.md#message-reading-time).
 It uses ordinary action events, settlement replay, checkpointing, and time observation. It is not hidden library state.
 
-A skippable gate may be completed by a primary click/tap on a message, its speaker avatar, Player background, or other unused Player space, or by Space while the focused empty composer is active. This completes only the gate. Interactive controls have event priority, and unskippable gates reject those completion attempts.
+A skippable gate may be completed by a primary click/tap on a message, its speaker avatar, Playroom background, or other unused Playroom space, or by Space while the focused empty composer is active. This completes only the gate. Interactive controls have event priority, and unskippable gates reject those completion attempts.
 
 ### Standard UI and transcript conventions
 
 The Standard UI uses one fixed chat composer. Foreground interaction controls appear directly above it, and the composer is focused automatically.
 
-Choice buttons may occupy one or two rows. The Player application may instead render a dropdown when viewport, font, zoom, accessibility, or text constraints make buttons impractical. The presentation is not canonical runtime/checkpoint state and does not change completion or transcript semantics.
+Choice buttons may occupy one or two rows. The Playroom application may instead render a dropdown when viewport, font, zoom, accessibility, or text constraints make buttons impractical. The presentation is not canonical runtime/checkpoint state and does not change completion or transcript semantics.
 
 Valid input and choice/button activations become player-authored transcript messages according to the accepted normalization and derivation rules. A basic ask's question is said once, as the requesting speaker's message, before its field opens. Control labels, field hints, localized validation feedback, and accessibility names do not automatically create duplicate speaker transcript output.
 
 ### Player and developer controls
 
-The normal Player application has no player-facing pause control, and this POC introduces no author-facing pause
+The normal Playroom application has no player-facing pause control, and this POC introduces no author-facing pause
 command. Developer mode may provide Run, Step, Pause, checkpoint, restore, and debugger controls. Timer scene-time
 observation and restore follow [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time); production host lifecycle and server
 time integrity remain separate.
@@ -312,7 +312,7 @@ Package libraries may:
 
 - call public Standard Library functions;
 - wrap or combine them into domain-specific APIs;
-- use permitted custom UI inside the player iframe;
+- use permitted custom UI inside the Playroom iframe;
 - expose normal TypeScript exports to TeaseScript tooling;
 - exchange only supported serializable values and engine-managed references across the runtime boundary.
 
@@ -352,10 +352,10 @@ ADR 0018 compact forms therefore require parser-owned syntax support in addition
 
 The current engine/compiler implements compact `showButton`, `askText`, `askNumber`, and `askChoice` plus ADR 0018
 `say` smart/exact pacing and skip policy. Positive pacing uses the resumable `chatPacingGate` lifecycle described above;
-`0 s`/`instant` and checkpoint/restore are implemented on that same deterministic runtime model. The Player presents
-these Standard interaction and pacing controls through the framework-independent Player adapter. Editor and formatter
+`0 s`/`instant` and checkpoint/restore are implemented on that same deterministic runtime model. The Playroom presents
+these Standard interaction and pacing controls through the framework-independent Playroom adapter. Editor and formatter
 support for the compact forms is described in [Code editor](CODE-EDITOR.md#accepted-first-standard-library-poc-tooling),
 and debugger and simulator support in [Debugger](DEBUGGER.md); the final package/import/version/replacement design
-remains deferred. The production cross-origin Player/host protocol remains separate future work.
+remains deferred. The production cross-origin Playroom/host protocol remains separate future work.
 
 Implemented Standard Library behavior ultimately requires unit, integration, editor-metadata, security-boundary, bounded-data, event-ordering, and checkpoint/resume coverage appropriate to the capabilities it composes.
