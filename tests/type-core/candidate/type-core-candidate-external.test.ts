@@ -517,8 +517,8 @@ test("a copy of a written collection admits its written domain at every level, n
  * function nothing calls, after `exit`, a branch on `false`) is checked against the written domain, as in live code,
  * never against `unknown`. Per place and dead shape, the dead program and its live form (the function called; the
  * statements live), in both orders: the admitted domain at each collection level, the one boundary against the written
- * element kind at the host read, and, where the candidate route takes the program, the one checked store, the host
- * value's, with the whole written type.
+ * element kind at the host read, and the candidate route's one checked store, the host value's, with the whole written
+ * type.
  */
 test("a dead store of host data into a written place is checked against its written domain, as live (AD-3)", (t) => {
   const sorted = (kinds: readonly string[]): string[] => [...kinds].sort();
@@ -570,26 +570,18 @@ test("a dead store of host data into a written place is checked against its writ
       .split("\n")
       .map((line) => `  ${line}`)
       .join("\n");
-  // per dead shape: the program with `body` dead, its live form, and whether the candidate route takes them (a function
-  // is outside its slice)
-  const shapes: readonly (readonly [
-    string,
-    (body: string) => string,
-    (body: string) => string,
-    boolean,
-  ])[] = [
+  // per dead shape: the program with `body` dead, and its live form
+  const shapes: readonly (readonly [string, (body: string) => string, (body: string) => string])[] = [
     [
       "a function nothing calls",
       (body) => `function use(x) {\n${indented(body)}\n}\nexit\n`,
       (body) => `function use(x) {\n${indented(body)}\n}\nuse(1)\nexit\n`,
-      false,
     ],
-    ["after exit", (body) => `exit\n${body}\n`, (body) => `${body}\nexit\n`, true],
+    ["after exit", (body) => `exit\n${body}\n`, (body) => `${body}\nexit\n`],
     [
       "a branch on a literal false",
       (body) => `if false {\n${indented(body)}\n}\nexit\n`,
       (body) => `${body}\nexit\n`,
-      true,
     ],
   ];
   const observe = (source: string, name: string, levels: number) => {
@@ -622,18 +614,16 @@ test("a dead store of host data into a written place is checked against its writ
     });
   };
   const wrong: string[] = [];
-  let plans = 0;
   for (const [what, name, body, levels, store, checked] of places)
-    for (const [where, dead, live, planned] of shapes) {
+    for (const [where, dead, live] of shapes) {
       const element = levels.at(-1)!;
       const expected = {
         levels: levels.map(sorted),
         boundaries: [
           `${[name, ...Array<string>(levels.length - 1).fill("element")].join(".")} [${sorted(element).join(", ")}] 'hostValue'`,
         ],
-        plan: planned ? [`'${store}' ${checked}`] : null,
+        plan: [`'${store}' ${checked}`],
       };
-      if (planned) plans += 2;
       for (const [form, source] of [
         ["dead", dead(body)],
         ["live", live(body)],
@@ -643,9 +633,7 @@ test("a dead store of host data into a written place is checked against its writ
           wrong.push(`${what}, ${where}, ${form}: ${JSON.stringify(found)}`);
       }
     }
-  t.diagnostic(
-    `${places.length * shapes.length * 2} programs, ${plans} planned on the candidate route`,
-  );
+  t.diagnostic(`${places.length * shapes.length * 2} programs`);
   assert.deepEqual(wrong, []);
 });
 
