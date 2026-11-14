@@ -349,6 +349,11 @@ export class SliceIndex {
             this.#storeOfReceiver.set(held, statement);
           pending.push({ expression: statement.target.object, store: null });
         } else if (statement.target.kind === "indexExpression") {
+          // an element store's target is no read either, but a member warning names it, as a property store's (#2807);
+          // the store owes no check for it: the runtime's element store checks its receiver and index itself
+          const key = siteKey(file, statement.target.span);
+          if (!this.#bySite.has(key)) this.#bySite.set(key, statement.target);
+          this.#file.set(statement.target, file);
           // an element store reads its receiver and its index
           pending.push({ expression: statement.target.index, store: null });
           pending.push({ expression: statement.target.object, store: null });
