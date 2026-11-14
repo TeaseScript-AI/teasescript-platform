@@ -5,9 +5,9 @@
 
 ## Context
 
-The runtime can execute, step, halt, fail, checkpoint, restore, and resume deterministic instruction plans, but it has no canonical state for work that has started and must wait for elapsed time or a typed player result.
+The runtime can execute, step, halt, fail, checkpoint, restore, and resume deterministic instruction plans, but it has no canonical state for work that has started and must wait for elapsed time or a typed Playroom result.
 
-Blocking waits, visible timers, choices, input, buttons, media completion, and future typed player capabilities need one shared answer for:
+Blocking waits, visible timers, choices, input, buttons, media completion, and future typed Playroom capabilities need one shared answer for:
 
 - execution suspension and continuation;
 - JSON-safe pending state;
@@ -20,7 +20,7 @@ Blocking waits, visible timers, choices, input, buttons, media completion, and f
 
 ADR 0015 remains authoritative. Resumable behavior must use explicit versioned state and may not depend on a suspended JavaScript stack, generator, closure, browser timer callback, or module-global mutable state.
 
-This ADR defines the reusable runtime contract. It does not implement syntax, the production player, the cross-origin message envelope, Laravel scheduling, camera lifecycle, or media persistence.
+This ADR defines the reusable runtime contract. It does not implement syntax, the production Playroom, the cross-origin message envelope, Laravel scheduling, camera lifecycle, or media persistence.
 
 ## Decision summary
 
@@ -68,7 +68,7 @@ The exact TypeScript property names are finalized by the implementation PR, but 
 
 `currentSessionTimeMs` is the canonical persisted position on the active runtime session coordinate. It is not raw `Date.now()` and not raw `performance.now()`.
 
-A fresh version-4 snapshot is created with a validated initial session coordinate. Deterministic tests may use `0`. A production player maps its clock observations onto the session coordinate before submitting them.
+A fresh version-4 snapshot is created with a validated initial session coordinate. Deterministic tests may use `0`. A production Playroom maps its clock observations onto the session coordinate before submitting them.
 
 Every timed action derives its absolute deadline from the persisted coordinate:
 
@@ -210,7 +210,7 @@ Cancellation and timeout remain action-kind policies rather than one universal s
 
 Action creation and counter advancement are atomic. An operation that would increment `Number.MAX_SAFE_INTEGER` fails before allocating or reusing an identity.
 
-Action IDs are internal runtime/player correlation IDs. They are distinct from TeaseScript timer handles and
+Action IDs are internal runtime/Playroom correlation IDs. They are distinct from TeaseScript timer handles and
 future handles for permanent buttons, media resources, or scheduled work.
 
 ### Action-ID lookup order
@@ -277,19 +277,19 @@ Rules:
 
 ### Runtime boundary
 
-The deterministic runtime does not call browser or operating-system clock APIs. The player/controller supplies validated time observations, and tests supply a fake clock.
+The deterministic runtime does not call browser or operating-system clock APIs. The Playroom/controller supplies validated time observations, and tests supply a fake clock.
 
 A time observation conceptually contains:
 
 - a position on the active session coordinate;
 - its authority or quality when relevant;
-- optional integrity/debug metadata supplied by the player.
+- optional integrity/debug metadata supplied by the Playroom.
 
 The runtime validates finite non-negative values and rejects observations outside the accepted numeric magnitude or format.
 
 ### Stable session coordinate
 
-The canonical persisted coordinate is not raw `performance.now()`, because that origin changes after reload. The player maps monotonic elapsed deltas onto one session coordinate.
+The canonical persisted coordinate is not raw `performance.now()`, because that origin changes after reload. The Playroom maps monotonic elapsed deltas onto one session coordinate.
 
 Conceptually:
 
@@ -297,11 +297,11 @@ Conceptually:
 sessionNow = savedObservedSessionTimeMs + monotonicDeltaSinceAnchor
 ```
 
-During a live Player execution, elapsed observations advance scene time, including ordinary background throttling.
-A new Player execution rebases its clock on the persisted observed time (`observedSessionTimeMs`); genuine
-unavailability does not consume timer duration. Visibility changes provide observation opportunities and do not pause a live Player.
+During a live Playroom execution, elapsed observations advance scene time, including ordinary background throttling.
+A new Playroom execution rebases its clock on the persisted observed time (`observedSessionTimeMs`); genuine
+unavailability does not consume timer duration. Visibility changes provide observation opportunities and do not pause a live Playroom.
 
-Absolute wall-clock targets and server-authoritative deadlines are separate scheduling concerns. The Player
+Absolute wall-clock targets and server-authoritative deadlines are separate scheduling concerns. The Playroom
 observation and restore contract is maintained in [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 
 ### Atomic time observation
@@ -326,7 +326,7 @@ observation and restore contract is maintained in [`RUNTIME.md`](../RUNTIME.md#t
 No checkpoint may expose due-action processing performed against a newer time than its `currentSessionTimeMs`
 value.
 
-A backward clock adjustment therefore does not extend an active wait. Restore itself does not read a clock and has no hidden completion side effect. After restore, the player submits an explicit observation; the persisted observed time then prevents time from moving backwards.
+A backward clock adjustment therefore does not extend an active wait. Restore itself does not read a clock and has no hidden completion side effect. After restore, the Playroom submits an explicit observation; the persisted observed time then prevents time from moving backwards.
 
 ### Timed actions
 
@@ -341,7 +341,7 @@ Persisting both remaining time and deadline is rejected as duplicate canonical s
 
 ### Active browser and future server time
 
-For a live Player execution, the Player maps monotonic elapsed observations onto persisted scene time.
+For a live Playroom execution, the Playroom maps monotonic elapsed observations onto persisted scene time.
 Server-authoritative absolute deadlines require a separate scheduling contract.
 
 Time-integrity anomalies may be recorded as typed diagnostics. This ADR does not define an author hook and does not automatically label an anomaly as cheating.
@@ -374,12 +374,12 @@ Rules:
 - a negative runtime result is a structured runtime failure;
 - `NaN`, infinity, unsupported magnitude, and deadline overflow are rejected;
 - there is no additional arbitrary product maximum below the technical numeric boundary;
-- delayed observations during a live Player execution catch up elapsed scene time; a newly restored execution
+- delayed observations during a live Playroom execution catch up elapsed scene time; a newly restored execution
   excludes the genuinely unavailable gap.
 
-## Runtime/player responsibility boundary
+## Runtime/Playroom responsibility boundary
 
-| Responsibility | Deterministic runtime | Player/controller |
+| Responsibility | Deterministic runtime | Playroom/controller |
 |---|---:|---:|
 | Canonical session coordinate, action state, settlement, and IDs | yes | no |
 | Validate snapshot/action/time invariants | yes | may prevalidate messages |
@@ -392,7 +392,7 @@ Rules:
 | Decide whether a deadline is canonically due | yes | no |
 | Validate script-level response type and policy | yes | may validate UX input first |
 | Mutate arbitrary snapshot fields | no external caller | never |
-| Persist checkpoints and acknowledge save | emits/returns state | player/Laravel workflow |
+| Persist checkpoints and acknowledge save | emits/returns state | Playroom/Laravel workflow |
 | Translate browser errors into typed outcomes | no raw browser exception | yes |
 | Clean up browser resources | requests canonical cleanup | yes |
 
@@ -538,7 +538,7 @@ Add visible and mystery blocking timers, stopping, repeating timers, persistent 
 
 ### Later slices
 
-Choices, text input, buttons, media completion, permanent buttons, custom views, and typed player capabilities reuse the accepted action contract.
+Choices, text input, buttons, media completion, permanent buttons, custom views, and typed Playroom capabilities reuse the accepted action contract.
 
 ## Alternatives considered
 
@@ -577,7 +577,7 @@ Rejected as duplicate canonical time state that can disagree.
 
 ### Runtime polling
 
-Rejected as the primary model. The player may submit explicit ticks or wake observations, but the runtime does not own an interval or browser timer. Tests directly inject deterministic observations.
+Rejected as the primary model. The Playroom may submit explicit ticks or wake observations, but the runtime does not own an interval or browser timer. Tests directly inject deterministic observations.
 
 ### Separate state fields per feature
 
@@ -595,7 +595,7 @@ Rejected. A wait exercises suspension, deadline persistence, restore, host obser
 
 - Pending work becomes inspectable, checkpointable, idempotent, and testable.
 - The nondecreasing session coordinate survives checkpoint and restore explicitly.
-- The player can reconstruct Standard UI and wake-up scheduling without replaying instructions.
+- The Playroom can reconstruct Standard UI and wake-up scheduling without replaying instructions.
 - Foreground and background semantics remain explicit rather than hidden in one generic collection.
 - Older active background actions cannot be misclassified as stale.
 - Duplicate completion retries are deterministic while snapshot growth remains bounded.
