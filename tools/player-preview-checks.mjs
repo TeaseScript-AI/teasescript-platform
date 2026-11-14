@@ -513,7 +513,7 @@ async function composerNoticeChecks(page) {
         box.right <= outer.right + 0.5 &&
         box.top >= outer.top - 0.5 &&
         box.bottom <= outer.bottom + 0.5;
-      if (!inside({ left: 0, top: 0, right: innerWidth, bottom: innerHeight }))
+      if (!inside({ left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }))
         return "outside the viewport";
       for (let element = notice.parentElement; element; element = element.parentElement) {
         const style = getComputedStyle(element);
