@@ -40,6 +40,15 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTUR
   transactional checkpoint/effect commit, reservation/lease lifecycle, idempotency, and cleanup behavior.
 - Optional author-defined recovery points beyond automatic recovery frontiers, including rollback scope and treatment of
   irreversible external effects.
+- **Published compiled delivery:** whether a published Tease reaches the Playroom already compiled, so that the browser
+  does not compile it at each load. Researched around 2026-11-04: the compiled plan as JSON with shared source spans,
+  compressed with Brotli (gzip as fallback) under immutable, cached URLs, which keeps it small; that work then paused.
+  The owner's preference (2026-11-14) is to send a compiled version.
+  [#2708](https://github.com/TeaseScript-AI/teasescript-platform/issues/2708) is a small, temporary proof of concept
+  that loads a compiled plan; it decides nothing about publication. Constraints: the
+  [playback entry](RUNTIME.md#canonical-source-to-runtime-route) runs a plan without loading a compiler,
+  [ADR 0015](decisions/0015-serializable-runtime-architecture.md#checkpoints) leaves production plan storage outside its
+  decision, and [ADR 0010](decisions/0010-package-network-policy.md) serves published media from platform storage.
 
 ## Language, Standard Library, and modules
 

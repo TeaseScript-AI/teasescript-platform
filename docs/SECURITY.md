@@ -10,6 +10,8 @@ reject a non-empty body without buffering the complete payload. Unsupported meth
 and unsafe paths receive structured errors without stack traces. Remaining tooling guards are tracked in
 [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). This is neither a public API nor a production backend.
 
+## Playroom isolation and external data
+
 - Run the complete Playroom and package code in a sandboxed cross-origin iframe, preferably on a separate Playroom origin.
 - Keep main-site cookies host-only and unavailable to the Playroom.
 - Validate every parent/Playroom message, checkpoint, package manifest, server response, and future integration result.

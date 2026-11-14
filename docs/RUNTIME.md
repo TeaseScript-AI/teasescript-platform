@@ -1,5 +1,35 @@
 # Runtime
 
+## Reading map
+
+This map leads to the section that decides each question, also in another document; it decides nothing itself.
+
+- **This file:** execution and session APIs, action completion, time, media, values, host inputs, validation and the
+  current formats. Read the section of the operation you change and the shared boundaries it links.
+- **Error codes:** [Runtime errors](#runtime-errors) has the rules for runtime error messages and the catalog of codes
+  with their repair; look a failure up by its code.
+- **Formats:** [Format evolution](#format-evolution) has the current plan, snapshot and checkpoint revisions and when a
+  revision rises.
+
+By question:
+
+- **Where does a script stop, and how does Continue work?** [Checkpoint boundary](#checkpoint-boundary),
+  [ADR 0015](decisions/0015-serializable-runtime-architecture.md#checkpoints) and
+  [ADR 0016](decisions/0016-resumable-pending-action-runtime-contract.md); what the Playroom keeps and continues:
+  [Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation).
+- **Does a published Tease arrive compiled, or is it compiled at each load?** The playback and authoring entries:
+  [Canonical source-to-runtime route](#canonical-source-to-runtime-route); publication is open:
+  "Published compiled delivery" in [open decisions](OPEN-DECISIONS.md#runtime-hardening-and-evolution).
+- **Who saves script data, and what do other tabs change?** [Script storage](#script-storage) and
+  [Script storage in the browser](DATA-AND-API.md#script-storage-in-the-browser), other tabs included.
+- **Where can Tease code run, and what can it reach?**
+  [Playroom isolation and external data](SECURITY.md#playroom-isolation-and-external-data).
+- **Which operation rules apply?** [Pending actions](#accepted-resumable-pending-action-model),
+  [time and interrupts](#timers-and-scene-time), [media](#stage-image-and-media-playback),
+  [session API](#runtime-sessions) or [Debug trace](#debug-trace).
+- **Is a choice already decided?** The topic's ADR links and the [ADR index](decisions/README.md#index); then
+  [open decisions](OPEN-DECISIONS.md), whose entries accept no answer.
+
 ## Playroom and playground execution adapters
 
 `player/runtime/runtime-adapter.ts` is the framework-independent Playroom adapter shared by the Playroom and the
