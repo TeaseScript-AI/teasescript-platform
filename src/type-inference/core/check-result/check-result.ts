@@ -165,7 +165,7 @@ export function coreCheckResult(
   const paths = new Map<Statement, readonly boolean[]>();
   for (const statement of index.statements)
     if (statement.kind === "ifStatement" || statement.kind === "whileStatement") {
-      // P7: a literal condition takes one branch, or runs the body never or until a `break` (the flow graph's own rule)
+      // P7: a literal condition takes one branch, or runs the body never or until a `break`
       const truth = literalTruth(statement.condition);
       paths.set(statement, [truth !== false, truth !== true]);
     } else if (statement.kind === "switchStatement") {
@@ -832,10 +832,8 @@ function factLevels(walk: () => (readonly ItemTag[])[], site: Expression): Stati
 }
 
 /**
- * Each expression's type as the facts give it (`coreFacts`' `values`), read after its operands' (the walk's order
- * reversed), so nesting needs no native recursion: a read of a place with a written type has that type, else the
- * occurrence's kinds, a collection's element type from its literal, its place, or the list its index reads; an
- * expression the index does not hold is `unknown`.
+ * Each expression's type as the facts give it, read after its operands' (the walk's order reversed), so nesting needs no
+ * native recursion; an expression the index does not hold is `unknown`.
  */
 export function expressionTypes(
   answers: Answers,
