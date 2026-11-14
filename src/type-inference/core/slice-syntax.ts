@@ -820,7 +820,7 @@ function unwrapped(expression: Expression): Expression {
   return current;
 }
 
-/** The calls of the slice, by what each is (see the module's comment); `null` for any other call. */
+/** The calls of the slice, by what each is; `null` for any other call. */
 type SliceCall =
   "get" | "conversion" | "fromJson" | "fileFromBase64" | "decrypt" | "method" | "toJson";
 
