@@ -176,7 +176,7 @@ compile error that suggests the parentheses. The unit belongs to the duration it
 separate `unit: "seconds"` parameter.
 
 A `wait` or timer whose length is written in days or weeks, such as `wait 2 days`, compiles with a warning (owner
-decision, 2026-10-10): it counts scene time, which stops while the Player is closed, while such a length almost always
+decision, 2026-10-10): it counts scene time, which stops while the Playroom is closed, while such a length almost always
 means real time ([V30 §27](../specifications/accepted-syntaxes-v30.md#time)).
 
 Each consumer takes an exact duration D:
