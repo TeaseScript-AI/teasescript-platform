@@ -65,7 +65,7 @@ import type {
   TypeTerm,
 } from "./graph.js";
 import { conditionShape } from "./narrowing-shapes.js";
-import { interactionEvidence, selectorsEvidence } from "./syntax-evidence.js";
+import { interactionEvidence } from "./syntax-evidence.js";
 
 // The collector decides nothing: it reads no type and reports no diagnostic.
 
@@ -1058,8 +1058,6 @@ class Collector {
           operands,
           [],
           expression,
-          "operand",
-          { kind: "tagQuery", catalog: expression.catalog, select: expression.select },
         );
       }
       case "sayExpression": {
@@ -1104,8 +1102,6 @@ class Collector {
           operands,
           [],
           expression,
-          "operand",
-          { kind: "timer", form: expression.form, async: expression.async },
         );
       }
       case "playMediaExpression": {
@@ -1119,8 +1115,6 @@ class Collector {
           operands,
           [],
           expression,
-          "operand",
-          { kind: "media", media: expression.media, async: expression.async },
         );
       }
       case "showCameraExpression":
@@ -1235,26 +1229,12 @@ class Collector {
               },
             ];
       const args = yield* compileChild(this.#arguments(expression, scope));
-      const allowSkip = expression.arguments.find(
-        (argument) => argument.kind === "namedArgument" && argument.name.name === "allowSkip",
-      );
-      const written = allowSkip === undefined ? undefined : unwrap(allowSkip.value);
       return this.#operation(
         { family: "interaction", name: "askImage" },
         null,
         args.positional,
         [...presentation, ...args.named],
         expression,
-        "operand",
-        {
-          kind: "image",
-          allowSkip:
-            written === undefined
-              ? null
-              : written.kind === "booleanLiteral"
-                ? written.value
-                : "computed",
-        },
       );
     }
     if (callee.kind === "identifier") {
@@ -1281,10 +1261,6 @@ class Collector {
           args.positional,
           args.named,
           expression,
-          "operand",
-          family === "listFunction" || callee.name === "randomWeighted"
-            ? selectorsEvidence(expression)
-            : undefined,
         );
       }
       const place = this.#value(expression);

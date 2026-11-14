@@ -79,46 +79,20 @@ function termPlaces(term: TypeTerm | null): PlaceId[] {
   return places;
 }
 
-/** The places syntax evidence refers to: every written element, descriptor part and choice object. */
+/** The places syntax evidence refers to: every written element and choice object. */
 function evidencePlaces(evidence: SyntaxEvidence | undefined): (PlaceId | null)[] {
   const element = (entry: ChoiceElementEvidence): (PlaceId | null)[] => [
     entry.place,
     ...(entry.object === null ? [] : [entry.object.value, entry.object.text]),
   ];
-  switch (evidence?.kind) {
-    case "form":
-      if (evidence.fields === "computed") return [];
-      return evidence.fields.entries.flatMap((field) => {
-        const written = field.written;
-        switch (written.kind) {
-          case "object":
-            return [
-              field.place,
-              written.value,
-              written.min,
-              written.max,
-              ...(written.options === null
-                ? []
-                : [written.options.place, ...(written.options.elements ?? []).flatMap(element)]),
-            ];
-          case "list":
-            return [field.place, ...written.elements.flatMap(element)];
-          default:
-            return [field.place];
-        }
-      });
-    case "choice":
-      return evidence.options.flatMap((option) => [
-        option.place,
-        ...(option.content.kind === "object"
-          ? [option.content.object.value, option.content.object.text]
-          : option.content.kind === "other"
-            ? []
-            : option.content.elements.flatMap(element)),
-      ]);
-    default:
-      return [];
-  }
+  if (evidence === undefined) return [];
+  return evidence.options.flatMap((option) =>
+    option.content.kind === "object"
+      ? [option.content.object.value, option.content.object.text]
+      : option.content.kind === "other"
+        ? []
+        : option.content.elements.flatMap(element),
+  );
 }
 
 /**
