@@ -286,7 +286,7 @@ export function summaryPresence(
   const sub = singleSource(contract, at, rest);
   after = null;
   run(
-    // #1668: the offending test over the sources (`run`)
+    // #1668: presence evidence
     (function* (): Work<readonly Item[]> {
       if (sub !== null) {
         // #1668: a count, a presence test or an offending test over the sources

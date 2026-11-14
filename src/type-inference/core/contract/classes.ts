@@ -49,7 +49,6 @@ export function readSnapshot(contract: Contract, value: PlaceId): string | null 
     projection = program.projOf.get(root);
   }
   const node = program.occNode.get(root) ?? null;
-  // (a read that takes its narrowing carries it, `Values.narrowingMark`)
   const read = `${guards.guardedRead(value) ? "g" : ""}${contract.pass.values.narrowingMark(value)}${copied}`;
   const snapshot =
     node === null
@@ -131,7 +130,6 @@ function ownClass(
     steps.reverse().join(" "),
     guards.guardedRead(value) ? "g" : "",
     guards.guardedBelowRead(value).join(" "),
-    // (on the value side, what its narrowing makes of its answer, `Values.narrowingMark`)
     exact ? contract.pass.values.narrowingMark(value) : "",
   ] as const;
   // (an alias of an alias read with no steps and no guard reads what that one reads: one class for the chain)
@@ -271,17 +269,8 @@ export function boundClass(contract: Contract, value: PlaceId, exact: boolean): 
 /**
  * The class every discovery of a value keys it by, on either side, so that values of one class answer alike at every
  * path apart from the writers of their roles (`classWriters`) and, for a mixed class (`classMixed`), an ingress's leaf
- * or an operand's identity. A read by `readClass`; a read of a host global, whose leaf is its own (`readClass`'s
- * `null`), by the global and its guards, mixed (#1196); a projection (a property, an element selection, a length) by
- * its step and its owner's class; a call's result by the callee's result key (on the value side with the key's
- * exact-path signature where the call returns); a literal by its structure (its own kinds, objects, empty collections
- * and absences per path, its cells' classes and guards, whether it is a cell); a choice by its options (a label's kind,
- * a choice object's selected value, any other option's value); a `load` or a parse landing in no written type by its
- * kind and its default's class and guards; any other operation by its family, its name and its operands' classes (a
- * `get`'s receiver and default, never its key). On the value side (`exact`) an operation only at its own node, a `get`
- * or an `otherwise` with whether its default or fallback runs (`Values.proofOf`). `null` for a loop's visit, a speaker,
- * a literal holding a reference or a read its holder marks, a choice holding a list's or a set's buttons, and a value
- * any part of which has none. Once per value and side, on an explicit walk.
+ * or an operand's identity. `null` for a loop's visit, a speaker, a literal holding a reference or a read its holder
+ * marks, a choice holding a list's or a set's buttons, and a value any part of which has none.
  */
 export function classOf(contract: Contract, value: PlaceId, exact: boolean): string | null {
   return classed(contract, value, exact).cls;

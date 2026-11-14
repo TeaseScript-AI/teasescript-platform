@@ -149,7 +149,6 @@ function ringOf(contract: Contract, place: PlaceId): CopyRing | null {
  * projection) stays an entry, cut there.
  */
 export function prefixStores(contract: Contract, asked: Key): PrefixStores {
-  // (a key in its identity: a wrapper family's text read as its cursor)
   const prefix = contract.canonicalKey(asked);
   if (!contract.prefix.has(prefix)) contract.settle(prefixWork(contract, prefix));
   return contract.prefix.get(prefix)!;
@@ -362,7 +361,6 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
         yield* adding(contract, f, result !== null ? { key: result } : { value: d.value! });
         continue;
       }
-      // a copy read under a guard is one marked entry of its source, its aliases followed
       if (guards.guardedRead(d.value!)) {
         const source = yield* contract.needValue(d.value!);
         yield* adding(contract, f, { key: source.key!, guarded: true });

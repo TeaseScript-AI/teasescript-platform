@@ -255,7 +255,6 @@ export function* keyContract(
  * contract reads them; a copy's own elements by the same question; once per element step.
  */
 export function* severalElements(contract: Contract, asked: Key): Work<boolean> {
-  // (a key in its identity: a wrapper family's text read as its cursor)
   const key = canonicalKey(contract, asked);
   const walk = keyWalk(contract, key);
   const { place, path } = walk;
@@ -375,7 +374,6 @@ export function* contractRead(
   context: ContextWord,
   later = false,
 ): Work<readonly Item[]> {
-  // (a key in its identity: a wrapper family's text read as its cursor)
   const key = canonicalKey(contract, asked);
   const { program } = contract.pass;
   // #1668: a reader's word on the contract, no contract slot's answer
@@ -651,7 +649,6 @@ export function* subAt(
   rest: Rest,
   flow: FlowSink | null = null,
 ): Work<readonly Item[]> {
-  // (a key in its identity: a wrapper family's text read as its cursor)
   const sub = canonicalKey(contract, asked);
   const site = contract.pass.program.places[keyPlace(sub)]?.site ?? null;
   const slot = joinParts("s", sub, restPart(rest));
