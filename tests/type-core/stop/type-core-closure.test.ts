@@ -326,6 +326,7 @@ test("an author function's family inside the slice completes where it freezes, i
         completed += 1;
         const at = `${name}, ${mode.name}, demand ${demand}`;
         const measured = sizes.map((answers) => {
+          // (#2801 deletes this pin: every obligation of the completion after a stop completes)
           assert.deepEqual(
             answers.receiving.filter((r) => r.result === null || r.result.state !== "complete"),
             [],
