@@ -515,10 +515,9 @@ function unshownChoiceText(
 }
 
 /**
- * Whether an operand holds only values its rule takes (`OperandRule`, or a unit's amount, `UNIT_AMOUNT`), beside the
- * cited check for an external value. A missing property's unknown is no value there, as its read fails first; a typed
- * ingress's read is the unknown its store's check stands for. An operand that only a narrowing or an `otherwise` shows
- * to fit is declined: a read of `n: integer?` under `n != null`, `(n otherwise 1) s`.
+ * Whether the route admits an operand: each value it may hold is of a kind its rule takes (`OperandRule`, or a unit's
+ * amount, `UNIT_AMOUNT`), or external data beside the cited check. An operand that only a narrowing or an `otherwise`
+ * shows to fit is declined: a read of `n: integer?` under `n != null`, `(n otherwise 1) s`.
  */
 function operandAdmitted(
   answers: Answers,

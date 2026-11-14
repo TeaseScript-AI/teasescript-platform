@@ -523,13 +523,10 @@ test("the host global at a position, the unknown the table admits: its instructi
 });
 
 test("the host global at a position, where the run ends before its instruction's check: as today's run, in every mode", () => {
-  // each run fails inside the producer (a text read past its end, of a stored text today's checker cannot know),
-  // whichever value the host global holds
+  // (a stored text, which today's checker cannot know)
   const producer = "s.substring(50)";
   for (const [source, position] of [
-    // the run does not reach the command
     [`let s = load "k", default: "x"\nlet a = ${producer}\nopenUrl(hostValue)\nexit\n`, "url"],
-    // an earlier operand of the same command fails before the command checks the host global's value
     [
       `let s = load "k", default: "https://example.com"\nopenUrl(${producer}, alwaysButton: hostValue)\nexit\n`,
       "alwaysButton",
