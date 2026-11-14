@@ -174,14 +174,20 @@ A comment says what the code cannot show. Write one for:
 - the contract of a message or format, once, at its definition;
 - a fact about something outside the repository that the code depends on (a browser, a library, a source format),
   with how it was verified;
+- the obligation a test guards;
 - a known limitation, stated as a fact with its issue.
 
 Do not write what the next lines do; what other code does, calls, reads or returns; a list that repeats the code
 (cases, stages, fields); history (what it was, which review or decision changed it); or a table. If code needs a
-comment to say what it does, rename or restructure it instead. The test: a sentence that would become untrue when code
-elsewhere changes, without anyone touching the comment, does not belong there. This holds in every language. A comment
-a tool reads (a lint disable with its reason, an expected-error marker such as `@ts-expect-error`, type annotations in
-doc comments, a build directive) is not a comment in this sense, and a generated file follows its generator.
+comment to say what it does, rename or restructure it instead. The test for a sentence about other code: if it would
+become untrue when that code changes, without anyone touching the comment, it does not belong there. None of this
+forbids what the list above names: a declaration's own contract stays, and when the code stops keeping it the code is
+wrong, not the comment. This holds in every language.
+
+Outside this rule: a comment a tool reads (a lint disable with its reason, an expected-error marker such as
+`@ts-expect-error`, type annotations in doc comments, a build directive); a comment another repository document
+requires in a set form, which follows that document (an `EVIDENCE:` reason in [`LINTING.md`](../LINTING.md), a moved
+pin's ground in [`TESTING.md`](../TESTING.md), "Pinned work"); and a generated file, which follows its generator.
 
 What a comment says is true of the code now, so it stays true whatever merges later. It never forecasts later work: no
 "until #N" or "until" a package or stage, no "once #N", no "will be replaced" or "replaces this", and no TODO in any

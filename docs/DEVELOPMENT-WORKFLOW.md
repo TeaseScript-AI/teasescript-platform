@@ -675,10 +675,11 @@ The builder repairs each blocker and reruns the evidence the repair can invalida
 The round reviewer checks the repair in one round scoped to those findings, which also repeats the delta item at the
 new head. A second final review happens only when the repair changed the construction.
 
-A repair that only deletes comments, in any language and after any review, needs no review round when READY's evidence
-shows two things at the new head: the sources are identical to the reviewed head once comments are stripped by the
-language's own parser, comments a tool reads kept, so that deleting one of those is a difference; and the component's
-checks pass. The coordinator reads that evidence before merging.
+A repair that only deletes comments needs no review round where its component, in whatever language, has a
+maintained check that shows it, and READY's evidence holds that check's output at the new head: the change deletes
+comments only, comments a tool reads kept; and the two heads parse to the same program, a deleted comment's line
+breaks counted, because a line break can end a statement. The component's checks pass as well. The coordinator reads
+that evidence before merging. Without such a check the repair gets its scoped round.
 
 ### Pull requests and rebases
 
