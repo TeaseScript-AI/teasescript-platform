@@ -2,7 +2,7 @@
 
 - **Status:** Current technical description of the locks of `encryptText`, `encryptFile`, `decryptText`, and
   `decryptFile` ([V30 §13](specifications/accepted-syntaxes-v30.md#encryption)).
-- **Use when:** changing the lock format, its openers, the drand time lock, the Player's lock dialogs and password
+- **Use when:** changing the lock format, its openers, the drand time lock, the Playroom's lock dialogs and password
   fields, or what a session records of a lock.
 - **Does not define:** the language surface (V30), the engine's lock instruction and action
   ([`RUNTIME.md`](RUNTIME.md#locks)), or the dialogs' presentation ([`PLAYER-UI.md`](ui/PLAYER-UI.md)).
@@ -11,7 +11,7 @@
 
 A lock encrypts its content once and gives each way to open it, an opener, its own copy of the key:
 
-1. The Player makes a fresh random 256-bit content key K and a random 96-bit nonce with `crypto.getRandomValues`.
+1. The Playroom makes a fresh random 256-bit content key K and a random 96-bit nonce with `crypto.getRandomValues`.
 2. **Password opener:** PBKDF2-HMAC-SHA-256 derives a key-encryption key (KEK) from the fixed prefix
    `teasescript-lock-password:` followed by exactly the password's UTF-8 (a lone surrogate as U+FFFD), a fresh random
    16-byte salt, and 600,000 iterations, OWASP's current work factor for this hash. The prefix keeps the input from
@@ -32,12 +32,12 @@ A lock encrypts its content once and gives each way to open it, an opener, its o
    so a lock whose openers were changed, removed, or added opens nothing.
 
 To open, an opener gives K back: the password's KEK opens its sealed K; a matching private key opens the age file,
-outside the Player, and the player gives the Player the unlock key it held; the round's beacon signature opens the time
+outside the Playroom, and the player gives the Playroom the unlock key it held; the round's beacon signature opens the time
 ciphertext, whose own check rejects a wrong signature. K then opens the content, and the tag check rejects a changed
 lock. A wrong password or key, a changed lock, and a wrong round all end in "not opened", which the script sees as the
 call's default.
 
-Locking with a time opener needs no network. When the Player can reach drand while it locks, it reads the latest round
+Locking with a time opener needs no network. When the Playroom can reach drand while it locks, it reads the latest round
 (within 4 s) and verifies it; a device clock behind that round's time moves the moment later by as much, so a player who
 sets the clock back does not get an earlier lock. Offline, or with a correct clock, the moment stays.
 
@@ -60,11 +60,11 @@ the engine enforces for any keys. A lock has 34 bytes besides its openers and co
 16-byte tag. A time lock only adds 205 bytes to the content, a password only 105, and both 276. `encryptText` gives the
 bytes as standard Base64, 4/3 of their length. A reader skips an opener of a kind it does not know and refuses a lock
 with two openers of one kind, as no lock is made so. A lock asking for more than 10,000,000 PBKDF2 iterations is not
-tried, so a made-up lock cannot keep the Player busy.
+tried, so a made-up lock cannot keep the Playroom busy.
 
 ### drand
 
-The Player, never package code, contacts drand
+The Playroom, never package code, contacts drand
 ([`CURRENT-DESIGN.md`](../CURRENT-DESIGN.md#trust-isolation-and-platform-ownership)): only the pinned relays
 `api.drand.sh`, `api2.drand.sh`, `api3.drand.sh`, and `drand.cloudflare.com`, in that order, each within 5 s, with
 `credentials: "omit"`, and following no redirect (`player/encryption/drand.ts`). It verifies every beacon signature
@@ -75,7 +75,7 @@ opens also long after its moment.
 
 ### For the owner of the private key
 
-These instructions are for the owner of the private key, a keyholder for example; the Player shows none of them. They
+These instructions are for the owner of the private key, a keyholder for example; the Playroom shows none of them. They
 need only the `age` tool and their own key; nothing of TeaseScript. Once, they make an age identity or an OpenSSH
 Ed25519 key and give the player its public key:
 
@@ -84,7 +84,7 @@ age-keygen -o key.txt          # prints "Public key: age1…", which they give t
 ssh-keygen -t ed25519          # or this: they give the player the line in ~/.ssh/id_ed25519.pub
 ```
 
-For each lock, the player copies or downloads the unlock request (`unlock-request.age`) from the Player's unlock dialog
+For each lock, the player copies or downloads the unlock request (`unlock-request.age`) from the Playroom's unlock dialog
 and sends it to them. They open it with the private key that matches,
 `age -d -i <private key file> unlock-request.age`, and send back the unlock key, the 44 characters it prints:
 
@@ -103,10 +103,10 @@ randomness. Browsers have no pairing cryptography, so `player/encryption/time-lo
 `@noble/hashes`, both 2.4.0 (MIT; curves' only dependency is hashes). `player/encryption/age.ts` writes the public key
 opener's age file with WebCrypto's X25519, HKDF, and HMAC, and with `@noble/ciphers` 2.4.0 (MIT, no dependencies) for
 ChaCha20-Poly1305, which WebCrypto lacks; `src/public-keys.ts` checks that an `ssh-ed25519` key is an Ed25519 point
-(RFC 8032, section 5.1.3) and maps it to its X25519 form (RFC 7748, section 4.1). The Player loads these
-modules with `import()`: a Player start without encryption loads none, and a session whose script locks or opens loads
+(RFC 8032, section 5.1.3) and maps it to its X25519 form (RFC 7748, section 4.1). The Playroom loads these
+modules with `import()`: a Playroom start without encryption loads none, and a session whose script locks or opens loads
 the lock and time lock code at its start, and the age code too when it locks, so that locking still works when the
-Player goes offline later.
+Playroom goes offline later.
 
 - **Need:** the time lock's identity-based encryption and beacon verification need BLS12-381 pairings, hash-to-curve
   (RFC 9380), and field arithmetic.
@@ -131,9 +131,9 @@ Player goes offline later.
 - A lock holds no secret but the sealed copies of K. `encryptText`'s result is text the script keeps like any text;
   `encryptFile`'s is a stored file of type `application/octet-stream`, durable as a photo is while a saved value refers
   to it ([V30 §33](specifications/accepted-syntaxes-v30.md#stored-files)).
-- Every call waits for the Player, and the engine records its result: a restore or a replay reuses it without the
+- Every call waits for the Playroom, and the engine records its result: a restore or a replay reuses it without the
   network, the store, or the password ([`RUNTIME.md`](RUNTIME.md#locks)).
-- K, a KEK, a password typed in a Player dialog or in the password field of `password: askPassword(...)`, a key pasted
+- K, a KEK, a password typed in a Playroom dialog or in the password field of `password: askPassword(...)`, a key pasted
   in the unlock dialog, and the beacon never reach the engine, so no snapshot, checkpoint, save, event, recorded call,
   Debug view, or debug export holds them. Debug shows a lock step's call, phase, whether a password was written or its
   field asks for one, how many public keys it has, whether a key was written, its time lock's moment, and the openers
@@ -158,8 +158,8 @@ Player goes offline later.
 - **Offline locking** works once the time lock's code is loaded, which a script's session does at its start.
 - **The owner of the private key learns the lock's key.** The unlock key they send back opens that lock for whoever
   reads it, as a password would; sending it through a chat that others read gives it to them too. A public key the
-  player pastes may belong to someone else than they think; the Player cannot tell.
+  player pastes may belong to someone else than they think; the Playroom cannot tell.
 - **AES-GCM is not key-committing.** Whoever makes a lock could give its openers different keys that open different
   content; that protects nothing anyone else locked, so it is no weakness here.
-- **A plain HTTP Player cannot encrypt.** Browsers offer WebCrypto only in a secure context; there every call fails with
+- **A plain HTTP Playroom cannot encrypt.** Browsers offer WebCrypto only in a secure context; there every call fails with
   `TSR086`.
