@@ -14,6 +14,7 @@ import {
   type DerivedStore,
   type Syntax,
   Underivable,
+  declaredIn,
   expressions,
   unwrap,
   writtenType,
@@ -218,23 +219,26 @@ export function functionLandings(
 
 /**
  * The name the analysis gives the place a checked store statement writes (`name`, the target's, as `o.a`): one of a
- * parameter of the function whose body holds the statement is prefixed with the function's, `<function>.<parameter>…`;
- * any other keeps its own. A check into a parameter without a written type is underivable, as at a transfer
- * (`transferStore`).
+ * parameter (`declaredIn`) is prefixed with its function's, `<function>.<parameter>…`; any other keeps its own. A check
+ * into a parameter without a written type is underivable, as at a transfer (`transferStore`).
  */
-export function storedPlaceName(statement: Statement, name: string, own: Syntax): string {
-  const root = name.split(".")[0];
-  for (const fn of own.statements) {
-    if (fn.kind !== "functionDeclaration" || !bodyOf(fn).includes(statement)) continue;
-    const parameter = fn.parameters.find((each) => each.name.name === root);
-    if (parameter === undefined) continue;
-    if (parameter.typeAnnotation === null)
-      throw new Underivable(
-        `parameter '${root}' of '${fn.name.name}': a check into a parameter or result without a written type`,
-      );
-    return `${fn.name.name}.${name}`;
-  }
-  return name;
+export function storedPlaceName(
+  statement: Statement,
+  name: string,
+  statements: readonly Statement[],
+): string {
+  const root = name.split(".")[0]!;
+  const declared = declaredIn(statements, statement, root);
+  if (declared?.kind !== "functionParameter") return name;
+  const fn = statements.find(
+    (each): each is FunctionDeclaration =>
+      each.kind === "functionDeclaration" && each.parameters.includes(declared),
+  )!;
+  if (declared.typeAnnotation === null)
+    throw new Underivable(
+      `parameter '${root}' of '${fn.name.name}': a check into a parameter or result without a written type`,
+    );
+  return `${fn.name.name}.${name}`;
 }
 
 /** A `return` ending a call, with its value. */

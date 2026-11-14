@@ -55,8 +55,10 @@ export function sourceShape(
       const next = new Set([...seen, at.name]);
       // (the name's declaration in its scope, and only the stores into that one)
       const declared = declaredIn(statements, at, at.name);
-      if (declared?.kind === "letStatement" && declared.typeAnnotation !== null)
+      if (declared !== null && declared !== undefined && declared.typeAnnotation !== null)
         return writtenType(declared.typeAnnotation);
+      if (declared?.kind === "functionParameter")
+        throw new Underivable(`a read of '${at.name}', a parameter without a written type`);
       const same = (statement: Statement): boolean =>
         declaredIn(statements, statement, at.name) === declared;
       let shape = admittedShape(
