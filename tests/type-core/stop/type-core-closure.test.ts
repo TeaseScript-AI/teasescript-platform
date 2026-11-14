@@ -36,9 +36,9 @@ import { decisionRecords, inMode, MODES } from "../../helpers/type-core-oracles.
  * with frozen keys registers every receiving obligation apart from the diagnostics and completes them in a completion
  * pass without those keys, each decision made where a proof first reads it and each property listing a cell the
  * frontier schedules, taken whole by a search that reaches it. Outside the candidate slice, by its syntax or its depth,
- * no completion runs and the analysis is main's: Astra's C-R1 chain of function results, the function result, an
- * argument, an `add` and a list join are outside its syntax, so the gate's witnesses are the in-slice families (copy
- * chains, shared, wide, ring, mutual) at one doubling; the full series is the PR's evidence, outside CI.
+ * no completion runs and the analysis is main's: an `add` and a list join are outside its syntax, so the gate's
+ * witnesses are the in-slice families (copy chains, shared, wide, ring, mutual, and since #2667's step 4a-1 author
+ * functions) at one doubling; the full series is the PR's evidence, outside CI.
  */
 
 const GLOBALS = ["hostValue", "hostOther"];
@@ -221,7 +221,7 @@ test("a feedback copy's completion lists finitely many keys, each deeper one in 
 
 test("the copied and direct nested stores owe their checks at every mode's stop", () => {
   // (Astra's round 1 R/Ru witnesses: a destination whose decision read a frozen key has no warning, yet owes; her M2,
-  // the unmarked function result, is outside the slice's syntax, a gate witness below)
+  // the unmarked function result, is a function family below)
   const witnesses: readonly (readonly [string, string, readonly string[]])[] = [
     ['let a = {f: [[1]]}\nlet b = a\nsay "BEFORE"\nb.f = hostValue' + ending, "b.f = hostValue", F],
     ['let o = {f: [[1]]}\nsay "BEFORE"\no.f = hostValue' + ending, "o.f = hostValue", F],
@@ -239,35 +239,17 @@ test("the copied and direct nested stores owe their checks at every mode's stop"
 });
 
 /**
- * Programs outside the candidate slice's syntax, a decision of each freezing: a function's result chain (Astra's C-R1),
- * the unmarked function result (her M2), a checked argument and return, an `add`, a list join, a compound assignment and
- * an interpolation. The candidate route declines them, and the analysis is main's: no receiving obligation, no
- * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221
- * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1–6 units more on four rows; a regression oracle of this gate only), and the route rule's queries since #1073 PR 4 (AD-1: a possible null's route asked at its use, on the rows that have one), and its ways into the use since #2497 (r4-451: the program's jump index, made once, 11 to 44 units on three rows), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
- * then 64's). The last three rows charge 542 to 594 units more at demand 16, and two or three times that at demand 64,
- * since #2764: the nesting index each admission pass builds for `b.f`'s paths with two element steps, all `indexSteps`.
+ * Programs outside the candidate slice's syntax, a decision of each freezing: an `add`, a list join, a compound
+ * assignment and an interpolation. The candidate route declines them, and the analysis is main's: no receiving
+ * obligation, no completion, and every unit charged as on `main` at `92a970442`, its event searches charged by
+ * comparison since #1221, no narrowing index made for a program without a test since #1251, and a read signature's
+ * prefixes found by its charged trie walk since #1822 (`rdWalk`, 1–6 units more on four rows; a regression oracle of
+ * this gate: demand 16's four modes, then 64's). The last three rows charge 542 to 594 units more at demand 16, and two
+ * or three times that at demand 64, since #2764: the nesting index each admission pass builds for `b.f`'s paths with
+ * two element steps, all `indexSteps`. Author functions left this gate in #2667's step 4a-1: `FUNCTIONS`.
  */
 const frozen = `let a = {f: [[1]]}\nlet b = a\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\nb.f = hostValue`;
 const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
-  ["the C-R1 chain", chain(16), [11837, 12196, 11837, 12196, 19438, 13621, 19459, 13621]],
-  [
-    "the unmarked function result",
-    'function make {\n  let r = {nest: {n: [[1]]}}\n  return r\n}\nlet out = make()\nsay "BEFORE"\nout.nest.n = hostValue',
-    [1539, 1617, 1539, 1617, 2424, 2149, 2289, 2149],
-  ],
-  // (at demand 64, a few units more since #1073 PR 2: a consumer's descendant demand looks up its path's narrowing)
-  [
-    "a checked argument",
-    `${chain(4)}\nfunction take(x: integer[]) { }\nlet maybe = null\nif hostValue { maybe = [1] }\ntake(maybe)`,
-    [4958, 5684, 4958, 5412, 7654, 6689, 7675, 6417],
-  ],
-  // (the same lookup's units at demand 64, #1073 PR 2; 33 to 97 more since #2378: `got` is a copy of `give`'s written
-  // result, which A4's copy graph, landings and inherited proofs now read, as for a copy of a declared variable)
-  [
-    "a checked return",
-    `${chain(4)}\nfunction give: integer[] {\n  let maybe = null\n  if hostValue { maybe = [1] }\n  return maybe\n}\nlet got = give()`,
-    [5187, 5881, 5145, 5566, 7465, 6937, 7328, 6622],
-  ],
   ["an add", "let b = [[1]]\nb.add(hostValue)", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],
   // (18 units more at demand 64 since #1828: the mixed join's sentence walks each operand to its leaf and reads its
   // occurrence there, its decider asked once with `decidedAt`'s, Codex r2 on #1899)
@@ -304,6 +286,66 @@ test("outside the slice's syntax the analysis is main's: no inventory, no comple
         at += 1;
       }
     assert.ok(froze > 0, `${name}: a decision freezes`);
+  }
+});
+
+/**
+ * Author functions, inside the slice since #2667's step 4a-1 (until then `OUTSIDE`'s rows, charging main's units):
+ * Astra's C-R1 chain of k function results, her M2 (the unmarked function result, its local stored k more times; k = 0
+ * is the row as it was), and a checked argument and a checked return after a chain of k functions. In every mode and at
+ * both demands where a decision freezes and the completion runs at both sizes, every obligation completes, each
+ * listing is listed at most twice and nothing waits; doubling k at most doubles the work in total and by counter.
+ */
+const FUNCTIONS: readonly (readonly [string, (k: number) => string])[] = [
+  ["the C-R1 chain", chain],
+  [
+    "the unmarked function result",
+    (k) =>
+      `function make {\n  let r = {nest: {n: [[1]]}}\n${lines(k, (i) => `  r = {nest: {n: [[${i}]]}}`)}\n  return r\n}\n` +
+      'let out = make()\nsay "BEFORE"\nout.nest.n = hostValue',
+  ],
+  [
+    "a checked argument",
+    (k) =>
+      `${chain(k)}\nfunction take(x: integer[]) { }\nlet maybe = null\nif hostValue { maybe = [1] }\ntake(maybe)`,
+  ],
+  [
+    "a checked return",
+    (k) =>
+      `${chain(k)}\nfunction give: integer[] {\n  let maybe = null\n  if hostValue { maybe = [1] }\n  return maybe\n}\nlet got = give()`,
+  ],
+];
+
+test("an author function's family inside the slice completes where it freezes, its work linear in its length (#2667)", () => {
+  for (const [name, family] of FUNCTIONS) {
+    let completed = 0;
+    for (const demand of [16, 64])
+      for (const mode of HELD_MODES) {
+        const sizes = [16, 32].map((k) => analyse(family(k) + ending, mode, demand));
+        if (sizes.some((answers) => answers.budget.closure === null)) continue;
+        completed += 1;
+        const at = `${name}, ${mode.name}, demand ${demand}`;
+        const measured = sizes.map((answers) => {
+          assert.deepEqual(
+            answers.receiving.filter((r) => r.result === null || r.result.state !== "complete"),
+            [],
+            at,
+          );
+          const { counts } = answers.budget.closure!;
+          assert.ok(counts.listings <= 2 * counts.cells, `${at}: ${counts.listings} listing runs`);
+          assert.equal(counts.unchanged, 0, at);
+          assert.equal(counts.transactions, 0, at);
+          return { counts, total: answers.budget.total };
+        });
+        const [small, large] = [measured[0]!, measured[1]!];
+        assert.ok(large.total / small.total <= DOUBLING, `${at}: total`);
+        for (const counter of ["decisions", "listings", "edges", "extractions"] as const)
+          assert.ok(
+            large.counts[counter] / Math.max(1, small.counts[counter]) <= DOUBLING,
+            `${at}: ${counter}`,
+          );
+      }
+    assert.ok(completed > 0, `${name}: some mode completes`);
   }
 });
 
