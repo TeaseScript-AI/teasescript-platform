@@ -18,7 +18,7 @@ The current repository uses:
 - real source-to-runtime tests where public behavior crosses parser, compiler, instruction-plan, and runtime boundaries;
 - deterministic RNG seeds, JSON checkpoint round trips, and runtime resume-equivalence coverage;
 - playground HTTP and static-path security tests;
-- a dependency-free Chromium DevTools smoke script for implemented playground and Player browser behavior; and
+- a dependency-free Chromium DevTools smoke script for implemented playground and Playroom browser behavior; and
 - a small repository-owned deterministic property campaign for runtime and source-pipeline boundaries.
 
 The repository currently has no browser-automation dependency and no external property-testing dependency. New dependencies require a demonstrated need and the normal maintenance and security review.
@@ -43,10 +43,10 @@ the framework-independent `player/` no `player/vue/`); cycles through imports th
 refused. Not seen: a `<script src>` block, a `.js` file beside a same-name `.ts` (read as the `.js`), and a `.vue` file
 Vue's parser refuses (vue-tsc refuses it in CI). `tools/repository-checks/imports.mjs` lists the boundaries with their
 sources, the packages each area may import with their reasons, the generated-component exception, and what no document
-declares. `npm run check:readme-paths` checks that every backticked path in the Player's two maps (`player/README.md`,
+declares. `npm run check:readme-paths` checks that every backticked path in the Playroom's two maps (`player/README.md`,
 `player/vue/src/README.md`) names a tracked file or folder; `tools/repository-checks/readme-paths.mjs` says which
-spans it reads and which it skips. `npm run lint:design` and `npm run test:lint:design` check the [Player design
-contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
+spans it reads and which it skips. `npm run lint:design` and `npm run test:lint:design` check the [Playroom design
+contracts](LINTING.md#playroom-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/check/run-parallel.mjs`; the pre-test gates
 are the npm scripts `tools/check/check-pretest-steps.txt` lists, one per line.
 `npm run check` (`tools/check/run-check.mjs`) runs the build and the compiled tests also when a pre-test check failed, and
@@ -91,7 +91,7 @@ folders down (none deeper), except under `fixtures/` and `helpers/`, which hold 
 in `tools/test-runner/test-shards.mjs`); a file is named by its path under `tests/`, one at the top by its name alone.
 Lists keyed by file path (inventories, ratchets, census tools) break silently when a file moves, and only the full
 suite catches them: a change that moves code first searches for the old path and names the hits in its plan.
-`npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file, and ends with each named file's test counts (`ℹ <file>: N passed`, and `; the file failed outside any test` when it threw while loading or its process ended non-zero); a named file that ran no test (a suite alone is none) fails the run, unless the tests were selected (a name or skip pattern, or `--test-only`, as an argument or in `NODE_OPTIONS`), where its line says the selection matched no test in it; the per-file counts, and this check, need Node's default process isolation, and a watch run is not checked per cycle; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis. A compiled-only run (`node tools/test-output-filter.mjs dist/tests/<file>.test.js` after `npm run build:typescript`) fails every Player test that loads a module when `dist/player-test-modules` was built before a file of the checkout changed, a test file included; `npm run build:player-test-modules` rebuilds it. In the full suite and for named files, a test, or one of its hooks, that waits 5 minutes fails (`TEST_LIMIT_MS`, `tools/test-runner/test-in-flight.mjs`), so an asynchronous hang fails by name (its line can wait until earlier files have reported); synchronous work is not ended. A test or hook that needs longer sets its own `timeout`.
+`npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file, and ends with each named file's test counts (`ℹ <file>: N passed`, and `; the file failed outside any test` when it threw while loading or its process ended non-zero); a named file that ran no test (a suite alone is none) fails the run, unless the tests were selected (a name or skip pattern, or `--test-only`, as an argument or in `NODE_OPTIONS`), where its line says the selection matched no test in it; the per-file counts, and this check, need Node's default process isolation, and a watch run is not checked per cycle; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis. A compiled-only run (`node tools/test-output-filter.mjs dist/tests/<file>.test.js` after `npm run build:typescript`) fails every Playroom test that loads a module when `dist/player-test-modules` was built before a file of the checkout changed, a test file included; `npm run build:player-test-modules` rebuilds it. In the full suite and for named files, a test, or one of its hooks, that waits 5 minutes fails (`TEST_LIMIT_MS`, `tools/test-runner/test-in-flight.mjs`), so an asynchronous hang fails by name (its line can wait until earlier files have reported); synchronous work is not ended. A test or hook that needs longer sets its own `timeout`.
 `node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, `merge commits`, format, oxlint, knip, the doc links, the imports, `test:lint` for every change that is not documentation only, and the type checks and tool tests selected by every touched path, deleted ones and both sides of a move included; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash. In a checkout the queue has already merged with its base (`--merged-with`), run `--merged-checkout "$SX_MERGED_HEAD" --base "$SX_MERGED_BASE"` instead (the queue sets both), so that `merge commits` judges the head's merge commits and not the queue's own merge.
 `node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a remote-tracking ref, or an archived or pull-request head on `origin`; a tree or blob hash only exists), and finds its unfilled placeholders and its closing clauses that name several issues after one keyword; it names and counts, without failing, the paths it reads into the scratch area `/tmp/agent-work/`, a count that claims no completeness (its header lists the rules and what it does not read); it never fetches. `--append` writes its last line into the checked file as that file's last line, replacing its earlier one, so the report sent is that file.
 `tools/archive-replaced-heads.mjs` is a `pre-push` hook: before a push deletes or rewrites a ref on the remote, it pushes the old value to `refs/archive/<sha>` there and keeps the same ref in this clone, and refuses the push when it cannot or when the push would delete or rewrite an archive (its header lists the rules and the limit).
@@ -194,7 +194,7 @@ before it. An empty cell has no corpus yet.
 | Runtime | `npm run check` | the [conformance corpus](#source-to-runtime-conformance-corpus) run at base and at head, outcomes compared; once the runtime differential harness exists (#1797), its campaign | |
 | Backend | none yet: its checks, compatibility documents, and area label come when the backend exists | | |
 | Website front end | none yet: its checks and area label come when the front end exists | | |
-| Player | `npm run check`; the [scoped visual check](#player-browser-and-visual-verification) after a visible UI change; [`npm run test:player:browser`](#local-browser-smoke-and-future-host-e2e-gate) for a change to `player/` or its fixture packages | `npm run test:player:browser` plus [`npm run test:player:preview`](#player-browser-and-visual-verification) | a real-device check |
+| Playroom | `npm run check`; the [scoped visual check](#playroom-browser-and-visual-verification) after a visible UI change; [`npm run test:player:browser`](#local-browser-smoke-and-future-host-e2e-gate) for a change to `player/` or its fixture packages | `npm run test:player:browser` plus [`npm run test:player:preview`](#playroom-browser-and-visual-verification) | a real-device check |
 
 The compiler's [shadow comparison](#the-shadow-comparison) is a campaign run when it is expected to find defects and
 reported on the tracker issue; it is not a per-pull-request level.
@@ -437,7 +437,7 @@ performance benchmarks
 Focused tests isolate syntax, diagnostics, lowering, validators, and runtime operations. Source-to-runtime tests prove
 that the public compilation and execution path preserves the accepted behavior. Runtime invariant and state-validation
 tests cover explicit serializable state and restore boundaries. Future integration and browser tests cover concrete
-player/host surfaces after those surfaces exist.
+Playroom/host surfaces after those surfaces exist.
 
 New author-facing syntax and source-reachable observable behavior require
 representative source-to-runtime coverage. Runtime-only primitives without a
@@ -447,10 +447,10 @@ proof; revisit both handoff witnesses when a feature runs a component's first co
 
 End-to-end testing does not replace focused unit, validator, and invariant tests.
 
-## Player browser and visual verification
+## Playroom browser and visual verification
 
 Use focused unit tests for deterministic presentation logic and the repository's local Chromium smoke route for changed
-browser behavior. While the Player UI is a proof of concept, keep these checks coarse: the Player loads, plays the demo,
+browser behavior. While the Playroom UI is a proof of concept, keep these checks coarse: the Playroom loads, plays the demo,
 its main controls work, and settled text stays readable. Behavior that took repeated fixes keeps focused checks, such
 as scrolling that must feel the same over the conversation, beside it, and over its scrollbar, and focus and input. Do
 not pin animations, timings, exact colours, or layout; the scoped visual check below covers those by eye. The existing
@@ -470,14 +470,14 @@ limit, leaves the folder as far as it was written and prints no folder line: a g
 when the group fails, not when the run is ended. The preview's dependency cache is never among the kept artifacts: the
 run's cleanup removes it, and a run ended before its cleanup leaves it.
 `npm run test:player:firefox-camera` keeps its failure artifacts the same way (`tools/failure-artifacts.mjs`).
-`npm test` separately checks that the default Player build does not statically load development preview content, and
+`npm test` separately checks that the default Playroom build does not statically load development preview content, and
 `tests/player/player-demo.test.ts` plays the repository demo to its exit through the runtime adapter and media device.
 
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
 (computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This
 is a scoped visual check, not a full UI audit; it catches clipping, overlap, unreadable wrapping, misplaced popovers,
 and other failures that source assertions or DOM semantics do not prove. A timing defect's regression test uses
-deterministic delays or fakes, not a device. Use a real device only to judge feel, for the Player's level 3 evidence
+deterministic delays or fakes, not a device. Use a real device only to judge feel, for the Playroom's level 3 evidence
 ([Checks and corpora by component](#checks-and-corpora-by-component)), or when the behavior depends on mobile browser
 chrome, a software keyboard, safe areas, or input hardware that emulation cannot reproduce.
 
@@ -507,7 +507,7 @@ call that did not register, a file whose declarations cannot be listed, and each
 fails for another reason, does not finish, or does not run. A case of another pull request does not run when that one is
 merged into the base (a commit subject ending `(#N)` in the base's `git log`), and is reported otherwise. Name what the
 fix adds by string (`{ name: "ForeignSessionError" }`), not by import, or the file does not load at the base. The base
-is compiled with `tsc` and its Player test bundles are built, so a case may load a Player module
+is compiled with `tsc` and its Playroom test bundles are built, so a case may load a Playroom module
 (`tests/helpers/player-modules.ts`). What the report does not establish, which is why it is not enforced: that an id
 names the same declaration at the base (the base's compilation can move a call site, and a loop can register its rows in
 another order), that every way of calling `regressionCase` is found, and that the selected cases run alone (another
@@ -1096,7 +1096,7 @@ tests remain the evidence for their detailed boundaries.
 
 ## Interactive runtime state-machine testing
 
-ADR 0016 defines the shared pending-action runtime contract. Every implemented choice, input, wait, timer, button, media completion, or future typed player action requires deterministic state-machine testing against that contract.
+ADR 0016 defines the shared pending-action runtime contract. Every implemented choice, input, wait, timer, button, media completion, or future typed Playroom action requires deterministic state-machine testing against that contract.
 
 Representative transitions include:
 
@@ -1152,7 +1152,7 @@ are rejected locally rather than supported through global interaction-result liv
 remain implementation-boundary regressions for the provisional POC policies and structural separation; they are not
 source-capacity evidence and must move with later evidence-based reassessment. Every rejected completion compares
 the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot
-change unnoticed. The local playground Player slice adds deterministic controller coverage for active-presentation
+change unnoticed. The local playground Playroom slice adds deterministic controller coverage for active-presentation
 inspection, all four interaction completions and rejections, pacing skip, explicit time, and checkpoint reconstruction.
 
 The implemented ADR 0018 `say` pacing slice adds source-to-runtime coverage for contextual skip/pacing syntax, captured
@@ -1174,10 +1174,10 @@ blocks.
 
 Permanent button coverage starts with real `.tease` source and exercises clicks during waits and questions, queued,
 busy, removed, and early clicks, removal, and file-entry ownership across `call`, `end`, `goto`, and `exit`. The shared
-resume-equivalence helper takes an optional simulated Player that clicks permanent buttons whenever execution waits,
+resume-equivalence helper takes an optional simulated Playroom that clicks permanent buttons whenever execution waits,
 so restore is checked at every boundary with buttons shown and blocks running.
 
-Player adapter coverage derives presented timers and observation deadlines from real `.tease` fixtures, catches up
+Playroom adapter coverage derives presented timers and observation deadlines from real `.tease` fixtures, catches up
 late observations, and restores the same timer state from a checkpoint. Malformed timer, handler, suspended-action, and handle-reference state is rejected
 through public validation/restore paths.
 
@@ -1185,8 +1185,8 @@ Media coverage starts with real `.tease` source and exercises accepted and rejec
 blocking and asynchronous waits including terminal ones, bounded and indefinite repetition, seeks and endpoint cues,
 `elapsed` excluding pauses and stalls, one-late versus many-small progress observations, same-time ordering across
 media and timers, cue blocks with self-handles, Stage replacement, playback projections, JSON
-checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
-`tests/player/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
+checkpoint/restore equivalence with a simulated Playroom, and rejection of malformed media state.
+`tests/player/player-media-device.test.ts` drives the Playroom's media device against real sessions with deterministic element
 stand-ins: single load reports, stalls, range repetition and terminal stop, overlapping instances of one file that each
 play out once, also after a late `seeked` notification or a rounding error at the range end, pause/resume/seek
 repositioning, refused playback and retry also within the end tolerance, failed video and unavailable sources, restore
@@ -1196,7 +1196,7 @@ actually played audio.
 
 ## Local browser smoke and future host E2E gate
 
-The playground and the Player's repository demo have a reproducible Chromium smoke route, which builds first:
+The playground and the Playroom's repository demo have a reproducible Chromium smoke route, which builds first:
 
 ```shell
 npm run test:player:browser
@@ -1212,10 +1212,10 @@ It covers the technical playground and, on the built `/player/` route with trust
 end without console errors: a typed answer, buttons, presses on a message, not on a control, that skip pacing, Space
 that skips pacing or presses a `showButton`, Stage images, audible sounds, and smart follow with Return to latest; it
 also starts over plain HTTP on a local-network name.
-It opens fixture packages by URL in the Player and the playground, including one that does not compile; checks
+It opens fixture packages by URL in the Playroom and the playground, including one that does not compile; checks
 script storage, a session kept across a reload with an image the script asked for, saved data exported and imported into
 a fresh profile, a session exported from one fresh profile and continued in another, the debug export after a script error, the rewind history's IndexedDB store, readable text once photo
-colours and the vignette have settled, a photo shown again from the Player's cache with its colour, the reading position
+colours and the vignette have settled, a photo shown again from the Playroom's cache with its colour, the reading position
 while messages change and enter, and the camera with Chromium's two fake cameras, also the camera view's mirror and
 Switch camera buttons clicked on a phone-sized screen and a camera that stops delivering frames opening again. Firefox
 captures camera frames differently: after `npm run build`, `npm run test:player:firefox-camera` drives Firefox's single
@@ -1225,7 +1225,7 @@ tried before the `/usr/bin` Chromium paths and then the newest Playwright-manage
 to them. An unavailable Chromium executable is an explicit skip; an available browser must pass the configured smoke
 checks.
 
-Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
+Production browser E2E coverage becomes required after the cross-origin host shell and Playroom exist. It should then
 include:
 
 - iframe sandboxing;
@@ -1236,7 +1236,7 @@ include:
 - Standard UI, extending the same browser matrix to package custom UI once custom views are implemented;
 - focus and keyboard behavior;
 - fullscreen and navigation;
-- invalid host/player messages.
+- invalid host/Playroom messages.
 
 Select the production host's browser-automation stack when that concrete surface exists, based on the engines,
 accessibility checks, isolation boundaries, cost, and stability it must prove. The current dependency-free Chromium
@@ -1244,7 +1244,7 @@ smoke does not predetermine that later tooling decision.
 
 ## The L5 activation gate kit
 
-`tools/player-gate/` measures what the L5 gate's cost report needs to decide whether the Player's engine moves into its
+`tools/player-gate/` measures what the L5 gate's cost report needs to decide whether the Playroom's engine moves into its
 Worker: real browsers and the Pixel 4a, outside CI, never a threshold; it changes no product file. Every value a cell
 reports derives from records that passed the kit's shared validation: each row is parsed once against its scenario's
 closed shape, and the derivations read only those validated copies; every cell is `measured, validated`. The headline, the summary and the R0 comparison hold timings and
