@@ -10,7 +10,6 @@ import {
   type DerivedType,
   site,
   syntaxOf,
-  allStatements,
   storeOf,
   unwrap,
   selected,
