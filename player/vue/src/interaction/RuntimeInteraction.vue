@@ -19,7 +19,6 @@ import {
   playerRuntimeUrlRequest,
   playerRuntimeForeground,
   playerRuntimePacingGate,
-  playerRuntimeQuestionAgain,
   type PlayerSession,
 } from "../../../runtime/runtime-view.js";
 import Composer from "./Composer.vue";
@@ -156,36 +155,6 @@ const foreground = computed(() => {
   const value = playerRuntimeForeground(session);
   presented =
     id === undefined ? null : { plan: session.planToken, reset: props.reset, actionId: id, value };
-  return value;
-});
-// The question's line again (`playerRuntimeQuestionAgain`), worked out anew only when the session's plan, reset,
-// transcript revision or presented action changes, so time observations neither walk the transcript nor re-render it.
-let askedAgain: {
-  readonly plan: string;
-  readonly reset: number;
-  readonly revision: number;
-  readonly actionId: number | undefined;
-  readonly value: ReturnType<typeof playerRuntimeQuestionAgain>;
-} | null = null;
-const questionAgain = computed(() => {
-  const session = props.session;
-  if (!session) return null;
-  const id = actionId.value;
-  if (
-    askedAgain?.plan === session.planToken &&
-    askedAgain.reset === props.reset &&
-    askedAgain.revision === session.transcriptRevision &&
-    askedAgain.actionId === id
-  )
-    return askedAgain.value;
-  const value = playerRuntimeQuestionAgain(session);
-  askedAgain = {
-    plan: session.planToken,
-    reset: props.reset,
-    revision: session.transcriptRevision,
-    actionId: id,
-    value,
-  };
   return value;
 });
 // A form's answers change with each edit, unlike the rest of its presentation.
@@ -811,7 +780,6 @@ function escape() {
           :jumped-revision="jumpedRevision ?? -1"
           :removed-rows="removedRows ?? []"
           :pending="submission.predicted.value"
-          :asked-again="consumed !== actionId ? questionAgain : null"
           :bottom-inset="bottomInset"
         >
           <template #foreground>

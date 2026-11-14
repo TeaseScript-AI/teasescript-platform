@@ -10,79 +10,14 @@ import {
   restorePlayerRuntimeSession,
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
-  submitPlayerRuntimeComposer,
   playerRuntimeSnapshot,
   type PlayerRuntimeSession,
 } from "../../player/runtime/runtime-adapter.js";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import {
   playerRuntimeForeground,
-  playerRuntimeQuestionAgain,
   playerRuntimeTranscript,
 } from "../../player/runtime/runtime-view.js";
-
-test("a question a block's question interrupted shows its line again once the block is answered, until it is answered", () => {
-  let session = createPlayerRuntimeSession(
-    [
-      "timer async 10 s {",
-      '    say "Surprise?", instant',
-      '    let surprise = askChoice "Yes", "No"',
-      "}",
-      'let animal = askText "Name an animal."',
-      'say "You said ${animal}.", instant',
-      'let done = askChoice "Done"',
-      "exit",
-    ].join("\n"),
-  );
-  assert.equal(playerRuntimeQuestionAgain(session), null, "its line is the latest");
-  const asked = session.transcriptEntries.at(-1)!;
-  session = observePlayerRuntimeTime(session, 11_000)!.session;
-  assert.equal(
-    playerRuntimeQuestionAgain(session),
-    null,
-    "the block's question: its line is the latest",
-  );
-  const yes = playerRuntimeForeground(session);
-  assert.ok(yes?.kind === "choose");
-  session = selectPlayerRuntimeChoice(session, yes.options[0]!.id)!.session;
-  const again = playerRuntimeQuestionAgain(session);
-  assert.ok(again !== null);
-  assert.equal(again.text, "Name an animal.");
-  assert.equal(again.speakerId, asked.kind === "message" ? asked.speakerId : undefined);
-  assert.notEqual(again.id, asked.id, "a row of its own");
-  session = submitPlayerRuntimeComposer(session, "Cat")!.session;
-  assert.equal(
-    playerRuntimeQuestionAgain(session),
-    null,
-    "answered: the next question's line is the latest",
-  );
-});
-
-test("a question without its own line shows no other line again, asked after an answer or interrupted", () => {
-  let session = createPlayerRuntimeSession(
-    [
-      'let rounds = askText "How many rounds?"',
-      "timer async 10 s {",
-      '    say "Surprise?", instant',
-      '    let surprise = askChoice "Yes", "No"',
-      "}",
-      'let speed = askChoice "Slow", "Fast"',
-      "exit",
-    ].join("\n"),
-  );
-  session = submitPlayerRuntimeComposer(session, "3")!.session;
-  assert.equal(playerRuntimeQuestionAgain(session), null, "the latest entry is an answer");
-  session = observePlayerRuntimeTime(session, 11_000)!.session;
-  const yes = playerRuntimeForeground(session);
-  assert.ok(yes?.kind === "choose");
-  session = selectPlayerRuntimeChoice(session, yes.options[0]!.id)!.session;
-  assert.ok(playerRuntimeForeground(session)?.kind === "choose");
-  assert.equal(
-    playerRuntimeQuestionAgain(session),
-    null,
-    "interrupted, its latest entry is still an answer",
-  );
-});
 
 test("a message update replaces its row in place, keeping its identity, speaker, and presentation", () => {
   let session = createPlayerRuntimeSession(
