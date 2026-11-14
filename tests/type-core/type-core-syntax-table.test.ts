@@ -373,6 +373,20 @@ const CONDITIONS: readonly Condition[] = [
     what: "this written type",
   },
   {
+    row: "functionDeclaration",
+    condition: "a parameter's written type of the slice",
+    source: "function f(x: integer | string) {\n  say x\n}",
+    at: "integer | string",
+    what: "this written type",
+  },
+  {
+    row: "functionDeclaration",
+    condition: "a result's written type of the slice",
+    source: "function f: integer | string {\n  return 1\n}",
+    at: "integer | string",
+    what: "this written type",
+  },
+  {
     row: "callExpression",
     condition: "one of `sliceCall`'s shapes",
     source: "let n = toInteger(hostValue)",
@@ -719,6 +733,7 @@ const UNCONDITIONAL: readonly SyntaxKind[] = [
   "stopAudioStatement",
   "deleteStatement",
   "exitStatement",
+  "returnStatement",
   "ifStatement",
   "repeatStatement",
   "forStatement",

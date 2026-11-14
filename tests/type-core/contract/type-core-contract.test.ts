@@ -715,7 +715,9 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
     "a copy of a parameter no call reaches",
     'let bad = {p0: "x"}\nfunction f(x) {\n  let a = x\n  let b = a\n  a = b\n  b = bad\n  say "${a.p0}"\n}\nexit\n',
     {
-      record: "1c31c49184a58f96",
+      // (since #2667's step 4a-1 the route takes functions and stops at the `say`; the record itself is main's, the
+      // route's before was `1c31c49184a58f96`)
+      record: "03ceca9e436a02cf",
       upToOrder: "e721593c76151fe3",
       compact: [
         "valid",
