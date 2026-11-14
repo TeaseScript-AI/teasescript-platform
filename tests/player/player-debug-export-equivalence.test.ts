@@ -17,8 +17,9 @@ import type { RuntimeSnapshot } from "../../src/index.js";
 /*
  * L5h.3b's export equivalence (L5h's HEAD 0, family 5): the scenarios of `tests/fixtures/debug-export-equivalence/`, assembled
  * on the head's path (the host prepares the plan's hash and replay data, `exportPrepare`), give the file JSON the base's
- * assembler gave (`fixture.json`, written once by `generate.mjs` at the base; its format revision fields follow the
- * format revisions, and nothing else in it changes without a stated reason). Every row is compared
+ * assembler gave (`fixture.json`, written once by `generate.mjs` at the base; its format revision fields, and the
+ * package's content hash, a hash of the plan with its revision, follow the format revisions, and nothing else in it
+ * changes without a stated reason). Every row is compared
  * unconditionally: its file text equals the fixture's, with no exception list. 3b's changes of what an export holds
  * (the marks and incident from the capture) are decided before the assembler, in the export observation family.
  */
