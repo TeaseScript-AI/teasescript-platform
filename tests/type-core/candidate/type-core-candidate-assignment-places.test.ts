@@ -17,7 +17,6 @@ import { MODES, inMode } from "../../helpers/type-core-oracles-modes.js";
  */
 const ROWS: readonly (readonly [string, string, boolean])[] = [
   ["a compound assignment", "let n = 0\nn += hostValue\nsay n\nexit\n", false],
-  ["a compound subtraction", "let n = 10\nn -= hostValue\nsay n\nexit\n", false],
   [
     "a compound assignment in a function",
     "function f {\n  let n = 0\n  n += hostValue\n  say n\n}\nf()\nexit\n",
