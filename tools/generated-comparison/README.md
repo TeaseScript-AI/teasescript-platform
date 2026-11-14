@@ -18,7 +18,9 @@ line per program, then the counts per verdict.
   answer; everything before it was compared, and it is never a whole-session match).
 - `refused`: the generator does not admit a form of the plan yet (`GenerationRefused`). Until S1 every plan is refused.
 - `differs`: the first operation whose records differ, with the mismatches.
-- `outside`: today's engine reached a limit of [the resource-limit registry](../../docs/RESOURCE-LIMITS.md).
+- `outside`: today's engine ran out of its instruction budget (`TSR037`, `runtime.instruction-budget-default` in
+  [the resource-limit registry](../../docs/RESOURCE-LIMITS.md)), which counts its own instructions. The registry's other
+  limits measure values both sides compute alike, so reaching one is compared like any failure.
 - From the command only: `notCompiled`, `timeout`, `error`.
 
 ## What is compared

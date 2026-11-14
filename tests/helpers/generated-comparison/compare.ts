@@ -23,8 +23,8 @@ import { projectRecord } from "./record.js";
  *   match);
  * - `refused`: the generator does not admit a form of the plan yet;
  * - `differs`: the first operation whose records differ;
- * - `outside`: today's engine reached a limit of the resource-limit registry (`docs/RESOURCE-LIMITS.md`), which
- *   generated code need not reach the same way. A fault only the generated side reaches is a difference.
+ * - `outside`: today's engine ran out of its instruction budget, which generated code does not count the same way. A
+ *   fault only the generated side reaches is a difference.
  */
 export type ComparisonVerdict =
   | {
@@ -62,16 +62,11 @@ const ANSWERS = 2_000;
 const SCENE_TIME_MS = 6 * 60 * 60 * 1000;
 
 /**
- * The runtime codes `docs/RESOURCE-LIMITS.md` registers; `generated-comparison.test.ts` keeps this list equal to it.
+ * The failure of today's run out of its instruction budget (`runtime.instruction-budget-default` in
+ * `docs/RESOURCE-LIMITS.md`), which counts the interpreter's own instructions. The registry's other limits measure values
+ * both sides compute alike, so a run that reaches one is compared like any other failure.
  */
-export const RESOURCE_LIMIT_CODES: readonly string[] = [
-  "TSR037",
-  "TSR045",
-  "TSR059",
-  "TSR084",
-  "TSR087",
-  "TSR088",
-];
+const INSTRUCTION_BUDGET = "TSR037";
 
 /**
  * Compares the code the stage generates for `input.plan` with today's engine. `generate` defaults to a stub that refuses
@@ -120,7 +115,7 @@ export function compareSessions(
     const theirs = apply(generated, operation, host);
     const todayState = today.state();
     const failure = todayState.snapshot.failure;
-    if (failure !== null && RESOURCE_LIMIT_CODES.includes(failure.code))
+    if (failure !== null && failure.code === INSTRUCTION_BUDGET)
       return { kind: "outside", limit: failure.code, operation: index };
     const compared = compareStructures(
       projectRecord({ ...mine, ...todayState }),

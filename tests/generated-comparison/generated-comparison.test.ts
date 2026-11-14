@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -17,7 +17,6 @@ import {
   compareSessions,
   type ComparisonInput,
   type ComparisonVerdict,
-  RESOURCE_LIMIT_CODES,
 } from "../helpers/generated-comparison/compare.js";
 import {
   type ComparedSession,
@@ -397,12 +396,36 @@ test("the entry sets up the generated side with its own host call", async () => 
   assert.equal(calls, 1);
 });
 
-test("the resource-limit codes are the runtime codes the registry lists", () => {
-  const registry = readFileSync(
-    new URL("../../../docs/RESOURCE-LIMITS.md", import.meta.url),
-    "utf8",
-  );
-  assert.deepEqual([...new Set(registry.match(/TSR\d{3}/gu))].sort(), [...RESOURCE_LIMIT_CODES]);
+test("a failure that is not the instruction budget is compared, also one with a code a registered limit shares", () => {
+  const source =
+    'let name = askText "file?"\nlet lock = encryptFile(name, password: "p", publicKey: false, timeLock: false)\nexit';
+  const alike = compare(source);
+  assert.equal(alike.kind === "matched" && alike.ended, "failed");
+  const different = compare(source, {
+    state: (state) =>
+      state.snapshot.status === "failed"
+        ? edited(state, (snapshot) => ({ ...snapshot, nextEventSequence: -1 }))
+        : state,
+  });
+  assert.equal(different.kind, "differs");
+});
+
+test("a record outside plain data is no match: holes, extra array keys, class instances, maps, dates", () => {
+  class Event {
+    public readonly kind = "say";
+  }
+  const sparse: unknown[] = [];
+  sparse.length = 1;
+  const keyed: unknown[] = Object.assign([], { extra: 1 });
+  for (const event of [sparse, keyed, new Event(), new Map(), new Date(0)])
+    assert.throws(
+      () =>
+        compare("exit", {
+          result: (kind, _input, result) =>
+            kind === "run" ? { ...result, events: [...result.events, event] } : result,
+        }),
+      TypeError,
+    );
 });
 
 test("a 10,000-level value is projected without exhausting the call stack", () => {

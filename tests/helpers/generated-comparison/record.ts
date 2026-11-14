@@ -101,8 +101,9 @@ function project(value: unknown, topLevel: boolean): PlainData {
 }
 
 /**
- * `value` as it is when it holds nothing, else an empty copy queued on `work` to be filled. A value outside plain data
- * (`undefined`, a function, a symbol, a bigint) is a defect of the side that gave it, not something to compare.
+ * `value` as it is when it holds nothing, else an empty copy queued on `work` to be filled. Plain data is `null`, text,
+ * numbers, booleans, and the containers `isPlainContainer` admits. Anything else (`undefined`, a function, a sparse
+ * array, a class instance, a `Map`, a `Date`, ...) is a defect of the side that gave it, not something to compare.
  */
 function shell(
   value: unknown,
@@ -116,9 +117,43 @@ function shell(
     typeof value === "boolean"
   )
     return value;
-  if (typeof value !== "object")
-    throw new TypeError(`A compared record holds ${typeof value}, which is not plain data.`);
+  if (typeof value !== "object" || !isPlainContainer(value))
+    throw new TypeError(`A compared record holds a value outside plain data (${describe(value)}).`);
   const copy: Container = Array.isArray(value) ? [] : {};
   work.push([value, copy, top]);
   return copy;
+}
+
+/**
+ * Whether `value` is a dense array with no other own keys, or an object with no symbol keys whose prototype is an
+ * `Object.prototype` or `null`. An object's prototype is judged by the depth of its chain, not by identity: a
+ * snapshot's arrays and objects need not have this realm's prototypes.
+ */
+function isPlainContainer(value: object): boolean {
+  if (Array.isArray(value)) {
+    if (Reflect.ownKeys(value).length !== value.length + 1) return false;
+    for (let index = 0; index < value.length; index += 1)
+      if (!Object.hasOwn(value, index)) return false;
+    return true;
+  }
+  return prototypeDepth(value) <= 1 && Object.getOwnPropertySymbols(value).length === 0;
+}
+
+/** How many prototypes stand between `value` and the end of its chain: 1 for a plain object, more for a class's. */
+function prototypeDepth(value: object): number {
+  let depth = 0;
+  for (
+    let at: object | null = Object.getPrototypeOf(value);
+    at !== null;
+    at = Object.getPrototypeOf(at)
+  )
+    depth += 1;
+  return depth;
+}
+
+function describe(value: unknown): string {
+  if (typeof value !== "object" || value === null) return typeof value;
+  return Array.isArray(value)
+    ? "an array with holes or other keys"
+    : (value.constructor?.name ?? "an object");
 }
