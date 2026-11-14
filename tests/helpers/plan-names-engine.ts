@@ -1,4 +1,5 @@
 import { planNames, type PlanNames, type Variable } from "../../src/compiler/javascript/names.js";
+import { PlanControlFlow } from "../../src/plan/control-flow.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import type { InterpreterEvent } from "../../src/runtime/events.js";
 import { createFreshRuntimeSession } from "../../src/runtime/session.js";
@@ -17,13 +18,15 @@ import {
  * each instruction, the variables `planNames` says it declares are looked up, and the scope the engine finds each in
  * gets that variable for that name; a media block's own handle as the block starts.
  *
- * At each read: the engine's `"global"` must be a global to `planNames`; a scope the engine finds must carry the label
- * of the very variable `planNames` names, and be labelled at all. A name the engine finds nowhere is either a file's
- * top-level variable not set yet, which `planNames` must name as that file's variable (a read on a way not taken, such
- * as `7 otherwise x`, or one that faults as ADR 0022 §3.4 says), or no variable at all (a host value not given, the
- * contextual `speaker`). The engine cannot tell those apart, so a global to `planNames` is checked against the plan
- * instead, at every read whether it runs or not: no global shares a name with a variable of the project (V30 §12 and
- * V30 §14), so a global that a `let`, loop, parameter or media block's handle names is wrong.
+ * At each read: the target must carry the name read. The engine's `"global"` must be a global to `planNames`; a scope
+ * the engine finds must carry the label of the very variable `planNames` names, and be labelled at all. A name the
+ * engine finds nowhere is either a file's top-level variable not set yet (a read on a way not taken, such as
+ * `7 otherwise x`, or one that faults as ADR 0022 §3.4 says), or no variable at all (a host value not given, the
+ * contextual `speaker`). Then a variable `planNames` names must be the one the plan's file declares at its top level
+ * under that name, outside a global function; a global is checked against the plan instead, at every read whether it
+ * runs or not: no global shares a name with a variable of the project (V30 §12 and V30 §14), so a global that a `let`,
+ * loop, parameter or media block's handle names is wrong. A file's top-level variable is declared in its root region,
+ * once per name.
  *
  * One scope variable labelled with two static variables is a mismatch too, as is a static variable declared by two
  * instructions (two parameter bindings excepted), which would merge two variables the engine keeps apart without any
@@ -79,10 +82,48 @@ export function checkNamesAgainstEngine(
     for (const parameter of definition.parameters) variableNames.add(parameter.name);
     if (definition.selfHandle !== null) variableNames.add(definition.selfHandle);
   }
+  // One variable per declaration: a parameter is bound where it is supplied or where its default is; any other
+  // variable by one instruction, which may run many times.
+  const declarers = new Map<Variable, number[]>();
   for (let index = 0; index < plan.instructions.length; index += 1)
-    for (const [name, target] of names.readsAt(index))
+    for (const variable of names.declaredAt(index)) {
+      const list = declarers.get(variable) ?? [];
+      list.push(index);
+      declarers.set(variable, list);
+    }
+  for (const [variable, list] of declarers)
+    if (list.length > (variable.kind === "parameter" ? 2 : 1))
+      mismatches.push(
+        `v${variable.id} '${variable.name}' is declared by instructions ${list.join(", ")}`,
+      );
+  // A file's top-level variable of a name, by the file whose root region declares it: one per file and name.
+  const fileRoots = new Map<string, Variable>();
+  const flow = new PlanControlFlow(plan);
+  for (const [variable, [declarer]] of declarers) {
+    if (variable.kind !== "root") continue;
+    const file = flow.fileOf(declarer!);
+    const region = plan.files[file]!;
+    const key = `${file} ${variable.name}`;
+    if (declarer! >= region.rootEndInstruction || fileRoots.has(key))
+      mismatches.push(
+        `v${variable.id} '${variable.name}' is no top-level variable of file ${file}`,
+      );
+    fileRoots.set(key, variable);
+  }
+  // Instructions of global functions and their blocks, which see no file's top level (ADR 0022 §3).
+  const global = new Uint8Array(plan.instructions.length);
+  for (const definition of plan.functions)
+    if (definition.global) global.fill(1, definition.entryInstruction, definition.endInstruction);
+  for (let index = 0; index < plan.instructions.length; index += 1)
+    for (const [name, target] of names.readsAt(index)) {
+      if ((target.kind === "global" ? target.name : target.variable.name) !== name)
+        mismatches.push(`instruction ${index}: '${name}' is read as another name`);
       if (target.kind === "global" && variableNames.has(name))
         mismatches.push(`instruction ${index}: '${name}' is a variable's name, not a global`);
+    }
+  /** The one variable a read the engine finds nowhere may be: the top-level variable of that name of its file. */
+  const unsetRoot = (index: number, name: string): Variable | undefined =>
+    global[index] === 1 ? undefined : fileRoots.get(`${flow.fileOf(index)} ${name}`);
   const label = (index: number, name: string, variable: number): void => {
     const scope = session.scopeOf(name);
     if (scope === "global") {
@@ -110,7 +151,7 @@ export function checkNamesAgainstEngine(
         const scope = session.scopeOf(name);
         const expected = target.kind === "global" ? "a global" : `v${target.variable.id}`;
         if (scope === null) {
-          if (target.kind === "variable" && target.variable.kind !== "root")
+          if (target.kind === "variable" && target.variable !== unsetRoot(index, name))
             mismatches.push(`instruction ${index}: '${name}' is unbound, not ${expected}`);
           continue;
         }
@@ -133,20 +174,6 @@ export function checkNamesAgainstEngine(
       for (const variable of names.declaredAt(index)) label(index, variable.name, variable.id);
     },
   };
-  // One variable per declaration: a parameter is bound where it is supplied or where its default is; any other
-  // variable by one instruction, which may run many times.
-  const declarers = new Map<Variable, number[]>();
-  for (let index = 0; index < plan.instructions.length; index += 1)
-    for (const variable of names.declaredAt(index)) {
-      const list = declarers.get(variable) ?? [];
-      list.push(index);
-      declarers.set(variable, list);
-    }
-  for (const [variable, list] of declarers)
-    if (list.length > (variable.kind === "parameter" ? 2 : 1))
-      mismatches.push(
-        `v${variable.id} '${variable.name}' is declared by instructions ${list.join(", ")}`,
-      );
   const host = new PlayHost();
   const play = new Play(session, host, options.play ?? "first", {
     answers: options.answers ?? 50,
