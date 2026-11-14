@@ -32,18 +32,19 @@ export function refText(work: WorkLedger, ref: Omit<TouchRef, "text">): string {
   return `${ref.owner}:${keptText(work, ref.path)}:${ref.bare === true ? "b" : ref.lands ? "l" : "h"}`;
 }
 
-interface Branch {
+/** An entry of a persistent treap: a touch's children (`Touch`) or a found trie's (`Found`). */
+interface Branch<N> {
   readonly key: string;
   readonly priority: number;
-  readonly node: Touch;
-  readonly left: Branch | null;
-  readonly right: Branch | null;
+  readonly node: N;
+  readonly left: Branch<N> | null;
+  readonly right: Branch<N> | null;
   readonly count: number;
 }
 
 export interface Touch {
   readonly id: number;
-  readonly branches: Branch | null;
+  readonly branches: Branch<Touch> | null;
   /** The contributors at this node: its own (a leaf), or its two parts'. */
   readonly refs: readonly TouchRef[];
   readonly parts: readonly [Touch, Touch] | null;
@@ -132,16 +133,7 @@ function idWith(set: IdSet | null, id: number, priority = idPriority(id)): IdSet
 export interface Found {
   readonly id: number;
   readonly here: boolean;
-  readonly branches: FoundBranch | null;
-}
-
-interface FoundBranch {
-  readonly key: string;
-  readonly priority: number;
-  readonly node: Found;
-  readonly left: FoundBranch | null;
-  readonly right: FoundBranch | null;
-  readonly count: number;
+  readonly branches: Branch<Found> | null;
 }
 
 /**
@@ -176,7 +168,6 @@ export interface TouchHost {
 
 const NONE: Found = { id: 0, here: false, branches: null };
 const HERE: Found = { id: 1, here: true, branches: null };
-const foundCount = (branch: FoundBranch | null): number => branch?.count ?? 0;
 
 function priorityOf(key: string): number {
   let priority = 2166136261;
@@ -212,30 +203,21 @@ function afterParts<T>(
   }
 }
 
-/** An entry of a persistent treap: a children map's (`Branch`) or a found trie's (`FoundBranch`). */
-interface Entry<N> {
-  readonly key: string;
-  readonly node: N;
-  readonly left: Entry<N> | null;
-  readonly right: Entry<N> | null;
-  readonly count: number;
-}
-
 /**
  * The entries of `a` whose key `b` lacks or holds another node at, passing whole every subtree the two share: a map
  * made from another by a few insertions shares all of it but those insertions' paths (a key's priority fixes its place),
  * so this walks only those. `null` past `limit` steps, each charged.
  */
 function differing<N>(
-  a: Entry<N> | null,
-  b: Entry<N> | null,
+  a: Branch<N> | null,
+  b: Branch<N> | null,
   limit: number,
   charge: () => void,
 ): [string, N][] | null {
   const out: [string, N][] = [];
   // (each treap's subtrees and entries still to pass, in key order, the next one last; an open one stands for its own
   // entry, its children pushed beside it)
-  type Pending = { readonly entry: Entry<N>; readonly open: boolean };
+  type Pending = { readonly entry: Branch<N>; readonly open: boolean };
   const left: Pending[] = a === null ? [] : [{ entry: a, open: false }];
   const right: Pending[] = b === null ? [] : [{ entry: b, open: false }];
   const open = (stack: Pending[]): void => {
@@ -267,16 +249,63 @@ function differing<N>(
   return out;
 }
 
-const countOf = (branch: Branch | null): number => branch?.count ?? 0;
+const countOf = <N>(branch: Branch<N> | null): number => branch?.count ?? 0;
 
-function made(
+function made<N>(
   key: string,
   priority: number,
-  node: Touch,
-  left: Branch | null,
-  right: Branch | null,
-): Branch {
+  node: N,
+  left: Branch<N> | null,
+  right: Branch<N> | null,
+): Branch<N> {
   return { key, priority, node, left, right, count: 1 + countOf(left) + countOf(right) };
+}
+
+/** The treap with `node` at `key`, sharing every subtree off the key's path. */
+function branchWith<N>(
+  branch: Branch<N> | null,
+  key: string,
+  node: N,
+  priority = priorityOf(key),
+): Branch<N> {
+  if (branch === null) return made(key, priority, node, null, null);
+  if (key === branch.key) return made(key, branch.priority, node, branch.left, branch.right);
+  if (key < branch.key) {
+    const left = branchWith(branch.left, key, node, priority);
+    return left.priority > branch.priority
+      ? made(
+          left.key,
+          left.priority,
+          left.node,
+          left.left,
+          made(branch.key, branch.priority, branch.node, left.right, branch.right),
+        )
+      : made(branch.key, branch.priority, branch.node, left, branch.right);
+  }
+  const right = branchWith(branch.right, key, node, priority);
+  return right.priority > branch.priority
+    ? made(
+        right.key,
+        right.priority,
+        right.node,
+        made(branch.key, branch.priority, branch.node, branch.left, right.left),
+        right.right,
+      )
+    : made(branch.key, branch.priority, branch.node, branch.left, right);
+}
+
+function branchGet<N>(branch: Branch<N> | null, key: string): N | undefined {
+  for (let at = branch; at !== null; at = key < at.key ? at.left : at.right)
+    if (at.key === key) return at.node;
+  return undefined;
+}
+
+/** The treap's entries in key order. */
+function branchEntries<N>(branch: Branch<N> | null, out: [string, N][]): void {
+  if (branch === null) return;
+  branchEntries(branch.left, out);
+  out.push([branch.key, branch.node]);
+  branchEntries(branch.right, out);
 }
 
 export class Touches {
@@ -287,7 +316,7 @@ export class Touches {
   readonly #expanded = new Map<string, Found>();
   readonly #standing = new Map<string, Found>();
   /** Per mode, whether a node or a branch holds a node `#expand` asks, at or below it (`#asksBelow`). */
-  readonly #asking: Readonly<Record<TouchMode, WeakMap<Touch | Branch, boolean>>> = {
+  readonly #asking: Readonly<Record<TouchMode, WeakMap<Touch | Branch<Touch>, boolean>>> = {
     meet: new WeakMap(),
     elements: new WeakMap(),
     copies: new WeakMap(),
@@ -415,48 +444,8 @@ export class Touches {
   }
 
   /** A treap step's cost: its depth, about the log of its size. */
-  #depth(branch: Branch | null): number {
+  #depth(branch: Branch<Touch> | null): number {
     return 1 + Math.ceil(Math.log2(1 + countOf(branch)));
-  }
-
-  #get(branch: Branch | null, key: string): Touch | undefined {
-    for (let at = branch; at !== null; at = key < at.key ? at.left : at.right)
-      if (at.key === key) return at.node;
-    return undefined;
-  }
-
-  #with(branch: Branch | null, key: string, node: Touch, priority = priorityOf(key)): Branch {
-    if (branch === null) return made(key, priority, node, null, null);
-    if (key === branch.key) return made(key, branch.priority, node, branch.left, branch.right);
-    if (key < branch.key) {
-      const left = this.#with(branch.left, key, node, priority);
-      return left.priority > branch.priority
-        ? made(
-            left.key,
-            left.priority,
-            left.node,
-            left.left,
-            made(branch.key, branch.priority, branch.node, left.right, branch.right),
-          )
-        : made(branch.key, branch.priority, branch.node, left, branch.right);
-    }
-    const right = this.#with(branch.right, key, node, priority);
-    return right.priority > branch.priority
-      ? made(
-          right.key,
-          right.priority,
-          right.node,
-          made(branch.key, branch.priority, branch.node, branch.left, right.left),
-          right.right,
-        )
-      : made(branch.key, branch.priority, branch.node, branch.left, right);
-  }
-
-  #entries(branch: Branch | null, out: [string, Touch][]): void {
-    if (branch === null) return;
-    this.#entries(branch.left, out);
-    out.push([branch.key, branch.node]);
-    this.#entries(branch.right, out);
   }
 
   #node(fields: Omit<Touch, "id" | "ring" | "ringHere">): Touch {
@@ -766,7 +755,7 @@ export class Touches {
       if (at.opaque !== null)
         above = this.unitePayloads(above, this.#shiftPayload(at.opaque, path.slice(index)));
       through ||= this.#isRingHere(at);
-      at = this.#get(at.branches, path[index]!) ?? null;
+      at = branchGet(at.branches, path[index]!) ?? null;
     }
     let found: Touch | null = at;
     if (above !== null)
@@ -845,7 +834,7 @@ export class Touches {
         }
         break;
       }
-      at = this.#get(at.branches, path[index]!) ?? null;
+      at = branchGet(at.branches, path[index]!) ?? null;
     }
     return kinds;
   }
@@ -856,7 +845,7 @@ export class Touches {
     for (const step of path) {
       if (at === null) return false;
       this.#charge(this.#depth(at.branches));
-      at = this.#get(at.branches, step) ?? null;
+      at = branchGet(at.branches, step) ?? null;
     }
     return at !== null && at.landed;
   }
@@ -869,7 +858,7 @@ export class Touches {
       this.#charge(this.#depth(at.branches));
       if (at.opaque !== null) for (const text of this.#two(at.opaque)) texts.add(text);
       if (texts.size > 1 || index === path.length) break;
-      at = this.#get(at.branches, path[index]!) ?? null;
+      at = branchGet(at.branches, path[index]!) ?? null;
     }
     return texts.size;
   }
@@ -884,13 +873,13 @@ export class Touches {
    * and branch, after their parts, on an explicit stack. Merges share both, so a node a merge makes costs only its new
    * branches (#1307).
    */
-  #asksBelow(root: Touch | Branch, mode: TouchMode): boolean {
+  #asksBelow(root: Touch | Branch<Touch>, mode: TouchMode): boolean {
     const memo = this.#asking[mode];
-    afterParts<Touch | Branch>(
+    afterParts<Touch | Branch<Touch>>(
       root,
       (at) => {
         if ("branches" in at) return at.branches === null ? [] : [at.branches];
-        const parts: (Touch | Branch)[] = [at.node];
+        const parts: (Touch | Branch<Touch>)[] = [at.node];
         if (at.left !== null) parts.push(at.left);
         if (at.right !== null) parts.push(at.right);
         return parts;
@@ -912,7 +901,7 @@ export class Touches {
   }
 
   /** A branch's entries whose nodes hold a node asked in a mode (`#asksBelow`), in their order. */
-  #askedEntries(branch: Branch | null, mode: TouchMode, out: [string, Touch][]): void {
+  #askedEntries(branch: Branch<Touch> | null, mode: TouchMode, out: [string, Touch][]): void {
     if (branch === null || !this.#asksBelow(branch, mode)) return;
     this.#askedEntries(branch.left, mode, out);
     if (this.#asksBelow(branch.node, mode)) out.push([branch.key, branch.node]);
@@ -1112,65 +1101,6 @@ export class Touches {
   readonly #unions = new Map<string, Found>();
   readonly #unders = new Map<string, Found>();
 
-  #foundWith(
-    branch: FoundBranch | null,
-    key: string,
-    node: Found,
-    priority = priorityOf(key),
-  ): FoundBranch {
-    const make = (
-      k: string,
-      p: number,
-      n: Found,
-      l: FoundBranch | null,
-      r: FoundBranch | null,
-    ): FoundBranch => ({
-      key: k,
-      priority: p,
-      node: n,
-      left: l,
-      right: r,
-      count: 1 + foundCount(l) + foundCount(r),
-    });
-    if (branch === null) return make(key, priority, node, null, null);
-    if (key === branch.key) return make(key, branch.priority, node, branch.left, branch.right);
-    if (key < branch.key) {
-      const left = this.#foundWith(branch.left, key, node, priority);
-      return left.priority > branch.priority
-        ? make(
-            left.key,
-            left.priority,
-            left.node,
-            left.left,
-            make(branch.key, branch.priority, branch.node, left.right, branch.right),
-          )
-        : make(branch.key, branch.priority, branch.node, left, branch.right);
-    }
-    const right = this.#foundWith(branch.right, key, node, priority);
-    return right.priority > branch.priority
-      ? make(
-          right.key,
-          right.priority,
-          right.node,
-          make(branch.key, branch.priority, branch.node, branch.left, right.left),
-          right.right,
-        )
-      : make(branch.key, branch.priority, branch.node, branch.left, right);
-  }
-
-  #foundGet(branch: FoundBranch | null, key: string): Found | undefined {
-    for (let at = branch; at !== null; at = key < at.key ? at.left : at.right)
-      if (at.key === key) return at.node;
-    return undefined;
-  }
-
-  #foundEntries(branch: FoundBranch | null, out: [string, Found][]): void {
-    if (branch === null) return;
-    this.#foundEntries(branch.left, out);
-    out.push([branch.key, branch.node]);
-    this.#foundEntries(branch.right, out);
-  }
-
   /**
    * The paths of both, each once: the smaller's branches put in the larger's, once per pair; only those the larger does
    * not hold as they are, where the two share subtrees (a node's meetings are mostly its parts', #1270).
@@ -1181,16 +1111,16 @@ export class Touches {
     const key = keptParts(this.host.work, Math.min(a.id, b.id), Math.max(a.id, b.id));
     const known = this.#unions.get(key);
     if (known !== undefined) return known;
-    const [big, small] = foundCount(a.branches) >= foundCount(b.branches) ? [a, b] : [b, a];
+    const [big, small] = countOf(a.branches) >= countOf(b.branches) ? [a, b] : [b, a];
     let branches = big.branches;
-    let entries = differing(small.branches, big.branches, 8 + foundCount(small.branches), () =>
+    let entries = differing(small.branches, big.branches, 8 + countOf(small.branches), () =>
       this.#charge(),
     );
-    if (entries === null) this.#foundEntries(small.branches, (entries = []));
+    if (entries === null) branchEntries(small.branches, (entries = []));
     for (const [step, inner] of entries) {
-      this.#charge(1 + Math.ceil(Math.log2(1 + foundCount(branches))));
-      const other = this.#foundGet(branches, step);
-      branches = this.#foundWith(
+      this.#charge(1 + Math.ceil(Math.log2(1 + countOf(branches))));
+      const other = branchGet(branches, step);
+      branches = branchWith(
         branches,
         step,
         other === undefined ? inner : this.#unite(other, inner),
@@ -1211,7 +1141,7 @@ export class Touches {
     let out = this.#unders.get(key);
     if (out === undefined) {
       this.#charge();
-      out = { id: this.#foundIds++, here: false, branches: this.#foundWith(null, step, inner) };
+      out = { id: this.#foundIds++, here: false, branches: branchWith(null, step, inner) };
       this.#unders.set(key, out);
     }
     return out;
@@ -1319,23 +1249,23 @@ export class Touches {
       }
       if (met.here && (mode === "meet" || this.kindsAt(outer, path).size > 1))
         out = this.#unite(out, this.#at(path));
-      const differs = differing(x.branches, y.branches, 8 + 2 * foundCount(met.branches), () =>
+      const differs = differing(x.branches, y.branches, 8 + 2 * countOf(met.branches), () =>
         this.#charge(),
       );
       const steps: string[] = [];
       if (differs !== null) for (const [step] of differs) steps.push(step);
       else {
         const entries: [string, Found][] = [];
-        this.#foundEntries(met.branches, entries);
+        branchEntries(met.branches, entries);
         for (const [step] of entries) steps.push(step);
       }
       for (const step of steps) {
         this.#charge(this.#depth(x.branches));
-        const below = this.#foundGet(met.branches, step);
+        const below = branchGet(met.branches, step);
         if (below === undefined) continue;
         stack.push({
-          x: this.#get(x.branches, step),
-          y: this.#get(y.branches, step),
+          x: branchGet(x.branches, step),
+          y: branchGet(y.branches, step),
           met: below,
           path: keptSteps(this.host.work, path, [step]),
         });
@@ -1481,16 +1411,16 @@ export class Touches {
     // (the smaller node's branches, each looked up in the larger's: the common ones merged, the others taken whole)
     let branches = big.branches;
     const entries: [string, Touch][] = [];
-    this.#entries(small.branches, entries);
+    branchEntries(small.branches, entries);
     for (const [step, child] of entries) {
       this.#charge(this.#depth(branches));
-      const other = this.#get(big.branches, step);
+      const other = branchGet(big.branches, step);
       if (other === undefined) {
-        branches = this.#with(branches, step, child);
+        branches = branchWith(branches, step, child);
         continue;
       }
       const merged = this.merge(other, child, mode);
-      if (merged.node !== other) branches = this.#with(branches, step, merged.node!);
+      if (merged.node !== other) branches = branchWith(branches, step, merged.node!);
       if (merged.found !== NONE) found = this.#unite(found, this.#under(step, merged.found));
     }
     const opaque = this.unitePayloads(a.opaque, b.opaque);
@@ -1534,20 +1464,20 @@ export class Touches {
       const below = this.standsAt(child, inner);
       if (below !== NONE) out = this.#unite(out, this.#under(step, below));
     };
-    if (countOf(node.branches) <= foundCount(where.branches)) {
+    if (countOf(node.branches) <= countOf(where.branches)) {
       const entries: [string, Touch][] = [];
-      this.#entries(node.branches, entries);
+      branchEntries(node.branches, entries);
       for (const [step, child] of entries) {
-        this.#charge(1 + Math.ceil(Math.log2(1 + foundCount(where.branches))));
-        const inner = this.#foundGet(where.branches, step);
+        this.#charge(1 + Math.ceil(Math.log2(1 + countOf(where.branches))));
+        const inner = branchGet(where.branches, step);
         if (inner !== undefined) take(step, child, inner);
       }
     } else {
       const entries: [string, Found][] = [];
-      this.#foundEntries(where.branches, entries);
+      branchEntries(where.branches, entries);
       for (const [step, inner] of entries) {
         this.#charge(this.#depth(node.branches));
-        const child = this.#get(node.branches, step);
+        const child = branchGet(node.branches, step);
         if (child !== undefined) take(step, child, inner);
       }
     }
@@ -1565,7 +1495,7 @@ export class Touches {
       this.#charge();
       if (at.here) out.push(under);
       const entries: [string, Found][] = [];
-      this.#foundEntries(at.branches, entries);
+      branchEntries(at.branches, entries);
       for (const [step, inner] of entries)
         stack.push({ found: inner, prefix: keptSteps(this.host.work, under, [step]) });
     }

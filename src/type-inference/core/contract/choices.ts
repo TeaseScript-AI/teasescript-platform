@@ -29,7 +29,7 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
       : (option.content.kind === "list" || option.content.kind === "set") &&
           option.content.elements.length === 0
         ? null
-        : option.label.kind,
+        : option.label,
   );
   LABELS().set(c, labels);
   return labels;
