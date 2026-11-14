@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { operandsOf } from "../../../src/type-inference/core/carriers.js";
 import { DefinitionIndex } from "../../../src/type-inference/core/definitions.js";
 import { NestingIndex } from "../../../src/type-inference/core/indexes/nesting.js";
 import { CoreProgram } from "../../../src/type-inference/core/program.js";
@@ -29,7 +30,12 @@ function indexOf(source: string): {
   assert.ok(request !== null, source);
   const program = new CoreProgram(request);
   program.index();
-  const index = new NestingIndex(program, new DefinitionIndex(program), () => true);
+  const index = new NestingIndex(
+    program,
+    new DefinitionIndex(program),
+    () => true,
+    (value) => operandsOf(program, value),
+  );
   const place = (name: string): PlaceId => {
     const [owner, part] = name.split(".");
     const found = program.places.find((candidate) => {
