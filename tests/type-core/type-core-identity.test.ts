@@ -442,8 +442,8 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   "core/check-result/otherwise.ts": [4, "values: a fallback's read and its literals"],
   "core/check-result/runtime-plan.ts": [5, "values: a load's key, a selected literal"],
   "core/check-result/slice-index.ts": [
-    6,
-    "values: an operand's sites, a count's or an index's role, a node's site, a transferred value's site; `unwrap` itself",
+    7,
+    "values: an operand's sites, a count's or an index's role, a node's site, a transferred value's site, a stored global's root; `unwrap` itself",
   ],
   "core/check-result/store-contracts.ts": [7, "values: literal data, a value's provenance"],
   "core/consumers/reports/diagnostics.ts": [
