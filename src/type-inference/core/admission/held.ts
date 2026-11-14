@@ -10,8 +10,6 @@ import { touchesOf, touchRef } from "./touches.js";
 import { heldInput } from "./transfers/held-input.js";
 import { expand } from "./walk.js";
 
-// What a place's live stores definitely hold: its held tries, built once per pass, and where they meet.
-
 /**
  * The strongly connected components of a graph over `nodes` and the nodes they reach (`next`: a node's successors),
  * Tarjan's on an explicit stack, a component after every one it reaches; `step` hears of each node and edge.
@@ -79,8 +77,7 @@ export function atCopy(admission: Admission, root: PlaceId, path: readonly strin
 /**
  * What a place's live stores definitely hold (`heldMeetings`): its own points (`heldPoints`) and its reads'
  * sources' held tries where they stand, by reference (`heldReads`); none of its landings, its copies inheriting
- * written types or its values holding anything, which decide nothing there. `null` where it holds nothing
- * definite. Built with its reads' sources first (`buildHeld`).
+ * written types or its values holding anything, which decide nothing there. `null` where it holds nothing definite.
  */
 function heldOf(admission: Admission, place: PlaceId): Touch | null {
   const known = admission.helds.get(place);
@@ -112,7 +109,6 @@ function heldReads(
 /** A read's contribution to a held trie where it stands: its source's held trie at its path. */
 function heldRead(admission: Admission, source: Key, at: readonly string[]): Touch | null {
   const touches = touchesOf(admission);
-  // (a cursor's steps through the charged boundary)
   // (the touches' tries take arrays, kept in their payloads: a cursor's steps copied out, `stepsArray`)
   const held = touches.sub(
     heldOf(admission, keyPlace(source)),

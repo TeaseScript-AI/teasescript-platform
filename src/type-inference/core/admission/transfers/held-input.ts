@@ -1,5 +1,3 @@
-// A task's contributions to the held view (`held.ts`), each once, at its path below the task's own.
-
 import type { Admission } from "../../admission.js";
 import { keep, keptParts, keptSteps, keptText } from "../../budget.js";
 import { type Key } from "../../definitions.js";

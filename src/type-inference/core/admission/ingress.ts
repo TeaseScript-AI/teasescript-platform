@@ -22,9 +22,6 @@ import { distinctStops, perLink, selects } from "./scan.js";
 import { sourceOf } from "./structure.js";
 import { compareKeys, contributionSite, RECEIVER_ROLES, stopsOf } from "./walk.js";
 
-// Where the checks of the external data a store brings are sited: its stops by key, its store's ingresses, its own
-// reads.
-
 /**
  * A store's contributions at `at`, in evaluation order: the stops of the one walk (`stopsOf`, the carrier table's)
  * standing at the path or above it, each with the rest of the path to read into it, the ones its operations may give
@@ -37,7 +34,6 @@ function contributions(
 ): readonly { readonly stop: Stop; readonly rest: Steps }[] {
   if (d.value === undefined) return [];
   const out: { stop: Stop; rest: Steps }[] = [];
-  // (a record's prefixes named by their record's texts and its rests its views; an array's by its own steps)
   for (let length = 0; length <= at.length; length += 1)
     for (const stop of keyStops(admission, d, stepsPrefixText(at, length)).distinct()) {
       admission.pass.program.work.charge("checks");
@@ -346,7 +342,6 @@ export function wholeBelow(admission: Admission, value: PlaceId, at: Steps): Pla
   let level: Level = { values: [value], whole: program.hasOf.has(value) ? null : value };
   let key = `${value}`;
   for (let index = 0; index + 1 < at.length && level.whole === null; index += 1) {
-    // (a record's prefix named by its record's text, `prefixText`; an array's step by step)
     key = isPathSteps(at)
       ? stepText(String(value), at.prefixText(index + 1))
       : stepText(key, at[index]!);

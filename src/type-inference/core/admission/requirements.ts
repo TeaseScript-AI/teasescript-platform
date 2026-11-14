@@ -7,8 +7,6 @@ import { propertyName, propertyStep, type CoreProgram } from "../program.js";
 import { copiedAt } from "./decision.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
 
-// The complete type a store owes after a stop: known without the stopped decision.
-
 /**
  * The complete type a store into `place` at `path` is checked against where a decision at, below or above the path
  * stopped (#1416, #1440), from a proof the stopped decision is no part of, without new solving: the place's written

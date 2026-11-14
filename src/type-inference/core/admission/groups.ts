@@ -49,8 +49,6 @@ import { levelsOf } from "./permitted.js";
 import { depthOf, elementsBelow, valueStructure } from "./structure.js";
 import { touchOf } from "./touches.js";
 
-// The places and paths admission decides, the stores it walks, and the hot sets among them.
-
 /**
  * Whether contents are known and scalar: some, each a scalar or `null`, so no copy meets them below their root
  * (`groups`); an unknown or anything else may hold properties or elements.
