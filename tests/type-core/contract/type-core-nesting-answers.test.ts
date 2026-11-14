@@ -12,7 +12,7 @@ import { coreRequest } from "../../helpers/type-core-analysis.js";
 import { compiledByLine, inMode, MODES, publication } from "../../helpers/type-core-oracles.js";
 
 /*
- * #2764 (B): the nesting cut through the analysis. A value a growing cycle nests deeper on each turn is the cut's unknown
+ * #2764: the nesting cut through the analysis. A value a growing cycle nests deeper on each turn is the cut's unknown
  * below its cut depth, answered before any demand, so the analysis settles; a level the cut does not reach keeps its
  * answer.
  */
