@@ -114,8 +114,8 @@ snapshot for comparing two analyses of the same sources.
   - The consumer (`coreCheckResult`, `core/check-result/check-result.ts`) walks the source with those answers and makes the
     `TypeCheckResult` that lowering consumes.
 
-  Other O4 foundations include the built-in result relations (`adapters/`): the core reads their operand types and asks
-  their member rules (`MEMBER_RULES`) whether a member exists; only the adapter tests read the relations themselves.
+  Other O4 foundations include the built-in member rules (`adapters/`): the core reads their operand types and asks
+  their member rules (`MEMBER_RULES`) whether a member exists.
   The condition-shape recognizer (`narrowing-shapes.ts`) is shared: `TypeChecker`'s branch rules and the core read
   the same classification.
 

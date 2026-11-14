@@ -2,7 +2,6 @@ import type { ScalarTypeName } from "../../ast.js";
 import { withValues, type StaticType } from "../../static-types.js";
 import {
   CALENDAR_DURATION_PARTS,
-  CLOCK_CONTRACTS,
   hasTemporalField,
   hasTemporalMethod,
   isCalendarDurationPart,
@@ -12,7 +11,7 @@ import {
   type TemporalField,
 } from "../../temporal-builtins.js";
 import type { ValueKind } from "../../value-kinds.js";
-import type { OperationRelation, OperationResult } from "./relation.js";
+import type { OperationResult } from "./relation.js";
 import { typeResult, type MemberAnswer, type MemberRules } from "./views.js";
 
 const scalar = (name: ScalarTypeName): StaticType => ({ kind: "scalar", name });
@@ -39,13 +38,6 @@ function method(kind: ValueKind, name: string): OperationResult | undefined {
     ? typeResult(scalar(TEMPORAL_METHODS[name].result))
     : undefined;
 }
-
-export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map(
-  Object.entries(CLOCK_CONTRACTS).map(([name, contract]): [string, OperationRelation] => [
-    name,
-    { contract: { family: "clock", name }, result: () => typeResult(scalar(contract.result)) },
-  ]),
-);
 
 const RULES: MemberRules = {
   kinds: ["date", "time", "datetime", "absoluteDateTime", "calendarDuration"],

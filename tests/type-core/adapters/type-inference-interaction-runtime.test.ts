@@ -13,10 +13,9 @@ import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
 import { runUntilExit } from "../../helpers/run-until-exit.js";
 
-// The interaction adapters' shape and optionality branches at runtime (stage-2b work note): each program is a row
-// of the case tables (`tests/fixtures/type-inference/adapter-cases/{choice,form,commands}.jsonl`), named by its `id`
-// with its `fact` and adapter cell, answered through the runtime's own operations; the value `r` settles to is of the
-// kind the adapter answers.
+// What an ask settles to at runtime, for the shape and optionality branches of choice, form and command asks: each
+// program compiles without diagnostics and is answered through the runtime's own operations, and the value `r` settles
+// to is of the kind of the type the compiler gives `r` (its fact, which each test's comment names).
 
 interface Asked {
   readonly plan: InstructionPlan;
@@ -100,7 +99,7 @@ function partKinds(value: SerializableRuntimeValue): Record<string, ValueKind> {
 }
 
 test("a labelled choice settles to its label", () => {
-  // choice/option/string.literal.name: fact `string{"one"}`, adapter `fact`.
+  // fact `string{"one"}`.
   const r = answered(asked('let r = askChoice one: "a"\nexit'), "choice", {
     kind: "selectedOption",
     optionIndex: 0,
@@ -110,8 +109,7 @@ test("a labelled choice settles to its label", () => {
 });
 
 test("a choice object settles to its value, written alone or as an element of a written list", () => {
-  // choice/written-collection/integer.object-value and choice/several/object-text-value: fact `integer{1}`, adapter
-  // `fact`, for the object as a written element and written alone.
+  // fact `integer{1}`, for the object as a written element and written alone.
   for (const options of ['{ text: "A", value: 1 }', '[{ text: "A", value: 1 }]']) {
     const r = answered(asked(`let r = askChoice ${options}\nexit`), "choice", {
       kind: "selectedOption",
@@ -123,7 +121,7 @@ test("a choice object settles to its value, written alone or as an element of a 
 });
 
 test("a cycle field settles to the option it shows", () => {
-  // form/written-descriptor/options.strings: fact `{"n":string}`, adapter `fact`.
+  // fact `{"n":string}`.
   const form = asked('let r = askForm("Q", fields: { n: { options: ["a", "b"] } })\nexit');
   const r = answered(edited(form, { kind: "select", fieldId: "n", optionIndex: 1 }), "form", {
     kind: "submit",
@@ -133,7 +131,7 @@ test("a cycle field settles to the option it shows", () => {
 });
 
 test("a form of a written dict of fields settles to a dict", () => {
-  // form/container/dict: fact `dict<integer>`, adapter `fact`.
+  // fact `dict<integer>`.
   const r = answered(asked('let r = askForm("Q", fields: dict { "n": 1 })\nexit'), "form", {
     kind: "submit",
   });
@@ -142,7 +140,7 @@ test("a form of a written dict of fields settles to a dict", () => {
 });
 
 test("a form whose fields are a computed object settles to an object", () => {
-  // form/container/object-variable: fact `{"n":integer}`, adapter `fact`.
+  // fact `{"n":integer}`.
   const r = answered(asked('let f = { n: 1 }\nlet r = askForm("Q", fields: f)\nexit'), "form", {
     kind: "submit",
   });
@@ -151,8 +149,8 @@ test("a form whose fields are a computed object settles to an object", () => {
 });
 
 test("a computed descriptor with type: answers the generic kind, which the answer narrows to the kind typed", () => {
-  // form/computed-descriptor/typed: fact `{"n":(absoluteDateTime|angle|boolean|calendarDuration|date|datetime|
-  // duration|null|number|string|time)}`, adapter `fact`; the generic union holds `number`, the family of `integer`.
+  // fact `{"n":(absoluteDateTime|angle|boolean|calendarDuration|date|datetime|
+  // duration|null|number|string|time)}`; the generic union holds `number`, the family of `integer`.
   let form = asked('let d = { type: "integer" }\nlet r = askForm("Q", fields: { n: d })\nexit');
   for (const update of [
     { kind: "edit", fieldId: "n" },
@@ -166,18 +164,18 @@ test("a computed descriptor with type: answers the generic kind, which the answe
 });
 
 test("a cancelled form settles to null", () => {
-  // form/container/cancel: fact `(null|{"n":integer})`, adapter `fact`.
+  // fact `(null|{"n":integer})`.
   const form = asked('let r = askForm("Q", fields: { n: 1 }, cancel: "Back")\nexit');
   assert.equal(valueKindOf(answered(form, "form", { kind: "cancel" })), "null");
 });
 
 test('a timed-out form settles to null with onTimeout: "cancel", and to its object with "submit"', () => {
-  // form/container/timeout-cancel: fact `(null|{"n":integer})`, adapter `fact`.
+  // fact `(null|{"n":integer})`.
   const cancelled = timedOut(
     asked('let r = askForm("Q", fields: { n: 1 }, timeout: 5 s, onTimeout: "cancel")\nexit'),
   );
   assert.equal(valueKindOf(cancelled), "null");
-  // form/container/timeout-submit: fact `{"n":integer}`, adapter `fact`.
+  // fact `{"n":integer}`.
   const submitted = timedOut(
     asked('let r = askForm("Q", fields: { n: 1 }, timeout: 5 s, onTimeout: "submit")\nexit'),
   );
@@ -186,7 +184,7 @@ test('a timed-out form settles to null with onTimeout: "cancel", and to its obje
 });
 
 test("a cancelled askBooleans settles to null", () => {
-  // commands/booleans/cancel: fact `(list<boolean>|null)`, adapter `fact`.
+  // fact `(list<boolean>|null)`.
   const form = asked(
     'let r = askBooleans("Q?", texts: ["A"], prefill: [false], cancel: "Back")\nexit',
   );
@@ -194,7 +192,7 @@ test("a cancelled askBooleans settles to null", () => {
 });
 
 test("a skipped askImage with allowSkip: true settles to null", () => {
-  // commands/image/skip: fact `(null|string)`, adapter `fact`.
+  // fact `(null|string)`.
   const request = asked('let r = askImage("P", allowSkip: true)\nexit');
   assert.equal(valueKindOf(answered(request, "image", { kind: "skip" })), "null");
 });
