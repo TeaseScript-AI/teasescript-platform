@@ -309,6 +309,41 @@ test("a block made due in a call's arguments marks the function the call enters,
   );
 });
 
+test("a block made due in a file call's destination marks the activation the call enters, where the block waits", () => {
+  // The destination is evaluated, then the called file's frame is pushed, then the block starts above it (runtime
+  // review, #2769).
+  const { plan, waits } = analysed({
+    "main.tease": [
+      "let target = timer async hidden 100 s { }",
+      "let setup = timer async hidden 500 ms {",
+      "  let next = timer async hidden 500 ms { wait 1 s }",
+      "  target = next",
+      "}",
+      'function site { call (target.pause() otherwise script("quiet.tease")) }',
+      "wait 1 s",
+      "site()",
+      "exit",
+    ].join("\n"),
+    "quiet.tease": 'say "quiet", instant\nend',
+  });
+  const quiet = plan.files.findIndex((file) => file.path === "quiet.tease");
+  assert.equal(waits.fileMayWait(quiet), true);
+  const result = checkWaitsAgainstEngine(plan);
+  assert.deepEqual(result.unmarked, []);
+  const site = plan.functions.find((definition) => definition.name === "site")!;
+  assert.ok(result.live.has(site.id), "site is live at the block's wait");
+  // The file call's frame is checked at its call: with that call unmarked, the check reports it.
+  const call = plan.instructions.findIndex((instruction) => instruction.kind === "transfer");
+  const missed = checkWaitsAgainstEngine(plan, 200, {
+    ...waits,
+    mayWaitAt: (index) => index !== call && waits.mayWaitAt(index),
+  }).unmarked;
+  assert.ok(
+    missed.some((line) => line.endsWith(`the file call at ${call} is live unmarked`)),
+    missed.join("\n"),
+  );
+});
+
 test("a computed file call whose destination may start a block marks every activation it may enter", () => {
   const files = {
     "main.tease": [

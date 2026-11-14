@@ -13,6 +13,9 @@ import type { ExpressionPlan, Instruction, InstructionPlan } from "./model.js";
  * field still marks. A block's own waits are its own: the runtime starts a block at a wait, above frames that wait
  * already, or right after an instruction of the script that made it due, which can bring a wait into an activation
  * that does not wait otherwise: the one holding the instruction, and the one the instruction enters.
+ *
+ * `file` is an index into this plan's `files`. These flags classify potential host waits, not checkpoint eligibility,
+ * restored waits, or Debug stops.
  */
 export interface PlanWaits {
   /** The instruction at `index` can leave the session waiting by itself. */
