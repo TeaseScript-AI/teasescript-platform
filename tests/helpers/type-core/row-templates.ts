@@ -301,9 +301,8 @@ export const OPERAND_TEMPLATES: Readonly<
 };
 
 /**
- * The positions of a choice object written in place whose value the button returns (`COMMAND_OPERANDS`'
- * `askChoice.returnedText` and `.value`), each with the host global there, which the core's check of the buttons refuses
- * (`DECLARED_REFUSALS`): the declared positions' samples hold other values there; no guard template has them.
+ * The positions of a choice object written in place whose value the button returns (`askChoice.returnedText` and
+ * `.value`), each with the host global there.
  */
 const CHOICE_OBJECT_OPERANDS: Readonly<Record<string, readonly string[]>> = {
   "askChoice.returnedText": ["let r = askChoice {text: hostValue}"],
