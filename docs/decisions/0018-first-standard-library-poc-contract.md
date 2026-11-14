@@ -9,7 +9,7 @@ ADR 0017 accepts the boundary between deterministic engine primitives, the publi
 
 The next POC needs one implementation contract for ordinary chat output and basic foreground interactions. It must not introduce separate state machines, suspended TypeScript calls, an implicit latest library, a final package format, or a second runtime model.
 
-The owner explicitly extended the issue discussion to decide that the normal Player application has no player-facing pause control. This does not decide browser-unavailability, reload, reconnect, device-sleep, or server-authoritative time policy.
+The owner explicitly extended the issue discussion to decide that the normal Playroom application has no player-facing pause control. This does not decide browser-unavailability, reload, reconnect, device-sleep, or server-authoritative time policy.
 
 This ADR was accepted as documentation and design. Its generic foreground-interaction runtime is now partially implemented. The implementation uses an owner-approved short canonical result handoff: completion atomically commits a typed result into prepared ordinary runtime state and records one nullable single-use authority until the first canonical consume, transfer, return, discard, or exit instruction succeeds. The record is then removed immediately, while bounded `lastSettlement` remains replay data only. This implementation choice preserves the ADR's typed completion, event ordering, checkpoint, restore, and later-normal-entry requirements without restoring a long-lived lifecycle or whole-plan liveness analysis.
 
@@ -26,7 +26,7 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
 9. `askText`, `askNumber`, `askChoice`, and `showButton` are mandatory foreground interactions with no cancellation
    result. Timer interrupts may suspend them; handler `exit` discards the interrupted instruction without a value.
 10. Interaction definitions and completions are bounded, typed, JSON-safe data. Over-limit data is rejected deterministically without truncation or partial state mutation.
-11. The Standard Player application uses one focused chat composer for typed answers. Choice controls may render as
+11. The Standard Playroom application uses one focused chat composer for typed answers. Choice controls may render as
     buttons or a dropdown without changing semantics; `showButton` completes through its rendered button or exact
     visible-text composer submission.
 12. Valid answers and choice/button activations become player-authored transcript messages. Exact unambiguous visible
@@ -34,8 +34,8 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
     empty composer, since its button is always preselected (owner decision on #512, 2026-10-08).
 13. `say` uses account-configured smart autoplay by default, supports exact durations, `0 s`, and `instant`, and supports speaker defaults plus per-message `skippable` or `unskippable` overrides.
 14. Every positive reading time is one ADR 0016 pending action, the foreground action: a paced `say` lasts its reading time, and the next statement runs after it, unless the player skips it (owner decision on #829, 2026-10-11).
-15. A skippable pacing gate may be completed by a primary click or tap on a message, its speaker avatar, Player background, or other unused Player space (owner decision, 2026-10-14), or by Space while the focused composer is empty. Skip completes only the pacing gate.
-16. The normal Player application has no player-facing pause control. Developer mode may provide Run, Step, Pause, checkpoint, and debugger controls.
+15. A skippable pacing gate may be completed by a primary click or tap on a message, its speaker avatar, Playroom background, or other unused Playroom space (owner decision, 2026-10-14), or by Space while the focused composer is empty. Skip completes only the pacing gate.
+16. The normal Playroom application has no player-facing pause control. Developer mode may provide Run, Step, Pause, checkpoint, and debugger controls.
 17. A later deterministic speaker-aware typing indicator is desired but excluded from this POC.
 
 ## Scope and sequencing
@@ -172,7 +172,7 @@ the safe integer range. `2.5`, `2.0`, and `1e3` are rejected like any other inva
 [V30 message](../specifications/accepted-syntaxes-v30.md#20-input-functions) "That is wrong. I asked for a whole number.".
 Negative zero returns `0`, and the transcript keeps the trimmed submitted text. The engine runs it as a `number`
 interaction whose UI only accepts whole numbers, so completion, prefill, checkpoint, and settlement rules are those of
-`askNumber`. The Player offers a numeric keyboard.
+`askNumber`. The Playroom offers a numeric keyboard.
 
 ### `askDate`, `askTime`, and `askDateTime`
 
@@ -184,7 +184,7 @@ let day = askDate "Which day?"
 let start = askTime as mistress "What time?", prefill: toTime("20:00")
 ```
 
-The Player shows the browser's date, time, or date-and-time control, which submits strict ISO text
+The Playroom shows the browser's date, time, or date-and-time control, which submits strict ISO text
 ([V30 §35](../specifications/accepted-syntaxes-v30.md#35-date-time-and-durations)); surrounding whitespace is
 removed. A local time that the player's zone skips is a valid answer, because local values have no zone. Any other
 text is rejected with "That is wrong. I asked for a date." (a time, a date and time). The transcript shows the answer
@@ -293,7 +293,7 @@ objects (owner decisions on #511). Interaction rules:
   [V30 §19](../specifications/accepted-syntaxes-v30.md#preselected-button)): it is marked and Space activates it, but
   it is never chosen by itself.
 
-A button or dropdown selection submits the selected button's position to the engine. The engine validates it against the active action, derives the canonical visible text from the stored choice option, writes that visible text as the player-authored transcript message, and returns that button's value to the script. The Player application does not supply an independent canonical transcript string.
+A button or dropdown selection submits the selected button's position to the engine. The engine validates it against the active action, derives the canonical visible text from the stored choice option, writes that visible text as the player-authored transcript message, and returns that button's value to the script. The Playroom application does not supply an independent canonical transcript string.
 
 This compact syntax supersedes the V30 split between `{...}` choice bodies with values and `[...]` choice bodies without. The question itself is normally a preceding `say`; compact `askChoice` has no prompt argument.
 
@@ -313,7 +313,7 @@ showButton "Continue", background: "hsl(155 55% 35%)"
 
 `background` accepts the shared [opaque authored CSS colours](../specifications/accepted-syntaxes-v30.md#authored-colours).
 Invalid statically known colours fail compilation; invalid computed colours fail the interaction before it is published. Omission uses the
-Player theme. The Player derives readable text and the approved button material from this base colour; this extension
+Playroom theme. The Playroom derives readable text and the approved button material from this base colour; this extension
 adds no authored text-colour or disabled syntax. The normalized background is captured with the active interaction
 and survives checkpoint save/restore without re-evaluating author expressions.
 
@@ -326,12 +326,12 @@ let elapsed = showButton "Continue", timeout: 30 s
 ```
 
 The form displays one blocking button and has no cancellation path. It is the one-option form of the same Standard
-foreground-control vocabulary as `askChoice`. The Player activates it by clicking/tapping the rendered button,
+foreground-control vocabulary as `askChoice`. The Playroom activates it by clicking/tapping the rendered button,
 submitting its exact non-empty stored visible text in the composer, or Space in the empty focused composer, since its
-button is always preselected. Other text and a click/tap on unrelated blank Player space do not activate `showButton`.
+button is always preselected. Other text and a click/tap on unrelated blank Playroom space do not activate `showButton`.
 Typed matching does not trim, fold case, or normalize Unicode.
 
-The engine derives the canonical player-authored transcript text from the stored button label; the Player application
+The engine derives the canonical player-authored transcript text from the stored button label; the Playroom application
 does not provide replacement transcript text.
 
 Owner-approved extension (2026-10-04, #531): a named `timeout:` sets the
@@ -468,7 +468,7 @@ Retries are built into the interaction contract. An ordinary author does not nee
   option);
 - closing or hiding a control does not complete it;
 - invalid input does not complete it;
-- package exit or fatal runtime/player failure is cleanup or failure, not an author-visible cancelled value;
+- package exit or fatal runtime/Playroom failure is cleanup or failure, not an author-visible cancelled value;
 - a `showButton` timeout is normal timeout completion, not cancellation.
 
 Timer interrupts may suspend an interaction. Normal handler return restores it; handler `exit` discards the
@@ -476,7 +476,7 @@ interrupted action and source instruction without synthesizing a result or bindi
 [§27](../specifications/accepted-syntaxes-v30.md#27-timers) and
 [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 
-The normal Player application has no player-facing pause control and TeaseScript gains no author-facing pause command through this decision. Developer mode may expose Pause alongside Run, Step, checkpoint, restore, and debugger controls. Developer pause is tooling and does not establish player-initiated pause semantics.
+The normal Playroom application has no player-facing pause control and TeaseScript gains no author-facing pause command through this decision. Developer mode may expose Pause alongside Run, Step, checkpoint, restore, and debugger controls. Developer pause is tooling and does not establish player-initiated pause semantics.
 
 Reload or reconnect resumes validated saved state. Timer scene-time observation and restore rebasing are defined in
 [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time); production host lifecycle and server time integrity remain
@@ -484,7 +484,7 @@ separate.
 
 ## Standard chat composer and choice presentation
 
-The Standard Player application uses one fixed composer area at the bottom of the chat.
+The Standard Playroom application uses one fixed composer area at the bottom of the chat.
 
 During a foreground interaction:
 
@@ -494,7 +494,7 @@ During a foreground interaction:
 - the answer field receives focus by default so the player can type without first clicking it;
 - only a valid completion advances the deterministic foreground interaction. Non-matching composer text does not become ordinary script progress; in this first POC it is a rejected attempt and the same mandatory interaction remains active. Future LLM clarification or interpretation may handle such text only through a separately accepted constrained contract.
 
-The Player application dynamically chooses how an `askChoice` interaction is presented. Buttons may occupy one or two rows. When the available viewport, text lengths, font metrics, zoom, accessibility settings, or other layout constraints make that presentation impractical, the same choices may render as a dropdown. Exact breakpoints and measurement rules remain a Player UI decision.
+The Playroom application dynamically chooses how an `askChoice` interaction is presented. Buttons may occupy one or two rows. When the available viewport, text lengths, font metrics, zoom, accessibility settings, or other layout constraints make that presentation impractical, the same choices may render as a dropdown. Exact breakpoints and measurement rules remain a Playroom UI decision.
 
 Button-versus-dropdown presentation is not canonical runtime or checkpoint state. Restoring the same action on another viewport may select another presentation while preserving the same values, visible texts, completion validation, transcript output, and return value.
 
@@ -511,7 +511,7 @@ Typing an exact unambiguous visible choice has the same completion effect.
 
 For `showButton`, clicking/tapping the rendered control, submitting its exact non-empty visible text in the composer,
 or Space with the empty focused composer makes the stored visible text the player's transcript message and completes
-the same pending action. Other composer submissions and clicking unrelated blank Player space do not activate the
+the same pending action. Other composer submissions and clicking unrelated blank Playroom space do not activate the
 button. For example:
 
 ```tease
@@ -537,7 +537,7 @@ Output and foreground interactions use the same target-and-speaker provenance co
 Terminology:
 
 - **player**: the human;
-- **Player application** or **player iframe**: the software interface;
+- **Playroom application** or **Playroom iframe**: the software interface;
 - **engine**: the deterministic runtime.
 
 ## Smart-autoplay duration
@@ -628,7 +628,7 @@ Each settlement emits its own sequenced `actionCompleted`. Continuations do not 
 
 ### Player skip completion
 
-A primary click/tap on a message, its speaker avatar, or otherwise unused Player space, or an eligible Space key while the focused composer is empty, submits a typed completion for the active `chatPacingGate` action ID. Interactive controls, the composer, and focused inputs take precedence: activating them must not also trigger the viewport-wide pacing shortcut. [PLAYER-UI.md](../ui/PLAYER-UI.md) owns the exact click and key rules.
+A primary click/tap on a message, its speaker avatar, or otherwise unused Playroom space, or an eligible Space key while the focused composer is empty, submits a typed completion for the active `chatPacingGate` action ID. Interactive controls, the composer, and focused inputs take precedence: activating them must not also trigger the viewport-wide pacing shortcut. [PLAYER-UI.md](../ui/PLAYER-UI.md) owns the exact click and key rules.
 
 - a skippable active gate settles normally with a skip settlement;
 - an unskippable gate rejects the attempt without state mutation;
@@ -671,7 +671,7 @@ Effective skip policy is:
 
 A skippable gate may be completed by:
 
-- a primary click or tap on a message, its speaker avatar, Player background, or other unused Player space;
+- a primary click or tap on a message, its speaker avatar, Playroom background, or other unused Playroom space;
 - Space when the focused Standard chat composer is empty.
 
 An actual interactive control has priority. Activating a control must not also be interpreted as a viewport-wide pacing skip.
@@ -692,7 +692,7 @@ The implementation must preserve ADR 0015 and ADR 0016:
 - output and action events remain typed and sequenced;
 - a pending interaction or pacing gate survives a JSON checkpoint round trip;
 - restore does not read a browser clock, silently settle time, or re-evaluate source expressions;
-- the Player application submits explicit time observations and typed action/gate completions;
+- the Playroom application submits explicit time observations and typed action/gate completions;
 - duplicate completion delivery follows the bounded settlement model;
 - invalid completion attempts do not mutate canonical state;
 - continuation execution occurs through a later normal runtime entry after settlement;
@@ -704,7 +704,7 @@ Exact internal TypeScript property names and plan instruction layout remain impl
 
 Every Standard UI text field, number field, choice group, and button must have a programmatic accessible name.
 
-The Standard Library/Player application derives it from sufficient visible control text or from a localized default such as:
+The Standard Library/Playroom application derives it from sufficient visible control text or from a localized default such as:
 
 ```text
 Answer
