@@ -202,8 +202,7 @@ reviews a file's structure and changes.
 
 - **The compiler coordinator owns the whole compiler:** parser, lexer, semantics, reachability, speaker flow,
   operation checks, lowering, the compiler entry point (`src/compiler.ts`), type inference, the V2 core and families,
-  and the compiler's tests, helpers and fixtures (`tests/type-*`, `tests/helpers/type-core*`,
-  `tests/helpers/type-core/adapter-cases/adapter-case-tables.ts`, `tests/fixtures/type-core/`,
+  and the compiler's tests, helpers and fixtures (`tests/type-*`, `tests/helpers/type-core*`, `tests/fixtures/type-core/`,
   `tests/language-tooling/probe-tool.test.ts`, `tests/runtime/language/otherwise-fallback.test.ts`). Also
   `tools/oxlint/*`, `tools/probe.mjs`, the compiler-differential tool, the families runner (`tests/families/run.mjs`,
   `area.sh`, `stalls.mjs`, `baselines.mjs`, the baseline store's format), and the two language specification documents
