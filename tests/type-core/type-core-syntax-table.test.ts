@@ -33,11 +33,11 @@ interface Composite {
 const CASES: readonly Composite[] = [
   {
     name: "a closed statement in an open statement's block",
-    files: ["if hostValue == null {\n  while true {\n    exit\n  }\n}\n"],
+    files: ['if hostValue == null {\n  save 1 as "k"\n}\n'],
     outer: "ifStatement",
-    inner: "whileStatement",
+    inner: "saveStatement",
     file: 0,
-    at: "while true",
+    at: 'save 1 as "k"',
   },
   {
     name: "a closed expression as an open list's element",
@@ -188,6 +188,14 @@ const CONDITIONS: readonly Condition[] = [
     source: "let c = 1.5 calendar months",
     at: "1.5 calendar months",
     what: "this duration literal",
+  },
+  {
+    row: "switchStatement",
+    condition: "a case's type test of a written type of the slice",
+    source:
+      "switch hostValue {\n  case 1 {\n    exit\n  }\n  case is integer | string {\n    exit\n  }\n}",
+    at: "integer | string",
+    what: "this written type",
   },
   {
     row: "letStatement",
@@ -714,6 +722,9 @@ const UNCONDITIONAL: readonly SyntaxKind[] = [
   "ifStatement",
   "repeatStatement",
   "forStatement",
+  "whileStatement",
+  "breakStatement",
+  "continueStatement",
   "booleanLiteral",
   "nullLiteral",
   "numberLiteral",

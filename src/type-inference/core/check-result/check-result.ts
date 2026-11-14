@@ -164,10 +164,13 @@ export function coreCheckResult(
       diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, source, moved));
   const paths = new Map<Statement, readonly boolean[]>();
   for (const statement of index.statements)
-    if (statement.kind === "ifStatement") {
-      // P7: a literal condition takes one branch (the flow graph's own rule)
+    if (statement.kind === "ifStatement" || statement.kind === "whileStatement") {
+      // (a literal condition decides the way as the flow graph does, P7)
       const truth = literalTruth(statement.condition);
       paths.set(statement, [truth !== false, truth !== true]);
+    } else if (statement.kind === "switchStatement") {
+      // (no way is ruled out by the values the subject's type holds: #2660)
+      paths.set(statement, [...statement.cases.map(() => true), true]);
     } else if (statement.kind === "repeatStatement") {
       // P7: whether the body runs, and whether it may run not at all
       const rounds = literalRounds(statement.count);
@@ -821,15 +824,14 @@ function factLevels(walk: () => (readonly ItemTag[])[], site: Expression): Stati
   }
 }
 
-/** The facts the core settled on for a program inside the slice, by source site (see `SolvedTypeFacts`). */
-export function coreFacts(
+/**
+ * Each expression's type as the facts give it, read after its operands' (the walk's order reversed), so nesting needs no
+ * native recursion; an expression the index does not hold is `unknown`.
+ */
+export function expressionTypes(
   answers: Answers,
   index: SliceIndex,
-  request: CoreAnalysisRequest,
-): SolvedTypeFacts {
-  void request;
-  // each expression's type after its operands' (the walk's order reversed), so nesting needs no native recursion: the
-  // occurrence's kinds, a collection's element type from its literal, its place, or the list its index reads
+): (expression: Expression) => StaticType {
   const types = new Map<Expression, StaticType>();
   const typeOf = (expression: Expression): StaticType => types.get(expression) ?? UNKNOWN_TYPE;
   for (const expression of [...index.expressions].reverse()) {
@@ -856,6 +858,17 @@ export function coreFacts(
         element = placeType(answers, place.id, [...place.path, "element"], expression);
     types.set(expression, typeOfKinds(tags, element));
   }
+  return typeOf;
+}
+
+/** The facts the core settled on for a program inside the slice, by source site (see `SolvedTypeFacts`). */
+export function coreFacts(
+  answers: Answers,
+  index: SliceIndex,
+  request: CoreAnalysisRequest,
+): SolvedTypeFacts {
+  void request;
+  const typeOf = expressionTypes(answers, index);
   const lets = declarations(answers, index);
   const bySite = (a: { readonly site: FactSite }, b: { readonly site: FactSite }): number =>
     a.site.file - b.site.file || a.site.start - b.site.start || a.site.end - b.site.end;

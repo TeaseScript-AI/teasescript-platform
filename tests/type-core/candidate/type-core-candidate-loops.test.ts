@@ -1,0 +1,492 @@
+// `while`, `switch`, `break` and `continue` on the candidate route (#2658, #2488's step 2b).
+
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+import { compileProject, compileProjectWithBackend } from "../../../src/compiler.js";
+import { run } from "../../../src/runtime/engine.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { DECLARED_WAY_ERRORS } from "../../helpers/type-core/declared-samples.js";
+import {
+  diagnosed,
+  type DifferentialRecord,
+  DOMAIN,
+  type Entry,
+  outcome,
+  records,
+  type RecordCase,
+} from "../../helpers/type-core/row-guard-records.js";
+import { HELD_MODES } from "../../helpers/type-core-held-host.js";
+
+/*
+ * What each row expects of the route, in every held mode:
+ * - `equal`: today's answer. A plan where today has one, with each of today's diagnostics and no other, and each run
+ *   ending as today's (status and failure, with its site); apart from two warning codes, dropped wherever they stand:
+ *   every TSV041 warning of the route's (1a's class, #2544's body "R5, diagnostics", a host value stored into a typed
+ *   place; #2674's, a read in a type case's block, which the route does not narrow) and every TSV046 warning of
+ *   today's (a test its types decide).
+ * - `refused`: the route declines with this text.
+ * - `error`: today plans; the route gives this error, no other, and no plan: #2660's TSV052 (its ways do not read the
+ *   values a subject's type holds), #2674's TSV041 (a value case narrows the switched variable).
+ * - `unreached`: as `equal`, but where today warns TSV065 that a statement after a `switch` never runs, the route does
+ *   not (#2660, the same cause: its ways do not read the values a subject's type holds).
+ */
+type Expect =
+  "equal" | { readonly refused: string } | { readonly error: "TSV052" | "TSV041" } | "unreached";
+
+interface Row {
+  readonly name: string;
+  readonly files: readonly { readonly path: string; readonly source: string }[];
+  readonly expect: Expect;
+}
+
+const one = (name: string, source: string, expect: Expect = "equal"): Row => ({
+  name,
+  files: [{ path: "main.tease", source }],
+  expect,
+});
+
+/**
+ * A diagnostic allowed on one side only: the route's TSV041 warning (1a's class, and in a type case's block #2674's, whose
+ * type case does not narrow), today's TSV046 warning.
+ */
+const ROUTE_ONLY = "warning TSV041";
+const TODAY_ONLY = "warning TSV046";
+
+/** The failures of one row's record. */
+function judge(row: Row, record: DifferentialRecord): string[] {
+  const { checker } = record;
+  const failures: string[] = [];
+  const modes = record.candidate.modes.map((mode) => mode.mode);
+  if (JSON.stringify(modes) !== JSON.stringify(HELD_MODES.map((mode) => mode.name)))
+    return [`${row.name}: the record's modes are ${modes.join(", ")}`];
+  for (const mode of record.candidate.modes) {
+    const at = `${row.name} [${mode.mode}]`;
+    if (mode.threw !== undefined) {
+      failures.push(`${at}: threw ${mode.threw}`);
+      continue;
+    }
+    if (typeof row.expect === "object" && "refused" in row.expect) {
+      if (mode.outside !== row.expect.refused)
+        failures.push(
+          `${at}: not refused as "${row.expect.refused}": ${mode.outside ?? "published"}`,
+        );
+      continue;
+    }
+    if (mode.outside !== undefined) {
+      failures.push(`${at}: refused: ${mode.outside}`);
+      continue;
+    }
+    if (typeof row.expect === "object") {
+      const errors = diagnosed(mode).filter((each) => each.startsWith("error "));
+      if (
+        !checker.plan ||
+        mode.plan ||
+        errors.length !== 1 ||
+        !errors[0]!.startsWith(`error ${row.expect.error} `)
+      )
+        failures.push(
+          `${at}: not ${row.expect.error} alone: today ${checker.plan ? "plans" : "no plan"}, route ${JSON.stringify(diagnosed(mode))}`,
+        );
+      continue;
+    }
+    const [today, route] = [
+      kept(checker, row.expect === "unreached" ? [TODAY_ONLY, "warning TSV065"] : [TODAY_ONLY]),
+      kept(mode, [ROUTE_ONLY]),
+    ];
+    if (JSON.stringify(today) !== JSON.stringify(route))
+      failures.push(
+        `${at}: diagnostics: today ${JSON.stringify(today)}, route ${JSON.stringify(route)}`,
+      );
+    if (!checker.plan !== !mode.plan) failures.push(`${at}: a plan on one side only`);
+    (checker.runs ?? []).forEach((run, index) => {
+      if (outcome(run) !== outcome(mode.runs?.[index]))
+        failures.push(
+          `${at}: run ${index}: today ${outcome(run)}, route ${outcome(mode.runs?.[index])}`,
+        );
+    });
+  }
+  return failures;
+}
+
+/** An entry's diagnostics, sorted, without those of the one-sided classes `dropped`. */
+const kept = (entry: Entry, dropped: readonly string[]): string[] =>
+  diagnosed(entry)
+    .filter((each) => !dropped.some((one) => each.startsWith(`${one} `)))
+    .sort();
+
+/** Fails the test where a row's answer is not its expectation. */
+function check(rows: readonly Row[], context: { after: (fn: () => void) => void }): void {
+  const folder = mkdtempSync(join(tmpdir(), "loops-"));
+  context.after(() => rmSync(folder, { recursive: true, force: true }));
+  const cases: RecordCase[] = rows.map((row) => ({ name: row.name, files: row.files }));
+  const found = records(cases, folder);
+  assert.deepEqual(
+    rows.flatMap((row, index) => judge(row, found[index]!)),
+    [],
+  );
+}
+
+test("`while`, `break` and `continue` answer as today's compiler, the false TSV052 on `while true` gone", (t) => {
+  check(
+    [
+      one("while true, exit", "while true {\n  exit\n}\n"),
+      one(
+        "while true, a let in the body",
+        "while true {\n  let y = hostValue\n  say y\n  exit\n}\n",
+      ),
+      one("while (true)", "while (true) {\n  exit\n}\n"),
+      one("while true, a statement after", 'while true {\n  exit\n}\nsay "unreached"\n'),
+      one("while false", 'while false {\n  say "never"\n}\nexit\n'),
+      one("while true, break", 'while true {\n  break\n}\nsay "after"\nexit\n'),
+      one("a host condition", 'while hostValue != null {\n  exit\n}\nsay "after"\nexit\n'),
+      one("a decided condition", 'let n = 1\nwhile n == null {\n  say "never"\n}\nexit\n'),
+      one(
+        "nested, break in the inner loop",
+        "while true {\n  for x in [1] {\n    break\n  }\n  exit\n}\n",
+      ),
+      one(
+        "R7",
+        "let n: integer? = 1\nwhile n != null {\n  let w: integer = n\n  n = null\n}\nexit\n",
+      ),
+      one(
+        "R7's control",
+        "let n: integer? = 1\nwhile n != null {\n  let w: integer = n\n  n = 2\n  exit\n}\nexit\n",
+      ),
+      one(
+        "while, break after a store",
+        "let i: integer = 0\nwhile true {\n  i = hostValue\n  break\n}\nsay i\nexit\n",
+      ),
+      one(
+        "for, break after a store",
+        "let w: integer = 0\nfor x in [1, 2] {\n  w = hostValue\n  break\n}\nexit\n",
+      ),
+      one(
+        "repeat, break after a store",
+        "let w: integer = 0\nrepeat 2 {\n  w = hostValue\n  break\n}\nexit\n",
+      ),
+      one(
+        "while, break on a null test",
+        "let n: integer? = hostValue\nwhile true {\n  if n == null {\n    break\n  }\n  let w: integer = n\n  exit\n}\nexit\n",
+      ),
+      one(
+        "while, continue",
+        "let n: integer? = 1\nwhile n != null {\n  n = null\n  continue\n}\nexit\n",
+      ),
+      one(
+        "for, continue",
+        "for x in [1, 2] {\n  if hostValue == null {\n    continue\n  }\n  say x\n}\nexit\n",
+      ),
+      one(
+        "repeat, continue",
+        "let n: integer = 0\nrepeat 3 {\n  n = hostValue\n  continue\n}\nexit\n",
+      ),
+      one(
+        "a typed let in the body",
+        "while hostValue != null {\n  let y: integer = hostValue\n  exit\n}\nexit\n",
+      ),
+    ],
+    t,
+  );
+});
+
+test("`switch` answers as today's compiler: each literal kind, a range, a type test, `null`, a default, every case exiting", (t) => {
+  check(
+    [
+      one(
+        "literal values and a default",
+        'switch hostValue {\n  case 1 {\n    say "one"\n  }\n  case "a", "b" {\n    say "ab"\n  }\n  default {\n    say "d"\n  }\n}\nexit\n',
+      ),
+      one(
+        "the other literal kinds",
+        'switch hostValue {\n  case 2.5 {\n    say "n"\n  }\n  case true {\n    say "t"\n  }\n  case null {\n    say "null"\n  }\n}\nexit\n',
+      ),
+      one(
+        "a range",
+        'let n = toInteger(hostValue, default: 0)\nswitch n {\n  case 1..3 {\n    say "low"\n  }\n  case 3..=5 {\n    say "mid"\n  }\n  default {\n    say "hi"\n  }\n}\nexit\n',
+      ),
+      one(
+        "type tests",
+        "switch hostValue {\n  case is integer {\n    let w: integer = hostValue\n  }\n  case is not string {\n    let v: string? = hostValue\n  }\n}\nexit\n",
+      ),
+      one(
+        "a type test of a list type",
+        "switch hostValue {\n  case is integer[] {\n    exit\n  }\n}\nexit\n",
+      ),
+      one(
+        "case null narrows",
+        "let n: integer? = hostValue\nswitch n {\n  case null {\n    exit\n  }\n  default {\n    let w: integer = n\n  }\n}\nexit\n",
+      ),
+      one(
+        "every case exits",
+        "switch hostValue {\n  case 1 {\n    exit\n  }\n  default {\n    exit\n  }\n}\n",
+      ),
+      one(
+        "every case exits, a statement after",
+        'switch hostValue {\n  case 1 {\n    exit\n  }\n  case "a" {\n    exit\n  }\n  default {\n    exit\n  }\n}\nsay "unreached"\n',
+      ),
+      one(
+        "a literal subject",
+        'switch 1 {\n  case 1 {\n    say "one"\n  }\n  case 2 {\n    say "two"\n  }\n  default {\n    say "d"\n  }\n}\nexit\n',
+      ),
+      one(
+        "a literal subject, every case exiting",
+        'switch 1 {\n  case 1 {\n    exit\n  }\n}\nsay "after"\nexit\n',
+      ),
+      one(
+        "a literal boolean subject",
+        'switch true {\n  case true {\n    exit\n  }\n  case false {\n    say "f"\n  }\n}\nsay "after"\n',
+      ),
+      one(
+        "both booleans, a statement after that ends the file",
+        'let b = hostValue == null\nswitch b {\n  case true {\n    exit\n  }\n  case false {\n    exit\n  }\n}\nsay "after"\nexit\n',
+        "unreached",
+      ),
+      one(
+        "R8",
+        "let n: integer? = 1\nswitch hostValue {\n  case 1 {\n    n = null\n  }\n  default {\n    n = 2\n  }\n}\nlet w: integer = n\nexit\n",
+      ),
+      one(
+        "R8's control",
+        "let n: integer? = 1\nswitch hostValue {\n  case 1 {\n    n = null\n  }\n  default {\n    n = 2\n  }\n}\nif n != null {\n  let w: integer = n\n}\nexit\n",
+      ),
+      one(
+        "a let in a case",
+        "switch hostValue {\n  case 1 {\n    let y: integer = hostValue\n    say y\n  }\n}\nexit\n",
+      ),
+      one(
+        "a let in the default",
+        "switch hostValue {\n  default {\n    let y = hostValue\n    say y\n  }\n}\nexit\n",
+      ),
+      one(
+        "a store in a case",
+        "let w: integer = 0\nswitch hostValue {\n  case 1 {\n    w = hostValue\n  }\n}\nexit\n",
+      ),
+      one(
+        "a switch in a loop, break in a case",
+        'while true {\n  switch hostValue {\n    case 1 {\n      break\n    }\n    default {\n      exit\n    }\n  }\n  say "x"\n}\nexit\n',
+      ),
+      {
+        name: "every case exits, in a file a transfer starts",
+        files: [
+          { path: "main.tease", source: 'goto "part.tease"\n' },
+          {
+            path: "part.tease",
+            source:
+              "switch hostValue {\n  case 1 {\n    exit\n  }\n  default {\n    exit\n  }\n}\n",
+          },
+        ],
+        expect: "equal",
+      },
+      one("TSV047", "let a = 1\nswitch hostValue {\n  case a {\n    exit\n  }\n}\nexit\n"),
+      one(
+        "TSV048",
+        "switch hostValue {\n  case 1 {\n    exit\n  }\n  case 1 {\n    exit\n  }\n}\nexit\n",
+      ),
+      one(
+        "a union in a type test",
+        "switch hostValue {\n  case is integer | string {\n    exit\n  }\n}\nexit\n",
+        { refused: "this written type" },
+      ),
+      one(
+        "a null-only type test",
+        "switch hostValue {\n  case is null {\n    exit\n  }\n}\nexit\n",
+        { refused: "this written type" },
+      ),
+      one(
+        "an optional type test",
+        "switch hostValue {\n  case is integer? {\n    exit\n  }\n}\nexit\n",
+      ),
+      one("a negative case value", "switch hostValue {\n  case -1 {\n    exit\n  }\n}\nexit\n", {
+        refused: "this unary expression",
+      }),
+    ],
+    t,
+  );
+});
+
+/** The subjects of the never-matching case's family: where each origin stands, then the subject. */
+const SUBJECTS: Readonly<Record<string, readonly [string, string]>> = {
+  "an integer literal": ["", "1"],
+  "a number literal": ["", "2.5"],
+  "a text literal": ["", '"a"'],
+  "a boolean literal": ["", "true"],
+  null: ["", "null"],
+  "a parenthesised literal": ["", "(1)"],
+  "an inferred integer": ["let s = 1\n", "s"],
+  "an inferred text": ['let s = "a"\n', "s"],
+  "an inferred list": ["let s = [1]\n", "s"],
+  "an inferred object": ["let s = {v: 1}\n", "s"],
+  "a branch-joined integer": ["let s = 1\nif hostValue == null {\n  s = 2\n}\n", "s"],
+  "a written integer": ["let s: integer = toInteger(hostValue, default: 0)\n", "s"],
+  "a written integer?, from the host": ["let s: integer? = hostValue\n", "s"],
+  "a written text?, from the host": ["let s: string? = hostValue\n", "s"],
+  "the host": ["", "hostValue"],
+  "a load": ['let s = load "k", default: 1\n', "s"],
+  "a conversion": ["", "toInteger(hostValue, default: 0)"],
+  "an element": ["let s = [1, 2]\n", "s[0]"],
+  "a get": ["let s = [1, 2]\n", "s.get(0, default: 0)"],
+  "a property": ["let s = {v: 1}\n", "s.v"],
+  "a parse": ["", "fromJson(hostValue, default: 1)"],
+  "a for loop's variable": ["for s in [1, 2] {\n", "s"],
+};
+
+/**
+ * The family's rows the route declines where today's checker plans: the facts type a parse by its default's kind, which
+ * today's checker leaves unknown, so the predicate on the facts' type finds these cases may never match. Each is
+ * refused, never published.
+ */
+const UNDER_OFFERED: ReadonlySet<string> = new Set([
+  'a parse, case "a"',
+  "a parse, case true",
+  "a parse, case null",
+]);
+
+const VALUES: readonly string[] = ["1", "2.5", '"a"', "true", "null", "1..3", "(1)"];
+
+test("a case value that may never match is refused where today's checker gives TSV049, and admitted alike elsewhere", (t) => {
+  const rows: Row[] = [];
+  for (const [name, [before, subject]] of Object.entries(SUBJECTS))
+    for (const value of VALUES) {
+      const inLoop = before.startsWith("for ");
+      const body = `${before}switch ${subject} {\n  case ${value} {\n    say "in"\n  }\n}\n${inLoop ? "}\n" : ""}`;
+      rows.push(one(`${name}, case ${value}`, `${body}say "after"\nexit\n`));
+    }
+  rows.push(
+    one(
+      "beside a matching value",
+      'let s = 1\nswitch s {\n  case "a", 1 {\n    say "in"\n  }\n}\nexit\n',
+    ),
+    one(
+      "in a later case",
+      'let s = 1\nswitch s {\n  case 1 {\n    say "one"\n  }\n  case "a" {\n    say "a"\n  }\n}\nexit\n',
+    ),
+    one(
+      "narrowed by a type test",
+      'let s = hostValue\nif s is integer {\n  switch s {\n    case "a" {\n      say "a"\n    }\n  }\n}\nexit\n',
+    ),
+    one(
+      "narrowed by a null test",
+      'let s: integer? = hostValue\nif s != null {\n  switch s {\n    case "a" {\n      say "a"\n    }\n  }\n}\nexit\n',
+    ),
+  );
+  const folder = mkdtempSync(join(tmpdir(), "loops-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const found = records(
+    rows.map((row) => ({ name: row.name, files: row.files })),
+    folder,
+  );
+  const failures = rows.flatMap((row, index) => {
+    const record = found[index]!;
+    const never = (record.checker.diagnostics ?? []).some((each) => each.code === "TSV049");
+    const refused = never || UNDER_OFFERED.has(row.name);
+    return judge({ ...row, expect: refused ? { refused: "this case" } : row.expect }, record);
+  });
+  assert.deepEqual(failures, []);
+  const refusedRows = found.filter((record) =>
+    (record.checker.diagnostics ?? []).some((each) => each.code === "TSV049"),
+  ).length;
+  assert.ok(refusedRows > 0 && refusedRows < rows.length, String(refusedRows));
+});
+
+test("a case value that may never match stays refused where the analysis's budget stops it before its subject's kind", () => {
+  // (a stop leaves the subject an unknown of the budget's reason, which the admitted set does not hold: refused, never
+  // published, never a throw of another kind)
+  for (const source of [
+    'let s = 1\nswitch s {\n  case "a" {\n    say "a"\n  }\n}\nexit\n',
+    'let s = "a"\nlet t = s\nswitch t {\n  case 1..3 {\n    say "r"\n  }\n}\nexit\n',
+    // (a conversion's result, which a stop can leave unknown before the store's own check is decided)
+    'let s = toInteger(hostValue, default: 0)\nswitch s {\n  case "a" {\n    say "a"\n  }\n}\nexit\n',
+  ]) {
+    const files = [{ path: "main.tease", source }];
+    const request = coreRequest(files);
+    assert.ok(request !== null, source);
+    const total = analyseCore(request).budget.total;
+    for (let allowance = 1; allowance < total; allowance += 1)
+      assert.throws(
+        () =>
+          withTestAllowance(allowance, () =>
+            compileProjectWithBackend(files, { globals: ["hostValue"] }, CORE_BACKEND),
+          ),
+        CandidateOutsideSlice,
+        `${source} at ${allowance} of ${total}`,
+      );
+  }
+});
+
+test("a `switch` whose subject's type rules out the no-case way gets TSV052 on the route where today plans (#2660)", (t) => {
+  check(
+    [
+      ...DECLARED_WAY_ERRORS.map((declared) => ({
+        name: `declared: ${declared.form}`,
+        files: declared.files,
+        expect: { error: "TSV052" } as const,
+      })),
+      // (inherited: a type case, and its twin without a `switch`, which gives the same TSV052)
+      one(
+        "inherited: a type case",
+        "let s = 1\nswitch s {\n  case is integer {\n    exit\n  }\n}\n",
+        { error: "TSV052" },
+      ),
+      one("inherited: the twin", 'let s = 1\nif s is integer {\n  exit\n}\nsay "after"\n', {
+        error: "TSV052",
+      }),
+    ],
+    t,
+  );
+});
+
+test("a value case narrows the switched variable on the route, so a typed store in it errs where today plans (#2674)", (t) => {
+  check(
+    [
+      one(
+        "a host subject",
+        'let w: integer = 0\nswitch hostValue {\n  case "text" {\n    w = hostValue\n  }\n}\nsay w\nexit\n',
+        { error: "TSV041" },
+      ),
+    ],
+    t,
+  );
+});
+
+test("a `while true` whose body waits: the run waits, as today's, in every held mode", () => {
+  const loop = "while true {\n  wait 1 s\n  exit\n}\n";
+  for (const files of [
+    [{ path: "main.tease", source: loop }],
+    [
+      { path: "main.tease", source: 'goto "part.tease"\n' },
+      { path: "part.tease", source: loop },
+    ],
+  ]) {
+    const today = compileProject(files, { globals: ["hostValue"] }).plan;
+    assert.ok(today !== null, files[0]!.source);
+    const plans = [
+      today,
+      ...HELD_MODES.map(
+        (mode) =>
+          mode.run(() => compileProjectWithBackend(files, { globals: ["hostValue"] }, CORE_BACKEND))
+            .plan,
+      ),
+    ];
+    for (const [at, plan] of plans.entries())
+      for (const hostValue of DOMAIN) {
+        assert.ok(plan !== null, `${files[0]!.source} [${at}]`);
+        const result = run(
+          plan,
+          createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } }),
+        );
+        assert.deepEqual(
+          [result.snapshot.status, result.events.some((event) => event.kind === "runtimeFailure")],
+          ["waiting", false],
+          `${files[0]!.source} [${at}] with ${JSON.stringify(hostValue)}`,
+        );
+      }
+  }
+});
