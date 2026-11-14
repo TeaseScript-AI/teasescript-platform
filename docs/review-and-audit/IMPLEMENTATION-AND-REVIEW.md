@@ -151,8 +151,8 @@ and say so in the round's request.
 
 ### Code that does not mislead
 
-Names, types, comments and documentation say what the code does. A large share of builders' and reviewers' wrong
-turns came from the code itself:
+Names, types, comments and documentation tell the truth about the code. A large share of builders' and reviewers'
+wrong turns came from the code itself:
 
 - a helper whose name or type promised handling it did not do, so its callers stopped doing it;
 - a check that covered less than its name said, such as a guard that checked only on entry, a wait that covered one of
@@ -164,7 +164,32 @@ turns came from the code itself:
 - a tool flag or default that silently overrides what the caller set;
 - names that differ by a letter, such as a file and its plural.
 
-A comment says what the code does now, so it stays true whatever merges later. It never forecasts later work: no
+A comment says what the code cannot show. Write one for:
+
+- the reason behind a choice: why this order, why not the obvious way, what breaks if it changes;
+- the language rule, ADR or accepted record the code implements, as a citation;
+- what a declaration guarantees, requires and deliberately does not check, where its name and signature do not carry
+  it;
+- the meaning of a value the type cannot express: a unit, a range, an invariant of the data;
+- the contract of a message or format, once, at its definition;
+- a fact about something outside the repository that the code depends on (a browser, a library, a source format),
+  with how it was verified;
+- the obligation a test guards;
+- a known limitation, stated as a fact with its issue.
+
+Do not write what the next lines do; what other code does, calls, reads or returns; a list that repeats the code
+(cases, stages, fields); history (what it was, which review or decision changed it); or a table. If code needs a
+comment to say what it does, rename or restructure it instead. The test for a sentence about other code: if it would
+become untrue when that code changes, without anyone touching the comment, it does not belong there. None of this
+forbids what the list above names: a declaration's own contract stays, and when the code stops keeping it the code is
+wrong, not the comment. This holds in every language.
+
+Outside this rule: a comment a tool reads (a lint disable with its reason, an expected-error marker such as
+`@ts-expect-error`, type annotations in doc comments, a build directive); a comment another repository document
+requires in a set form, which follows that document (an `EVIDENCE:` reason in [`LINTING.md`](../LINTING.md), a moved
+pin's ground in [`TESTING.md`](../TESTING.md), "Pinned work"); and a generated file, which follows its generator.
+
+What a comment says is true of the code now, so it stays true whatever merges later. It never forecasts later work: no
 "until #N" or "until" a package or stage, no "once #N", no "will be replaced" or "replaces this", and no TODO in any
 form. A known temporary state is stated as a fact, and its plan lives in its issue. A reference to an accepted record
 in the repository (an issue, a merged pull request, an ADR, a section of a repository document) is a citation and is
