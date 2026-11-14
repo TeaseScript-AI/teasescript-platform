@@ -3,17 +3,15 @@ import type { SourceSite } from "../graph.js";
 import type { WorkLedger } from "./budget.js";
 import { Retained } from "./retained/retained.js";
 
-/**
- * The items of the coarse core (checkpoint 9): what the analysis knows of a value at a read. A value is a
- * list of items, one per kind. An item is one kind with a certainty (`def`: every run that reaches the read has a value
- * of this kind; `pos`: some run may), the reasons of an `unknown`, one writer that explains it (F28) and one context
- * word (§3.4). Some items also carry the ingress stores of external data (C9), the guard mark (§3.2) or the identity of
- * the one unknown operand whose operator rows they stand for (§4).
+/*
+ * The items of the core: what the analysis knows of a value at a read. A value is a list of items, one per kind. An
+ * item is one kind with a certainty (`def`: every run that reaches the read has a value of this kind; `pos`: some run
+ * may), the reasons of an `unknown`, one writer that explains it (F28) and one context word (`CONTEXT_WORDS`).
  */
 
 /**
  * A kind an item can have: a value kind, `unknown` (a value the core does not model, with its reasons), or `empty`, the
- * mark that an element read may find no element on some run (M `open`).
+ * mark that an element read may find no element on some run.
  */
 export type ItemTag = ValueKind | "unknown" | "empty";
 
@@ -27,12 +25,9 @@ export type Certainty = "def" | "pos";
 export const REASON = { external: 1, opaque: 2, deferred: 4, missing: 8, budget: 16 } as const;
 
 /**
- * The context words in the order a warning names the first (§3.4): the words of §3's steps 1 and 2, which are decided
- * first, then those of the exact path's conditions X1 to X7, then A7's `later`, and last `budget`, a value the analysis
- * stopped before deciding (B1, D4; S3 §5). `reasonContext` orders the first four, the reasons' own words, differently
- * (`external`'s `unknown` before `deferred-parameter`). So that the two orders never meet on an unknown (#2486), the
- * unknown a merge gives takes `reasonContext`'s word where its word is one of those four and its reasons hold one of
- * their bits (`mergeItems`, which an operation's result passes too); every other word stays as this order gives it.
+ * The context words in the order a warning names the first: the reasons' words (`unmodelled` to `unknown`), which are
+ * decided first, then those of the exact path's conditions X1 to X7, then A7's `later`, and last `budget`, a value the
+ * analysis stopped before deciding (B1, D4).
  */
 export const CONTEXT_WORDS = [
   "unmodelled",
@@ -52,14 +47,14 @@ export const CONTEXT_WORDS = [
 
 export type ContextWord = (typeof CONTEXT_WORDS)[number];
 
-/** A store that explains an item (F28): its kind and its site; the record writes it `kind@file:offset`. */
+/** A store that explains an item (F28): its kind and its site. */
 export interface Writer extends SourceSite {
   readonly kind: string;
 }
 
 /**
  * The ingresses of external data that an item holds (C9), as a shared graph: a leaf names one ingress, by its own
- * expression's writer (S6-CARRIERS §3.1: the store that brought it is a fact of admission's walk, not the value side's),
+ * expression's writer (the store that brought it is a fact of admission's walk, not the value side's),
  * a union two parts, and a cell what one member of a fixpoint brought, which grows in place as the member runs again, so
  * every value that holds the cell sees the growth. Merging items unites their nodes and never copies the leaves.
  */
@@ -80,14 +75,13 @@ export interface Item {
   readonly reasons: number;
   readonly writer: Writer | null;
   readonly context: ContextWord | null;
-  /** The word of a `null` that stands beside external data (a typeless load's `default: null`, §3.4). */
+  /** The word of a `null` that stands beside external data (a typeless load's `default: null`). */
   readonly word?: ContextWord;
   readonly ingress?: IngressNode;
   /** External data that no ingress store brought, merged beside some that one did (C9). */
   readonly loose?: true;
   /**
-   * The guard mark: the value was read under a test of its path, so no consumer errs on it (§3.2). An item made from
-   * others takes it from them through `marksOf`, as it takes `called`.
+   * The guard mark: the value was read under a test of its path, so no consumer errs on it.
    */
   readonly guarded?: true;
   /**
@@ -97,9 +91,8 @@ export interface Item {
    */
   readonly called?: true;
   /**
-   * A kind a type test proved of external data (`narrowedItems`, #1073): the test proves the kind, never the ingress, so a
-   * consumer still asks C9's boundary of the ingress the data came by (the lead's ruling (a) on #1073 PR 2). Travels as
-   * the guard mark does.
+   * A kind a type test proved of external data (`narrowedItems`, #1073), or a stopped read of an ingress: the kind is
+   * proved or unknown, never the ingress, so a consumer still asks C9's boundary of the ingress the data came by.
    */
   readonly fromExternal?: true;
   /**
@@ -107,7 +100,7 @@ export interface Item {
    * on every route that the compiler cannot keep, which warns, never the route rule's error (V30 §13).
    */
   readonly tested?: true;
-  /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4). */
+  /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of. */
   readonly fan?: string;
   /**
    * An operation's result kind that every combination giving it holds external data in: possible solely through
@@ -149,7 +142,7 @@ export function joinSpelling(
 /**
  * A spelling's part of an identity (docs/specifications/type-inference-accepted-record/contract.md#r4-277): empty for
  * none, `*` for `MIXED`, else its kinds by value. Every key or snapshot that identifies items or a type test's form
- * includes it (`itemsSignature`, `Values.narrowingMark`), so differently marked lists are different values.
+ * includes it, so differently marked lists are different values.
  */
 export function spellingIdentity(spelling: Spelling | undefined): string {
   return spelling === undefined ? "" : spelling.length === 0 ? "*" : spelling.join("+");
@@ -183,10 +176,9 @@ export function makeItem(
 }
 
 /**
- * The marks an item made from others takes from them: the guard mark where one of them is guarded (§3.2), and the
- * through-a-call flag where one came through a call (AD-3). Every item rebuilt from others takes its marks here (the
- * merge of one kind, an operator's rows, `carried`'s transfers, a written domain's kinds, a step below an unknown), so
- * the two travel together.
+ * The marks an item made from others takes from them, each where one of them has it: the guard mark (`guarded`), the
+ * through-a-call flag (`called`, AD-3) and a test's kind of external data (`fromExternal`). A new mark that travels
+ * belongs here and in `computedMarks`.
  */
 export function marksOf(from: readonly Item[]): {
   readonly guarded?: true;
@@ -202,9 +194,9 @@ export function marksOf(from: readonly Item[]): {
 
 /**
  * The marks a computed item takes from its operands (`marksOf` without `fromExternal`): an operator's row, a
- * conversion, a length, a declared result or a key is computed, so it is never external data a test refined (#1073
- * PR 2: only a transfer that keeps the value, a copy, a merge of one kind, a literal's element or a selection, carries
- * that mark).
+ * conversion, a length, a declared result or a key is computed, so it is never external data a test refined (#1073:
+ * only a transfer that keeps the value, a copy, a merge of one kind, a literal's element or a selection, carries that
+ * mark).
  */
 export function computedMarks(from: readonly Item[]): {
   readonly guarded?: true;
@@ -220,8 +212,8 @@ export function computedMarks(from: readonly Item[]): {
 export const EMPTY: Item = Object.freeze(makeItem("empty"));
 
 /**
- * Every value's answer once the analysis stopped (D4 a′): `unknown` with the reason `budget`, the terminal contract
- * every key has, so each consumer owes its check when the script runs and no further proof is made.
+ * The answer that stands for a value the analysis stopped before answering (D4): `unknown` with the reason `budget`,
+ * the terminal contract every key has.
  */
 export const STOPPED: readonly Item[] = Object.freeze([
   makeItem("unknown", null, { reasons: REASON.budget, context: "budget", cert: "pos" }),
@@ -232,7 +224,7 @@ export function writerKey(writer: Writer): string {
   return `${writer.kind}@${writer.file}:${writer.start}`;
 }
 
-/** The identity of an unknown operand in an operation (§4): its writer's, or else the operation's site. */
+/** The identity of an unknown operand in an operation (`fan`): its writer's, or else the operation's site. */
 export function fanIdentity(writer: Writer | null, operation: SourceSite): string {
   return writer === null ? `op@${operation.file}:${operation.start}` : writerKey(writer);
 }
@@ -241,7 +233,7 @@ function contextRank(context: ContextWord | null): number {
   return context === null ? CONTEXT_WORDS.length : CONTEXT_WORDS.indexOf(context);
 }
 
-/** Of two context words, the one a warning names first (§3.4); no word comes last. */
+/** Of two context words, the one a warning names first (`CONTEXT_WORDS`); no word comes last. */
 export function firstContext(a: ContextWord | null, b: ContextWord | null): ContextWord | null {
   return contextRank(b) < contextRank(a) ? b : a;
 }
@@ -250,14 +242,6 @@ export function firstContext(a: ContextWord | null, b: ContextWord | null): Cont
  * The word of one unknown's reasons: the first present in the rank `external` (`unknown`), `opaque`
  * (`unmodelled`), `deferred` (`deferred-parameter`), `missing` (`missing`), `budget` (`budget`); an unknown without
  * reasons says `unknown`. This order differs from `CONTEXT_WORDS`' (`deferred-parameter` comes before `unknown` there).
- *
- * The unknown a merge gives takes this word where its word comes before every condition's and its reasons hold
- * `external`, `opaque`, `deferred` or `missing` (`mergeItems`, #2486): kept by `CONTEXT_WORDS`' order, such a word
- * outlived the reasons that gave it and went round a solver component. Outside that rule:
- * - a condition's word, `later` and no word, which name where the value comes from rather than its reasons, and which a
- *   type test hands to the kind it proves (`narrowedItems`), so a message would lose them;
- * - `budget`, the word and the reason, which comes after every condition's word: rewriting a word to it would let a
- *   condition's word win a later merge that it lost before, so the merge would depend on its grouping.
  */
 export function reasonContext(reasons: number): ContextWord {
   if ((reasons & REASON.external) !== 0) return "unknown";
@@ -278,8 +262,8 @@ const EARLY_WORDS: ReadonlySet<ContextWord> = new Set([
 ]);
 
 /**
- * The word an item brings where words meet: an unknown its reasons' word, whatever word it carries, since its reasons
- * name it and come before any condition's word (§3.4); any other item its own word.
+ * The word an item brings where words meet: an unknown its reasons' word (`reasonContext`), whatever word it carries;
+ * any other item its own word.
  */
 export function ownContext(item: Item): ContextWord | null {
   return item.tag === "unknown" ? reasonContext(item.reasons) : item.context;
@@ -340,7 +324,7 @@ export class IngressGraph {
   }
 
   public cell(): IngressCell {
-    // (#1072 1b: a record, so the solver's growth of a fixpoint's cell is a recorded write)
+    // (#1072: a record, so the solver's growth of a fixpoint's cell is a recorded write)
     return Retained.record("IngressCell", { id: this.#next++, contents: null });
   }
 }
@@ -453,15 +437,13 @@ const TAG_RANK: ReadonlyMap<ItemTag, number> = new Map(
 );
 
 /**
- * The one order of a list of a value's kinds (#1398): a written spelling's where exactly one spelling
- * covers every kind of the list but `null`, `unknown` and `empty` (an inferred kind it spells adds nothing to it, as
- * G5 rules), then the others in the table's; else the table's (`TAG_RANK`), never the order the analysis met them,
- * which the consumers' and the solver's orders and the sharing change. It reads the kinds and the spellings alone, so it
- * is the same in whatever order the entries come; entries of one kind keep their order. A list is made in it (a merge, a
- * stopped answer, a finishing read) and reaches its publication through steps that keep it, and a list composed with
- * another passes here again where it is completed. A fixed table's order and a tuple by position keep their own. One
- * pass over the entries and one over the ranks, so it costs no more than the entries it is given, each already charged
- * where it was made, and it charges nothing of its own. The result is made at its length: a flattened
+ * The one order of a list of a value's kinds (#1398): a written spelling's where exactly one spelling covers every kind
+ * of the list but `null`, `unknown` and `empty` (an inferred kind it spells adds nothing to it, as G5 rules), then the
+ * others in the table's; else the table's (`TAG_RANK`), never the order the analysis met them, which the consumers' and
+ * the solver's orders and the sharing change. It reads the kinds and the spellings alone, so it is the same in whatever
+ * order the entries come; entries of one kind keep their order. A fixed table's order and a tuple by position keep
+ * their own. One pass over the entries and one over the ranks, so it costs no more than the entries it is given, each
+ * already charged where it was made, and it charges nothing of its own. The result is made at its length: a flattened
  * one keeps spare capacity, which the many answers kept multiply (#1625).
  */
 function inOrderOf<T>(
@@ -533,9 +515,8 @@ export function kindsInOrder<Kind extends ItemTag>(kinds: Iterable<Kind>): Kind[
 /**
  * The items of one value, one per kind, in their one order (`inItsOrder`): an item is definite when one of its
  * kind is (and none is guarded); the reasons and ingress stores of all are kept, so no merge drops a boundary check
- * (C9); the earliest writer and the first context word stand for the kind (F28, §3.4), but an `unknown` whose first
- * word and reasons come before every condition's takes its reasons' word (`reasonContext`); a guarded one marks the
- * kind (§3.2).
+ * (C9); the earliest writer and the first context word stand for the kind (F28), but an `unknown` whose first word and
+ * reasons come before every condition's takes its reasons' word (`reasonContext`); a guarded one marks the kind.
  */
 export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
   const byTag = new Map<ItemTag, Item>();
@@ -544,10 +525,13 @@ export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
     const earlier = byTag.get(item.tag);
     byTag.set(item.tag, earlier === undefined ? item : mergePair(earlier, item, scope.ingress));
   }
-  // (#2486: an unknown's reasons' word is its reasons' one (`reasonContext`), which changes only as they grow; kept by
-  // the word order, an earlier word outlived the reasons that gave it and went round a solver component. Only a word
-  // before every condition's becomes one, so the merge stays associative; a condition's word, `later`, `budget` and no
-  // word stay as the order gives them, and a type test hands them to the kind it proves)
+  // (#2486: the unknown takes its reasons' word (`reasonContext`), which changes only as they grow, where its word is
+  // one of the four before every condition's (`EARLY_WORDS`) and its reasons hold one of their bits: kept by the word
+  // order, an earlier word outlived the reasons that gave it and went round a solver component. A condition's word,
+  // `later` and no word stay as the order gives them: they name where the value comes from, and a type test hands them
+  // to the kind it proves (`narrowedItems`). `budget` stays too: rewriting a word to it, which comes after every
+  // condition's, would let a condition's word win a later merge that it lost before, so the merge would depend on its
+  // grouping)
   const unknown = byTag.get("unknown");
   if (
     unknown !== undefined &&
@@ -585,8 +569,7 @@ export function alternatives(items: readonly Item[], scope: ItemScope): Item[] {
 }
 
 /**
- * Every item a possibility, with `context` where no word comes first; an `unknown` keeps its own word, the reason's,
- * which comes before any condition's (§3.4).
+ * Every item a possibility, with `context` where no word comes first; an `unknown` keeps the word it carries.
  */
 export function weaken(items: readonly Item[], context: ContextWord | null = null): Item[] {
   return items.map((item) => ({

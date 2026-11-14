@@ -21,21 +21,21 @@ import { noteSharing, rootName, type Sharing } from "../operation-checks.js";
 import { globMatches, MAIN_FILE_PATH } from "../project-paths.js";
 import { placeKey } from "../way-facts.js";
 
-// What the code of a project may change (ADR 0021 rule 5.5): the names that functions and timer, media, and button
-// blocks assign or change in place, what each loop may do before its next test, and which files enter main.tease
-// again. The type analysis takes narrowing (rule 5.5) and the facts of a loop from these; code found never to run
-// changes nothing.
-
-/**
- * What one iteration of a loop may do before the next test: the variables it assigns or changes in place, and whether it
- * may suspend.
- */
+/** What one iteration of a loop may do before the next test. */
 export interface LoopEffects {
   readonly writes: ReadonlyMap<string, Sharing>;
+  /**
+   * Whether an iteration reaches a point where a block may run or variables that functions and blocks share may change
+   * (#2737), also inside an inner loop. Not whether the iteration waits.
+   */
   readonly suspends: boolean;
 }
 
-const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
+/**
+ * The statements at which a block may run or shared variables may change (a file `call` runs another file's top
+ * level).
+ */
+const OTHER_CODE_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "sayStatement",
   "showButtonStatement",
   "showPopupStatement",
@@ -85,7 +85,7 @@ export function coversDeadCode(found: DeadCode, dead: DeadCode): boolean {
   return true;
 }
 
-/** What the code of a project may change, as the check uses it. */
+/** What the code of a project may change (ADR 0021 rule 5.5). */
 export interface ProjectEffects {
   readonly files: readonly ProgramEffects[];
   readonly loops: ReadonlyMap<Block, LoopEffects>;
@@ -199,7 +199,7 @@ function programEffects(program: Program, file: number, dead: DeadCode): Program
           expression.kind === "timerExpression" ||
           expression.kind === "playMediaExpression" ||
           expression.kind === "showCameraExpression" ||
-          (expression.kind === "callExpression" && !isPureBuiltinCall(expression)))
+          (expression.kind === "callExpression" && !isInertBuiltinCall(expression)))
       )
         loop.suspends = true;
       // A method that changes a list, set, or dict changes the variable that holds it, also called in parentheses.
@@ -230,7 +230,7 @@ function programEffects(program: Program, file: number, dead: DeadCode): Program
       continue;
     }
     const statement = item.statement;
-    if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
+    if (loop !== null && OTHER_CODE_STATEMENTS.has(statement.kind)) loop.suspends = true;
     if (runs && statement.kind === "callFileStatement") callsFiles = true;
     if (
       runs &&
@@ -315,17 +315,20 @@ function entersMainAtTop(target: TransferTarget): boolean {
   return text === null || text === MAIN_FILE_PATH;
 }
 
-const PURE_BUILTINS: ReadonlySet<string> = new Set([
+const CORE_AND_PRELUDE_BUILTINS: ReadonlySet<string> = new Set([
   ...CORE_RUNTIME_BUILTINS,
   ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
 ]);
 
-/** A call of a built-in without effects on script variables or time. */
-function isPureBuiltinCall(expression: CallExpression): boolean {
+/**
+ * A call of a core or prelude built-in that is no file store and no lock (both may wait for the Player): it changes no
+ * script variable and lets no other code run. It is not pure: the random functions are among them (#2737).
+ */
+function isInertBuiltinCall(expression: CallExpression): boolean {
   const callee = expression.callee;
   return (
     callee.kind === "identifier" &&
-    PURE_BUILTINS.has(callee.name) &&
+    CORE_AND_PRELUDE_BUILTINS.has(callee.name) &&
     !isFileStoreCall(expression) &&
     !isLockCall(expression)
   );

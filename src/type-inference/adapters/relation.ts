@@ -3,19 +3,13 @@ import type { KnownValue } from "../../static-evaluation.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { ContractRef, DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence } from "../graph.js";
 
-// An operation's result as a relation over what is known of its operands so far (O4 stage 2). Each contract family has
-// one adapter that reads the owning contract module (`conversions.ts`, `numeric-functions.ts`, `text-operations.ts`,
-// ...) and answers in these terms; `operationRelations()` (`index.ts`) serves them, and only the adapter tests read
-// it. The coarse core takes its results from `core/contract/` and `core/method-categories.ts`; of this file it reads
-// the operand types (`OperandView`, `OperationInputs`).
-
 /** A reference to one operand of an operation: its receiver, a positional argument, or a named one. */
 export type OperandRef =
   { readonly receiver: true } | { readonly argument: number } | { readonly named: string };
 
 /**
- * What the solver knows of an operand so far. `alternatives` lists the types the operand may have, as the solver has
- * them now (closed types, no open slots); `null` means no evidence yet (bottom), which is not a value. `dynamic` says
+ * What is known of an operand so far. `alternatives` lists the types the operand may have, as known now (closed
+ * types, no open slots); `null` means no evidence yet (bottom), which is not a value. `dynamic` says
  * why the operand may hold data the compiler cannot know, beside any alternatives; `known` is its value from the
  * shared fold, when the contract's result depends on it.
  */
@@ -29,7 +23,7 @@ export interface OperationInputs {
   readonly receiver: OperandView | null;
   readonly arguments: readonly OperandView[];
   readonly named: ReadonlyMap<string, OperandView>;
-  /** What the source says beyond the operands' types (see `SyntaxEvidence`). */
+  /** What the source says beyond the operands' types. */
   readonly evidence: SyntaxEvidence | undefined;
   /** The view of a place the evidence names, such as a written choice object's `value`. */
   view(place: PlaceId): OperandView;
@@ -46,8 +40,7 @@ export type OperationResult =
   | { readonly kind: "type"; readonly type: StaticType }
   /**
    * The types the result may have while an operand's type is not known: `x / 4` with `x` unknown can be a number, never
-   * text. The solver keeps them as possibilities with the operand's provenance, so a store of the result into a place
-   * that none of them fits is still an error, and a place one of them fits keeps a runtime check.
+   * text. The result is one of them, with the operand's provenance.
    */
   | { readonly kind: "possible"; readonly types: readonly StaticType[]; readonly why: DynamicWhy }
   /** A copy of a part of an operand: an element the method gives, a selected property, a dict key. */
@@ -62,14 +55,14 @@ export type OperationResult =
   | { readonly kind: "dynamic"; readonly why: DynamicWhy }
   /** The contract says nothing yet (a numeric callback's `unknown`); no evidence is added or removed. */
   | { readonly kind: "unconstrained" }
-  /** The operands can never combine under the contract; the check reports it, the result has no value. */
+  /** The operands can never combine under the contract: the result has no value. */
   | { readonly kind: "invalid" }
   /** One of several results, as `fromBase64(text, default: box)` gives text or a copy of its default. */
   | { readonly kind: "alternatives"; readonly results: readonly OperationResult[] }
   /**
-   * A result per kind the receiver may have, as `union(other)` on a receiver that is a list or a set. The solver
-   * evaluates each case with the receiver's view restricted to that kind, and every operand path inside the case
-   * refers to that restricted receiver; the cases join as alternatives do.
+   * A result per kind the receiver may have, as `union(other)` on a receiver that is a list or a set. Each case holds
+   * for the receiver's view restricted to that kind (`restrictedTo`), and every operand path inside the case refers to
+   * that restricted receiver; the cases join as alternatives do.
    */
   | {
       readonly kind: "byReceiver";
@@ -79,13 +72,12 @@ export type OperationResult =
 export interface OperationRelation {
   readonly contract: ContractRef;
   /**
-   * The result for operands known as `inputs` says. Called again whenever an operand's view grows, so it must be a
-   * function of its inputs alone: no state, no reading of other places.
+   * The result for operands known as `inputs` says: a function of its inputs alone, no state and no reading of other
+   * places, so a reader may ask again whenever an operand's view grows.
    */
   result(inputs: OperationInputs): OperationResult;
 }
 
-/** The relations of every contract family, by family and name, which the solver asks. */
 export interface OperationRelations {
   relation(contract: ContractRef): OperationRelation | undefined;
 }

@@ -27,9 +27,9 @@ import { selectsElement } from "./method-categories.js";
 import { Retained } from "./retained/retained.js";
 
 /**
- * The input of the coarse core's analysis (checkpoint 9): the request's files with both fields the core reads beside
- * their programs. The name pass's picks are the files each glob target may start, which the flow graph takes as the
- * lowering does; the source text names the operands an obligation checks (§10.5: `x` in `x / 4`).
+ * The input of the core's analysis: the request's files with both fields the core reads beside their programs. The
+ * name pass's picks are the files each glob target may start; the source text names the operands an obligation checks
+ * (`x` in `x / 4`).
  */
 export interface CoreFile extends TypeAnalysisFile {
   readonly source: string;
@@ -102,7 +102,7 @@ export type HasConstraint = Extract<Constraint, { readonly kind: "has" }>;
 
 /**
  * The steps a projection takes that are no property (`ProjectionStep`, graph.ts): a key's path keeps a property of one
- * of these names apart from them (Astra B1), so `box.iteration` is `box`'s property, not a loop's visit.
+ * of these names apart from them, so `box.iteration` is `box`'s property, not a loop's visit.
  */
 const INTERNAL_STEPS: ReadonlySet<string> = new Set(["element", "entry", "index", "iteration"]);
 
@@ -162,7 +162,6 @@ function measureSyntax(programs: readonly Program[]): {
     if (kinded) nodes += 1;
     const inner = fields["kind"] === "block" ? depth + 1 : depth;
     nesting = Math.max(nesting, inner);
-    // the outermost node past the limit (a block, or an `else if` counted past it)
     const outermost = kinded && !inside && inner > NESTING_LIMIT;
     if (outermost) {
       // EVIDENCE: invariant: a parsed node with a kind has its span.
@@ -187,9 +186,8 @@ function measureSyntax(programs: readonly Program[]): {
 }
 
 /**
- * The index of one analysis's input, built once: the collector's places and constraints by the ways the analysis looks
- * them up, the flow graph and its dominators, the work ledger, and the positions the dominator order gives nodes. The
- * collector's `PlaceId` and a path are a key's identity; a place's label is only how it is shown.
+ * The index of one analysis's input, built once. The collector's `PlaceId` and a path are a key's identity; a place's
+ * label is only how it is shown.
  */
 export class CoreProgram {
   readonly graph: ConstraintGraph;
@@ -202,7 +200,7 @@ export class CoreProgram {
   readonly syntaxNodes: number;
   /** The analysis's view of the request: each call of an identity function read as its argument (#2493). */
   readonly identity: IdentityView;
-  /** The view's files and host values, as the candidate slice's syntax reads them (`slice-syntax.ts`). */
+  /** The view's files and host values. */
   readonly files: readonly CoreFile[];
   readonly globals: ReadonlySet<string>;
   /** The request's built-in names: none a fix may declare (`Answers.keptName`). */
@@ -260,7 +258,7 @@ export class CoreProgram {
 
   /**
    * The setup work of the analysis, charged, and the indexes: once, before anything reads them. A stop in it
-   * leaves it to run again to its end, uncharged, for the finishing path (D4 a′).
+   * leaves it to run again to its end, uncharged, for the finishing path (D4).
    */
   public index(): void {
     if (this.#indexed) return;
@@ -349,7 +347,6 @@ export class CoreProgram {
     for (const constraint of this.constraints)
       if (constraint.kind === "speakerRead" && !this.placeBySite.has(siteKey(constraint.site)))
         this.placeBySite.set(siteKey(constraint.site), constraint.occurrence);
-    // the flow graph's uses of an operand, by its place
     const uses = [
       ["index", this.flow.indexUses],
       ["count", this.flow.countUses],
@@ -368,7 +365,7 @@ export class CoreProgram {
         if (place !== undefined) this.#consumed(place, { kind: "use", what, span });
       }
     this.#indexed = true;
-    // (#1072 R61: its graph is held as it is from here on, its private fields with it)
+    // (#1072: its graph is held as it is from here on, its private fields with it)
     Retained.programPart(this, (program) => ({
       functions: program.#functions,
       functionRegions: program.#functionRegions,
