@@ -2528,7 +2528,6 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
-- Revision 131: The exact-fields snapshot contract.
 - Revision 130: The plan contract of a check of a part of a stored value.
 - Revision 129: The plan contract of a typed reading into a written `object`.
 - Revision 128: The form-presentation snapshot contract.
