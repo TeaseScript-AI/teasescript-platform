@@ -1,6 +1,7 @@
 import type {
   Block,
   CallExpression,
+  DurationLiteral,
   Expression,
   InteractionExpression,
   Program,
@@ -10,6 +11,11 @@ import type {
 } from "../../ast.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { dictMethod } from "../../dict-operations.js";
+import {
+  durationLiteralValue,
+  isStoredCalendarDurationRecord,
+  isStoredDurationRecord,
+} from "../../duration.js";
 import { isBlankTextAnswer } from "../../interaction-answers.js";
 import { listMethod } from "../../list-methods.js";
 import { isTextMethod, TEXT_METHODS } from "../../text-operations.js";
@@ -300,9 +306,12 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   booleanLiteral: modelled(),
   nullLiteral: modelled(),
   numberLiteral: modelled(),
-  durationLiteral: REFUSED,
-  unitExpression: REFUSED,
-  angleExpression: REFUSED,
+  durationLiteral: {
+    row: "modelled",
+    visit: (node) => (storedLiteral(node) ? walk([]) : refuse(node.span, "this duration literal")),
+  },
+  unitExpression: modelled((node) => [node.operand]),
+  angleExpression: modelled((node) => [node.operand]),
   stringLiteral: {
     row: "modelled",
     visit: (node) =>
@@ -430,6 +439,15 @@ export function outsideSyntax(
     }
   }
   return null;
+}
+
+/** Whether the plan can store a duration literal's value (ADR 0026). */
+function storedLiteral(node: DurationLiteral): boolean {
+  const value = durationLiteralValue(node);
+  if (typeof value === "string") return false;
+  return value.kind === "duration"
+    ? isStoredDurationRecord({ ...value })
+    : isStoredCalendarDurationRecord({ ...value });
 }
 
 /** Whether a comparison is a null test, `x != null` or `x == null` (either side the `null`). */

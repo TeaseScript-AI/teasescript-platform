@@ -26,12 +26,14 @@ const LITERALS: Readonly<Partial<Record<ValueKind, string>>> = {
   range: "1..=2",
   list: "[1]",
   object: "{v: 1}",
+  duration: "2 s",
+  calendarDuration: "1 calendar month",
+  angle: "90 deg",
 };
 
 /**
  * The text each conversion the slice admits (`sliceCall`'s: a value's, not `toString`) converts: a sample's second
- * origin, `<conversion>(<text>, default: hostValue)`, a value of the conversion's result kind. The declared positions'
- * test requires one for each such conversion.
+ * origin, `<conversion>(<text>, default: hostValue)`, a value of the conversion's result kind.
  */
 export const CONVERSION_INPUTS: Readonly<Record<string, string>> = {
   toNumber: '"2.5"',
@@ -182,12 +184,12 @@ const SAY_REFUSED: ReadonlySet<string> = new Set([
   "time",
   "datetime",
   "absoluteDateTime",
+  "duration",
+  "calendarDuration",
+  "angle",
 ]);
 
-/**
- * A fitting value of each declared position: the command with it is a sample's fitting twin (the lead's R12). A duration
- * literal is outside the slice, so a twin with one is compared on today's checker.
- */
+/** A fitting value of each declared position: the command with it is a sample's fitting twin. */
 const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<string, string>>>>> = {
   showImageStatement: { image: '"a.png"' },
   openUrlStatement: { url: '"https://example.com"', buttonText: '"Go"', alwaysButton: "true" },
@@ -255,7 +257,6 @@ export const DECLARED_REFUSALS: readonly {
     position: "the condition",
     refused: 'if hostValue {\n  say "y"\n}',
     admitted: 'let b = hostValue == null\nif b {\n  say "y"\n}',
-    // (an unknown condition's operator diagnostic, which the route refuses after the analysis)
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
   },
@@ -264,9 +265,40 @@ export const DECLARED_REFUSALS: readonly {
     position: "`get`'s receiver",
     refused: "let x: integer = hostValue.get(0, default: 0)",
     admitted: "let xs = [1]\nlet x: integer = xs.get(0, default: 0)",
-    // (`get` on a receiver of unknown kind, which the route refuses after the analysis)
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
+  },
+  {
+    row: "durationLiteral",
+    position: "a calendar amount of no whole months",
+    refused: "let c = 1.5 calendar months",
+    admitted: "let c = 2 calendar months",
+    gate: "the durationLiteral row (src/type-inference/core/slice-syntax.ts)",
+    text: "this duration literal",
+  },
+  {
+    row: "unitExpression",
+    position: "the amount, text",
+    refused: 'let t = "a"\nlet d = t s',
+    admitted: "let t = 2\nlet d = t s",
+    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+    text: "this unit expression",
+  },
+  {
+    row: "unitExpression",
+    position: "the amount, a known fraction of calendar months",
+    refused: "let n = 1.5\nlet c = n calendar months",
+    admitted: "let n = 1\nlet c = n calendar months",
+    gate: "coreCheckResult (src/type-inference/core/check-result/check-result.ts)",
+    text: "this unit expression",
+  },
+  {
+    row: "angleExpression",
+    position: "the amount, a known overflow",
+    refused: "let n = 1e308\nlet a = n rad",
+    admitted: "let n = 1\nlet a = n rad",
+    gate: "coreCheckResult (src/type-inference/core/check-result/check-result.ts)",
+    text: "this angle expression",
   },
   // (a `say`'s value of a kind it shows only by S9b's rules, written in place)
   ...samples()

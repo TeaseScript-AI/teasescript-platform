@@ -11,6 +11,7 @@ import {
   SliceIndex,
   OutsideContract,
   SLICE_DEPTH,
+  unwrap,
 } from "./check-result/slice-index.js";
 import { oneType } from "./consumers/kinds.js";
 import { checkedOnSource, identityView, type IdentityView } from "./identity-view.js";
@@ -264,6 +265,36 @@ export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
   ["gender", { takes: ["string", "null"], check: null }],
 ]);
 
+/** What the amount of a unit or angle expression takes (`n s`, `n deg`): a number (ADR 0026 §8). */
+export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: OperandCheck } = {
+  takes: ["integer", "number"],
+  check: { file: "src/runtime/evaluator.ts", function: "evaluate" },
+};
+
+/**
+ * Whether the route admits a unit's or an angle's amount: one the core shows to be a number (`UNIT_AMOUNT`), or external
+ * data, which the run checks. It deliberately declines an amount only a narrowing or an `otherwise` shows to be a number
+ * (`n: integer?` under `n != null`, `(n otherwise 1) s`).
+ */
+function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression): boolean {
+  const answer = answers.at(nodeOf(answers, index, amount));
+  const read = answer?.place ?? null;
+  const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
+  return (answer?.items ?? []).every((item) => {
+    if (item.tag === "empty") return true;
+    if (item.tag !== "unknown") return UNIT_AMOUNT.takes.includes(item.tag);
+    const reasons = item.reasons & ~REASON.missing;
+    if (reasons === 0) return true;
+    if (reasons !== REASON.external) return false;
+    if (admitted !== null)
+      return (
+        admitted.by === "undecided" ||
+        admitted.kinds.every((kind) => UNIT_AMOUNT.takes.includes(kind))
+      );
+    return unwrap(amount).kind === "identifier";
+  });
+}
+
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
 function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
@@ -314,6 +345,13 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
             what: "this speaker property",
           };
       }
+  for (const unit of index.units)
+    if (!amountAdmitted(answers, index, unit.operand))
+      return {
+        file: index.fileOf(unit),
+        span: unit.span,
+        what: unit.kind === "unitExpression" ? "this unit expression" : "this angle expression",
+      };
   // a load whose default is only null: without a declared type, the storage rules' error (F19, S9b's)
   for (const load of index.loads)
     if (
