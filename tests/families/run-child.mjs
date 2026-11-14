@@ -1,6 +1,7 @@
 // The families runner's child process (`run.mjs` forks this module with `--child`): each source's runs in the four
-// modes on each tree, each run's charged units and its stall over the unit limit; and what the runner shares with
-// it, each tree's library and ledger and the stall's marker on stderr.
+// modes on each tree, each run's charged units, the limit its ledger stopped at, whether it had nothing to analyse
+// (`unparsed`) and its stall over the unit limit; and what the runner shares with it, each tree's library and ledger
+// and the stall's marker on stderr.
 import { existsSync, writeFileSync, writeSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -81,6 +82,8 @@ if (process.argv[2] === "--child") {
   const multiple = units ?? Infinity;
   let spent = 0;
   let allowance = null;
+  // (the limit a ledger of the run going on stopped at, `WorkLedger.stop`, or null)
+  let stopped = null;
   let limit = Infinity;
   let next = Infinity;
   let running = null;
@@ -115,6 +118,13 @@ if (process.argv[2] === "--child") {
     process.exit(OVER_EXIT);
   };
   for (const ledger of new Set(ledgers.filter((found) => found !== null))) {
+    // (a tree whose ledger has no `stop` records none)
+    const { stop } = ledger.prototype;
+    if (typeof stop === "function")
+      ledger.prototype.stop = function (reached) {
+        stopped ??= reached;
+        return stop.call(this, reached);
+      };
     const { charge } = ledger.prototype;
     ledger.prototype.charge = function (counter, units = 1) {
       spent += units;
@@ -152,6 +162,7 @@ if (process.argv[2] === "--child") {
     running = { seq, run: index, tree, mode, check, since: Date.now(), before };
     spent = 0;
     allowance = null;
+    stopped = null;
     limit = Infinity;
     next = measured && record !== undefined ? STEP : Infinity;
     write({ work: measured ? 0 : null, allowance: null });
@@ -166,6 +177,9 @@ if (process.argv[2] === "--child") {
     used.peak.push(peak / 2 ** 20);
     used.work.push(measured ? spent : null);
     used.allowance.push(measured ? allowance : null);
+    used.stopped.push(measured ? stopped : null);
+    // (whether this tree's oracle had no request to analyse: its files do not parse or name, #2796's no analysis)
+    used.unparsed.push(result.value?.unparsed === true);
     used.ms.push(ms);
     // (what its oracle reported of its own questions, which its limit and its stored run hold, #1837)
     used.questions.push((measured ? reportedBy(trees[tree], check) : undefined) ?? null);
@@ -206,7 +220,15 @@ if (process.argv[2] === "--child") {
           continue;
         }
         // compared by hash, so that the base's text is not held while the head runs
-        const used = { work: [], allowance: [], ms: [], questions: [], peak: [] };
+        const used = {
+          work: [],
+          allowance: [],
+          stopped: [],
+          unparsed: [],
+          ms: [],
+          questions: [],
+          peak: [],
+        };
         const results = [];
         for (const tree of trees.keys()) {
           // (with the peaks of the trees that ended this run, so that a stall on a later tree keeps them)

@@ -62,8 +62,24 @@ const QUESTIONS = new RegExp(`^${COUNT}/${WORDS}$`);
 
 /** Why `c` is no compile `compile` writes, else undefined. */
 function compileFault(c) {
-  if (!shaped(c, ["plan", "diagnostics", "checks", "error", "trace", "questions", "units"]))
-    return "a compile without exactly its seven parts";
+  if (
+    !shaped(
+      c,
+      ["plan", "diagnostics", "checks", "error", "trace", "questions", "units"],
+      ["allowance", "stopped", "outside", "thrown", "analysed"],
+    )
+  )
+    return "a compile without exactly its seven parts, or one of the five a runner since #2796 adds";
+  if (c.analysed !== undefined && typeof c.analysed !== "boolean")
+    return "a compile's analysed neither true nor false";
+  if (c.allowance !== undefined && !whole(c.allowance))
+    return "a compile's allowance no whole number";
+  if (c.stopped !== undefined && !textOrNull(c.stopped))
+    return "a compile's stopped limit neither text nor null";
+  if (c.thrown !== undefined && !textOrNull(c.thrown))
+    return "a compile's thrown place neither text nor null";
+  if (c.outside !== undefined && ![null, "limit", "slice"].includes(c.outside))
+    return "a compile's refusal neither limit, slice nor null";
   if (![c.plan, c.diagnostics].every((part) => part === null || (text(part) && DIGEST.test(part))))
     return "a compile's plan or diagnostics neither a digest nor null";
   if (!textOrNull(c.error)) return "a compile's error neither text nor null";

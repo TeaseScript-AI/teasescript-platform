@@ -6,6 +6,7 @@ import { submit } from "./compiler-replay/submit.mjs";
 import { collect } from "./compiler-replay/collect.mjs";
 import { rerunShard, rerunStalls } from "./compiler-replay/reruns.mjs";
 import { aside, asideRun } from "./compiler-replay/aside.mjs";
+import { evidence, evidenceReportStep } from "./compiler-replay/evidence.mjs";
 
 // A compiler pull request's replay of its base against its head, through the queue, in these steps:
 //
@@ -16,9 +17,12 @@ import { aside, asideRun } from "./compiler-replay/aside.mjs";
 //   node tools/compiler-replay.mjs rerun-stalls <prefix> <base> <head> --owner <owner> [--memory <MB>] [--host <host>]
 //   node tools/compiler-replay.mjs aside <prefix> <base> <head> --owner <owner> --declare <file>
 //   node tools/compiler-replay.mjs plan-checks <plan.json>...
+//   node tools/compiler-replay.mjs evidence <base> <head> --owner <owner> [--areas <a,b,…>] [--packages <folder>]... …
+//   node tools/compiler-replay.mjs evidence-report <prefix> --owner <owner> [--json <file>]
 //
-// The replay steps live in `tools/compiler-replay/` (`submit.mjs`, `collect.mjs`, `reruns.mjs`, `aside.mjs`); `plan-checks`
-// remains here.
+// The replay steps live in `tools/compiler-replay/` (`submit.mjs`, `collect.mjs`, `reruns.mjs`, `aside.mjs`, and the
+// evidence command for a change meant to keep behaviour, `evidence.mjs`, whose header gives its options and its exit
+// status); `plan-checks` remains here.
 //
 // `plan-checks` prints each plan file's checks (`tests/helpers/plan-checks.ts`'s `planChecks`, from the built `dist/`).
 //
@@ -28,8 +32,8 @@ import { aside, asideRun } from "./compiler-replay/aside.mjs";
 // a shard did not run.
 
 /**
- * The positional arguments and `--name value` options of `argv`; `--dry` and `--baseline` are flags, and each
- * `--replace <failed>=<rerun>` adds a pair to `options.replace`.
+ * The positional arguments and `--name value` options of `argv`; `--dry` and `--baseline` are flags, each `--packages`
+ * adds a folder to `options.packages`, and each `--replace <failed>=<rerun>` adds a pair to `options.replace`.
  */
 function parse(argv) {
   const positional = [];
@@ -40,7 +44,8 @@ function parse(argv) {
     else if (argument.startsWith("--")) {
       if (i + 1 >= argv.length) throw new Usage(`${argument} needs a value`);
       const value = argv[(i += 1)];
-      if (argument !== "--replace") options[argument.slice(2)] = value;
+      if (argument === "--packages") options.packages = [...(options.packages ?? []), value];
+      else if (argument !== "--replace") options[argument.slice(2)] = value;
       else if (/^[0-9a-f]{14}=[0-9a-f]{14}$/u.test(value)) options.replace.push(value.split("="));
       else throw new Usage(`--replace takes <failed job>=<rerun job>, not ${value}`);
     } else positional.push(argument);
@@ -66,6 +71,8 @@ const STEPS = {
   aside,
   "aside-run": asideRun,
   "plan-checks": planChecksStep,
+  evidence,
+  "evidence-report": evidenceReportStep,
 };
 
 if (import.meta.main) {
