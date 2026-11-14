@@ -14,7 +14,7 @@ implementations, a probe's expected output.
   1,000 placement attempts, at 150 tries), and a text of 65,536 code points (300,032 on demand) and a list of 10,000
   items. Their sizes are workload dimensions, not limits. Packages DisciplineClinic, Toy and
   ToyExpanded, and the research's other measured packages, are holdouts: never an `origin`, never tuned against.
-- `tapes/`: a tape is the input of a case that needs the host: its calls in order, `{ kind, args }` as the Player's
+- `tapes/`: a tape is the input of a case that needs the host: its calls in order, `{ kind, args }` as the Playroom's
   debug export names them (`completeAction`, `updateInteraction`, `observeTime`, `reportMediaLoad`,
   `pressPermanentButton`), with literal action IDs, a `completeAction`'s recorded media store answers
   (`admissionQueries`), and `unit: true` on each call that completes a useful unit. What the calls give is the
@@ -35,7 +35,7 @@ implementations, a probe's expected output.
 ## Driving a case
 
 A case drives `stepToEvent` with a research allowance of 2,000,000,000 instructions, which lets the stress shots finish.
-With `budget: "product"` it drives `run` without a budget, as the Player does, so the product default applies at each
+With `budget: "product"` it drives `run` without a budget, as the Playroom does, so the product default applies at each
 scene time; `stepToEvent` gives each call its own count, so only `run` shows that contract. The three Battleship claims
 stay apart: `battleship-three-hits-product-budget` stops with `TSR037` after exactly 1,000,000 instructions (the
 manifest's `failure`); the cooperative case, more than one budget in all, finishes under the same default through its rests; the full shots finish
