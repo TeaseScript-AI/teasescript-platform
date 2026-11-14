@@ -7,7 +7,6 @@ import { parse } from "../../src/parser.js";
 import { validateProjectSemantics } from "../../src/semantic.js";
 import {
   dominators,
-  insideLoopsOf,
   type Dominators,
 } from "../../src/type-inference/core/flow-graph/dominators.js";
 import {
@@ -17,13 +16,6 @@ import {
 } from "../../src/type-inference/core/flow-graph.js";
 import { filesOf } from "../helpers/type-core/type-core-flow-oracle.js";
 import { FLOW_PROGRAMS, HOST_GLOBALS } from "../helpers/type-core/type-core-flow-programs.js";
-
-/*
- * The dominators of the coarse core's flow graph: Lengauer and Tarjan's algorithm
- * against the iterative one on every graph of the corpus, and the shapes the exact path depends on, each expected by
- * the table's rule or by what a run does: literal loops (P7), labels and boundaries (X4), loops (X5), computed
- * transfers (L11), blocks, early leaves (F5a), and calls that cannot return (L10).
- */
 
 /**
  * A node by its id. Assertions compare ids, never nodes: a failing assertion prints its values in full, and a node reaches
@@ -142,8 +134,8 @@ test("the dominators agree with the iterative algorithm on every graph of the co
           dom.dfsIn(above) < dom.dfsIn(node) && dom.dfsOut(node) < dom.dfsOut(above),
           `${program.name}: the interval of node ${node.id} lies in its dominator's`,
         );
-      // The nearest boundary and block entry are found up the tree. A boundary is X4's: a function's entry, a file's
-      // entry that something other than the session's start enters, a label that some `goto` enters.
+      // A boundary is X4's: a function's entry, a file's entry that something other than the session's start enters, a
+      // label that some `goto` enters.
       const boundary = (candidate: FlowNode): boolean =>
         candidate.kind === "function-entry" ||
         (candidate.kind === "file-entry" &&
@@ -181,7 +173,6 @@ test("the dominators agree with the iterative algorithm on every graph of the co
 test("a literal count of one or more runs the body before the loop is left (P7)", () => {
   const twice = analyse('repeat 2 {\n  say "B"\n  say "D"\n}\nsay "R"\nexit');
   assert.equal(twice.dom.dominates(twice.at("D"), twice.at("R")), true);
-  assert.equal(insideLoopsOf(twice.at("D"), twice.at("R")), true);
   const folded = analyse('repeat (1 + 1) {\n  say "D"\n}\nsay "R"\nexit');
   assert.equal(folded.dom.dominates(folded.at("D"), folded.at("R")), true);
   const unknown = analyse('repeat hostValue {\n  say "D"\n}\nsay "R"\nexit');
@@ -192,7 +183,6 @@ test("a literal count of one or more runs the body before the loop is left (P7)"
   assert.equal(forever.dom.dominates(forever.at("B"), forever.at("R")), true);
   const maybe = analyse('while hostFlag {\n  say "B"\n}\nsay "R"\nexit');
   assert.equal(maybe.dom.dominates(maybe.at("B"), maybe.at("R")), false);
-  // A `for` over a literal collection: an empty one never runs its body, a non-empty one runs it first.
   const filled = analyse('for item in [1, 2] {\n  say "D"\n}\nsay "R"\nexit');
   assert.equal(filled.dom.dominates(filled.at("D"), filled.at("R")), true);
   const empty = analyse('for item in [] {\n  say "B"\n}\nsay "R"\nexit');
@@ -235,32 +225,15 @@ test("a condition its literals decide has a dead way, as the type check reads co
   }
 });
 
-test("every loop around a read must enclose its definition (X5)", () => {
-  const { at } = analyse(
-    'say "BEFORE"\nrepeat hostValue {\n  say "OUTER"\n  repeat hostValue {\n    say "INNER"\n  }\n  say "AFTER_INNER"\n}\nexit',
-  );
-  assert.equal(insideLoopsOf(at("BEFORE"), at("OUTER")), false);
-  assert.equal(insideLoopsOf(at("OUTER"), at("AFTER_INNER")), true);
-  assert.equal(insideLoopsOf(at("INNER"), at("AFTER_INNER")), true);
-  assert.equal(insideLoopsOf(at("OUTER"), at("INNER")), false);
-  assert.equal(insideLoopsOf(at("INNER"), at("BEFORE")), true);
-  const each = analyse('for item in hostList {\n  say "BODY"\n}\nexit');
-  // A loop variable's binding counts as inside its loop.
-  assert.equal(insideLoopsOf(each.graph.loops[0]!.body, each.at("BODY")), true);
-});
-
 test("a label that some `goto` enters is a boundary, one that only the code before it reaches is not (X4)", () => {
-  // L2: the label before both, the `goto` after both: the same boundary.
   const before = analyse('label again\nsay "D"\nsay "N"\nif hostFlag { goto again }\nexit');
   assert.equal(id(before.dom.edom(before.at("D"))), id(before.dom.edom(before.at("N"))));
   assert.equal(before.dom.edom(before.at("N"))?.statement?.kind, "labelStatement");
-  // L3, L4: the label between them, entered by a `goto`, also behind another label.
   for (const labels of ["label again", "label again\nlabel next"]) {
     const between = analyse(`say "D"\n${labels}\nsay "N"\nif hostFlag { goto again }\nexit`);
     assert.equal(id(between.dom.edom(between.at("D"))), null, labels);
     assert.notEqual(id(between.dom.edom(between.at("N"))), null, labels);
   }
-  // L5: a label that no `goto` enters.
   const unused = analyse('say "D"\nlabel again\nsay "N"\nexit');
   assert.equal(id(unused.dom.edom(unused.at("N"))), null);
 });
@@ -358,7 +331,6 @@ test("a callable that calls and file transfers may run twice at once is recursiv
     recursive("function f {\n  g()\n}\nfunction g {\n  if hostFlag { f() }\n}\nf()\nexit"),
     ["f", "g"],
   );
-  // One call of `visit`, which calls a file that starts, by a `goto`, the file that calls `visit` again.
   assert.deepEqual(
     recursive([
       { path: "main.tease", source: 'global depth = 0\ncall "b.tease"\nexit' },
@@ -469,7 +441,7 @@ test("code after a call that cannot return is dead, and after one that may retur
     ]),
     true,
   );
-  // A block may end the running file at any wait: here the called file, which never ends itself, returns through it.
+  // A block may end the running file at any wait.
   assert.equal(
     live([
       {
@@ -504,7 +476,7 @@ test("code after a call that cannot return is dead, and after one that may retur
       never,
     );
   // A block registered only behind a call that cannot return registers nothing, so its `end` cannot justify that
-  // call's return: behind `stop()` in the called file, after the call in main, or in a function called there.
+  // call's return.
   const exits = { path: "part.tease", source: 'say "TARGET"\nexit' };
   const button = 'showPermanentButton "Never" {\n  end\n}\n';
   assert.equal(

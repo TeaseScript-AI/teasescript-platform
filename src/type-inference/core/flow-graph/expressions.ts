@@ -48,7 +48,7 @@ export function* expressionTask(
         call: expression,
       });
     if (lazy === undefined) return out;
-    // P7: a `get` on a list literal with a literal index uses its default exactly when the list has no such position
+    // A `get` on a list literal with a literal index uses its default exactly when the list has no such position
     // (`listHasPosition`, the runtime's rule: a negative or fractional index takes the default too).
     let runs: "never" | "always" | "maybe" = "maybe";
     if (callee.kind === "propertyAccessExpression" && callee.property.name === "get") {
@@ -63,7 +63,7 @@ export function* expressionTask(
       const first = builder.nodes.length;
       const last = yield* compileChild(expressionTask(builder, lazy.value, context, out));
       builder.link(last, accepted);
-      // (F18: a typed parse's default reads the state at the call, which no event separates from it)
+      // (a typed parse's default reads the state at the call, which no event separates from it)
       if (callee.kind === "identifier" && callee.name === "fromJson")
         builder.snapshotFrom(first, out);
     } else {
@@ -82,7 +82,6 @@ export function* expressionTask(
   ) {
     if (expression.operator !== "otherwise") builder.logicals.push({ file, expression });
     const left = yield* compileChild(expressionTask(builder, expression.left, context, current));
-    // P7: a literal left operand decides whether the right one runs.
     let runs: "never" | "always" | "maybe" = "maybe";
     if (expression.operator === "otherwise") {
       const leftValue = unwrap(expression.left);
@@ -112,7 +111,7 @@ export function* expressionTask(
     const value = yield* compileChild(
       expressionTask(builder, expression.defaultValue, context, probe),
     );
-    // (F18: a typed load's default reads the state at the load, which no event separates from it)
+    // (a typed load's default reads the state at the load, which no event separates from it)
     builder.snapshotFrom(first, probe);
     const node = remember(builder.own("expression", context, expression.span, { expression }));
     builder.link(value, node);

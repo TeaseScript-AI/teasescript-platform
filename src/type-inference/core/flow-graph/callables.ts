@@ -2,8 +2,6 @@ import type { FlowGraphBuilder } from "../flow-graph.js";
 import { edgeKey } from "./keys.js";
 import type { Callable, CallSite, FlowNode } from "./model.js";
 
-// The callables in a cycle of calls and file transfers, and the callables a block may run.
-
 /**
  * The callables in a cycle of calls and file transfers, which may run in several activations at once: the strongly
  * connected components of the graph from each callable to those it may run in (Tarjan, iteratively). A file that a
@@ -84,7 +82,7 @@ export function recursion(
 /**
  * The callables a block may run: those it calls or starts, and all that they call and start, by a worklist over the
  * call and transfer edges, each once. A `goto` out of a block reaches the code after its label, not the code before
- * it (L6): those nodes are marked, and the callables they call or start are block code whole.
+ * it: those nodes are marked, and the callables they call or start are block code whole.
  */
 export function blockReach(builder: FlowGraphBuilder): {
   readonly blockCalled: ReadonlySet<Callable>;
