@@ -456,9 +456,11 @@ async function transcriptNativeWheelChecks(page) {
 }
 
 // A refused answer shows the composer's notice, which floats above the question's buttons and the field, covering
-// neither, and paints whole: no ancestor clips it, and it is what a press at its corners and centre would reach. The
-// buttons, the field and the last messages stay where they are while it shows and once it went. A press or touch
-// dismisses it. 390x420 stands for a phone with its keyboard open.
+// neither. In the states measured it is painted whole, with nothing of the session's own content over it: it lies in the
+// viewport, no ancestor clips it, and every third of every line of its text looks different with the notice shown than
+// with it hidden. (A focused control's tooltip may lie over it, by the layer order at its z-index in `Composer.vue`;
+// none is open here.) The buttons, the field and the last messages stay where they are while it shows and once it
+// went. A press or touch dismisses it. 390x420 stands for a phone with its keyboard open.
 async function composerNoticeChecks(page) {
   const baseUrl = page.url().split("?")[0];
   // Read once the entrances and glides have ended.
@@ -528,21 +530,41 @@ async function composerNoticeChecks(page) {
         )
           return `clipped by ${element.tagName}.${element.className}`;
       }
-      // Hit-tested with pointer events on for the probe only: whatever paints above it would be reached instead. The
-      // corners' points lie inside its 12px rounding.
-      notice.style.pointerEvents = "auto";
-      const points = [
-        [box.left + 6, box.top + 6],
-        [box.right - 6, box.top + 6],
-        [box.left + 6, box.bottom - 6],
-        [box.right - 6, box.bottom - 6],
-        [(box.left + box.right) / 2, (box.top + box.bottom) / 2],
-      ];
-      const hidden = points.find(([x, y]) => !notice.contains(document.elementFromPoint(x, y)));
-      notice.style.pointerEvents = "";
-      return hidden ? `covered at ${hidden.map(Math.round)}` : "";
+      return "";
     });
     if (unseen) throw new Error(`The composer's notice does not paint whole: ${unseen}`);
+    // What the screen shows: each third of each line of its text, with the notice shown and hidden by the probe.
+    const segments = await page.evaluate(() => {
+      const range = document.createRange();
+      range.selectNodeContents(document.querySelector(".composer-notice"));
+      return [...range.getClientRects()]
+        .filter((line) => line.width > 6 && line.height > 6)
+        .flatMap((line) =>
+          [0, 1, 2].map((third) => ({
+            x: line.left + (third * line.width) / 3,
+            y: line.top,
+            width: line.width / 3,
+            height: line.height,
+          })),
+        );
+    });
+    if (segments.length === 0) throw new Error("The composer's notice has no text to see");
+    const notice = (visibility) =>
+      page.evaluate((value) => {
+        document.querySelector(".composer-notice-slot").style.visibility = value;
+      }, visibility);
+    const shoot = async () => {
+      const shots = [];
+      for (const clip of segments) shots.push(await page.screenshot({ clip }));
+      return shots;
+    };
+    const shown = await shoot();
+    await notice("hidden");
+    const hidden = await shoot();
+    await notice("");
+    const blank = segments.findIndex((_, index) => shown[index].equals(hidden[index]));
+    if (blank !== -1)
+      throw new Error(`The composer's notice is not painted at ${JSON.stringify(segments[blank])}`);
   };
   const unmoved = async () => {
     const after = await layout();

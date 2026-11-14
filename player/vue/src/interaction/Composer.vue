@@ -715,7 +715,11 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
   font-weight: 700;
 }
 
-/* Above the conversation, the Stage and the top bar (z-index 20), below dialogs; a press passes through it. */
+/*
+ * The session's layers, bottom to top: the Stage and the conversation; the top bar (z-index 20); this notice (25); the
+ * tooltip of the control the pointer or the keyboard focus is on (50), over the notice while the player stays on that
+ * control; dialogs and panels. A press passes through the notice and dismisses it.
+ */
 .composer-notice-slot {
   position: absolute;
   z-index: 25;
