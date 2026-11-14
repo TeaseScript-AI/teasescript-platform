@@ -588,8 +588,10 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   // literal's body, its index and its elements' views: 345 checks, 144 yields, 98 event steps, 50 `rdWalk`, 40
   // frames, 33 `invSteps` and 60 others, 32 literal and structure units fewer; 4 more since #2378: a written source's
   // reader asks whether a projection that copies no key, `[a,b][0]`, stands below a call's result, 4 `invSteps`; 366
-  // more since #2764: the nesting index, built for the first path with two element steps, 366 `indexSteps`)
-  assert.equal(budget.total, 22_964_165);
+  // more since #2764: the nesting index, built for the first path with two element steps, 366 `indexSteps`; 7 more
+  // since #2771: the index asks each written binding's openness, one check each for `object`, `integer` and `string`,
+  // and `typed`, whose `object` leaves its properties open, takes its routes, 4 `indexSteps`)
+  assert.equal(budget.total, 22_964_172);
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {
