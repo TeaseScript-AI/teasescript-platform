@@ -38,21 +38,21 @@ item because its section already supplies it.
 ## POC / Foundation
 
 **Goal:** Prove the core technical foundations: TeaseScript, compilation, deterministic execution, save/resume,
-Player/runtime boundaries, and the development tooling needed to exercise them.
+Playroom/runtime boundaries, and the development tooling needed to exercise them.
 
 **Expectation:** The system may still be developer-oriented and incomplete. Internal APIs, formats, tooling, and
 architecture may change substantially while correctness and the basic model are being proven.
 
 - [ ] **ADR 0018 Standard Library interactions and pacing**
   - **Outcome:** Implement the accepted ADR 0018 slice end to end: `showButton`, `askText`, `askNumber`, `askChoice`,
-    and `say` pacing/skip behavior, together with the matching Standard Player controls and editor/simulator support.
+    and `say` pacing/skip behavior, together with the matching Standard Playroom controls and editor/simulator support.
     Keep the detailed runtime state-machine and checkpoint rules in their accepted runtime sources rather than
     repeating them here.
   - **Reference:** [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md), [`RUNTIME.md`](../RUNTIME.md),
     [`LIBRARIES.md`](../LIBRARIES.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and [`DEBUGGER.md`](../DEBUGGER.md).
 
 - [x] **Foreground and background timers**
-  - **Outcome:** Authored blocking and asynchronous timers have lifecycle control, expiry interrupts, Player
+  - **Outcome:** Authored blocking and asynchronous timers have lifecycle control, expiry interrupts, Playroom
     presentation data, and deterministic scene-time save/resume.
   - **Reference:** [Accepted timer syntax](../specifications/accepted-syntaxes-v30.md#27-timers),
     [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time), and [`PLAYER-UI.md`](../ui/PLAYER-UI.md#timer-presentation).
@@ -68,35 +68,35 @@ architecture may change substantially while correctness and the basic model are 
     [V30 status legend](../specifications/accepted-syntaxes-v30.md#status-legend), which lists the sections that state
     those rules.
 
-- [ ] **Player UI**
-  - **Outcome:** Replace the technical playground presentation with a practical Player interface for transcript output,
+- [ ] **Playroom UI**
+  - **Outcome:** Replace the technical playground presentation with a practical Playroom interface for transcript output,
     Standard interactions, timers, status/errors, and the media capabilities selected for the POC. Keep development and
-    debug controls secondary to the actual Player experience.
+    debug controls secondary to the actual Playroom experience.
   - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`DEBUGGER.md`](../DEBUGGER.md),
-    [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md). The Vue Player is the
+    [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md). The Vue Playroom is the
     selected direction; its foundation landed in #418, its runtime timers in #444, Stage image/audio in #446, and the
-    single-script demo on `/player/` with legacy Player retirement in #448.
+    single-script demo on `/player/` with legacy Playroom retirement in #448.
 
 - [ ] **Iframe development host and virtual viewport**
-  - **Outcome:** Run the Player through a small local host shell using the product's iframe boundary without requiring a
+  - **Outcome:** Run the Playroom through a small local host shell using the product's iframe boundary without requiring a
     Laravel site. Let the host set custom viewport dimensions plus useful phone, tablet, desktop, and 4K presets, scaling
-    the preview to fit the available monitor while the Player lays itself out against the requested viewport; keep device
-    simulation logic out of the Player itself.
+    the preview to fit the available monitor while the Playroom lays itself out against the requested viewport; keep device
+    simulation logic out of the Playroom itself.
   - **Reference:** [`ARCHITECTURE.md`](../ARCHITECTURE.md), [`SECURITY.md`](../SECURITY.md), and
     [`WISHES.xml` W-041](../../WISHES.xml).
 
-- [ ] **Browser editor and Player preview**
-  - **Outcome:** Provide the browser authoring environment with editing, diagnostics, simulation/debugging, and a Player
-    preview that can use the same iframe host and virtual viewport. Keep the editor and Player as separate components even
+- [ ] **Browser editor and Playroom preview**
+  - **Outcome:** Provide the browser authoring environment with editing, diagnostics, simulation/debugging, and a Playroom
+    preview that can use the same iframe host and virtual viewport. Keep the editor and Playroom as separate components even
     when they are shown side by side.
   - **Reference:** [`CODE-EDITOR.md`](../CODE-EDITOR.md), [`DEBUGGER.md`](../DEBUGGER.md), and
     [`WISHES.xml` W-031](../../WISHES.xml).
 
 - [ ] **Audio and video playback**
-  - **Outcome:** Support real Player audio playback and the Stage image for the POC, including blocking and background
+  - **Outcome:** Support real Playroom audio playback and the Stage image for the POC, including blocking and background
     use, simultaneous identified resources, and targeted lifecycle control. The video authoring API is defined with
     audio; browser video playback may follow the POC. The language/runtime foundation landed for #445 in #452 and the
-    Player audio and Stage-image integration in #446. Keep exact media APIs and persistence details in the
+    Playroom audio and Stage-image integration in #446. Keep exact media APIs and persistence details in the
     runtime/specification rather than defining them in the roadmap.
   - **Reference:** [`RUNTIME.md`](../RUNTIME.md), [`LIBRARIES.md`](../LIBRARIES.md), and
     [`WISHES.xml` W-044](../../WISHES.xml).
@@ -104,7 +104,7 @@ architecture may change substantially while correctness and the basic model are 
 ## Alpha
 
 **Goal:** Turn the proven foundation into a coherent usable product slice that can be exercised meaningfully, especially
-the scripting, editor/tooling, and Player experience selected for alpha.
+the scripting, editor/tooling, and Playroom experience selected for alpha.
 
 **Expectation:** Selected core flows should work together well enough for sustained testing. A production
 website, community platform, or every planned product feature is not required. Rough UX, missing secondary capabilities,
@@ -119,7 +119,7 @@ and breaking changes remain acceptable.
     [`accepted-syntaxes-v30.md`](../specifications/accepted-syntaxes-v30.md).
 
 - [ ] **Review all author- and player-facing messages**
-  - **Outcome:** Review every compiler diagnostic, runtime error, developer warning, and Player error or status message
+  - **Outcome:** Review every compiler diagnostic, runtime error, developer warning, and Playroom error or status message
     in one pass, so that each one uses plain language for non-programmers, names the problem and a concrete fix, and
     fits the product's tone. Most current message wording is not owner-approved. Record the agreed message style once in
     its canonical document and apply it consistently.
@@ -128,9 +128,9 @@ and breaking changes remain acceptable.
   - **Reference:** Tracker #512, the diagnostic catalog in [`DIAGNOSTICS.md`](../DIAGNOSTICS.md), and
     [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
 
-- [ ] **Cross-origin Player host contract**
+- [ ] **Cross-origin Playroom host contract**
   - **Outcome:** Define the smallest coherent production contract between the application host shell and its cross-origin
-    Player iframe: iframe creation/lifecycle, sandbox/CSP, validated parent/Player messages, capability negotiation,
+    Playroom iframe: iframe creation/lifecycle, sandbox/CSP, validated parent/Playroom messages, capability negotiation,
     selected package/session data and any later host-owned account data, checkpoint storage acknowledgement/failure,
     restore/reconnect, resize/fullscreen/navigation, protocol errors, and responsibility boundaries. When that concrete
     boundary exists, verify the contract in real browsers for the relevant startup, restore, input, navigation, and
@@ -151,7 +151,7 @@ behavior, persistence, operational behavior, and integration. Major redesign bec
 subsystems may still have different maturity levels.
 
 - [ ] **Reassess the public TypeScript package API**
-  - **Outcome:** Use actual editor, Player, debugger, and integration needs to decide which compiler/runtime/tooling
+  - **Outcome:** Use actual editor, Playroom, debugger, and integration needs to decide which compiler/runtime/tooling
     exports belong in the supported package API and which should remain internal. Preserve useful consumer capabilities;
     reassessment does not presume that exports must be removed or establish a compatibility promise.
   - **Trigger:** Reconsider when representative integrated authoring, execution, and debugging workflows provide enough
@@ -163,7 +163,7 @@ subsystems may still have different maturity levels.
 - [ ] **Complete the custom-view contract**
   - **Outcome:** Complete the parts ADR 0012 leaves open: registration/lifecycle APIs, typed input/events/results,
     reconstructible-state declaration, surface isolation/optional Shadow DOM, remaining keyboard/navigation behavior,
-    accessibility, preview/debug tooling, and the author-facing TypeScript/TeaseScript API. Add real-browser Player/host
+    accessibility, preview/debug tooling, and the author-facing TypeScript/TeaseScript API. Add real-browser Playroom/host
     coverage when package custom UI is implemented.
   - **Reference:** [ADR 0012](../decisions/0012-custom-view-capability.md),
     [ADR 0015](../decisions/0015-serializable-runtime-architecture.md), [`RUNTIME.md`](../RUNTIME.md),
@@ -193,22 +193,22 @@ subsystems may still have different maturity levels.
   - **Outcome:** Keep [`TOKEN-BURNERS.md`](TOKEN-BURNERS.md) current: large, optional, well-specified work packages the
     Owner can launch when spare weekly agent budget would otherwise expire. Owner direction, 2026-10-08.
 
-- [ ] **Establish Player bundle and startup performance baseline**
-  - **Outcome:** Measure the production Player's cold and warm startup, compressed bundle sizes, module contribution,
+- [ ] **Establish Playroom bundle and startup performance baseline**
+  - **Outcome:** Measure the production Playroom's cold and warm startup, compressed bundle sizes, module contribution,
     cache reuse, and normal-playback dependency graph. Use that evidence to remove accidental dependencies and choose
     appropriate code-splitting, lazy-loading, caching and versioning boundaries, including whether compiler code belongs
-    on the ordinary Player playback path.
-  - **Trigger:** Start once the representative Player and host path are sufficiently complete to measure realistically;
+    on the ordinary Playroom playback path.
+  - **Trigger:** Start once the representative Playroom and host path are sufficiently complete to measure realistically;
     move earlier if Alpha testing shows material download or startup cost.
   - **Reference:** [`CURRENT-DESIGN.md`](../../CURRENT-DESIGN.md), [`DATA-AND-API.md`](../DATA-AND-API.md),
     [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`TESTING.md`](../TESTING.md).
 
 - [ ] **Evaluate editor usability warnings for interaction content**
-  - **Outcome:** Use representative authoring, Player, accessibility, and usability evidence to decide whether non-blocking
+  - **Outcome:** Use representative authoring, Playroom, accessibility, and usability evidence to decide whether non-blocking
     editor warnings are useful for unusually long interaction labels or unusually large choice sets. If warnings are
     adopted, define them as a separate usability policy rather than copying engine hard limits or treating provisional
     resource guards as recommendations. Do not invent placeholder thresholds merely to make the warning category finite.
-  - **Trigger:** Reconsider after representative Alpha/Beta authoring and Player usage provides concrete evidence that
+  - **Trigger:** Reconsider after representative Alpha/Beta authoring and Playroom usage provides concrete evidence that
     technically valid interaction content creates a recurring usability or accessibility problem.
   - **Reference:** [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md),
     [ADR 0019](../decisions/0019-resource-limit-governance.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and
@@ -232,10 +232,10 @@ subsystems may still have different maturity levels.
     devices.
   - **Reference:** Issue #421 and [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
 
-- [ ] **Consider: Player polish and fidelity**
-  - **Outcome:** Decide whether to make these Player refinements.
+- [ ] **Consider: Playroom polish and fidelity**
+  - **Outcome:** Decide whether to make these Playroom refinements.
     - A permanent button click adds no line to the transcript.
-    - Choice buttons and askForm toggles show their hover fill at once, while other Player buttons fade it in.
+    - Choice buttons and askForm toggles show their hover fill at once, while other Playroom buttons fade it in.
     - The shared dialog close icon is 16 px, below the 44 px touch target.
 
 - [ ] **Consider: check literal media paths at compile time, as a warning**
