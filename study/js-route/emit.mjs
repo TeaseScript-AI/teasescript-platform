@@ -211,7 +211,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       });
     const vars = [...rootScope.values()];
     if (vars.length > 0) lines.push(`var ${vars.join(", ")};`);
-    if (chain) lines.push(`rt.rootVars[${index}] = () => [${vars.join(", ")}];`);
+    if (chain)
+      lines.push(`rt.rootVars[${index}] = () => [${vars.join(", ")}];`, `rt.setRootVars[${index}] = (r) => { ${vars.length > 0 ? `[${vars.join(", ")}] = r;` : ""} };`);
     lines.push(...functions, root, ...moduleBlocks.values());
     moduleBlocks.clear();
     // An activation of the file from instruction `at`: its start (the session's first file: its speakers' and globals'

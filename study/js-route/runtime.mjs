@@ -105,6 +105,7 @@ export class Runtime {
     this.fns = null;
     /** By file: its variables' current values, which a root's call record takes when the session suspends. */
     this.rootVars = [];
+    this.setRootVars = [];
     this.calls = 0;
     this.callee = null;
     this.callArgs = null;
@@ -547,6 +548,11 @@ export class Runtime {
     try {
       if (rec !== null) {
         while (rec.call) {
+          // A root's file variables come back before any callee runs, which may read them; not again at its re-entry.
+          if (rec.r !== undefined) {
+            this.setRootVars[rec.file](rec.r);
+            rec.r = undefined;
+          }
           stack.push(fn, rec);
           rec = this.resumeFrame();
           fn = this.fns[rec.fn];
