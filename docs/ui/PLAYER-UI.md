@@ -1002,9 +1002,8 @@ away, and the question's controls go; a form's answer shows at once unless one o
 then with the runtime's reply. Nothing is greyed because an answer was sent. Except while a form edit is still on its
 way, the Player first checks an answer by the runtime's own rules; one they refuse never leaves the composer, and the
 notice shows at once. The runtime stays the authority: when it refuses the answer, as when a block's question overtakes it, the answer leaves the chat, its
-typed text is back before what was typed since, with the notice "The question was gone before your answer arrived. Your
-text is back in the field." (only its first sentence where no chat text comes back, as for a choice, a button or a
-password), and its controls show again once its question does.
+typed text is back before what was typed since, and its controls show again once its question does; a refusal because
+its question was gone shows no notice (the owner's decision of 2026-11-14).
 A popup or an `exportText` dialog closes at once in the same way; when its close is refused, it shows again once it is
 the question.
 
@@ -1016,7 +1015,7 @@ Outside such a request there is no paperclip and no drop target. The Player iden
 AVIF, or BMP), requires the extension and the type to match `types` and `mime` when given, and has the browser decode
 it; a file that fails, more than one file, or typed text shows the composer notice and the request keeps waiting, as
 does a cancelled picker. A file chosen in a picker opened for a request that is no longer presented, for example
-because a timer's request replaced it meanwhile, is taken by neither request and shows the composer notice. An accepted
+because a timer's request replaced it meanwhile, is taken by neither request, without a notice. An accepted
 image is stored as session media and becomes the request's preview.
 
 An `askImage(...)` shows its controls under its question, where `showButton` shows its button, in two steps. None of

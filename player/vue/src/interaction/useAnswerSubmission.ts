@@ -30,7 +30,7 @@ import {
   type InputSectionHost,
 } from "../session/runtime-input.js";
 import type { ComposerState } from "./useComposerState.js";
-import { questionGone, refusalMessage } from "./answerNotices.js";
+import { refusalMessage } from "./answerNotices.js";
 import { presentedForm, type FormUpdates } from "./useFormUpdates.js";
 
 /*
@@ -270,14 +270,13 @@ export function useAnswerSubmission(host: {
     if (!current(record) || host.terminal() !== null) return;
     if (result.kind === "retired") return settle(record, "undone");
     if (result.kind === "unanswered") return settle(record, "undone", host.unansweredMessage());
-    // Only an answered result publishes; an unavailable action, or any other result, undoes the answer.
-    if (result.kind !== "answered")
-      return settle(record, "undone", questionGone(returnsText(record)));
+    // Only an answered result publishes; an unavailable action, or any other result, undoes the answer silently.
+    if (result.kind !== "answered") return settle(record, "undone");
     host.publish(result.session);
     const outcome = result.outcome;
     if (outcome.kind === "completed" || outcome.kind === "updated" || outcome.kind === "unchanged")
       return settle(record, "released");
-    settle(record, "undone", refusalMessage(outcome, returnsText(record)));
+    settle(record, "undone", refusalMessage(outcome));
   }
 
   /** The input section's run for the presented action, readying an inspected state first. */

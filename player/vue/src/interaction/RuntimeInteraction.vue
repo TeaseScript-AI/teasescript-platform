@@ -33,7 +33,6 @@ import { imagePickerAccept, type ImageFileFilters } from "../../../media/image-f
 import { openUrlTab } from "../../../url-tab.js";
 import type { InputSectionHost } from "../session/runtime-input";
 import { composerDescriptor, descriptorKey, useComposerState } from "./useComposerState";
-import { QUESTION_GONE } from "./answerNotices";
 import {
   useAnswerSubmission,
   type PendingAnswer,
@@ -694,11 +693,15 @@ watch(
 async function submitImage(files: readonly File[], target: ImageRequestIdentity) {
   const request = imageRequest.value;
   const { images, capture } = props;
-  if (!request || !images || !capture || submission.pending.value || readingImage.value) return;
-  if (!presents(target)) {
-    submission.showNotice(QUESTION_GONE);
+  if (
+    !request ||
+    !images ||
+    !capture ||
+    submission.pending.value ||
+    readingImage.value ||
+    !presents(target)
+  )
     return;
-  }
   if (files.length !== 1) {
     submission.showNotice("Choose one image.");
     return;

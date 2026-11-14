@@ -12,7 +12,7 @@ import {
   type InputResult,
   type InputSectionHost,
 } from "../session/runtime-input.js";
-import { questionGone, refusalMessage } from "./answerNotices.js";
+import { refusalMessage } from "./answerNotices.js";
 import type { ComposerState, FormDraft } from "./useComposerState.js";
 
 /*
@@ -65,15 +65,11 @@ export function useFormUpdates(host: {
     readonly revision: number;
   } | null>(null);
 
-  /**
-   * A form update, in order with the others; never greyed, no answer, counted in `unacknowledged`. `textBack` when `after` puts
-   * the chat's text back on a refusal.
-   */
+  /** A form update, in order with the others; never greyed, no answer, counted in `unacknowledged`. */
   async function update(
     actionId: number,
     intent: InputIntent,
     after?: (result: InputResult) => void,
-    textBack = false,
   ): Promise<void> {
     if (closed()) return;
     const epoch = host.epoch();
@@ -90,9 +86,8 @@ export function useFormUpdates(host: {
         host.publish(result.session);
         const outcome = result.outcome;
         if (outcome.kind !== "updated" && outcome.kind !== "unchanged")
-          showNotice(refusalMessage(outcome, textBack));
-      } else if (result.kind === "unavailable") showNotice(questionGone(textBack));
-      else if (result.kind === "unanswered") showNotice(host.unansweredMessage());
+          showNotice(refusalMessage(outcome));
+      } else if (result.kind === "unanswered") showNotice(host.unansweredMessage());
     } finally {
       release(actionId);
     }
@@ -149,7 +144,6 @@ export function useFormUpdates(host: {
           (result.outcome.kind === "updated" || result.outcome.kind === "unchanged");
         if (!taken && sent !== null) host.composer.restoreChat(chat, sent);
       },
-      sent !== null,
     );
   }
 

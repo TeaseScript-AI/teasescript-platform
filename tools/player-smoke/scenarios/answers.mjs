@@ -129,8 +129,7 @@ function shownAtOnce({ frames, entered }, text, what) {
  * nothing greyed, and the runtime's row takes that row and element over. A block that falls due within the answer's own
  * operation puts its tall message before the answer: the message enters and following stops at it, the answer keeps its
  * element and enters no second time; scrolled up, the text being read stays where it is. A typed answer the block
- * refused leaves the conversation and its text is back in the composer with the notice. Typing changes nothing in the
- * conversation.
+ * refused leaves the conversation and its text is back in the composer. Typing changes nothing in the conversation.
  */
 export async function instantAnswersScenario(cdp, origin) {
   await setViewport(cdp, 1280, 800);
@@ -244,7 +243,7 @@ export async function instantAnswersScenario(cdp, origin) {
       `Scrolled up, the text being read moved (${readingTop} → ${readingAfter})`,
     );
 
-    // 4. A typed answer a block refused: its row goes, its text is back with the notice.
+    // 4. A typed answer a block refused: its row goes, its text is back.
     await physicalClick(cdp, ".return-to-latest");
     await waitFor(
       cdp,
@@ -289,9 +288,9 @@ export async function instantAnswersScenario(cdp, origin) {
     );
     await waitFor(
       cdp,
-      `document.querySelector('[data-composer-input]')?.value === 'hello there' && !!document.querySelector('.composer-notice')`,
+      `document.querySelector('[data-composer-input]')?.value === 'hello there'`,
       4_000,
-      "A refused answer's text did not come back with the notice",
+      "A refused answer's text did not come back",
     );
   } finally {
     await removeInitScript(cdp, identifier);
@@ -372,8 +371,8 @@ export async function composerStatesScenario(cdp, origin) {
       "The link's button did not open its address",
     );
 
-    // A popup closes in the frame of its click; the block's question overtakes the close, with the notice, and once
-    // the block is answered the popup shows again with its button focused.
+    // A popup closes in the frame of its click; the block's question overtakes the close, and once the block is
+    // answered the popup shows again with its button focused.
     await start();
     await typeInto(cdp, "[data-composer-input]", "x");
     await pressEnter(cdp);
@@ -400,20 +399,16 @@ export async function composerStatesScenario(cdp, origin) {
       8_000,
       "The block did not overtake the popup's close",
     );
-    const notice = `document.querySelector('.composer-notice')?.textContent.trim() ?? ''`;
-    const overtaken = await value(cdp, `[!!${popup}, ${notice}].join('|')`);
+    const overtaken = await value(cdp, `!!${popup}`);
     await typeInto(cdp, "[data-composer-input]", "b");
     await pressEnter(cdp);
     await waitFor(cdp, `!!${popup}`, 8_000, "The overtaken popup did not show again");
     await delay(300);
-    const again = await value(
-      cdp,
-      `[${popup}.contains(document.activeElement), ${notice}].join('|')`,
-    );
+    const again = await value(cdp, `${popup}.contains(document.activeElement)`);
     assertEqual(
       `${overtaken} / ${again}`,
-      "false|The question was gone before your answer arrived. / true|",
-      "The overtaken popup: shown under the block | notice / focused | notice",
+      "false / true",
+      "The overtaken popup: shown under the block / focused once it shows again",
     );
     await clickLabelled(cdp, "OK", "[role=dialog] button");
     await waitFor(
