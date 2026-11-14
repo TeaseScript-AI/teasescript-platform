@@ -85,6 +85,8 @@ const EXPRESSION_KINDS = new Set(["literal", "regex", "duration", "calendarDurat
 /** Instruction kinds today's engine may leave waiting (an action with the host), besides a paced `say`. */
 /** A loop body longer than this many instructions is outlined even without an inner loop. */
 const OUTLINE_LENGTH = 120;
+/** A structured sequence longer than this many instructions is cut into functions between its constructs. */
+const CHUNK_LENGTH = 150;
 const WAITING_KINDS = new Set(["wait", "interaction", "capture", "fileStore", "lock", "storageWrite", "playMedia", "showImage"]);
 
 /**
@@ -241,6 +243,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     const tempUses = new Map();
     const bodyParents = new Map();
     let usesRV = false;
+    /** The region's function as a chunk's home: the variables its chunks declare for it. */
+    const regionChunks = { lets: [] };
     let indent = 1;
     const line = (text) => out.push(`${"  ".repeat(indent)}${text}`);
     const scopes = [new Map()];
@@ -515,6 +519,12 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       if (scope.has(name)) throw new Unsupported("a name declared twice in one scope");
       const js = jsName(name);
       scope.set(name, js);
+      // Declared at the level a chunk was cut at: the function that holds the chunks declares it, so later chunks see it.
+      const top = bodies.at(-1);
+      if (top !== undefined && top.ownLoop === null && top.cutDepth === scopes.length) {
+        top.home.lets.push(js);
+        return { code: js, fresh: false };
+      }
       return { code: js, fresh: true };
     }
 
@@ -591,12 +601,12 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
               if (!isBool(ins.condition)) line(`if (${c} !== true && ${c} !== false) throw rt.notBool(${konst(ins.condition)}, ${c});`);
               line(`if (${c}) {`);
               indent += 1;
-              emitRange(pc + 1, shape.thenEnd);
+              emitChunked(pc + 1, shape.thenEnd);
               indent -= 1;
               if (shape.elseEnd !== null) {
                 line("} else {");
                 indent += 1;
-                emitRange(shape.target, shape.elseEnd);
+                emitChunked(shape.target, shape.elseEnd);
                 indent -= 1;
               }
               line("}");
@@ -767,11 +777,16 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
      * it returns 0 (next round), 1 (break), -1 (a return, its value in RV) or a code for a break or continue of an outer
      * loop, which the call site carries out.
      */
-    function outlinedBody(ins, pc, endLoop, roundVars, yields) {
-      const key = `b${pc}_${bodyCount++}`;
+    /**
+     * Emits [from, to) as a function of its own (a loop body: `ownLoop` and the round's variables as parameters; a
+     * chunk of a long sequence: neither) and returns its text and what its call site must carry out: 0 (go on), 1
+     * (break of its own loop), -1 (a return, its value in RV) or a code for a break or continue of an outer loop.
+     */
+    function outlineFunction(from, to, ownLoop, params, yields) {
+      const key = `${ownLoop === null ? "k" : "b"}${from}_${bodyCount++}`;
       bodyParents.set(key, bodies.length === 0 ? "root" : bodies.at(-1).key);
-      const body = { key, ownLoop: ins.loopId, codes: new Map(), returns: false, yields };
-      // The function's text: emitted into its own buffer at the loop's indentation, then placed before the loop.
+      // A chunk's home: the function whose sequence it was cut from, which declares the chunk level's variables.
+      const body = { key, ownLoop, codes: new Map(), returns: false, yields, lets: [], home: bodies.at(-1) ?? regionChunks, cutDepth: scopes.length };
       const outer = out.splice(0);
       const savedScratch = scratch;
       const savedMax = scratchMax;
@@ -780,7 +795,9 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       scratchMax = 0;
       indent = 1;
       bodies.push(body);
-      emitRange(pc + 1, endLoop);
+      // A loop body may itself be long and is cut; a chunk is already short pieces.
+      if (ownLoop === null) emitRange(from, to);
+      else emitChunked(from, to);
       bodies.pop();
       const inner = out.splice(0);
       const bodyScratch = scratchMax;
@@ -788,17 +805,19 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       scratchMax = savedMax;
       indent = savedIndent;
       out.push(...outer);
-      const locals = [...Array.from({ length: bodyScratch }, (_, i) => `x${i}`), `%TEMPS_${key}%`];
-      const fn = [`function${yields ? "*" : ""} ${key}(${roundVars.join(", ")}) {`, `  let ${locals.join(", ")};`, ...inner, "  return 0;", "}"];
-      // Before the loop's header: the header began where the loop's first line was written.
-      const headerAt = out.findLastIndex((text) => text.trimStart().startsWith(`L${ins.loopId}:`));
-      const prefix = "  ".repeat(savedIndent - 1);
-      out.splice(headerAt, 0, ...fn.map((text) => prefix + text));
-      const c = `c${pc}`;
-      line(`const ${c} = ${yields ? "yield* " : ""}${key}(${roundVars.join(", ")});`);
+      const locals = [...body.lets, ...Array.from({ length: bodyScratch }, (_, i) => `x${i}`), `%TEMPS_${key}%`];
+      const fn = [`function${yields ? "*" : ""} ${key}(${params.join(", ")}) {`, `  let ${locals.join(", ")};`, ...inner, "  return 0;", "}"];
+      return { key, body, fn };
+    }
+
+    /** The call of an outlined function and what its result asks of the call site. */
+    function callOutlined({ key, body }, args, ownLabel) {
+      const c = `c_${key}`;
+      line(`const ${c} = ${body.yields ? "yield* " : ""}${key}(${args.join(", ")});`);
+      if (ownLabel === null && body.codes.size === 0 && !body.returns) return;
       line(`if (${c} !== 0) {`);
       indent += 1;
-      line(`if (${c} === 1) break L${ins.loopId};`);
+      if (ownLabel !== null) line(`if (${c} === 1) break ${ownLabel};`);
       for (const { code, action, loopId } of body.codes.values()) {
         line(`if (${c} === ${code}) {`);
         indent += 1;
@@ -819,6 +838,85 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       }
       indent -= 1;
       line("}");
+    }
+
+    function outlinedBody(ins, pc, endLoop, roundVars, yields) {
+      const outlined = outlineFunction(pc + 1, endLoop, ins.loopId, roundVars, yields);
+      // Before the loop's header: the header began where the loop's first line was written.
+      const headerAt = out.findLastIndex((text) => text.trimStart().startsWith(`L${ins.loopId}:`));
+      const prefix = "  ".repeat(indent - 1);
+      out.splice(headerAt, 0, ...outlined.fn.map((text) => prefix + text));
+      callOutlined(outlined, roundVars, `L${ins.loopId}`);
+    }
+
+    /** Where the construct at `pc` ends at this level: an `if` with its else, a loop, a block, a skipped default. */
+    function constructEnd(pc, to) {
+      const ins = plan.instructions[pc];
+      if (ins.kind === "jumpIfFalse") {
+        const shape = ifShape(pc, to);
+        return shape.elseEnd ?? shape.target;
+      }
+      if (ins.kind === "loopStart") return ins.target;
+      if (ins.kind === "prepareParameterDefault" && ins.target > pc + 1) return ins.target;
+      if (ins.kind === "enterScope") {
+        let depth = 0;
+        for (let at = pc; at < to; at += 1) {
+          const kind = plan.instructions[at].kind;
+          if (kind === "enterScope") depth += 1;
+          else if (kind === "leaveScope" && --depth === 0) return at + 1;
+        }
+      }
+      return pc + 1;
+    }
+
+    /**
+     * Structured code for [from, to); a sequence longer than CHUNK_LENGTH instructions is cut between its constructs
+     * into functions of their own (a construct longer than that is cut inside: a block's contents, an `if`'s branches,
+     * a loop's body). The variables a chunk declares at the level where it was cut are declared in the enclosing
+     * function, so the next chunks see them.
+     */
+    function emitChunked(from, to) {
+      if (flat || to - from <= CHUNK_LENGTH) return emitRange(from, to);
+      const pieces = [];
+      for (let at = from; at < to; ) {
+        const next = Math.max(at + 1, constructEnd(at, to));
+        pieces.push([at, next]);
+        at = next;
+      }
+      /** A construct longer than a chunk: a block's contents are cut inside its scope; an `if` cuts its branches. */
+      const emitLong = ([a, b]) => {
+        const ins = plan.instructions[a];
+        if (ins.kind === "enterScope" && b - a > 2) {
+          statement(ins, a);
+          emitChunked(a + 1, b - 1);
+          statement(plan.instructions[b - 1], b - 1);
+        } else emitRange(a, b);
+      };
+      let group = [];
+      let size = 0;
+      const flush = () => {
+        if (group.length === 0) return;
+        const [a, b] = [group[0][0], group.at(-1)[1]];
+        if (b - a <= 2) emitRange(a, b);
+        else {
+          const outlined = outlineFunction(a, b, null, [], regionYields && containsWait(a, b));
+          for (const text of outlined.fn) line(text);
+          callOutlined(outlined, [], null);
+        }
+        group = [];
+        size = 0;
+      };
+      for (const piece of pieces) {
+        if (piece[1] - piece[0] > CHUNK_LENGTH) {
+          flush();
+          emitLong(piece);
+          continue;
+        }
+        group.push(piece);
+        size += piece[1] - piece[0];
+        if (size >= CHUNK_LENGTH) flush();
+      }
+      flush();
     }
 
     /**
@@ -1165,8 +1263,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       emitRange(start, entry);
       indent -= 1;
       line("}");
-      emitRange(entry, end);
-    } else emitRange(start, end);
+      emitChunked(entry, end);
+    } else emitChunked(start, end);
     // Each temporary is declared in the innermost function (region or outlined body) that holds all its uses.
     const ancestors = (key) => { const chain = [key]; while (chain.at(-1) !== "root") chain.push(bodyParents.get(chain.at(-1))); return chain; };
     const bodyTemps = new Map();
@@ -1184,7 +1282,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         out[i] = out[i].replace(/(, )?%TEMPS_(\w+)%/g, (_, comma, key) => { const list = bodyTemps.get(key) ?? []; return list.length === 0 ? "" : `${comma ?? ""}${list.join(", ")}`; }).replace("let ;", "");
     regionTempNames = regionTemps;
     const header = [];
-    const locals = [...regionTemps, ...Array.from({ length: scratchMax }, (_, i) => `x${i}`), ...hoisted, ...(usesRV ? ["RV"] : [])];
+    const locals = [...regionChunks.lets, ...regionTemps, ...Array.from({ length: scratchMax }, (_, i) => `x${i}`), ...hoisted, ...(usesRV ? ["RV"] : [])];
     if (locals.length > 0) header.push(`  let ${locals.join(", ")};`);
     if (!flatRegion) {
       if (definition === null) return [`function${generators ? "*" : ""} file${fileIndex}(resume, fromEntry) {`, ...header, ...out, "}"].join("\n");
