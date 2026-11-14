@@ -47,6 +47,18 @@ General reusable UI engineering and visual-design guidance lives in
 replace the Player-specific contract here.
 
 Player verification follows [`TESTING.md`](../TESTING.md), including its local browser and scoped visual-check route.
+Before READY, a change to what the Player shows takes screenshots in light and dark, on desktop and phone, and READY
+answers from them (owner, 2026-11-08):
+
+- Is any information shown twice?
+- Is any text stating the obvious?
+- Does anything move, flicker or reflow? A status element takes no layout space.
+- Is any element present without a purpose?
+- Are disabled controls visibly disabled?
+
+READY for a change to `player/` or its fixture packages also holds the whole `npm run test:player:browser` run on its
+head, as [`TESTING.md`](../TESTING.md#checks-and-corpora-by-component) requires; a scenario or two is not that run.
+
 ADR 0001 fixes the responsive PWA direction; exact offline, storage, cache, and update lifecycle choices remain in
 [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md) rather than being duplicated here.
 
