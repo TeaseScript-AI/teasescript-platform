@@ -178,6 +178,21 @@ test("evidence: the set's sources by class on each tree, a class move apart from
       ["fine", "completed"],
     ],
   );
+  // (each tree's own class: a source completed on the base and stopped on the head is the head's heaviest, stopped)
+  const regressed = partSummary(
+    setSources([
+      {
+        name: "regressed",
+        modes: MODE_NAMES.map((m) =>
+          setMode(m, compile(), compile({ stopped: "work", units: 2000 })),
+        ),
+      },
+    ]),
+  );
+  assert.deepEqual(
+    regressed.shares.map((share) => share.heaviest.class),
+    ["completed", "limit"],
+  );
   // (a move is never one of the differences: a new throw is one, completed → threw; so is, within one class, another
   // outcome in a paired mode; the differences are over sources completed on both trees; a throw alike is listed apart)
   assert.deepEqual(summary.moved, [
