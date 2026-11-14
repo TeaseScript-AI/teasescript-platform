@@ -200,10 +200,12 @@ test("a recursive function that fills a written dict with its own result is cut 
     `  }\n  return value\n}\nlet v = loadValue("x")\n`;
   // `dict` leaves its values open: M = 1, its written level
   const open = indexOf(loader("dict"));
-  for (const name of ["entries", "value", "loadValue.result"]) assert.equal(open.cut(name), 2, name);
+  for (const name of ["entries", "value", "loadValue.result"])
+    assert.equal(open.cut(name), 2, name);
   // `string dict` is closed: it decides its values, takes no route, and no cycle is left
   const closed = indexOf(loader("string dict"));
-  for (const name of ["entries", "value", "loadValue.result"]) assert.equal(closed.cut(name), null, name);
+  for (const name of ["entries", "value", "loadValue.result"])
+    assert.equal(closed.cut(name), null, name);
 });
 
 test("a cycle through a property is cut at that property", () => {
