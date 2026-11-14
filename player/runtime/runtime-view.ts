@@ -144,57 +144,6 @@ export function playerTemporalContext(
   return DEFAULT_TEMPORAL_CONTEXT;
 }
 
-/**
- * The presented question's line, shown again with its controls once the conversation moved on after it was asked, as a
- * block's messages and answers do while it waits. A closed rule over the runtime's own entries, with Player-made ones
- * and removed messages left out: its line is the latest entry created before the interaction was requested, only when
- * that entry is a script message, and it shows again only when an entry was created after the request. `null` in every
- * other case, and for a popup or an `exportText` dialog, which shows again itself.
- */
-export function playerRuntimeQuestionAgain(
-  session: Pick<PlayerSessionView, "state" | "transcriptEntries">,
-): PlayerMessagePresentation | null {
-  const action = activeInteraction(session.state);
-  if (action === null || !asksInChat(action.ui.kind)) return null;
-  let moved = false;
-  const entries = session.transcriptEntries;
-  for (let index = entries.length - 1; index >= 0; index--) {
-    const entry = entries[index]!;
-    const created = playerRuntimeTranscriptEventSequence(entry.id);
-    if (entry.kind !== "message" || entry.removed || created === null) continue;
-    if (created > action.requestEventSequence) {
-      moved = true;
-      continue;
-    }
-    // A script message has its content event; an answer has none.
-    return moved && entry.contentSequence !== undefined
-      ? { ...entry, id: `asked-again-${action.actionId}` }
-      : null;
-  }
-  return null;
-}
-
-/** Whether an interaction of `kind` asks in the conversation, so its line can show again; a dialog shows itself. */
-function asksInChat(kind: RuntimeInteractionActionSnapshot["ui"]["kind"]): boolean {
-  switch (kind) {
-    case "text":
-    case "number":
-    case "temporal":
-    case "password":
-    case "choice":
-    case "button":
-    case "url":
-    case "image":
-    case "form":
-      return true;
-    case "popup":
-    case "export":
-      return false;
-    default:
-      return kind satisfies never;
-  }
-}
-
 export function playerRuntimeForeground(
   session: PlayerSessionView,
 ): PlayerForegroundPresentation | null {

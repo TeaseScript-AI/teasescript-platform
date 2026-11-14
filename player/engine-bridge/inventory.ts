@@ -224,7 +224,6 @@ export const VIEW_READERS: readonly string[] = [
   "playerTemporalContext",
   "playerRuntimeForm",
   "playerRuntimeForeground",
-  "playerRuntimeQuestionAgain",
   "playerRuntimeTimers",
   "playerRuntimeDeadlines",
   "playerRuntimePacingGate",
