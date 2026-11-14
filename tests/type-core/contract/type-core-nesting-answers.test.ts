@@ -9,7 +9,7 @@ import { CoreProgram } from "../../../src/type-inference/core/program.js";
 import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
 import { regressionCase } from "../../helpers/regression-case.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
-import { compiledByLine, MODES } from "../../helpers/type-core-oracles.js";
+import { compiledByLine, inMode, MODES, publication } from "../../helpers/type-core-oracles.js";
 
 /*
  * #2764 (B): the nesting cut through the analysis. A value a growing cycle nests deeper on each turn is the cut's unknown
@@ -133,22 +133,58 @@ regressionCase(
       );
       assert.ok(compiled[0]!.run !== null, `${shape}: a plan`);
       for (const other of compiled.slice(1)) assert.deepEqual(other, compiled[0], shape);
+      // (and the answers at every occurrence with them)
+      const published = MODES.map((mode) =>
+        withTestAllowance(300_000, () => publication(files, mode, [])),
+      );
+      for (const other of published.slice(1)) assert.equal(other, published[0], shape);
+      // (and every binding's kinds at the levels around the cut, which no occurrence's answer reaches here)
+      const request = coreRequest(files);
+      assert.ok(request !== null);
+      const bindings = new CoreProgram(request).places.filter(
+        (place) => place.kind.kind === "binding",
+      );
+      const levels = ["", "element", "element.element", "element.element.element"];
+      const deep = MODES.map((mode) =>
+        inMode(mode, () => {
+          const answers = withTestAllowance(300_000, () => analyseCore(request));
+          return bindings.map((place) =>
+            levels.map((path) =>
+              answers
+                .place(place.id, path === "" ? [] : path.split("."))
+                .contract.kinds.map((item) => item.tag)
+                .join("|"),
+            ),
+          );
+        }),
+      );
+      for (const other of deep.slice(1)) assert.deepEqual(other, deep[0], shape);
     }
   },
 );
 
 test("a chain of a helper that wraps its argument demands no key below the cut, and a key count linear in the chain", () => {
   // the base demands its parameter's and result's keys to 101 element steps at two calls, and runs out at 300,000 units
-  const solved = (k: number): readonly string[] => {
+  const source = (k: number): string => {
     const calls = Array.from({ length: k }, (_, i) => `let v${i + 1} = part(v${i})`).join("\n");
-    const source = `${PART}let v0 = 1\n${calls}\nsay "done"\nexit\n`;
+    return `${PART}let v0 = 1\n${calls}\nsay "done"\nexit\n`;
+  };
+  // `part.value` and `part.result` are cut at 1 (M = 0, an integer enters)
+  const steps = (key: string): number => (key.match(/element/g) ?? []).length;
+  // the analysis's contract demands: a key below the cut is answered before it is one
+  const request = coreRequest([{ path: "main.tease", source: source(4) }]);
+  assert.ok(request !== null);
+  for (const { key } of analyseCore(request).budget.finished)
+    if (key.startsWith("c|")) assert.ok(steps(key) <= 1, key);
+  // the candidate route's cycles, at two sizes
+  const solved = (k: number): readonly string[] => {
     const keys: string[] = [];
     const compiled = withSolverSeam(
       { onComponent: (members) => keys.push(...members.map((member) => member.key)) },
       () =>
         withTestAllowance(300_000, () =>
           compileProjectWithBackend(
-            [{ path: "main.tease", source }],
+            [{ path: "main.tease", source: source(k) }],
             {},
             { name: "core", analyze: (request) => coreOutcome(request, "past") },
           ),
@@ -158,9 +194,7 @@ test("a chain of a helper that wraps its argument demands no key below the cut, 
     return keys;
   };
   const [small, large] = [16, 32].map(solved);
-  for (const key of [...small!, ...large!])
-    // `part.value` and `part.result` are cut at 1 (M = 0, an integer enters)
-    assert.ok((key.match(/element/g) ?? []).length <= 1, key);
+  for (const key of [...small!, ...large!]) assert.ok(steps(key) <= 1, key);
   assert.ok(
     large!.length <= 2 * small!.length,
     `${small!.length} keys at 16 calls, ${large!.length} at 32`,
