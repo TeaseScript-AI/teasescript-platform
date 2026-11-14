@@ -1,7 +1,5 @@
 import type { WorkLedger } from "../../budget.js";
 
-// #2764 (B): the nesting graph's components and the depths within one, over any kind of node.
-
 /** A route into a receiver from a producer, with the element levels the producer's value gains there. */
 export interface Edge<N> {
   readonly producer: N;
@@ -92,7 +90,6 @@ export function longestWithin<N>(
   entry: ReadonlyMap<N, number>,
   bound: number,
 ): Map<N, number> | null {
-  // the component's edges from each producer to its receivers
   const readers = new Map<N, { readonly receiver: N; readonly weight: number }[]>();
   for (const receiver of members)
     for (const edge of into.get(receiver) ?? []) {
