@@ -10,8 +10,10 @@ capabilities work.
 
 **Required**
 
-- applicable `AGENTS.md`, repository `README-FIRST.md`, and the assigned issue or pull request;
-- `docs/DEVELOPMENT-WORKFLOW.md` and the task documents selected by `README-FIRST.md`;
+- applicable [AGENTS.md](../../AGENTS.md), repository [README-FIRST.md](../../README-FIRST.md), and the assigned
+  issue or pull request;
+- the [workflow startup sections for your role](README.md#workflow-reading-before-starting) and the task
+  documents selected by `README-FIRST.md`;
 - only the relevant topic documents, accepted decisions, code, and tests selected by the start route.
 
 **Conditional**
