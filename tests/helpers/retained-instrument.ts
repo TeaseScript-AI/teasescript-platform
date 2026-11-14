@@ -44,7 +44,7 @@ import { IngressGraph } from "../../src/type-inference/core/items.js";
 import { CoreProgram } from "../../src/type-inference/core/program.js";
 import {
   retainedCopy,
-  type RetainedInstrumentHooks,
+  type RetainedRecorder,
 } from "../../src/type-inference/core/retained/retained.js";
 import { Solver } from "../../src/type-inference/core/solver.js";
 
@@ -427,7 +427,7 @@ export interface InstrumentOptions {
   readonly trace?: ((report: InstrumentReport) => void) | undefined;
 }
 
-export class RetainedInstrument implements RetainedInstrumentHooks {
+export class RetainedInstrument implements RetainedRecorder {
   readonly #note: boolean;
   readonly #measure: boolean;
   /** What a measurement saw made (`measure`): a kind, an owner or a function, by its name and the site that made it. */

@@ -6,18 +6,17 @@
  * (`Retained.array`); and an owner's own fields (`Retained.owner`), each change to one marked (`amend(owner)`,
  * `Retained.held`). Everything else kept is plain data, which no later run changes. With no instrument (production)
  * a record, arena or array is a copy of what it is given (`retainedCopy`), a collection the native one it makes, `owner`
- * and `amend` return at once, and nothing is charged. A test installs an instrument (`withRetainedInstrument`;
+ * and `amend` return at once, and nothing is charged. A test installs an instrument (`withRetainedRecorder`;
  * `retained-instrument.ts`), which makes the kinds, refuses at its line any other write to retained
  * state, and hears the owners' marks and the solver's runs. A typed array, which no freeze holds, is the exception: a
  * write to its elements after its run is caught at the process's exit, which fails the file.
  */
 
 /**
- * Test-only: the calls the retained API and the solver (`run`) make on an installed instrument, which the test class
- * `RetainedInstrument` (`tests/helpers/retained-instrument.ts`) implements. Each kind made while it is installed is
- * made by it; each name says the owner and the field (`Contract.prefix`).
+ * Test-only: what an instrument hears. Each kind made while it is installed is made by it; each name says the owner
+ * and the field (`Contract.prefix`).
  */
-export interface RetainedInstrumentHooks {
+export interface RetainedRecorder {
   map<K, V>(name: string, entries: Iterable<readonly [K, V]> | null): Map<K, V>;
   set<T>(name: string, values: Iterable<T> | null): Set<T>;
   weakMap<K extends object, V>(name: string): WeakMap<K, V>;
@@ -49,27 +48,24 @@ export interface RetainedInstrumentHooks {
   run<T extends object>(run: T | null): void;
 }
 
-let active: RetainedInstrumentHooks | null = null;
+let active: RetainedRecorder | null = null;
 /**
- * The instrument installed for the whole process (`installRetainedInstrument`), which `withRetainedInstrument` stands
+ * The instrument installed for the whole process (`installRetainedRecorder`), which `withRetainedRecorder` stands
  * over.
  */
-let ambient: RetainedInstrumentHooks | null = null;
+let ambient: RetainedRecorder | null = null;
 
 /** Test-only: installs `instrument` for the whole process (the frozen type-core suites' preload). */
-export function installRetainedInstrument(instrument: RetainedInstrumentHooks): void {
+export function installRetainedRecorder(instrument: RetainedRecorder): void {
   if (active !== null) throw new Error("A retained-state instrument is already installed.");
   ambient = active = instrument;
 }
 
 /**
- * Test-only: runs `callback` with `instrument` in place of the process's own (`installRetainedInstrument`), if any,
+ * Test-only: runs `callback` with `instrument` in place of the process's own (`installRetainedRecorder`), if any,
  * making every retained kind and hearing every mark and run; refused while another stands over the process's own.
  */
-export function withRetainedInstrument<T>(
-  instrument: RetainedInstrumentHooks,
-  callback: () => T,
-): T {
+export function withRetainedRecorder<T>(instrument: RetainedRecorder, callback: () => T): T {
   if (active !== ambient) throw new Error("A retained-state instrument is already installed.");
   const before = active;
   active = instrument;
@@ -81,7 +77,7 @@ export function withRetainedInstrument<T>(
 }
 
 /** The installed instrument, `null` in production: the solver takes it once, when made. */
-export function retainedInstrument(): RetainedInstrumentHooks | null {
+export function retainedRecorder(): RetainedRecorder | null {
   return active;
 }
 
@@ -134,8 +130,7 @@ export const Retained = {
   },
   /**
    * A function retained state may keep, registered where it is made (#1072 R26). The comment line before each call
-   * (`#1072 R26: captures …` or `#1072 R26: as …`, which `check-retained-state` requires) names what the function
-   * captures and why that is covered: a closed-list kind or an owner, a value fixed when it is
+   * names what the function captures and why that is covered: a closed-list kind or an owner, a value fixed when it is
    * made, or a module's own binding. The instrument does not see the captures; the comment is read at review.
    */
   closure<T extends (...args: never[]) => void>(name: string, fn: T): T {
@@ -200,7 +195,7 @@ export function retainedModule<K extends WeakKey, V>(
 export function retainedModule<T extends WeakKey>(name: string, kind: "weakSet"): () => WeakSet<T>;
 export function retainedModule(name: string, kind: ModuleKind): () => object {
   let native: object | undefined;
-  let instrumented: { readonly by: RetainedInstrumentHooks; readonly value: object } | undefined;
+  let instrumented: { readonly by: RetainedRecorder; readonly value: object } | undefined;
   const make = (): object =>
     kind === "map"
       ? Retained.map(name)

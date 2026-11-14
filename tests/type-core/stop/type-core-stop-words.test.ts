@@ -306,12 +306,12 @@ test("the sentence table and the derived record name every site that words or de
   const controls: readonly (readonly [string, string, "words" | "fields"])[] = [
     [
       "renamed",
-      'import { described as codeOf } from "../messages/words.js";\nfunction a(k) { return `is ${codeOf(k)}`; }',
+      'import { described as codeOf } from "../messages.js";\nfunction a(k) { return `is ${codeOf(k)}`; }',
       "words",
     ],
     [
       "namespace",
-      'import * as m from "../messages/words.js";\nfunction a(k) { return `is ${m.described(k)}`; }',
+      'import * as m from "../messages.js";\nfunction a(k) { return `is ${m.described(k)}`; }',
       "words",
     ],
     [

@@ -39,8 +39,13 @@ import { otherwiseChains, provesNonNull, unusedFallbackRule } from "./otherwise.
 import { literalTruth, literalRounds, type FlowNode } from "../flow-graph.js";
 import { type ItemTag } from "../items.js";
 import { type CoreAnalysisRequest, propertyStep } from "../program.js";
-import { coreMessage, coreMessageInWords, messageSource, staticCode } from "../messages.js";
-import type { MessageSource } from "../messages/site.js";
+import {
+  type MessageSource,
+  coreMessage,
+  coreMessageInWords,
+  messageSource,
+  staticCode,
+} from "../messages.js";
 import {
   type CheckedDiagnostic,
   type CoreResult,

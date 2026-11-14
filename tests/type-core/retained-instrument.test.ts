@@ -7,7 +7,7 @@ import {
   Retained,
   retainedCopy,
   retainedModule,
-  withRetainedInstrument,
+  withRetainedRecorder,
 } from "../../src/type-inference/core/retained/retained.js";
 import { Solver, type Demand, type Work } from "../../src/type-inference/core/solver.js";
 import { itemScope } from "../helpers/type-core-items.js";
@@ -40,7 +40,7 @@ function stepped(
 ): { readonly steps: Outcome[]; readonly run: Outcome } {
   const steps: Outcome[] = [];
   let run: Outcome = "ok";
-  withRetainedInstrument(instrument, () => {
+  withRetainedRecorder(instrument, () => {
     const made = shape();
     const demands = made.map((step, index): Demand => ({
       key: `run${index}`,
@@ -362,7 +362,7 @@ test("a typed array holds its elements alone: an own field beside them is refuse
 
 test("a helper watches a made map's writes through its own writer, which stays in place; a native map is not watched", () => {
   const seen: string[] = [];
-  withRetainedInstrument(new RetainedInstrument(), () => {
+  withRetainedRecorder(new RetainedInstrument(), () => {
     const made = Retained.map<string, number>("T.watched");
     assert.equal(
       watchWrites(made, (key, value) => seen.push(`${key}=${value}`)),
@@ -420,7 +420,7 @@ test("a typed array sealed when its run ends and written in a later one is caugh
 test("a run's mark stands in each of its intervals: a write after the run resumes is open, another run's is not", () => {
   let wrote: Outcome = "ok";
   let other: Outcome = "ok";
-  withRetainedInstrument(new RetainedInstrument(), () => {
+  withRetainedRecorder(new RetainedInstrument(), () => {
     const owner = new Owner();
     const child: Demand = {
       key: "child",
@@ -466,7 +466,7 @@ test("a run's mark stands in each of its intervals: a write after the run resume
 test("a demand's factory runs as its own run: its caller's mark does not open the owner to the write it makes", () => {
   for (const eager of [true, false]) {
     let refused: Outcome = "ok";
-    withRetainedInstrument(new RetainedInstrument(), () => {
+    withRetainedRecorder(new RetainedInstrument(), () => {
       const owner = new Owner();
       const change = (): void => {
         owner.field += 1;
@@ -677,7 +677,7 @@ test("a module's collection is made by its kind, one per instrument", () => {
   const outside = made();
   assert.equal(made(), outside);
   const instrument = new RetainedInstrument();
-  withRetainedInstrument(instrument, () => {
+  withRetainedRecorder(instrument, () => {
     const recorded = made();
     assert.notEqual(recorded, outside);
     assert.equal(made(), recorded);
@@ -824,7 +824,7 @@ test("the program's walk refuses an own accessor, whose result it does not see",
 });
 
 test("a made collection's writers are exactly the storing methods its runtime has", () => {
-  withRetainedInstrument(new RetainedInstrument(), () => {
+  withRetainedRecorder(new RetainedInstrument(), () => {
     const made = [
       ["map", Retained.map<string, number>("T.writers"), Map.prototype],
       ["set", Retained.set<string>("T.writers"), Set.prototype],
@@ -851,7 +851,7 @@ test("a made map's upserts answer as the native ones do: the key the runtime tak
   ];
   const native = sequence(upserting(new Map()), upserting(new WeakMap()));
   let instrumented: number[] = [];
-  withRetainedInstrument(new RetainedInstrument(), () => {
+  withRetainedRecorder(new RetainedInstrument(), () => {
     instrumented = sequence(
       upserting(Retained.map<number, number>("T.nativeUpserts")),
       upserting(Retained.weakMap<object, number>("T.nativeWeakUpserts")),
@@ -928,7 +928,7 @@ test("an upsert's callback that is no function throws as the native one does, he
   const native = upserting(new Map<string, number>([["k", 1]]));
   const program = upserting(new Map<string, number>([["k", 1]]));
   let outcomes: string[] = [];
-  withRetainedInstrument(new RetainedInstrument(), () => {
+  withRetainedRecorder(new RetainedInstrument(), () => {
     const made = upserting(Retained.map<string, number>("T.nonCallable"));
     made.set("k", 1);
     Retained.program({ program });

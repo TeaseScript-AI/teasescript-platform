@@ -62,7 +62,7 @@ export function narrowingPass(request: CoreAnalysisRequest): CorePass {
   const exact = new ExactPath(pass);
   const contract = new Contract(pass);
   const values = new Values(pass);
-  // (as `createPass` registers its pass: the retained-state instrument reads its getters through this)
+  // (as `createPass` registers its pass: the retained-state recorder reads its getters through this)
   Retained.owner(pass, "CorePass", (made) => ({
     exact: made.exact,
     contract: made.contract,

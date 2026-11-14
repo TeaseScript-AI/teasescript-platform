@@ -75,8 +75,7 @@ export const PREFILL_LITERALS: Readonly<Record<string, readonly string[]>> = {
 
 /**
  * The samples of an `askChoice`'s option and element positions the route refuses, by origin and kind: the core's check
- * of what the buttons return (TSV029, V30 §19, `checkChoiceValues` in
- * `src/type-inference/core/checks/interactions.ts`) has
+ * of what the buttons return (TSV029, V30 §19, `choiceValues` in `src/type-inference/core/checks/interactions.ts`) has
  * something to say of them, a value no button returns or an object whose fields are unknown, and the route refuses
  * any of its diagnostics after the analysis ("this operand"). Measured on the samples; the guard keeps the list closed.
  */

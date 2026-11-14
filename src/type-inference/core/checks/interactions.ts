@@ -39,7 +39,7 @@ const isMissing = (item: Item): boolean =>
  * beside one. A labelled option's buttons return the label. The answer's value side takes only choice values
  * (`choiceItems`), so no record of a button is composed.
  */
-export function checkChoiceValues(
+export function choiceValues(
   walk: Consumers,
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
   node: FlowNode,

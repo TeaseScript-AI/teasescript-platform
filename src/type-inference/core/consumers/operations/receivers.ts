@@ -15,7 +15,7 @@ import {
   type ItemTag,
   type Writer,
 } from "../../items.js";
-import { described } from "../../messages/words.js";
+import { described } from "../../messages.js";
 import { propertyName } from "../../program.js";
 import { offendingKinds, type ContextDetail, type DiagnosticRule } from "../../result.js";
 import { error } from "../reports/diagnostics.js";

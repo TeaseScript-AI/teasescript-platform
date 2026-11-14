@@ -47,6 +47,8 @@ import { errorSentence, writtenTypeMessage } from "./messages/errors.js";
 import { budgetMessage, warningFix, warningSentence } from "./messages/warnings.js";
 import { contextSentence, originSentence, requiredSentence } from "./messages/causes.js";
 import { unusedFallbackMessage } from "./check-result/otherwise.js";
+export type { Landing, MessageSource } from "./messages/site.js";
+export { described, pathPhrase } from "./messages/words.js";
 
 /*
  * The sentences of the coarse core's diagnostics: each diagnostic's code is its rule's (one code, both severities where

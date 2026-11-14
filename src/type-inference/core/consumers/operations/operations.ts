@@ -14,7 +14,7 @@ import { builtinResult, conversionCategory } from "../../method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "../../operator-table.js";
 import type { ValueConstraint } from "../../program.js";
 import type { DiagnosticRule, RequiredKind } from "../../result.js";
-import { checkChoiceValues } from "../../checks/interactions.js";
+import { choiceValues } from "../../checks/interactions.js";
 import { error } from "../reports/diagnostics.js";
 import { jsonArgument, methodArguments, methodElements } from "./signatures.js";
 import { domainFamily, fallbackFits } from "./fallbacks.js";
@@ -165,7 +165,7 @@ function operation(
 ): void {
   const { family, name } = c.contract;
   // TSV029: what a choice's buttons return (TSV044's mixed answer is its own last stage, `mixedChoices`)
-  if (family === "interaction" && c.evidence?.kind === "choice") checkChoiceValues(walk, c, node);
+  if (family === "interaction" && c.evidence?.kind === "choice") choiceValues(walk, c, node);
   if (c.receiver !== null && family !== "operator") {
     // C2: a position or a count, where the receiver may have the method (any other's is its member check's, C5b)
     if (

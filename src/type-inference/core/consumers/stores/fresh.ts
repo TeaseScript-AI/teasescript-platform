@@ -4,7 +4,7 @@ import type { Consumers } from "../../consumers.js";
 import { termAt, writtenOf } from "../../contract.js";
 import { keyOf, type Definition } from "../../definitions.js";
 import { STOPPED } from "../../items.js";
-import { pathPhrase } from "../../messages/words.js";
+import { pathPhrase } from "../../messages.js";
 import { Laminar } from "../../narrowing/laminar.js";
 import { siteKey } from "../../program.js";
 import { targetName, type StoreRoot, type StoreStep } from "../../result.js";
