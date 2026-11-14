@@ -27,7 +27,7 @@ export class NativeSet {
     return this.#items.length;
   }
 
-  /** The members in insertion order, through an iterator, which gives no way to change them. */
+  /** Iterates the members in insertion order without exposing the array that holds them. */
   public [Symbol.iterator](): IterableIterator<NativeValue> {
     return this.#items.values();
   }
