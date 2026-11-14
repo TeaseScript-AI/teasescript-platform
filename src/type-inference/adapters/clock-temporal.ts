@@ -16,11 +16,10 @@ import type { OperationRelation, OperationResult } from "./relation.js";
 import { typeResult, type MemberAnswer, type MemberRules } from "./views.js";
 
 /**
- * The clock reads and the members of date and time values and calendar durations, as `#builtinType`,
- * `memberPropertyType` and `memberMethodType` of the legacy checker give them: a clock read gives a value of its
+ * The clock reads and the members of date and time values and calendar durations: a clock read gives a value of its
  * kind, a field or part is computed when it is read, with the field's few values kept (`weekday` is one of the seven
- * names), and a method gives a new value of its result. None of them takes arguments; a call with any is
- * `TypeChecker`'s report, and the result stands. An exact duration has no members.
+ * names), and a method gives a new value of its result. None of them takes arguments; a call with any still gives the
+ * result. An exact duration has no members.
  */
 const scalar = (name: ScalarTypeName): StaticType => ({ kind: "scalar", name });
 

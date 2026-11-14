@@ -84,7 +84,7 @@ type Entry =
       readonly place: PlaceId;
       /** The code the binding belongs to, `null` for a global, for the known-value links of its reads. */
       readonly body: object | null;
-      /** The initializer a read may count as the variable's value (see `TypeChecker`'s `Variable.keeps`). */
+      /** The initializer a read may count as the variable's value. */
       readonly keeps: SourceSite | null;
     }
   | { readonly kind: "speaker"; readonly name: string }
@@ -107,7 +107,7 @@ class Scope {
     this.#entries.set(name, entry);
   }
 
-  /** The names visible here down to `boundary`, in a new scope under `boundary` (as `TypeChecker`'s `visibleAbove`). */
+  /** The names visible here down to `boundary`, in a new scope under `boundary`. */
   public visibleAbove(boundary: Scope): Scope {
     const copy = new Scope(boundary);
     for (let scope: Scope | null = this; scope !== null && scope !== boundary; scope = scope.parent)
@@ -159,7 +159,7 @@ class Collector {
   #outer: Scope = this.#project;
   /** The function whose body is walked, whose `return`s are recorded; `null` outside a body. */
   #function: FunctionId | null = null;
-  /** The code being walked, in which a `let` counts as kept (see `TypeChecker`'s `Variable.keeps`). */
+  /** The code being walked, in which a `let` counts as kept. */
   #body: object = this.#project;
 
   public constructor(request: TypeAnalysisRequest) {
@@ -987,7 +987,6 @@ class Collector {
         return yield* compileChild(this.#binary(expression, scope));
       case "typeTestExpression": {
         const value = yield* compileChild(this.#expression(expression.value, scope));
-        // A type test is always the `type` shape; the shape names what it tests, as `TypeChecker` reads it.
         const shape = conditionShape(expression);
         const tested = shape.kind === "type" ? this.#plainVariable(shape.tested, scope) : undefined;
         if (tested !== undefined)
@@ -1317,7 +1316,6 @@ class Collector {
     const method = callee.property.name;
     const speaker = this.#speakerName(callee.object, scope);
     if (method === "copyFrom" && speaker === PLAYER) {
-      // `player.copyFrom(playerProfile)` stores each person field into the player.
       yield* compileChild(this.#expression(callee.object, scope));
       yield* compileChild(this.#arguments(expression, scope));
       const result = this.#value(expression);
@@ -1337,7 +1335,6 @@ class Collector {
       positional.length === 1 &&
       expression.arguments.length === 1
     ) {
-      // The element, or each element of the list, is stored into the receiver's elements, in place.
       const value = yield* compileChild(this.#expression(positional[0]!.value, scope));
       const target = this.#place(expression, `${label(callee.object)}[]`, {
         kind: "target",

@@ -170,7 +170,6 @@ function suggestionFor(union: UnionType): string | null {
     if (next.kind === "unionType")
       for (let at = next.members.length - 1; at >= 0; at -= 1) pending.push(next.members[at]!);
     else members.push(next);
-  // a type name that is no collection and not `null`, also as `T?`: its name and its written text
   const scalar = (
     type: TypeAnnotation,
   ): { readonly name: string; readonly text: string } | null => {
