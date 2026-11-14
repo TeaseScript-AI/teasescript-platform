@@ -199,7 +199,6 @@ function rootOfPlace(
  * to that source; with its holder. A loop along those places, then each answered from the last.
  */
 export function keyIdentity(contract: Contract, asked: Key): Identity {
-  // (a key in its identity: a wrapper family's text read as its cursor)
   const key = contract.canonicalKey(asked);
   if (!contract.keys.has(key)) contract.settle(keyIdentityWork(contract, key));
   return contract.keys.get(key)!;
@@ -421,7 +420,6 @@ export function* structureWork(contract: Contract, value: PlaceId): IdentityWork
   program.work.charge("structureSteps");
   let id = `v${value}`;
   if (contract.copiedKey(value) !== null || contract.resultKey(value) !== null) {
-    // (a read under a test of its path is marked)
     if (!definitions.ingress.has(value)) {
       const identity = yield* contract.needValue(value);
       id = identity.guarded ? `${identity.id}g` : identity.id;

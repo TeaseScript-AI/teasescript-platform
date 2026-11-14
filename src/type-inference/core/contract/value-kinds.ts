@@ -105,7 +105,7 @@ function spanMemberStep(contract: Contract, ref: PathRef, from: number): number 
 
 /**
  * `through` at the step `at`: the first of `rest` from `from` on that names a member a built-in value answers by itself
- * (a dict's `values` or `keys`, a temporal field, a calendar duration's part: `memberStep`), read by `members`.
+ * (a dict's `values` or `keys`, a temporal field, a calendar duration's part: `memberStep`).
  */
 function* memberAt(
   contract: Contract,
@@ -301,7 +301,6 @@ function* valueAt(
     // level's literal once, its answer composed from the level inside's, never again per level above (#1426)
     if (route === "literal") {
       const site = program.places[value]?.site ?? null;
-      // (the rest in its identity: a wrapper's own literal asked by an array, at its cursor's span)
       const at = canonicalRest(contract, value, rest);
       const slot = joinParts("cl", value, restPart(at));
       flow?.include(slot, "literal");
@@ -365,7 +364,6 @@ export function* contractOfValue(
     if (binding !== undefined) {
       const read = flow?.child() ?? null;
       const items = contract.entered(value, yield* contract.contractOf(keyOf(binding, []), read));
-      // the mark travels with the value
       const marks = guards.guardedRead(value);
       if (read !== null) flow!.attach(read, "entered", ...(marks ? (["marked"] as const) : []));
       return marks ? marked(items) : items;

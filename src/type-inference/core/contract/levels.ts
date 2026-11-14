@@ -119,7 +119,6 @@ export function* entryAt(
  * starts the levels, every other entry answers each path by itself.
  */
 export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStores): PrefixLevels {
-  // (a prefix in its identity, as the levels hold it)
   const prefix = contract.canonicalKey(asked);
   const known = contract.levelBases.get(prefix);
   if (known !== undefined) return known;
@@ -325,7 +324,6 @@ function holderGroups(
   const memoKey = joinParts(restPart(path));
   const known = index.folds.get(memoKey);
   if (known !== undefined) return known;
-  // (a read of the property itself folds its holders afresh, keeping nothing)
   const kept = asked.length > 1;
   if (kept) contract.keepText(memoKey.length);
   contract.keep(path.length === 1 ? holders.length : 1);
@@ -444,7 +442,6 @@ export function groupsAt(
   base: readonly LevelGroup[],
   path: Rest,
 ): readonly LevelGroup[] {
-  // (a prefix in its identity, as the levels' groups are named by it; a span by its name, never its text)
   const prefix = contract.canonicalKey(asked);
   const memoKey = joinParts(prefix, restPart(path));
   const known = contract.levelGroups.get(memoKey);

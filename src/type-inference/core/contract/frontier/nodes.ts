@@ -187,8 +187,6 @@ export function keyNode(frontier: Frontier, place: PlaceId, path: readonly strin
   if (known !== undefined) return known;
   const { contract } = frontier;
   eligible(contract, place);
-  // (declined here: a key whose family is a cursor's, and, with `positions()` on, one whose first step passes a
-  // wrapper)
   if (isKeyId(canonicalKey(contract, name))) throw new Decline("cursor");
   if (positions() && contract.wrapperHop(place, path[0]!) !== null) throw new Decline("wrapper");
   frontier.places.add(place);
@@ -433,7 +431,6 @@ export function stateOf(frontier: Frontier, start: number, mark: boolean): numbe
   let [node, marked] = [start, mark];
   for (;;) {
     const at = frontier.nodes[node]!;
-    // (a step per marked or held node resolved: a graph without marks charges none here)
     if (at.kind === "mark" || at.kind === "hold") step(frontier);
     if (at.kind === "mark") [node, marked] = [at.inner, true];
     else if (at.kind === "hold") node = at.inner;

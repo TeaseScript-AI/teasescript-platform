@@ -512,7 +512,7 @@ export interface PathRef extends Iterable<string> {
   steps(): PathSteps | readonly string[];
   /** The text of its first `length` steps (`pathText`), made. */
   text(length: number): string;
-  /** Its path's id in the arena: a span's own (`spanId`); an array's by its steps, as `pathIdOf` walks them. */
+  /** Its path's id in the arena. */
   id(): number;
   /** A short name for a memo: an array's text, a span's id after a dot (no path's text starts with one). */
   name(): string;

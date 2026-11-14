@@ -19,12 +19,11 @@ export type KeyLane = "cursor" | "text";
 export type ShapeAsker = "hop" | "lane";
 
 /**
- * A wrapper shape or a key lane asked, with what the question cost (each family's choice recorded once per pass, with
- * its cost by counter: docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-196): its pass
- * (in the order the recording first saw it), binding and first step; for a shape its asker, answer (`stopped` where the
- * ledger stopped it), whether its memo answered, and the units it charged by counter, as the demand's own work, a shared
- * build's or work counted apart; for a lane its lane, whether its family was frozen already or was being built, which
- * leaves it text for the pass. Each with the demand whose run asked (`Solver.reading`).
+ * A wrapper shape or a key lane asked, with what the question cost: its pass (in the order the recording first saw it),
+ * binding and first step; for a shape its asker, answer (`stopped` where the ledger stopped it), whether its memo
+ * answered, and the units it charged by counter, as the demand's own work, a shared build's or work counted apart; for
+ * a lane its lane, whether its family was frozen already or was being built, which leaves it text for the pass. Each
+ * with the demand whose run asked (`Solver.reading`).
  */
 export type KeyRecord =
   | {

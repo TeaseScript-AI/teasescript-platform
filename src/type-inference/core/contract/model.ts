@@ -372,11 +372,10 @@ export interface PrefixStores {
 }
 
 /**
- * A cycle of whole copies, a strongly connected component of the places that the live, unguarded, exact whole copies
- * `prefixWork` follows link (`copiedRoot`), with its members as ports. A member with one live store at its root (the
- * copy of another member) is a link, an alias `prefixWork` replaces by its source's entry as it does any alias; every
- * other member is a stop, and a copy of a stop is an entry of its key wherever the copy is: the cut every entry into the
- * cycle takes at once, whichever member the walk entered it by.
+ * A cycle of whole copies, a strongly connected component of the places that live, unguarded, exact whole copies link
+ * (`copiedRoot`), with its members as ports. A member with one live store at its root (the copy of another member) is a
+ * link; every other member is a stop, and a copy of a stop is an entry of its key wherever the copy is: the cut every
+ * entry into the cycle takes at once, whichever member the walk entered it by.
  */
 export interface CopyRing {
   readonly ports: readonly PlaceId[];
