@@ -620,7 +620,7 @@ test("each member of a cycle of whole copies has one answer whichever place ente
  * publication with those orders set aside, and its outcome, diagnostics, checks and decided types with their deciders,
  * are a regression oracle taken from `main` at `ab3ec62bf` for these sources only (a change that changes `main`'s records
  * of them updates it; a change of a message, or of the fix's facts `mergedIdentity` sets aside, does not). The first
- * record's hash follows the plan revision its route carries (105 since #1224; with 104 it is `8aaeac9dadbf8b26`).
+ * record's hash follows the plan revision its route carries (106 since #2767; with 105 it is `534659c6f03cf4da`).
  */
 const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
   [
@@ -628,7 +628,7 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
     'let bad = {p0: "x", p1: "x"}\nlet wobj: object? = {p0: 1}\nlet a0 = bad\nlet a1 = a0\nlet a2 = a1\na2 = a1\n' +
       "a0 = a2\na1 = wobj\nexit\n",
     {
-      record: "534659c6f03cf4da",
+      record: "a08256f2b2c816ee",
       upToOrder: "8ec84600facd682a",
       compact: [
         "valid",
