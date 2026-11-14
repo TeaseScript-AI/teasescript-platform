@@ -196,8 +196,9 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
   };
 
   /**
-   * The activations the instruction at `index` enters: a called function, a file it calls or goes to, or every file
-   * for a computed destination. Only these push or replace an activation; a method or built-in never enters author code.
+   * The activations that an instruction at `index` that may start a block enters: a called function, or every file for
+   * a computed `goto` or `call`. A path or glob destination evaluates nothing, so it starts no block; only calls and
+   * transfers push or replace an activation, never a method or built-in.
    */
   const enteredActivations = (index: number): number[] =>
     flow.successors(index).flatMap(({ edge }) => {
@@ -205,7 +206,6 @@ export function planWaits(plan: InstructionPlan, flow = new PlanControlFlow(plan
         const callee = regionOfFunction.get(edge.functionId);
         return callee === undefined ? [] : [callee];
       }
-      if (edge.kind === "transfer") return [activationNode(edge.file)];
       return edge.kind === "computed" ? [everyActivation] : [];
     });
   /** The nodes that make an instruction that may start a block stand below a wait, by instruction. */
