@@ -16,12 +16,6 @@ import type { ValueKind } from "../../value-kinds.js";
 import type { OperationResult } from "./relation.js";
 import { typeResult, type MemberAnswer, type MemberRules } from "./views.js";
 
-/**
- * The members of timers, media, cameras, messages and permanent buttons (O4 stage 2b), as `handlePropertyType` and
- * `memberMethodType` of the legacy checker give them from `HANDLE_MEMBERS`: a property is computed from the state
- * the handle names when it is read, also null where it is `nullable` (a timer's `label`), and every method gives
- * null. What the visitor reports about a method's arguments is checking-only.
- */
 const VALUE_TYPES: Readonly<Record<HandleValueType, StaticType>> = {
   duration: DURATION_TYPE,
   string: STRING_TYPE,

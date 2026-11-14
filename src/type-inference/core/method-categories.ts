@@ -16,16 +16,15 @@ import { isTextMethod, TEXT_METHODS, type TextResult } from "../../text-operatio
 import type { ValueKind } from "../../value-kinds.js";
 
 /*
- * What each built-in operation does to the values the coarse core follows, by semantic category (the owner's
- * extensibility criterion, 2026-10-24: PLAN §6a, S3 revision 8 §2). The generic core (definitions, contract, exact
- * path, values, answers) reads an operation's category, never its name: a new method that uses a mechanism the core
- * already has is a new row of a table (below), with its language rules in the adapter layer (`consumers.ts`), and no
- * change to the core. A new mechanism (a new kind of definition, a new transfer, a new loop form, a new certainty rule)
- * is a change to the core. The rows are the model's (`points14.mjs`: `METHOD_RESULT`, `REMOVALS`, `SELECTIONS`,
- * `ASKED`, the conversions). The selections, the conversions, and what a method does to its receiver's elements come
- * from the language's own tables (`list-methods.ts`, `dict-operations.ts`, `conversions.ts`), which the compiler and
- * the runtime read too, so a method that removes or clears is a row of its contracts alone; the other methods' results
- * are rows here, which `type-core-method-categories.test.ts` checks against the contracts.
+ * What each built-in operation does to the values the core follows, by semantic category (the owner's extensibility
+ * criterion, 2026-10-24; PLAN). The generic core (definitions, contract, exact path, values, answers) reads a method's,
+ * a conversion's or an interaction's category, never its name (an operator it reads by its symbol, `+` among them): a
+ * new method that uses a mechanism the core already has is a new row of a table (below), with its language rules in the
+ * consumers (`consumers.ts`, `consumers/`), and no change to the core. A new mechanism (a new kind of definition, a new
+ * transfer, a new loop form, a new certainty rule) is a change to the core. The selections, the conversions, and what a
+ * method does to its receiver's elements come from the language's own tables (`list-methods.ts`, `dict-operations.ts`,
+ * `conversions.ts`), which the compiler and the runtime read too, so a method that removes or clears is a row of its
+ * contracts alone; the other methods' results are rows here.
  */
 
 /** What a method of a collection does and gives. */
@@ -80,7 +79,7 @@ const REMOVES: Readonly<Record<"element" | "null", MethodCategory>> = {
 /**
  * A method's category, or `undefined` for one the core does not model (its result is the runtime's): a method that
  * removes or clears its receiver's elements has its category from its contracts; one that adds them is a store into
- * them (`collector.ts`).
+ * them.
  */
 export function methodCategory(name: string): MethodCategory | undefined {
   const list = listMethod(name);
@@ -196,7 +195,7 @@ export function memberStep(
 }
 
 /**
- * F25, F19a: what the other interactions give, the adapters' fixed results: a button's or a popup's duration, a
+ * F25, F19a: what the other interactions give: a button's or a popup's duration, a
  * permanent button's or a camera's handle.
  */
 const SHOWN: Readonly<Record<string, ValueKind>> = {
@@ -225,7 +224,7 @@ export function memberResult(name: string): readonly ValueKind[] | undefined {
 export type InteractionCategory =
   { readonly kind: "asks"; readonly result: ValueKind } | { readonly kind: "options" };
 
-/** The interactions with a declared answer, by the collector's interaction kinds: the oracle's adapter rows. */
+/** The interactions with a declared answer, by the collector's interaction kinds. */
 const ASKS: Readonly<Record<string, ValueKind>> = {
   text: "string",
   password: "string",

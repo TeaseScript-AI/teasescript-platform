@@ -1,11 +1,7 @@
 /**
- * The work budget of the coarse core (checkpoint 9): every unit of work the analysis does is charged to one
- * counter as it runs, and the charged total is checked against the program's allowance at each charge, so an analysis
- * stops proving at the unit that crosses it. The allowance is the larger of a fixed floor and a coefficient per syntax
- * node; statement nesting and a read chain's depth have their own limits. A stop is no compile error (the owner's D4,
- * option a′): the ledger then only finishes, every later charge counted apart and none stopping it, and
- * each unit before the stop is counted to the place that spent it, so one warning can name the heaviest. The fallback
- * of a demand over its own allowance is not part of this module.
+ * Every unit of work the analysis does is charged as it runs and the total checked against the program's allowance at
+ * each charge, so an analysis stops proving at the unit that crosses it. A stop is no compile error (D4); each unit
+ * before it is counted to the place that spent it, so one warning can name the heaviest.
  */
 
 /** The allowance every program has, however small. */
@@ -20,16 +16,10 @@ export const WORK_PER_NODE = 256;
  */
 export const NESTING_LIMIT = 256;
 
-/** The work allowance of a program with `syntaxNodes` parsed nodes: max(30,000,000, 256 × nodes). */
 export function allowanceFor(syntaxNodes: number): number {
   return Math.max(WORK_FLOOR, WORK_PER_NODE * syntaxNodes);
 }
 
-/**
- * Every counter the analysis charges, by the part of the analysis that charges it (the names of the reference model,
- * so that work records of the port and the model compare counter by counter). A counter that several parts share says
- * what it counts.
- */
 export type WorkCounter =
   // the program's size, charged once as setup
   | "syntaxNodes"
@@ -64,9 +54,8 @@ export type WorkCounter =
   | "eventSteps"
   // the contract per demanded path and its source indexes
   | "invSteps"
-  // #1747: the objects query's own work (`contract/objects.ts`, through `charged-iteration.ts`'s charged helpers):
-  // each function entry, proof node, entry, group, store, writer, list, child edge, copied element, joined part and
-  // sort step
+  // #1747: the objects query's own work: each function entry, proof node, entry, group, store, writer, list, child
+  // edge, copied element, joined part and sort step
   | "objectSteps"
   // what the literal indexes, their identities and structures keep, charged before they keep it: each entry, scheduled
   // task and element of a sorted copy, and each text (a signature, a structure) by its size; and each path, key or
@@ -92,7 +81,7 @@ export type WorkCounter =
   | "checksSkipped"
   | "rejectPasses"
   | "stopPasses"
-  // admission's copies (S6-CARRIERS §4): alias keys, signatures and groups; the eligibility index; the quiet proofs of a
+  // admission's copies: alias keys, signatures and groups; the eligibility index; the quiet proofs of a
   // class; the member visits a proof that is not quiet makes; the structure levels
   | "aliasSteps"
   | "eligibility"
@@ -107,7 +96,7 @@ export type WorkCounter =
   // asked whether it stopped
   | "readerRecords"
   | "stopAsks"
-  // the receiving closure of a pass that starts with frozen keys (#1526 phase C): each read it keeps (an edge), each
+  // the receiving closure of a pass that starts with frozen keys (#1526): each read it keeps (an edge), each
   // node a walk of it visits (taint, blockers, an invalidation transaction)
   | "closureEdges"
   | "closureVisits";
@@ -129,14 +118,13 @@ export function pathTextLength(path: readonly string[]): number {
 }
 
 /**
- * The paths and keys the core makes, each through one of these helpers or the key helpers of `definitions.ts`
- * (`type-core-kept.test.ts` fails on one made past them). A text or array a structure keeps (a map's key, a set's
- * member, an entry's path or key) is made by a kept helper (`keptText`, `keptKey`, …), which charges its size to
- * `literalUnits` before it makes it, so a literal's depth, breadth or names reach the allowance before
- * the heap; one a step only looks up or passes on is made by its plain twin (`pathText`, `keyOf`, …), which charges
- * nothing: its making is the step's own work. Up to `SHORT` code units or elements ride on the unit of the step that
- * makes them, so an ordinary path costs nothing more; beyond it a text costs a unit per eight code units and an array a
- * unit per element, about their size in 8-byte words.
+ * The paths and keys the core makes, each through one of these helpers or the key helpers of `definitions.ts`. A text
+ * or array a structure keeps (a map's key, a set's member, an entry's path or key) is made by a kept helper
+ * (`keptText`, `keptKey`, …), which charges its size to `literalUnits` before it makes it, so a literal's depth,
+ * breadth or names reach the allowance before the heap; one a step only looks up or passes on is made by its plain twin
+ * (`pathText`, `keyOf`, …), which charges nothing: its making is the step's own work. Up to `SHORT` code units or
+ * elements ride on the unit of the step that makes them, so an ordinary path costs nothing more; beyond it a text costs
+ * a unit per eight code units and an array a unit per element, about their size in 8-byte words.
  */
 const SHORT = 32;
 
@@ -244,13 +232,8 @@ const LIMIT_NAMES: Readonly<Record<BudgetLimit, string>> = {
 };
 
 /**
- * Thrown by `charge` at the unit that exceeds the allowance and by `checkReadDepth` past the read-depth limit: the
- * analysis catches it and stops proving. A statement nested past the nesting limit stops nothing: it is checked when
- * the script runs (`nesting`).
- */
-/**
- * A demand that crossed its allowance (S3 §5): the solver gives it up between two steps of its computations,
- * so no computation is cut midway; its reader answers with its key's contract and the reason `budget`.
+ * A demand that crossed its allowance: the solver gives it up between two steps of its computations, so no computation
+ * is cut midway.
  */
 export class DemandExhausted extends Error {
   public constructor() {
@@ -260,8 +243,8 @@ export class DemandExhausted extends Error {
 }
 
 /**
- * Work that would pass a ceiling a caller set (`WorkLedger.capped`): the receiving completion's own allowance (#1526
- * phase C), never the analysis's; the charge that would pass it is not made.
+ * Work that would pass a ceiling a caller set (`WorkLedger.capped`): the receiving completion's own allowance (#1526),
+ * never the analysis's; the charge that would pass it is not made.
  */
 export class CapReached extends Error {
   public constructor() {
@@ -270,6 +253,10 @@ export class CapReached extends Error {
   }
 }
 
+/**
+ * The analysis's stop at a limit. A statement nested past the nesting limit stops nothing: it is checked when the
+ * script runs (`nesting`).
+ */
 export class BudgetExhausted extends Error {
   public constructor(public readonly limit: BudgetLimit) {
     super(`The analysis exceeded its ${LIMIT_NAMES[limit]}.`);
@@ -279,9 +266,9 @@ export class BudgetExhausted extends Error {
 
 /**
  * The work of one analysis. Counters change only through `charge`, which adds to the total too, so the counters always
- * sum to the total; the budget's test checks that identity over charged work. Until the analysis stops, each unit is
- * also counted to its spender (`spender`: 0 for setup, else a callable's number); after the stop (`stop`) the ledger
- * only counts the finishing work (`finishing`), never stopping it again.
+ * sum to the total. Until the analysis stops, each unit is also counted to its spender (`spender`: 0 for setup, else a
+ * callable's number); after the stop (`stop`) the ledger only counts the finishing work (`finishing`), never stopping
+ * it again.
  */
 export class WorkLedger {
   readonly #counts = new Map<WorkCounter, number>();
@@ -364,9 +351,9 @@ export class WorkLedger {
   }
 
   /**
-   * Runs `callback`, the first build of an index every later read of the program shares (the narrowing index): its
-   * units count to the analysis as any, but to no demand's allowance, as the read that happened to ask first did not
-   * make them its own work (S3 §5).
+   * Runs `callback`, the first build of an index every later read of the program shares: its units count to the
+   * analysis as any, but to no demand's allowance, as the read that happened to ask first did not make them its own
+   * work.
    */
   public shared<T>(callback: () => T): T {
     if (this.#sharing) return callback();
@@ -429,7 +416,6 @@ export class WorkLedger {
     return step.value;
   }
 
-  /** Opens a `sharedStructure` window. */
   #openStructure(): void {
     this.#sharing = true;
     this.#structural = true;
@@ -461,8 +447,7 @@ export class WorkLedger {
   }
 
   /**
-   * Ends an open `sharedSteps` build: its units counted as shared, what its readers repeated dropped. Its own end
-   * calls it, and so does a solver run that abandons it unfinished (a stop leaves its generator suspended).
+   * Ends an open `sharedSteps` build: its units counted as shared, what its readers repeated dropped.
    */
   public closeShared(): void {
     const window = this.#window;
@@ -474,14 +459,17 @@ export class WorkLedger {
     this.#repeated = window.repeated;
   }
 
-  /** Whether a `shared` build is running: its units count as shared once it ends (`own`). */
+  /**
+   * Whether a shared build is open (`shared`, `sharedSteps`, or a `sharedStructure` window): its units count as shared
+   * once it ends (`own`).
+   */
   public get sharing(): boolean {
     return this.#sharing;
   }
 
   /**
    * The analysis's units outside `shared` builds, with what its readers repeat (`repeat`): what a demand's allowance
-   * measures (S3 §5).
+   * measures.
    */
   public get own(): number {
     const window = this.#window;
@@ -504,9 +492,8 @@ export class WorkLedger {
   }
 
   /**
-   * Runs `callback` as finishing work without a stop: the checks of statements nested past the nesting limit after an
-   * analysis that ran to its end (D4 a′), a diagnostic's fix facts, what a stop forgets by (`countApart`), counted apart
-   * and never stopping it. Inside another `apart` callback it stays apart to that callback's end.
+   * Runs `callback` as finishing work without a stop, counted apart and never stopping it. Inside another `apart`
+   * callback it stays apart to that callback's end.
    */
   public apart<T>(callback: () => T): T {
     const outer = this.#apart;
@@ -550,14 +537,13 @@ export function countApart(work: WorkLedger, counter: WorkCounter, units = 1): v
 
 /**
  * The levels of a read chain the analysis follows in one run of native calls: a read's projections (`value[0][0]…`,
- * `value.x.y…`, `value.first.first…`), each read by a generator inside the one before (`Contract`'s `contractOfValue` and
- * `valueAt`, `Values`' `#valueAt`), so a deeper chain needs a deeper native stack; an operation's answer at a path runs
- * on its frame's own stack, its read chain new (`inline`, #1572). Past it the
- * analysis stops proving (`read-depth`) instead of overflowing that stack. A technical bound, not a language limit: on Node
- * 26.13.0's default stack (984 KiB) such a chain overflowed at 2,448 levels for index, property and `.first` reads, as
- * on 24.18.0 with the same build; 1,024 is about 40 % of that, leaving the stack a compile is called from and a heavier
- * level their room. `docs/RESOURCE-LIMITS.md` records it
- * (`compiler.core-read-depth`). After a stop, a read past it is not settled (`Solver.enterRead`).
+ * `value.x.y…`, `value.first.first…`), each read by a generator inside the one before, so a deeper chain needs a deeper
+ * native stack; an operation's answer at a path runs on its frame's own stack, its read chain new (`inline`, #1572).
+ * Past it the analysis stops proving (`read-depth`) instead of overflowing that stack. A technical bound, not a
+ * language limit: on Node 26.13.0's default stack (984 KiB) such a chain overflowed at 2,448 levels for index, property
+ * and `.first` reads, as on 24.18.0 with the same build; 1,024 is about 40 % of that, leaving the stack a compile is
+ * called from and a heavier level their room. `docs/RESOURCE-LIMITS.md` records it (`compiler.core-read-depth`). After
+ * a stop, a read past it is not settled.
  */
 export const READ_DEPTH_LIMIT = 1_024;
 
@@ -570,12 +556,8 @@ export function checkReadDepth(depth: number): void {
 let testAllowance: number | null = null;
 let testDemandAllowance: number | null = null;
 
-/**
- * A demand's allowance (S3 §5): 256 × the nodes of the reading site's callable, or a test's
- * (`withTestDemandAllowance`).
- */
-export function demandAllowanceFor(callableNodes: number): number {
-  return testDemandAllowance ?? WORK_PER_NODE * callableNodes;
+export function demandAllowanceFor(nodes: number): number {
+  return testDemandAllowance ?? WORK_PER_NODE * nodes;
 }
 
 /** Test-only: runs `callback` with `allowance` as every demand's allowance (`demandAllowanceFor`). */

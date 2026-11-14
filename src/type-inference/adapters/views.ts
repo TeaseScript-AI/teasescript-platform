@@ -9,20 +9,15 @@ import type {
   OperationResult,
 } from "./relation.js";
 
-/**
- * What every adapter shares (O4 stage 2b): how an operand's view is read, how a result is written, and the rules of
- * the members of one receiver kind, which `members.ts` composes over a receiver that may be of several kinds.
- */
-
 /** The member rules of the receiver kinds one module owns. */
 export interface MemberRules {
   readonly kinds: readonly ValueKind[];
   /** Reading `name` on a receiver of `kind`: a held part of the receiver, a computed result, or no such member. */
   property(kind: ValueKind, name: string, receiver: OperandView): MemberAnswer | undefined;
   /**
-   * Calling `name` on a receiver of `kind` with `inputs`: the receiver's view as a whole, since a gate of the legacy
-   * may read the receiver's other kinds; a rule that reads the members of its kind restricts the view itself
-   * (`restrictedTo`). The solver realizes a `byReceiver` case on the restricted view.
+   * Calling `name` on a receiver of `kind` with `inputs`: the receiver's view as a whole, since a rule's gate may read
+   * the receiver's other kinds; a rule that reads the members of its kind restricts the view itself (`restrictedTo`). A
+   * `byReceiver` case holds for the restricted view.
    */
   method(kind: ValueKind, name: string, inputs: OperationInputs): OperationResult | undefined;
 }
@@ -60,7 +55,7 @@ export function isBottom(view: OperandView): boolean {
   return view.alternatives === null && view.dynamic === null;
 }
 
-/** A view restricted to the alternatives of one kind, as the solver restricts a receiver for a `byReceiver` case. */
+/** A view restricted to the alternatives of one kind: the receiver a `byReceiver` case holds for. */
 export function restrictedTo(view: OperandView, kind: ValueKind): OperandView {
   const kept = viewMembers(view).filter((member) => valueKindOfType(member) === kind);
   return { alternatives: kept, dynamic: view.dynamic, known: view.known };
