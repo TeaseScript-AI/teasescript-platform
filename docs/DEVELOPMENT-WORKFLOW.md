@@ -675,6 +675,11 @@ The builder repairs each blocker and reruns the evidence the repair can invalida
 The round reviewer checks the repair in one round scoped to those findings, which also repeats the delta item at the
 new head. A second final review happens only when the repair changed the construction.
 
+A repair that only deletes comments, in any language and after any review, needs no review round when READY's evidence
+shows two things at the new head: the sources are identical to the reviewed head once comments are stripped by the
+language's own parser, comments a tool reads kept, so that deleting one of those is a difference; and the component's
+checks pass. The coordinator reads that evidence before merging.
+
 ### Pull requests and rebases
 
 - The builder opens the pull request as a draft and marks it ready only after READY.
@@ -712,7 +717,8 @@ gh pr diff <N> | rg -n '^\+.*(debugger;|console\.(log|debug)\(|\.only\(|PRIVATE 
 
 The merge checklist:
 
-1. The head is unchanged since the last review that approved it.
+1. The head is unchanged since the last review that approved it, or differs from it only by comment deletions shown
+   as [The final review](#the-final-review) says.
 2. The base is the intended branch.
 3. The pull request is mergeable and clean, CI is green on the head, and `git diff --check` against the base passes.
 4. Every review round, including the final review, is a comment on the pull request that names its head SHA.
