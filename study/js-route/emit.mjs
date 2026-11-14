@@ -83,6 +83,8 @@ const EXPRESSION_KINDS = new Set(["literal", "regex", "duration", "calendarDurat
   "unit", "angleUnit", "binary", "range", "temporary", "preparedReference", "storageLoad", "tagQuery", "typeTest"]);
 
 /** Instruction kinds today's engine may leave waiting (an action with the host), besides a paced `say`. */
+/** A loop body longer than this many instructions is outlined even without an inner loop. */
+const OUTLINE_LENGTH = 120;
 const WAITING_KINDS = new Set(["wait", "interaction", "capture", "fileStore", "lock", "storageWrite", "playMedia", "showImage"]);
 
 /**
@@ -221,8 +223,24 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
   function emitRegion(start, end, definition, parameters, rootScope, fileIndex) {
     const out = [];
     const temps = new Set();
+    // Scratch variables are expression-local: reused from x0 at every instruction, declared per JavaScript function
+    // (the region's, or an outlined loop body's) up to the most any instruction needed.
     let scratch = 0;
-    const x = () => `x${scratch++}`;
+    let scratchMax = 0;
+    const x = () => {
+      const name = `x${scratch++}`;
+      if (scratch > scratchMax) scratchMax = scratch;
+      return name;
+    };
+    /**
+     * Outlined loop bodies (a loop body that holds a loop becomes its own function, so that the hot inner loops sit in
+     * functions small enough for the optimizer): the stack of bodies being emitted, and each temporary's uses by body.
+     */
+    const bodies = [];
+    let bodyCount = 0;
+    const tempUses = new Map();
+    const bodyParents = new Map();
+    let usesRV = false;
     let indent = 1;
     const line = (text) => out.push(`${"  ".repeat(indent)}${text}`);
     const scopes = [new Map()];
@@ -240,7 +258,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     const hoisted = [];
     const fnName = isRoot ? `file${fileIndex}` : `f${definition.id}`;
     // Only a generator may yield; a wait elsewhere (an instant say, which never waits) keeps the replay call.
-    const WAIT_HERE = generators && (isRoot || canWait.has(definition.id)) ? WAIT : "rt.waited()";
+    const regionYields = generators && (isRoot || canWait.has(definition.id));
+    const WAIT_HERE_REGION = regionYields ? WAIT : "rt.waited()";
 
     const resolve = (name) => {
       for (let depth = scopes.length - 1; depth >= 0; depth -= 1) {
@@ -262,6 +281,9 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     const rawRead = (name) => resolve(name).code;
     const temp = (id) => {
       temps.add(id);
+      const where = bodies.length === 0 ? "root" : bodies.at(-1).key;
+      if (!tempUses.has(id)) tempUses.set(id, new Set());
+      tempUses.get(id).add(where);
       return `t${id}`;
     };
     const own = (e) => {
@@ -503,8 +525,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     }
 
     /** The variables a resumable region saves at a wait: its own, its parameters, its file's for a root, temporaries. */
+    /** Set at the region's end: the temporaries declared in the region's own function (not in an outlined body). */
+    let regionTempNames = null;
     function saved() {
-      return [...params, ...hoisted, ...(isRoot ? [...rootScope.values()] : []), ...[...temps].map((id) => `t${id}`)];
+      return [...params, ...hoisted, ...(isRoot ? [...rootScope.values()] : []), ...(regionTempNames ?? [...temps].map((id) => `t${id}`))];
     }
     function suspendHere(resumeAt) {
       return `{ pc = ${resumeAt}; rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: ${resumeAt}, v: [${"%SAVED%"}] }); throw rt.SUSPEND; }`;
@@ -524,6 +548,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     function emitRange(pc, endAt) {
       while (pc < endAt) {
         const ins = plan.instructions[pc];
+        scratch = 0;
         if (flat) line(`case ${pc}:`);
         switch (ins.kind) {
           case "prepareParameterDefault": {
@@ -605,7 +630,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
                 loops.delete(ins.loopId);
                 scopes.pop();
               }
-            } else line(`${ins.action === "break" ? "break" : "continue"} ${loop.label};`);
+            } else loopControl(ins.action, ins.loopId);
             pc += 1;
             continue;
           }
@@ -631,9 +656,41 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       flat = was;
     }
 
+    /** `break`/`continue` of a loop, also from an outlined body whose loop it is or that lies inside it. */
+    function loopControl(action, loopId) {
+      const loop = loops.get(loopId);
+      if (loop.depth === bodies.length) return line(`${action} ${loop.label};`);
+      const body = bodies.at(-1);
+      if (loopId === body.ownLoop) return line(`return ${action === "continue" ? 0 : 1};`);
+      const key = `${action}:${loopId}`;
+      if (!body.codes.has(key)) body.codes.set(key, { code: 2 + body.codes.size, action, loopId });
+      line(`return ${body.codes.get(key).code};`);
+    }
+    /** A return of the region's function, also from an outlined body (the value waits in `RV`). */
+    function returnWith(value) {
+      if (bodies.length === 0) return line(`return ${value};`);
+      usesRV = true;
+      bodies.at(-1).returns = true;
+      line(`{ RV = ${value}; return -1; }`);
+    }
+    /** The wait code where emission stands: an outlined body yields when it is a generator, else as its region. */
+    function waitHere() {
+      if (bodies.length > 0) return bodies.at(-1).yields ? WAIT : "rt.waited()";
+      return WAIT_HERE_REGION;
+    }
+    function containsLoop(from, to) {
+      for (let at = from; at < to; at += 1) if (plan.instructions[at].kind === "loopStart") return true;
+      return false;
+    }
+    function containsWait(from, to) {
+      for (let at = from; at < to; at += 1) if (waitsAt(at)) return true;
+      return false;
+    }
+
     function structuredLoop(ins, pc, endLoop) {
       const label = `L${ins.loopId}`;
-      loops.set(ins.loopId, { label, flat: false });
+      loops.set(ins.loopId, { label, flat: false, depth: bodies.length });
+      const roundVars = [];
       const roundStart = ins.continueTarget ?? pc;
       if (roundStart < pc && ins.loopKind !== "while") throw new Unsupported(`a '${ins.loopKind}' loop whose rounds start before it`);
       if (ins.loopKind === "while") {
@@ -663,12 +720,13 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         line(`${a} = ${expr(e.start)}; ${b} = ${expr(e.end)};`);
         line(`if (!(Number.isSafeInteger(${a}) && Number.isSafeInteger(${b}) && Number.isSafeInteger(${b} - ${a}))) rt.forSource(${konst(ins)}, rt.range(${konst(e)}, ${a}, ${b}));`);
         const i = `i${pc}`;
-        line(`${label}: for (let ${i} = 0, n${pc} = Math.max(0, ${b} - ${a}${e.inclusive ? " + 1" : ""}); ${i} < n${pc}; ${i}++) {`);
+        line(`${label}: for (let ${i} = 0, a${pc} = ${a}, n${pc} = Math.max(0, ${b} - ${a}${e.inclusive ? " + 1" : ""}); ${i} < n${pc}; ${i}++) {`);
         indent += 1;
         if (tick) line(tick);
         scopes.push(new Map());
         const v = declare(ins.variable);
-        line(`let ${v.code} = ${a} + ${i};`);
+        roundVars.push(v.code);
+        line(`let ${v.code} = a${pc} + ${i};`);
       } else if (ins.loopKind === "for") {
         const s = x();
         line(`${s} = rt.forSource(${konst(ins)}, ${expr(ins.expression)});`);
@@ -678,9 +736,11 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         if (tick) line(tick);
         scopes.push(new Map());
         const v = declare(ins.variable);
+        roundVars.push(v.code);
         line(`let ${v.code} = it${pc} === null ? a${pc} + ${i} : it${pc}[${i}];`);
         if (ins.valueVariable !== undefined) {
           const w = declare(ins.valueVariable);
+          roundVars.push(w.code);
           const c = x();
           line(`let ${w.code} = (${c} = vs${pc}[${i}], typeof ${c} === "object" && ${c} !== null ? rt.copy(${c}) : ${c});`);
         }
@@ -692,9 +752,71 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         if (tick) line(tick);
         scopes.push(new Map());
       } else throw new Unsupported(`a '${ins.loopKind}' loop`);
-      emitRange(pc + 1, endLoop);
+      // A body that holds a loop, or a long one, is outlined; in the generator form a body that waits is a generator.
+      if (containsLoop(pc + 1, endLoop) || endLoop - pc > OUTLINE_LENGTH)
+        outlinedBody(ins, pc, endLoop, roundVars, regionYields && containsWait(pc + 1, endLoop));
+      else emitRange(pc + 1, endLoop);
       scopes.pop();
       loops.delete(ins.loopId);
+      indent -= 1;
+      line("}");
+    }
+
+    /**
+     * The body of loop `ins` as a function defined before the loop and called each round with the round's variables;
+     * it returns 0 (next round), 1 (break), -1 (a return, its value in RV) or a code for a break or continue of an outer
+     * loop, which the call site carries out.
+     */
+    function outlinedBody(ins, pc, endLoop, roundVars, yields) {
+      const key = `b${pc}_${bodyCount++}`;
+      bodyParents.set(key, bodies.length === 0 ? "root" : bodies.at(-1).key);
+      const body = { key, ownLoop: ins.loopId, codes: new Map(), returns: false, yields };
+      // The function's text: emitted into its own buffer at the loop's indentation, then placed before the loop.
+      const outer = out.splice(0);
+      const savedScratch = scratch;
+      const savedMax = scratchMax;
+      const savedIndent = indent;
+      scratch = 0;
+      scratchMax = 0;
+      indent = 1;
+      bodies.push(body);
+      emitRange(pc + 1, endLoop);
+      bodies.pop();
+      const inner = out.splice(0);
+      const bodyScratch = scratchMax;
+      scratch = savedScratch;
+      scratchMax = savedMax;
+      indent = savedIndent;
+      out.push(...outer);
+      const locals = [...Array.from({ length: bodyScratch }, (_, i) => `x${i}`), `%TEMPS_${key}%`];
+      const fn = [`function${yields ? "*" : ""} ${key}(${roundVars.join(", ")}) {`, `  let ${locals.join(", ")};`, ...inner, "  return 0;", "}"];
+      // Before the loop's header: the header began where the loop's first line was written.
+      const headerAt = out.findLastIndex((text) => text.trimStart().startsWith(`L${ins.loopId}:`));
+      const prefix = "  ".repeat(savedIndent - 1);
+      out.splice(headerAt, 0, ...fn.map((text) => prefix + text));
+      const c = `c${pc}`;
+      line(`const ${c} = ${yields ? "yield* " : ""}${key}(${roundVars.join(", ")});`);
+      line(`if (${c} !== 0) {`);
+      indent += 1;
+      line(`if (${c} === 1) break L${ins.loopId};`);
+      for (const { code, action, loopId } of body.codes.values()) {
+        line(`if (${c} === ${code}) {`);
+        indent += 1;
+        loopControl(action, loopId);
+        indent -= 1;
+        line("}");
+      }
+      if (body.returns) {
+        line(`if (${c} === -1) {`);
+        indent += 1;
+        if (bodies.length === 0) line("return RV;");
+        else {
+          bodies.at(-1).returns = true;
+          line("return -1;");
+        }
+        indent -= 1;
+        line("}");
+      }
       indent -= 1;
       line("}");
     }
@@ -934,10 +1056,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
           line(`${params[ins.parameterIndex]} = ${typeChecked(own(ins.value), ins.typeCheck, ins.value.span)};`);
           return;
         case "returnValue":
-          line(`return ${typeChecked(own(ins.value), ins.typeCheck, ins.value.span)};`);
+          returnWith(typeChecked(own(ins.value), ins.typeCheck, ins.value.span));
           return;
         case "returnVoid":
-          line("return null;");
+          returnWith("null");
           return;
         case "prepareSaySpeaker":
           line(`${temp(ins.destinationTemporary)} = rt.prepareSaySpeaker(${konst(ins)}, ${ins.speaker === null ? "undefined" : rawRead(ins.speaker)});`);
@@ -968,7 +1090,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
             line(`${said};`);
             line(`case ${1e6 + pc}:`);
             line(`if (rt.afterWait()) ${suspendHere(1e6 + pc)}`);
-          } else line(`if (${said}) ${WAIT_HERE};`);
+          } else line(`if (${said}) ${waitHere()};`);
           return;
         }
         case "exit":
@@ -1032,7 +1154,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         line(`${call};`);
         line(`case ${1e6 + pc}:`);
         line(`if (rt.afterWait()) ${suspendHere(1e6 + pc)}`);
-      } else line(`if (${call}) ${WAIT_HERE};`);
+      } else line(`if (${call}) ${waitHere()};`);
       for (const id of writes) line(`${temp(id)} = rt.takeTemporary(${id});`);
     }
 
@@ -1045,8 +1167,24 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       line("}");
       emitRange(entry, end);
     } else emitRange(start, end);
+    // Each temporary is declared in the innermost function (region or outlined body) that holds all its uses.
+    const ancestors = (key) => { const chain = [key]; while (chain.at(-1) !== "root") chain.push(bodyParents.get(chain.at(-1))); return chain; };
+    const bodyTemps = new Map();
+    const regionTemps = [];
+    for (const id of temps) {
+      const uses = [...(tempUses.get(id) ?? ["root"])];
+      let common = ancestors(uses[0]);
+      for (const use of uses.slice(1)) { const chain = new Set(ancestors(use)); common = common.filter((k) => chain.has(k)); }
+      const home = common[0];
+      if (home === "root") regionTemps.push(`t${id}`);
+      else { if (!bodyTemps.has(home)) bodyTemps.set(home, []); bodyTemps.get(home).push(`t${id}`); }
+    }
+    for (let i = 0; i < out.length; i += 1)
+      if (out[i].includes("%TEMPS_"))
+        out[i] = out[i].replace(/(, )?%TEMPS_(\w+)%/g, (_, comma, key) => { const list = bodyTemps.get(key) ?? []; return list.length === 0 ? "" : `${comma ?? ""}${list.join(", ")}`; }).replace("let ;", "");
+    regionTempNames = regionTemps;
     const header = [];
-    const locals = [...[...temps].map((id) => `t${id}`), ...Array.from({ length: scratch }, (_, i) => `x${i}`), ...hoisted];
+    const locals = [...regionTemps, ...Array.from({ length: scratchMax }, (_, i) => `x${i}`), ...hoisted, ...(usesRV ? ["RV"] : [])];
     if (locals.length > 0) header.push(`  let ${locals.join(", ")};`);
     if (!flatRegion) {
       if (definition === null) return [`function${generators ? "*" : ""} file${fileIndex}(resume, fromEntry) {`, ...header, ...out, "}"].join("\n");
