@@ -90,31 +90,6 @@ const CASES: readonly [string, Files][] = [
       'function f(x: integer): integer? {\n  while true {\n    switch x {\n      case 1 {\n        return hostValue\n      }\n      default {\n        break\n      }\n    }\n  }\n  say "left"\n  return null\n}\nsay f(1)\nsay f(2)\nexit\n',
     ),
   ],
-  // (a name's written type is its own scope's, V30 §14: another function's `let` of the name gives none)
-  [
-    "a parse into a local, beside another function's local of its name",
-    one(
-      "function unused {\n  let n: string? = null\n}\nfunction f {\n  let n: integer? = null\n  n = fromJson(hostValue, default: null)\n  say n\n}\nf()\nexit\n",
-    ),
-  ],
-  [
-    "a parse into a parameter, beside another function's local of its name",
-    one(
-      "function unused {\n  let n: string? = null\n}\nfunction f(n: integer?) {\n  n = fromJson(hostValue, default: null)\n  say n\n}\nf(1)\nexit\n",
-    ),
-  ],
-  [
-    "a load into a local, beside another function's local of its name",
-    one(
-      'function unused {\n  let n: string? = null\n}\nfunction f {\n  let n: integer? = null\n  n = load("n", default: hostValue)\n  say n\n}\nf()\nexit\n',
-    ),
-  ],
-  [
-    "a load into a parameter, beside another function's local of its name",
-    one(
-      'function unused {\n  let n: string? = null\n}\nfunction f(n: integer?) {\n  n = load("n", default: hostValue)\n  say n\n}\nf(1)\nexit\n',
-    ),
-  ],
   // (the order of a call, V30 §10, §11: every argument evaluated before any is checked, the supplied ones checked before
   // an omitted default is evaluated, and the defaults evaluated in parameter order; each source's runs differ under
   // another order, by what they say or where they fail)
@@ -373,4 +348,55 @@ test("another file's default is never the calling file's store, at whatever offs
     [main, helpers],
   );
   assert.deepEqual(store === null ? null : [store.so, store.eo], [33, 47]);
+});
+
+test("a parse or a load stored by a function reads its own scope's written type, never another function's (V30 §14)", () => {
+  // (today's checker reads no expected type for a parse stored by an assignment and drops a load's `null`, at a file's
+  // top level too; the record and the route read the place's written type, here `integer?`, never the `string?` of
+  // `unused`'s local of the same name)
+  const unused = "function unused {\n  let n: string? = null\n}\n";
+  for (const [source, read] of [
+    [
+      `${unused}function f {\n  let n: integer? = null\n  n = fromJson(hostValue, default: null)\n  say n\n}\nf()\nexit\n`,
+      "expected",
+    ],
+    [
+      `${unused}function f(n: integer?) {\n  n = fromJson(hostValue, default: null)\n  say n\n}\nf(1)\nexit\n`,
+      "expected",
+    ],
+    [
+      `${unused}function f {\n  let n: integer? = null\n  n = load("n", default: hostValue)\n  say n\n}\nf()\nexit\n`,
+      "load",
+    ],
+    [
+      `${unused}function f(n: integer?) {\n  n = load("n", default: hostValue)\n  say n\n}\nf(1)\nexit\n`,
+      "load",
+    ],
+  ] as const) {
+    const files = one(source);
+    const request = coreRequest(files);
+    assert.ok(request !== null, source);
+    const syntax = syntaxOf(source);
+    const derived = {
+      path: "main.tease",
+      syntax,
+      ...derive(syntax, compactAnalysis(request), [syntax]),
+    };
+    const parse =
+      read === "load" ? 'load("n", default: hostValue)' : "fromJson(hostValue, default: null)";
+    const at = source.indexOf(parse);
+    assert.deepEqual(
+      derivedContent(derived.content, source),
+      [`${read} ${at}:${at + parse.length} integer|null${read === "load" ? " repair=false" : ""}`],
+      source,
+    );
+    const today = compileProject(files, OPTIONS);
+    assert.ok(today.plan !== null, source);
+    for (const inputs of assignments(["hostValue"]))
+      assert.deepEqual(
+        evaluateProject([derived], inputs).run,
+        runGlobals(today.plan, inputs),
+        `${source} with ${JSON.stringify(inputs)}`,
+      );
+  }
 });
