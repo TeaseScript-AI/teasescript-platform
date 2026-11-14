@@ -11,10 +11,10 @@ import { fitsType } from "./type-core-derived-values.js";
  * not a boolean, and a `while` still running after `ROUNDS` rounds, are underivable.
  */
 
-/** `break`, thrown from the statement to the innermost loop's round (`round`). */
+/** The signal of a `break` to the innermost loop. */
 export class Break {}
 
-/** `continue`, thrown from the statement to the innermost loop's round (`round`). */
+/** The signal of a `continue` to the innermost loop. */
 export class Continue {}
 
 /** The rounds a `while` may run before the oracle calls it one it does not see end. */
@@ -37,7 +37,6 @@ export function round(run: Run, body: readonly Statement[]): boolean {
   return true;
 }
 
-/** A `while`: its condition before each round. */
 export function runWhile(
   statement: Extract<Statement, { kind: "whileStatement" }>,
   run: Run,
@@ -53,7 +52,6 @@ export function runWhile(
   }
 }
 
-/** A `switch`: its subject once, then the first case it matches, else its `default`. */
 export function runSwitch(
   statement: Extract<Statement, { kind: "switchStatement" }>,
   run: Run,

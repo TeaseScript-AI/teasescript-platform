@@ -44,14 +44,12 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
   ifStatement: ['if hostValue == null {\n  say "y"\n} else {\n  say "n"\n}'],
   repeatStatement: ['repeat hostValue {\n  say "r"\n}'],
   forStatement: ["for item in hostValue {\n  say item\n}"],
-  // (the condition, a literal one, and a typed store in the body; every body leaves its loop, so a run ends)
+  // (every body leaves its loop, so a run ends)
   whileStatement: [
     "while hostValue != null {\n  let x: integer = hostValue\n  break\n}",
     "let n: integer? = 1\nwhile n != null {\n  n = hostValue\n  break\n}",
     "while true {\n  let x: integer = hostValue\n  exit\n}",
   ],
-  // (the subject; each case form, a value, values, a range, `null`, a type test and its negation; a typed store in a
-  // case's body and in the default's)
   switchStatement: [
     'switch hostValue {\n  case 1 {\n    say "one"\n  }\n  default {\n    say "d"\n  }\n}',
     'switch hostValue {\n  case 1, "a" {\n    let x: integer = hostValue\n  }\n}',
@@ -59,7 +57,6 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
     "switch hostValue {\n  case is integer {\n    let x: integer = hostValue\n  }\n  case is not string {\n    let y: string? = hostValue\n  }\n}",
     'switch hostValue {\n  case null {\n    say "n"\n  }\n  default {\n    let x: integer = hostValue\n  }\n}',
   ],
-  // (in each loop, after a typed store)
   breakStatement: [
     "while true {\n  let x: integer = hostValue\n  break\n}",
     "for item in [1, 2] {\n  let x: integer = hostValue\n  break\n}",
@@ -279,9 +276,7 @@ export function spoken(declared: string): string {
 }
 
 /**
- * Sources the guard requires the route to answer as today's compiler does, which gives them a compile error: a `say as`
- * of a name that declares no speaker (the lead's R26); a case value that is no literal, and one that repeats or
- * overlaps an earlier one (the name pass's TSV047 and TSV048).
+ * Sources the guard requires the route to answer as today's compiler does, which gives them a compile error.
  */
 export const ANSWERED_AS_TODAY: readonly string[] = [
   'say as nobody "a"',

@@ -165,12 +165,11 @@ export function coreCheckResult(
   const paths = new Map<Statement, readonly boolean[]>();
   for (const statement of index.statements)
     if (statement.kind === "ifStatement" || statement.kind === "whileStatement") {
-      // P7: a literal condition takes one branch, or runs the body never or until a `break`
+      // (a literal condition decides the way as the flow graph does, P7)
       const truth = literalTruth(statement.condition);
       paths.set(statement, [truth !== false, truth !== true]);
     } else if (statement.kind === "switchStatement") {
-      // every case, and no case: these ways do not read the values the subject's type holds, so none is ruled out
-      // (#2660)
+      // (no way is ruled out by the values the subject's type holds: #2660)
       paths.set(statement, [...statement.cases.map(() => true), true]);
     } else if (statement.kind === "repeatStatement") {
       // P7: whether the body runs, and whether it may run not at all
