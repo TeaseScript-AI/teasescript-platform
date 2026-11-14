@@ -424,7 +424,6 @@ test("a case value that may never match stays refused where the analysis's budge
 test("a `switch` whose subject's type rules out the no-case way gets TSV052 on the route where today plans (#2660)", (t) => {
   check(
     [
-      // (declared: the boolean and `askChoice` forms, `DECLARED_WAY_ERRORS`)
       ...DECLARED_WAY_ERRORS.map((declared) => ({
         name: `declared: ${declared.form}`,
         files: declared.files,
