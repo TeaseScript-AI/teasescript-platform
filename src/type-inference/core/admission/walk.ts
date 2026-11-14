@@ -396,14 +396,8 @@ function* dictValuesWritten(admission: Admission, value: PlaceId): Reads<boolean
  * what it carries, so a written copy it selects precedes its snapshot; any other value is a stop, a literal's
  * cells below it.
  */
-export function expand(
-  admission: Admission,
-  value: PlaceId,
-  node: FlowNode,
-  strip: readonly string[],
-  after = false,
-): Expansion {
-  return readNow(expandRead(admission, value, node, strip, after));
+export function expand(admission: Admission, value: PlaceId, node: FlowNode): Expansion {
+  return readNow(expandRead(admission, value, node, []));
 }
 
 /** `expand` with the value side's decisions reads (`Read`, #1072). */

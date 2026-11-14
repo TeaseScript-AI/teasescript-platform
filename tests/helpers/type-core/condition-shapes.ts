@@ -1,8 +1,7 @@
 import type { Expression, Program, Statement } from "../../../src/ast.js";
 import { collectGraph } from "../../../src/type-inference/collector.js";
-import { graphText } from "../../../src/type-inference/graph.js";
 import { analyzeTypes } from "../../../src/type-inference/index.js";
-import { request } from "./type-inference-graph.js";
+import { graphText, request } from "./type-inference-graph.js";
 
 /*
  * The condition-shape table (O4 stage 2c, work note): every line of the legacy branch decisions

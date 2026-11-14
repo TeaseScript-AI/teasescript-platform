@@ -826,18 +826,6 @@ export class Touches {
     return { ...below, text: refText(this.host.work, below) };
   }
 
-  /** Whether a node holds or lands at a path: a node there standing, or an opaque one at or above it. */
-  public touches(node: Touch | null, path: readonly string[]): boolean {
-    let at = node;
-    for (const step of path) {
-      if (at === null) return false;
-      this.#charge(this.#depth(at.branches));
-      if (at.opaque !== null) return true;
-      at = this.#get(at.branches, step) ?? null;
-    }
-    return at !== null && at.here;
-  }
-
   /**
    * The concrete kinds held at a path below a node: its node's contents' (its contributors' by its parts, a contribution
    * shared by several of them taken once, as its node is), and the opaque contributors' above it.
@@ -884,18 +872,6 @@ export class Touches {
       at = this.#get(at.branches, path[index]!) ?? null;
     }
     return texts.size;
-  }
-
-  /** Whether an opaque node stands at or above a path below a node. */
-  public opaqueAt(node: Touch | null, path: readonly string[]): boolean {
-    let at = node;
-    for (let index = 0; at !== null; index += 1) {
-      this.#charge(this.#depth(at.branches));
-      if (at.opaque !== null) return true;
-      if (index === path.length) return false;
-      at = this.#get(at.branches, path[index]!) ?? null;
-    }
-    return false;
   }
 
   /** Whether `#expand` asks a node in a mode: one standing there, for `meet` with a written type landed. */
@@ -1063,7 +1039,7 @@ export class Touches {
    * Whether a meeting at a node is owed: a written type landed there may not meet the contents there (`meet`: a type
    * landed with none, or contents some landed type does not admit), or two stand there (`elements`).
    */
-  #owed(nodes: readonly Touch[], extra: readonly TouchRef[], mode: TouchMode): boolean {
+  #owed(nodes: readonly Touch[], mode: TouchMode): boolean {
     const summary: Summary = {
       terms: new Map(),
       contents: new Map(),
@@ -1073,7 +1049,6 @@ export class Touches {
       met: false,
     };
     for (const node of nodes) this.#combine(summary, this.#summary(node, mode), mode);
-    for (const ref of extra) this.#add(summary, ref, mode);
     if (mode !== "meet") {
       // (two stand there, and their contents there hold two kinds or more: `literalElements` keeps the path; the test
       // is the merge's, once per pair of nodes, never once per literal)
@@ -1089,9 +1064,6 @@ export class Touches {
           this.host.work.charge("checks");
           if (this.host.concrete(item)) kinds.add(item.tag);
         }
-      const held = new Map<string, Item>();
-      for (const ref of extra) this.#held(held, ref);
-      for (const item of held.values()) if (this.host.concrete(item)) kinds.add(item.tag);
       return kinds.size > 1;
     }
     if (summary.met) return true;
@@ -1102,7 +1074,6 @@ export class Touches {
         this.host.work.charge("checks");
         items.set(text, item);
       }
-    for (const ref of extra) this.#held(items, ref);
     const list = [...items.values()];
     for (const term of summary.terms.values()) {
       this.host.work.charge("checks");
@@ -1276,7 +1247,7 @@ export class Touches {
       if (summary.terms.size === 0) return;
       const terms = [...summary.terms.keys()].sort().join(",");
       keepText(this.host.work, terms.length);
-      if (this.#owed([node], [], mode) || this.#payloadMeets(payload, rest, summary.terms, terms))
+      if (this.#owed([node], mode) || this.#payloadMeets(payload, rest, summary.terms, terms))
         found.push([rest]);
     });
     let out: Found = NONE;
@@ -1506,7 +1477,7 @@ export class Touches {
     if (b.opaque !== null && expands) found = this.#unite(found, this.#expand(b.opaque, a, mode));
     if (both) here = true;
     else if (a.here && b.here && (mode !== "meet" || a.landed || b.landed))
-      here = this.#owed([a, b], [], mode);
+      here = this.#owed([a, b], mode);
     // (the smaller node's branches, each looked up in the larger's: the common ones merged, the others taken whole)
     let branches = big.branches;
     const entries: [string, Touch][] = [];

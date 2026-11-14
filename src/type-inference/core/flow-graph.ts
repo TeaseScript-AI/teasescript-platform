@@ -195,7 +195,7 @@ export class FlowGraphBuilder {
     this.link(program.entry, startup.entry);
     let current: FlowNode = startup.entry;
     for (const { file, declaration } of sessionDeclarations(this.files.map((f) => f.program))) {
-      const context = this.context(startup.id, file, null, null, null, null, []);
+      const context = this.context(startup.id, file, null, null, null);
       const values =
         declaration.kind === "globalStatement"
           ? [declaration.initial]
@@ -207,7 +207,7 @@ export class FlowGraphBuilder {
     this.link(current, startup.exit);
     this.files.forEach((file, index) => {
       const region = this.#fileRegion(index, file.path, file.program.span);
-      const context = this.context(region.id, index, region, null, null, null, []);
+      const context = this.context(region.id, index, region, null, null);
       const last = runCompileTask(blockTask(this, file.program.statements, context, region.entry));
       this.link(last, region.exit);
     });
@@ -439,12 +439,10 @@ export class FlowGraphBuilder {
     region: number,
     file: number,
     fileRegion: FileRegion | null,
-    loop: WalkContext["loop"],
     fn: FunctionRegion | null,
     handler: HandlerRegion | null,
-    loops: readonly BuildNode[],
   ): WalkContext {
-    return { region, file, fileRegion, loops, loop, function: fn, handler, own: [] };
+    return { region, file, fileRegion, loops: [], loop: null, function: fn, handler, own: [] };
   }
 
   /** The context of a statement within `context`'s code: its own expressions are collected afresh. */
@@ -486,7 +484,7 @@ export class FlowGraphBuilder {
     this.addRegion(region, sites);
     this.handlers.push(region);
     this.link(creation, region.entry);
-    const inner = this.context(id, context.file, context.fileRegion, null, null, region, []);
+    const inner = this.context(id, context.file, context.fileRegion, null, region);
     const last = yield* compileChild(blockTask(this, block.statements, inner, region.entry));
     this.link(last, region.exit);
   }

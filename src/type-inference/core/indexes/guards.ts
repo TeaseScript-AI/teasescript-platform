@@ -2,7 +2,7 @@ import type { Expression } from "../../../ast.js";
 import { expressionChildren, unwrap } from "../../../expression-children.js";
 import type { PlaceId } from "../../graph.js";
 import { conditionShape } from "../../narrowing-shapes.js";
-import { keepText, keptText, pathText } from "../budget.js";
+import { keepText, keptText } from "../budget.js";
 import {
   isCursor,
   keptKey,
@@ -738,12 +738,9 @@ export class GuardIndex {
     return merged;
   }
 
-  /**
-   * Whether a value is read under a guard of its key: the read below its property and element projections, at the path
-   * `rest` read further.
-   */
-  public guardedRead(value: PlaceId, rest: readonly string[] = []): boolean {
-    return this.guardedReadAt(value, pathText(rest));
+  /** Whether a value is read under a guard of its key: the read below its property and element projections. */
+  public guardedRead(value: PlaceId): boolean {
+    return this.guardedReadAt(value, "");
   }
 
   /** `guardedRead` at a path given by its text (a cursor's span's, spelled by its record: `PathRef.text`). */

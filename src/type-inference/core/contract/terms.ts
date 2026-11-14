@@ -87,9 +87,9 @@ export interface StepRead {
   at(index: number): string | undefined;
 }
 
-/** The written type at `path` from its step `from` on, a step at a time: no copy of the path's rest per step (#1194). */
-export function typeAtPath(term: TypeTerm, path: readonly string[], from = 0): TypeAt | null {
-  const at = typeAtStep(term, path, from);
+/** The written type at `path`, a step at a time: no copy of the path's rest per step (#1194). */
+export function typeAtPath(term: TypeTerm, path: readonly string[]): TypeAt | null {
+  const at = typeAtStep(term, path, 0);
   return at === null || "term" in at ? at : { place: at.place, rest: path.slice(at.below) };
 }
 

@@ -5,13 +5,9 @@ import test from "node:test";
 
 import { compareProjectPaths } from "../../src/project-paths.js";
 import { collectGraph } from "../../src/type-inference/collector.js";
-import {
-  graphText,
-  type ConstraintGraph,
-  type SyntaxEvidence,
-} from "../../src/type-inference/graph.js";
+import type { ConstraintGraph, SyntaxEvidence } from "../../src/type-inference/graph.js";
 import { analyzeTypes } from "../../src/type-inference/index.js";
-import { referencesExist, request } from "../helpers/type-core/type-inference-graph.js";
+import { graphText, referencesExist, request } from "../helpers/type-core/type-inference-graph.js";
 
 function collect(source: string): {
   readonly graph: ConstraintGraph;
