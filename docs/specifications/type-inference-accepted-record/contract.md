@@ -338,8 +338,10 @@ before any demand is made. The index is built on the first key with two element 
 
 **Reason.** Under F20 and F21 a function that wraps its argument in a list and is called on its own result has types
 without end: the candidate route asked ever deeper paths (1.35 million units at two calls) and ended with TSV076 or a
-slice refusal. The cut depends on the graph alone, never on the order anything is asked in.
+slice refusal. A recursive function that fills a written `dict` with its own result nests the same way below the
+`dict`'s written level, where the contract reads the stores: below an open element, and below a closed one where the
+store has a runtime check (#2771, #2814). The cut depends on the graph alone, never on the order anything is asked in.
 
-**Source.** The owner's decisions of 2026-11-14 on rule 1.1, and the lead's rulings on #2764's plan (rule B, the cut at
-`M + 1`, property routes by name, the carrier table's routes) and of 2026-11-14 (the index routes the stores the contract
-reads), applied by #2764's pull request.
+**Source.** The owner's decisions of 2026-11-14 on rule 1.1, among them its clause for a written type that leaves a
+level open, and the lead's rulings on #2764's plan (rule B, the cut at `M + 1`, property routes by name, the carrier
+table's routes) and of 2026-11-14 (the index routes the stores the contract reads), applied by #2764's pull request.
