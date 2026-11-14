@@ -22,7 +22,7 @@ import {
 } from "./model.js";
 import { readKey } from "./names.js";
 
-// What the stores' syntax decides (source 4): the shape below a read's key by syntax, built once per path.
+// What the stores' syntax decides after a stop: the shape below a read's key by syntax, built once per path.
 
 /** The property names a type term gives, through its unions. */
 function termNames(term: TypeTerm): string[] {
@@ -155,19 +155,18 @@ export function syntaxRead(
 ): Pick<CheapDecision, "kinds" | "spelling"> | null {
   if (!syntaxDecides(walk)) return null;
   const key = readKey(walk, value);
-  return key === null ? null : walk.cheapDecided(keyPlace(key), joinSteps(keyPath(key), rest));
+  return key === null ? null : cheapDecided(walk, keyPlace(key), joinSteps(keyPath(key), rest));
 }
 
 /**
- * The syntax decision, source 4: at a settled stop, where admission retained no
- * decision at `path`, the type a place has there where every store into the key or a key above it gives a value its
- * syntax tells there: a literal (its own types there, a `null` deciding nothing but admitting `null`), a copy of a place
- * with a written type (that type there), a typed parse or load by its default (F18), or a host value (external,
- * deciding nothing). Integers beside numbers decide numbers, as admission's family does (ADR 1.2); `null` where any
- * other store, or only `null`s, reach it, or where object literals with other properties or a store of another kind
- * meet it. Asks no demand; made once per key and path from each key's shape, which each store's syntax enters once.
- * A path admission left undecided is one it decides lazily; a decision that stopped at its allowance, at the key or
- * above it, is undecided by the stop, and syntax decides nothing there (S3 §5: every read of it `budget`).
+ * The syntax decision: at a settled stop, where admission retained no decision at `path`, the type a place has there
+ * where every store into the key or a key above it gives a value its syntax tells there: a literal (its own types
+ * there, a `null` deciding nothing but admitting `null`), a copy of a place with a written type (that type there), a
+ * typed parse or load by its default, or a host value (external, deciding nothing). Integers beside numbers decide
+ * numbers (ADR 1.2); `null` where any other store, or only `null`s, reach it, or where object literals with other
+ * properties or a store of another kind meet it. A path admission left undecided is one it decides lazily; a decision
+ * that stopped at its allowance, at the key or above it, is undecided by the stop, and syntax decides nothing there
+ * (every read of it has the reason `budget`).
  */
 export function cheapDecided(
   walk: Consumers,
@@ -186,7 +185,7 @@ export function cheapDecided(
   const known = walk.cheapDecisions.get(memo);
   if (known !== undefined) return known;
   const frontier = cheapFrontier(walk, root, path);
-  // (an untold frontier decides nothing: its summary is not made, as on `main`, Codex r6's B1 on #1653)
+  // (an untold frontier decides nothing: its summary is not made, #1653)
   if (!frontier.told) {
     walk.cheapDecisions.set(memo, null);
     return null;
@@ -212,7 +211,7 @@ export function cheapDecided(
 }
 
 /**
- * Whether the stores' syntax may decide (source 4): not in a finishing walk before admission settled, where admission's
+ * Whether the stores' syntax may decide: not in a finishing walk before admission settled, where admission's
  * decision rests on a contract a fresh pass has not solved.
  */
 function syntaxDecides(walk: Consumers): boolean {
@@ -288,7 +287,7 @@ function levelBelow(
   // (a level found cut where it was made at `d` has a chain of copies longer than `FRONTIER_COPIES` - `d` below it:
   // cut again wherever it is asked at `d` or deeper, made again only where it is asked higher up, so each level is
   // made at most `FRONTIER_COPIES` + 1 times; a level cut higher up may be told lower down, never the other way,
-  // Codex r5's B1 on #1653)
+  // #1653)
   const cutFrom = state.cutFrom.get(key);
   if (cutFrom !== undefined && state.depth >= cutFrom) {
     state.cuts += 1;
@@ -303,8 +302,8 @@ function levelBelow(
     frontier: CheapFrontier;
   }[] = [];
   // (each shape, written type and copied source once a level, a type and a source given by the earliest store that
-  // brings it, as the decider is: copies of one source through several stores or levels bring the same again, Codex
-  // r1's and r2's B1 on #1653; a source's frontier is linked, never copied into this one)
+  // brings it: copies of one source through several stores or levels bring the same again, #1653; a source's frontier
+  // is linked, never copied into this one)
   const entered = new Set<CheapShape>();
   const enter = (shape: CheapShape): void => {
     if (entered.has(shape)) return;
@@ -463,9 +462,8 @@ function joinProperties(a: number | null, b: number | null): number | null {
 const kindsByTerm = new WeakMap<Consumers, WeakMap<TypeTerm, readonly ItemTag[]>>();
 
 /**
- * A written type's kinds, each once in the order first written (`spelledBy` reads them so): made once a type and walk,
- * each member of its unions looked at then and charged, so a wide type read through many frontiers is looked at once
- * (Codex r6's B1 on #1653).
+ * A written type's kinds, each once in the order first written: made once a type and walk, each member of its unions
+ * looked at then and charged, so a wide type read through many frontiers is looked at once (#1653).
  */
 function termKinds(walk: Consumers, term: TypeTerm): readonly ItemTag[] {
   let terms = kindsByTerm.get(walk);
@@ -485,7 +483,7 @@ function termKinds(walk: Consumers, term: TypeTerm): readonly ItemTag[] {
  * copied it (`summaryOf`): whether every written type there is told; the kinds; the written spelling; the property sets'
  * token; the earliest store giving a kind other than `null` and whether it gave a shape's (else only a written type's);
  * whether a shape, or only a written type, gives one. No property names: no reader of a decision asks them, so none
- * travels through a link (Codex r4's B1 on #1653).
+ * travels through a link (#1653).
  */
 interface Summary {
   readonly told: boolean;
@@ -502,8 +500,8 @@ const summaries = new WeakMap<CheapFrontier, Summary>();
 
 /**
  * A frontier's summary (`Summary`), made once a frontier from its own shapes and written types and its links' summaries,
- * each looked at once and charged, so a source copied into many keys is summed once, never copied into each (#1604;
- * Codex r2's B1 on #1653).
+ * each looked at once and charged, so a source copied into many keys is summed once, never copied into each (#1604,
+ * #1653).
  */
 function summaryOf(walk: Consumers, frontier: CheapFrontier): Summary {
   const known = summaries.get(frontier);
@@ -574,7 +572,7 @@ const tokensOf = new WeakMap<Consumers, Map<string, number>>();
 /**
  * A shape's object literal's properties as a token, one per set of names in the walk, `null` where it has none: made and
  * charged once a shape, its names looked at once there, so a level compares its shapes in one step each whatever their
- * width, also where distinct shapes hold the same names (#1604; Codex r1's B2 on #1653).
+ * width, also where distinct shapes hold the same names (#1604, #1653).
  */
 function propertyToken(walk: Consumers, shape: CheapShape): number | null {
   let token = propertyTokens.get(shape);
@@ -703,8 +701,6 @@ function cheapShapeOf(walk: Consumers, key: Key): CheapShape {
       }
       continue;
     }
-    // a typed parse or load (F18): what its default's syntax gives, as its typed default reads it (a written
-    // destination's type is the store's own); none without a default
     const fallback = typedFallback(walk, value);
     if (fallback !== null) {
       if (fallback === undefined) at.opaque = true;
@@ -724,7 +720,7 @@ function cheapShapeOf(walk: Consumers, key: Key): CheapShape {
   return shape;
 }
 
-/** A typed parse's or load's default (F18), `undefined` where it has none; `null` for any other value. */
+/** A typed parse's or load's default, `undefined` where it has none; `null` for any other value. */
 function typedFallback(walk: Consumers, value: PlaceId): PlaceId | undefined | null {
   const c = walk.pass.program.opOf.get(value);
   if (c?.kind === "load") return c.fallback ?? undefined;

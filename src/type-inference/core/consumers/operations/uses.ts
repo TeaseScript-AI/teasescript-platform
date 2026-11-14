@@ -7,9 +7,9 @@ import { indexProjection } from "../names.js";
 import { consume, indexUse, integerOnly } from "./operands.js";
 import { nullWarning, obligation, warning } from "../reports/warnings.js";
 
-// The graph's uses (counts, indexes, conditions, dict keys: C2, C3, C12), and every access to a speaker's field (F19a).
+// The graph's uses (counts, indexes, range bounds, conditions, dict keys), and every access to a speaker's field.
 
-/** The counts, indexes, range bounds, conditions and dict keys of the graph (C2, C3, C12; V30 §6). */
+/** The counts, indexes, range bounds, conditions and dict keys of the graph (V30 §6). */
 export function uses(walk: Consumers): void {
   const { program } = walk.pass;
   const flow = program.flow;
@@ -22,7 +22,7 @@ export function uses(walk: Consumers): void {
   ]);
   walk.enter(1);
   for (const { use, what } of uses) {
-    if (!walk.runs({ file: use.file, start: use.span.start.offset, end: use.span.end.offset }))
+    if (!walk.startUnit({ file: use.file, start: use.span.start.offset, end: use.span.end.offset }))
       continue;
     const operandSite: SourceSite = {
       file: use.file,
@@ -83,7 +83,10 @@ export function uses(walk: Consumers): void {
   }
 }
 
-/** F19a: every access to a speaker's field by its name asks its member; a declaration's start values are not accesses. */
+/**
+ * Every access to a speaker's field by its name is opaque and owes its member check; a declaration's start values are
+ * not accesses.
+ */
 export function speakers(walk: Consumers): void {
   const { program } = walk.pass;
   const speakers = program.constraints
@@ -96,7 +99,7 @@ export function speakers(walk: Consumers): void {
   walk.enter(3);
   for (const c of walk.order(accesses)) {
     if (c.kind !== "speakerRead" && c.kind !== "speakerStore") continue;
-    if (!walk.runs(c.site)) continue;
+    if (!walk.startUnit(c.site)) continue;
     program.work.charge("checks");
     // a store's receiver: the nearest speaker site before it in its file, by binary search
     let low = 0;

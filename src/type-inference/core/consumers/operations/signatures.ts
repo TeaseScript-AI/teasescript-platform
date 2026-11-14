@@ -24,7 +24,7 @@ import { domainItems, keyLabel, ownSpan, quietKinds, receiverKinds, shownLabel }
 import { consume, writtenNumberUse } from "./operands.js";
 import { obligation, warning } from "../reports/warnings.js";
 
-// C13 (S3 §1): a built-in method's arguments and the elements it reads, against what its contract takes.
+// A built-in method's arguments and the elements it reads, against what its signature takes.
 
 type Takes = Extract<DiagnosticRule, { rule: "argument" }>["takes"];
 
@@ -38,8 +38,8 @@ const TEXT_TAKES: Readonly<Record<TextParameterKind, Takes | null>> = {
 };
 
 /**
- * What a list's or set's method's parameter takes, by its kind (`ListParameter`): any value (`value`), and an index or
- * a count, whose whole number C2 checks (`integerOnly`), are no argument check's.
+ * What a list's or set's method's parameter takes, by its kind (`ListParameter`): any value (`value`), an index and a
+ * count are no argument check's.
  */
 const LIST_TAKES: Readonly<Record<ListParameterKind, Takes | null>> = {
   value: null,
@@ -80,7 +80,6 @@ function takes(kind: ValueKind, name: string, position: number): Takes | null | 
     const parameter = method.parameters[position];
     return parameter === undefined ? undefined : LIST_TAKES[parameter.kind];
   }
-  // (a dict's key is C12's, `operations.ts`)
   if (kind === "dict")
     return dictMethod(name)?.parameters[position] === undefined ? undefined : null;
   return undefined;
@@ -94,11 +93,9 @@ function parameterName(kind: ValueKind, name: string, position: number): string 
 }
 
 /**
- * C13: each argument of a method against what its contract takes on every kind its receiver may be, an unknown receiver
+ * Each argument of a method against what its contract takes on every kind its receiver may be, an unknown receiver
  * any kind that has the method (only text has `startsWith`): an argument is checked where every such kind takes only
- * some kinds; one that a kind takes whatever it is, or that a reference's runtime members take, is quiet. The ordered
- * predicate is `consume`'s: all fit, quiet; none fits and all definite, an error at the argument; else a warning whose
- * check is the method's own check of its argument when it runs.
+ * some kinds; one that a kind takes whatever it is, or that a reference's runtime members take, is quiet.
  */
 export function methodArguments(
   walk: Consumers,
@@ -131,7 +128,6 @@ export function methodArguments(
       domain,
       takes: taken!,
     };
-    // (a whole number's argument: C2's rule for a place written `number`, as at every whole-number use)
     if (
       taking.every(([, each]) => each === "integer") &&
       writtenNumberUse(walk, argument, node, c.site, "operator", rule)
@@ -171,11 +167,8 @@ function families(tags: readonly ItemTag[]): ItemTag[] {
 }
 
 /**
- * C13, Astra's G1: the elements a list's `join` or `sort` reads, at the call: `join` shows each (TSV042), `sort` orders
- * them, all of one ordered type. The ordered predicate over the elements the receiver's lists may hold: all fit, quiet;
- * none fits, or two ordered types, and all definite, an error; else a warning whose check is the method's own check of
- * its elements when it runs. A receiver that may be no list is the member check's (`methodReceiver`), and one the core
- * cannot know reads no elements here.
+ * The elements a list's `join` or `sort` reads, at the call: `join` shows each (TSV042), `sort` orders them, all of one
+ * ordered type.
  */
 export function methodElements(
   walk: Consumers,
@@ -264,7 +257,7 @@ function writable(tag: ItemTag): boolean {
 
 /**
  * `writable` for an item the walk reads: after a stop, a value the stop left unread (`STOPPED`) owes its check, its
- * mark owning the one the unstopped analysis may make there, as every consumer's (D4 a′, Astra r1's B2 on #1437).
+ * mark owning the one the unstopped analysis may make there, as every consumer's (#1437).
  */
 function writes(walk: Consumers, item: Item): boolean {
   return walk.pass.program.work.stopped !== null &&
@@ -275,7 +268,7 @@ function writes(walk: Consumers, item: Item): boolean {
 }
 
 /**
- * What `toJson`'s walk found, the class's (Codex r6): the first path in it that holds a kind it cannot write; the items
+ * What `toJson`'s walk found, the class's: the first path in it that holds a kind it cannot write; the items
  * there and the root's, with their writers, are each read's own, read where it stands.
  */
 interface JsonProof {
@@ -285,7 +278,7 @@ interface JsonProof {
 }
 
 /**
- * The proofs of each walk (the owner's review P1): one per read class (`Contract.readClass`, on the value side and the
+ * The proofs of each walk: one per read class (`Contract.readClass`, on the value side and the
  * contract's: reads of one class answer alike at every path below them, by their binding, its written type among its
  * facts, their snapshot, their guards there and below and their narrowing; k whole copies of an unwritten binding of
  * one source one class, a chain of them resolved once), so `toJson` of one unchanged value at k calls walks its content
@@ -294,7 +287,7 @@ interface JsonProof {
 const JSON_PROOFS = new WeakMap<Consumers, Map<string, JsonProof | null>>();
 
 /**
- * C13, Astra's G1: what `toJson` writes, each value its argument holds at every depth, a list's and a set's elements, a
+ * What `toJson` writes, each value its argument holds at every depth, a list's and a set's elements, a
  * dict's values and an object's properties (V30 §13): the ordered predicate over the known kinds at each path, the first
  * path in the walk that offends, at the argument. An unknown is external data, which JSON held, or the runtime's to check
  * where it writes it, so it owes nothing here, but for a value a stop left unread (`writes`); a path past the read-depth

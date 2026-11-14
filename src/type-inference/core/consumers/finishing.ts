@@ -30,7 +30,7 @@ import { placelessCells, syntaxRead } from "./syntax.js";
 import { heldIngress, hostIngress } from "./host-frontier.js";
 import { openness, prefixAt, writtenTags } from "./written-openness.js";
 
-// The finishing read after a stop (D4 a′): a value's items, a key's, a typed parse's or load's, from what remains.
+// The finishing read after a stop, from what the stop left: a value's items, a key's, a typed parse's or load's.
 
 /** The collection literals and their own kinds; their elements (a dict's entries) are their children. */
 const COLLECTION_LITERALS: ReadonlyMap<string, "list" | "set" | "dict"> = new Map([
@@ -39,7 +39,7 @@ const COLLECTION_LITERALS: ReadonlyMap<string, "list" | "set" | "dict"> = new Ma
   ["dictLiteral", "dict"],
 ]);
 
-/** A typed parse or load (F18), with its default where it has one; `null` for any other value. */
+/** A typed parse or load, with its default where it has one; `null` for any other value. */
 export function typedCall(
   program: CorePass["program"],
   value: PlaceId,
@@ -56,30 +56,12 @@ export function typedCall(
 }
 
 /**
- * After a stop, a value's items at a node and a path as the finishing read answers them (`finishingRead`), for the
- * route's questions: one derivation with the consumers'.
- */
-export function finishedItems(
-  walk: Consumers,
-  value: PlaceId,
-  node: FlowNode | null,
-  rest: readonly string[],
-): readonly Item[] {
-  return finishingRead(walk, value, node, rest);
-}
-
-/**
- * A read in the finishing path (D4 a′; S3 §5 revision 14), answered from the retained
- * state only, the first source that decides it winning: a leaf's own kind (`leafKind`), which no proof decides (an
- * error found there stands, a host read's boundary check forms); the read itself, then its key's contract, as the analysis had finished them before the stop (`run`:
- * the solver answers only from what had finished); the admitted type admission retained at its key's path (written,
- * decided, or a copy's through the copy forest, `Admission.retained`); what the stores' syntax decides there
- * at a settled stop (`cheapDecided`, source 4); `STOPPED` (`unknown` with the reason `budget`) only where
- * none of these decides it, so its consumer owes its check when the script runs. Only a leaf's kind and the
- * read's own answer are the value at the read; the key's contract, the written and the retained type are domains,
- * what the key may hold over all its stores (revisions 15, 16): read as the value for a fixed need,
- * possibly empty at an element; for a `requirement` that follows from the value's kinds (C10's family) only through
- * `required`.
+ * A read in the finishing path, answered from the retained state only; `STOPPED` only where nothing retained decides
+ * it, so its consumer owes its check when the script runs. Only a leaf's kind and the read's own answer are the
+ * value at the read; the expected type, the key's contract, the written and the retained type are domains, what the key
+ * may hold over all its stores: read as the value for a fixed need, possibly empty at an element; for a `requirement`
+ * that follows from the value's kinds (a fallback's family) only through `required`. Except for a `requirement`, a host
+ * read's ingress is added beside what the sources give where no item they give carries an ingress.
  */
 export function finishingRead(
   walk: Consumers,
@@ -120,7 +102,7 @@ export function finishingRead(
   const items =
     exact ??
     (read.length > 0 ? inItsOrder(read) : laterSources(walk, value, node, rest, requirement));
-  // (a host read's ingress is structural whatever the script stores into its global: its C9 boundary forms from it,
+  // (a host read's ingress is structural whatever the script stores into its global: its boundary check forms from it,
   // beside the kinds the later sources give)
   const ingress = requirement ? null : hostIngress(walk, value);
   return ingress === null || items.some((item) => item.ingress !== undefined)
@@ -129,10 +111,8 @@ export function finishingRead(
 }
 
 /**
- * After a stop, a typed parse's or load's expected type at a path (F18): its written destination's (`landsIn`), else its
- * default's own kinds as a typed default reads it (`typedDefault`: a `null` there leaves its level open), through a
- * chain of typed defaults, as the route's stopped answers read it (`CoreAnswers.#stoppedShape`); `null` for any other
- * value and where none gives a type. Each link of a chain and path once.
+ * After a stop, a typed parse's or load's expected type at a path; `null` for any other value and where none gives a
+ * type.
  */
 function typedRead(
   walk: Consumers,
@@ -166,11 +146,9 @@ function typedRead(
         found = walk.typedReads.get(link);
         chain.push(link);
       } else {
-        // the default itself: its own kinds as a typed default reads them; a default no literal gives (a named one, a
-        // call's result) by its read's finished answer, else by its domain (its written, contract or retained type)
-        // only where one kind no narrower kind refines decides it: a domain is not the value (an
-        // `integer?` may hold null alone, which leaves the level open; a `number` an integer), so elsewhere the type
-        // stays open, `STOPPED`, and the call is marked (Codex r22 B1)
+        // a domain is not the value (an `integer?` may hold null alone, which leaves the level open; a `number` an
+        // integer), so a domain decides the default only where one kind no narrower kind refines it; elsewhere the type
+        // stays open, `STOPPED`, and the call is marked
         const decision = typedDefault(path, false);
         let own = leafKind(walk, at, path);
         if (own === null && !literalSyntax(walk, at)) {
@@ -233,16 +211,14 @@ function laterSources(
     const items = walk.run(work());
     return items.some(unsettledItem) ? null : items;
   };
-  // the value at the read: its own finished answer
   const exact = finishedAnswer(walk, value, node, rest);
   if (exact !== null) return exact;
-  // else its own syntax: a typed parse's or load's expected type (F18), as the route's stopped answers read it; a type,
-  // so a domain like those below (a typed list may be empty: C6), but external data where no type reaches it
+  // a typed parse's or load's expected type is a domain like those below (a typed list may be empty), but external data
+  // where no type reaches it
   const typed = typedRead(walk, value, rest);
   if (typed !== null && typed.some(isExternal)) return typed;
   const typedTags =
     typed === null ? null : [...new Set(withoutEmpty(typed).map((item) => item.tag))];
-  // from here on a domain, what the key may hold over all its stores (S3 §5 revision 16): its finished contract
   const held = typedTags === null ? settled(() => contract.contractOfValueAt(value, rest)) : null;
   // (a domain that admits every kind, one whose nearest written prefix does, directly, through copies or a dictionary's
   // values list, holds the host data its key's stores hold, as an admitted or a syntax domain does below, #1450; a
@@ -264,8 +240,6 @@ function laterSources(
       ? [...domain, ...heldIngress(walk, value, rest)]
       : domain;
   }
-  // the admitted type as admission retained it (revision 14): a written type by its syntax in any finishing pass; a
-  // decision or a copy's only where admission settled
   const read = typedTags === null ? writtenRead(walk, value) : null;
   const written = read === null ? null : termAt(read, rest);
   const retained =
@@ -289,9 +263,9 @@ function laterSources(
     const syntax = syntaxRead(walk, value, rest);
     return required(syntax?.kinds ?? [], syntax?.spelling);
   }
-  // else, at a settled stop, the stores' syntax (source 4,
-  // docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-135): every store's syntax decides the
-  // key together
+  // else, at a settled stop, the stores' syntax
+  // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-135): every store's syntax decides
+  // the key together
   const syntax =
     typedTags === null && retained.kinds.length === 0 ? syntaxRead(walk, value, rest) : null;
   const tags = typedTags ?? (retained.kinds.length > 0 ? retained.kinds : (syntax?.kinds ?? []));
@@ -307,13 +281,12 @@ function laterSources(
       ? heldIngress(walk, value, rest)
       : [];
   if (tags.length === 0 || tags.includes("unknown")) return [...STOPPED, ...host];
-  // (one item per kind, with the domain's spelling)
   const spelled = spelling === undefined ? {} : { spelling };
   const items = [
     ...[...new Set(tags)].map((tag) => makeItem(tag, null, { cert: "pos", ...spelled })),
     ...host,
   ];
-  // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)
+  // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty)
   const step = rest.at(-1) ?? walk.pass.program.projOf.get(value)?.step;
   return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
 }
@@ -325,7 +298,6 @@ function laterSources(
  * boundary forms whatever its stores hold.
  */
 function markDomain(walk: Consumers, value: PlaceId, items: readonly Item[]): readonly Item[] {
-  // (each item looked at once, charged)
   walk.pass.program.work.charge("checks", items.length);
   if (!items.some(isExternal) || hostIngress(walk, value) !== null) return items;
   return items.map((item) => {
@@ -337,15 +309,13 @@ function markDomain(walk: Consumers, value: PlaceId, items: readonly Item[]): re
 }
 
 /**
- * A key's read in the finishing path (a store's receiver), from the same retained state as `finishingRead`: its own
- * finished answer at the node; else, domains, its finished contract and its written or retained admitted type (S3 §5
- * revisions 14, 16); `STOPPED` where none decides it. A receiver the retained state decides keeps its shape, so a store
- * into a property no source has keeps its error at the literal.
+ * A key's read in the finishing path (a store's receiver). A receiver the retained state decides keeps its shape, so a
+ * store into a property no source has keeps its error at the literal.
  */
 export function finishingKeyRead(walk: Consumers, key: Key, node: FlowNode): readonly Item[] {
   const { program } = walk.pass;
   // (a host global holds its own external data where the script stores at no path at or above the key, as its reads
-  // do: `leafKind`; that data is there whatever it stores, so its C9 boundary forms)
+  // do: `leafKind`; that data is there whatever it stores, so its boundary check forms)
   const host = program.isHost(keyPlace(key));
   if (host && !storedAbove(walk, keyPlace(key), keyPath(key)))
     return [unknownItem(REASON.external)];
@@ -362,33 +332,51 @@ function laterKeySources(walk: Consumers, key: Key, node: FlowNode): readonly It
   return items === null || items.some(unsettledItem) ? keyDomain(walk, key) : items;
 }
 
-/**
- * A key's domain in the finishing path (S3 §5 revisions 14, 16): its finished contract, else its written or retained
- * admitted type, `STOPPED` where none decides it: a receiver's read (`finishingKeyRead`).
- */
+/** A key's domain in the finishing path. */
 function keyDomain(walk: Consumers, key: Key): readonly Item[] {
-  const { contract, program } = walk.pass;
-  const found = walk.run(contract.contractOf(key));
-  if (!found.some(unsettledItem)) return found;
-  const text = isKeyId(key) ? keyOfId(contract, key) : key;
-  const [place, path] = [keyPlace(text), keyPath(text)];
-  const written = writtenOf(program.place(place).kind);
-  const term = written === null ? null : termAt(written, path);
-  const retained = term === null && walk.settled ? walk.admission.retained(place, path) : null;
-  const tags = term !== null ? typeTags(term) : (retained?.tags ?? []);
+  const decided = keyDecided(walk, key);
+  if (decided !== null && "contract" in decided) return decided.contract;
+  const tags = decided?.tags ?? [];
   // (a written type, or a copy's, keeps its spelling, #1398)
-  const spelled = term !== null || retained?.inherited === true ? spelledBy(tags) : {};
+  const spelled =
+    decided !== null && (decided.source === "written" || decided.inherited) ? spelledBy(tags) : {};
   return tags.length === 0 || tags.includes("unknown")
     ? STOPPED
     : [...new Set(tags)].map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
 }
 
+/** What decides a key in the finishing path. */
+function keyDecided(
+  walk: Consumers,
+  key: Key,
+):
+  | { readonly contract: readonly Item[] }
+  | {
+      readonly tags: readonly ItemTag[];
+      readonly source: "written" | "retained";
+      readonly inherited: boolean;
+    }
+  | null {
+  const { contract, program } = walk.pass;
+  const found = walk.run(contract.contractOf(key));
+  if (!found.some(unsettledItem)) return { contract: found };
+  const text = isKeyId(key) ? keyOfId(contract, key) : key;
+  const [place, path] = [keyPlace(text), keyPath(text)];
+  const written = writtenOf(program.place(place).kind);
+  const term = written === null ? null : termAt(written, path);
+  if (term !== null) return { tags: typeTags(term), source: "written", inherited: false };
+  if (!walk.settled) return null;
+  const retained = walk.admission.retained(place, path);
+  return {
+    tags: retained?.tags ?? [],
+    source: "retained",
+    inherited: retained?.inherited === true,
+  };
+}
+
 /**
  * After a program stop, the kinds a label's step is spelled from where the key's contract asked then is unsettled, and
- * the proof they rest on (#1595, the lead's ruling on its HEAD 0): the key's finished contract; else its
- * written type; else, at a settled stop, what admission retained where that is a decision or a written kind (A1, A2,
- * A4, a copy's source's among them), proved by the stopped analysis itself. Never an open answer (`unknown`, every kind
- * fitting) nor a path no decision retains (a stopped one's): `null` there, and the label keeps its generic step.
+ * the proof they rest on (#1595), or `null`.
  */
 export function labelDomain(
   walk: Consumers,
@@ -397,19 +385,9 @@ export function labelDomain(
   readonly kinds: readonly Item[];
   readonly source: "contract" | "written" | "retained";
 } | null {
-  const { contract, program } = walk.pass;
-  const found = walk.run(contract.contractOf(key));
-  if (!found.some(unsettledItem)) return { kinds: found, source: "contract" };
-  const text = isKeyId(key) ? keyOfId(contract, key) : key;
-  const [place, path] = [keyPlace(text), keyPath(text)];
-  const written = writtenOf(program.place(place).kind);
-  const term = written === null ? null : termAt(written, path);
-  const decided =
-    term !== null
-      ? { tags: typeTags(term), source: "written" as const }
-      : walk.settled
-        ? { tags: walk.admission.retained(place, path)?.tags ?? [], source: "retained" as const }
-        : null;
+  const decided = keyDecided(walk, key);
+  if (decided !== null && "contract" in decided)
+    return { kinds: decided.contract, source: "contract" };
   if (decided === null || decided.tags.length === 0 || decided.tags.includes("unknown"))
     return null;
   return {
@@ -419,9 +397,9 @@ export function labelDomain(
 }
 
 /**
- * A domain read for a requirement that follows from the value's kinds (C10's family; S3 §5 revisions 15, 16): every
- * value in it must give the same requirement. One family without `null` gives it, as possible kinds (a domain proves
- * nothing); `null` only gives none; any other domain leaves it undecided (`STOPPED`).
+ * A domain read for a requirement that follows from the value's kinds (a fallback's family): every value in it must
+ * give the same requirement. One family without `null` gives it, as possible kinds (a domain proves nothing); `null`
+ * only gives none; any other domain leaves it undecided (`STOPPED`).
  */
 function required(tags: readonly ItemTag[], spelling: Spelling | undefined): readonly Item[] {
   if (tags.length === 0 || tags.includes("unknown")) return STOPPED;
@@ -455,11 +433,10 @@ function retainedRead(
 }
 
 /**
- * A leaf's own kind (S3 §5 revision 18): a literal's own kind at the read (a scalar's, a collection
- * literal's: what its syntax is, as the stopped shapes read it), and below it its children's, or a host
- * read's own ingress, directly or through projections (`Contract.ingressOf`), where the script stores into its host
- * global at no path at or above the read's own: what the value is, known from the program's structure without solving;
- * else `null`.
+ * A leaf's own kind: a literal's own kind at the read (a scalar's, a collection literal's: what its syntax is), and
+ * below it its children's, or a host read's own ingress, directly or through projections (`Contract.ingressOf`), where
+ * the script stores into its host global at no path at or above the read's own: what the value is, known from the
+ * program's structure without solving; else `null`.
  */
 function leafKind(
   walk: Consumers,
@@ -546,7 +523,7 @@ function ownLiteralKind(walk: Consumers, value: PlaceId): readonly Item[] | null
   return own === undefined ? null : [makeItem(own, null, { cert: "def" })];
 }
 
-/** A scalar literal's own kind, which no proof decides (an error found there stands, D4 a′); `null` for any other value. */
+/** A scalar literal's own kind, which no proof decides (an error found there stands); `null` for any other value. */
 function literalKind(walk: Consumers, value: PlaceId): readonly Item[] | null {
   const { program } = walk.pass;
   const place = program.places[value]?.kind;

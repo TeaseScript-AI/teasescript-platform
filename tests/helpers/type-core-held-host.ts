@@ -932,7 +932,7 @@ function holds(syntax: ReturnType<typeof syntaxOf>, store: SourceSite, value: So
 
 /**
  * A consumer's read as `recordingReads` records it: its answer, whether the finishing walk made it, whether the consumer
- * left the value to its contract instead (`Consumers.skip`), and the walk's unit it was made in (`Consumers.runs`, by its
+ * left the value to its contract instead (`Consumers.skip`), and the walk's unit it was made in (`Consumers.startUnit`, by its
  * count, and by its stage and site, which name the unit in another analysis of the program).
  */
 interface RecordedRead {
@@ -1032,17 +1032,17 @@ class EmissionsOf extends Map<CoreDiagnostic, number> {
 /**
  * Runs `make`, an analysis under a demand allowance, recording each read its consumers make through
  * `Consumers.valueItems`, each value they leave to its contract (`Consumers.skip`) and each warning they emit
- * (`Consumers.rules`), each in its walk's unit (`Consumers.runs`, `Consumers.enter`). Each wrap is for the run alone,
+ * (`Consumers.rules`), each in its walk's unit (`Consumers.startUnit`, `Consumers.enter`). Each wrap is for the run alone,
  * restored in any case, and fails loudly where its method is not the one it expects.
  */
 function recordingReads<T extends { readonly answers: Answers }>(make: () => T): T {
   const prototype = Consumers.prototype;
-  const { valueItems, runs, enter, check, finish, skip } = prototype;
+  const { valueItems, startUnit, enter, check, finish, skip } = prototype;
   if (
     typeof valueItems !== "function" ||
     valueItems.length !== 3 ||
-    typeof runs !== "function" ||
-    runs.length !== 1 ||
+    typeof startUnit !== "function" ||
+    startUnit.length !== 1 ||
     typeof enter !== "function" ||
     enter.length !== 1 ||
     typeof check !== "function" ||
@@ -1050,7 +1050,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     typeof skip !== "function"
   )
     throw new Error(
-      "Consumers.prototype is not the walk the recorder wraps (valueItems, runs, enter, check, finish, skip)",
+      "Consumers.prototype is not the walk the recorder wraps (valueItems, startUnit, enter, check, finish, skip)",
     );
   interface Walk {
     readonly reads: Map<string, RecordedRead[]>;
@@ -1299,12 +1299,12 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     walk.unitSite = `stage ${walk.stage}`;
     return enter.apply(this, args);
   };
-  prototype.runs = function (this: Consumers, ...args: Parameters<Consumers["runs"]>) {
+  prototype.startUnit = function (this: Consumers, ...args: Parameters<Consumers["startUnit"]>) {
     labelling(this);
     const walk = walkOf(this);
     walk.unit += 1;
     walk.unitSite = `stage ${walk.stage} ${siteKey(args[0])}`;
-    return runs.apply(this, args);
+    return startUnit.apply(this, args);
   };
   const record = (
     consumers: Consumers,
@@ -1364,7 +1364,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     return made;
   } finally {
     live = false;
-    Object.assign(prototype, { valueItems, runs, enter, check, finish, skip });
+    Object.assign(prototype, { valueItems, startUnit, enter, check, finish, skip });
     for (const map of maps) map.into = undefined;
   }
 }

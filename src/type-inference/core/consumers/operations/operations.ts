@@ -25,17 +25,7 @@ import { projection, selection } from "./projections.js";
 import { methodReceiver } from "./receivers.js";
 import { leftOutBy, obligation, shownProperty, warning, type Owner } from "../reports/warnings.js";
 
-/**
- * C1 with C9: where external data a store brings enters, for its warning and check: the external
- * value's own expression, found by applying to the stored value, step by step, what the store reads of it, the way the
- * value transfer composes it: a literal's child for a path step, a projection's owner with the projection's step
- * before the rest, a choice's options (a list's or a set's elements, else the argument itself; a labelled option gives
- * its label) each selected (V30 §19: a choice object's `value`, or its `text` without one, else the option itself)
- * before the rest, also where a choice is another choice's option or projected, and an external value's own site
- * whatever remains. A variable read stops it: the store, as for a copy of a variable holding choice options. The first
- * in source order.
- */
-/** The consumers that operations and projections are: C2–C6, C11, C12, C13's iterable, ADR 1.5. */
+/** The operation and projection consumers, in the walk's first stage. */
 export function operations(walk: Consumers): void {
   const { program } = walk.pass;
   const { contract } = walk.pass;
@@ -51,8 +41,8 @@ export function operations(walk: Consumers): void {
   );
   walk.enter(0);
   for (const c of finals) {
-    if (!walk.runs(c.site)) continue;
-    // (a compound assignment's operation is its statement's, which has no expression of its own: Astra's G2)
+    if (!walk.startUnit(c.site)) continue;
+    // (a compound assignment's operation is its statement's, which has no expression of its own)
     const node = program.exprAt(c.site) ?? compoundNode(walk, c);
     if (node === null) continue;
     walk.reading = node;
@@ -89,7 +79,7 @@ export function operations(walk: Consumers): void {
       c.contract.family === "conversion" &&
       conversionCategory(c.contract.name)?.kind === "parses";
     if (c.kind === "load" || parses) {
-      // C10: the default against the expected type (V30 §12)
+      // a typed load's or parse's default against the expected type (V30 §12)
       const written = (c.kind === "load" ? c.receiver : null) ?? contract.landsIn(c.result, []);
       const fallback = c.kind === "load" ? c.fallback : defaultOf(c);
       if (written !== null && fallback !== null && fallback !== undefined)
@@ -110,7 +100,6 @@ export function operations(walk: Consumers): void {
       if (c.kind === "load") continue;
     }
     if (c.kind === "operation" && c.contract.family === "conversion") {
-      // C10: a conversion's default against its result
       const category = conversionCategory(c.contract.name);
       const fallback = defaultOf(c);
       if (category?.kind === "converts" && fallback !== undefined)
@@ -127,7 +116,7 @@ export function operations(walk: Consumers): void {
       c.contract.family === "builtin" &&
       lazyDefaultOperation(c.contract.name, false) !== null
     ) {
-      // C10: the default `fileFromBase64`, `decryptText` and `decryptFile` select (ADR 0021 7.2) against their result
+      // the default `fileFromBase64`, `decryptText` and `decryptFile` select (ADR 0021 7.2) against their result
       const fallback = defaultOf(c);
       const result = builtinResult(c.contract.name);
       if (fallback !== undefined)
@@ -149,7 +138,7 @@ export function operations(walk: Consumers): void {
 
 /**
  * The node of a compound assignment's operation (`x += y`, the collector's `compound` value): its statement's, where the
- * binary form's operation is its expression's, so both forms meet one operand consumer (C4, F16); `null` for any other.
+ * binary form's operation is its expression's, so both forms meet one operand consumer; `null` for any other.
  */
 function compoundNode(walk: Consumers, c: Constraint): FlowNode | null {
   if (c.kind !== "operation") return null;
@@ -167,7 +156,6 @@ function operation(
   // TSV029: what a choice's buttons return (TSV044's mixed answer is its own last stage, `mixedChoices`)
   if (family === "interaction" && c.evidence?.kind === "choice") choiceValues(walk, c, node);
   if (c.receiver !== null && family !== "operator") {
-    // C2: a position or a count, where the receiver may have the method (any other's is its member check's, C5b)
     if (
       (name === "removeAt" || name === "take" || name === "takeLast") &&
       c.arguments.length > 0 &&
@@ -184,9 +172,6 @@ function operation(
         name,
       );
     if (c.arguments.length > 0 && dictMethod(name)?.parameters[0]?.name === "key") {
-      // C12: a dict method's key is text (`contains`, `remove`; `get`'s is its own constraint's); where the receiver may
-      // also be a list, a set or text (or unknown), whose method takes another value, only a check, as an index use
-      // owes one
       const kinds = kindsOf(walk, c.receiver, node);
       if (kinds.some((item) => item.tag === "dict"))
         consume(
@@ -204,18 +189,15 @@ function operation(
           kinds.some((item) => item.tag !== "dict" && item.tag !== "null"),
         );
     }
-    // F7a: an element selection
     if (name === "removeFirst" || name === "removeLast")
       selection(walk, c.receiver, node, c.site, `.${name}()`);
     methodReceiver(walk, c.site, node, c.receiver, name);
-    // C13: what the method's contract takes of its arguments and its elements
     if (family === "method") {
       methodArguments(walk, c, node);
       methodElements(walk, c, node);
     }
     return;
   }
-  // C3
   if (family === "logic") {
     for (const argument of c.arguments)
       consume(walk, argument, node, c.site, BOOLEAN, name, { rule: "boolean", operator: name }, [
@@ -224,7 +206,6 @@ function operation(
     return;
   }
   if (family === "interpolation") {
-    // C11, F26b: the value and every element of a list must be showable; a list is an element selection
     const value = c.arguments[0];
     if (value === undefined) return;
     const kinds = kindsOf(walk, value, node);
@@ -280,13 +261,12 @@ function operation(
       selection(walk, value, node, c.site, "${...}");
     return;
   }
-  // C13, Astra's G1: what `toJson` writes
   if (family === "conversion") jsonArgument(walk, c, node);
   const operator = operatorOf(c);
   if (operator !== null) operatorUse(walk, c, operator, node);
 }
 
-/** C4: a row of the runtime's operator table (F16). */
+/** An operator's operands against the rows of the runtime's operator table. */
 function operatorUse(
   walk: Consumers,
   c: Extract<ValueConstraint, { kind: "operation" }>,
@@ -299,7 +279,6 @@ function operatorUse(
     const row = operatorRow(operator, kinds);
     return row === undefined ? "none" : row.byValue ? "value" : "row";
   };
-  // §3.3
   const quiet = c.arguments.map((argument) => quietKinds(walk, argument));
   if (quiet.every((kinds) => kinds !== null)) {
     let combinations: ItemTag[][] = [[]];
@@ -314,8 +293,6 @@ function operatorUse(
   const matches = (row: (typeof rows)[number], index: number, tag: ItemTag): boolean =>
     row.operands[index] === tag;
   const domain = (index: number): RequiredKind[] => operandDomain(rows, operands, index);
-  // D1: an operand's rule names the kinds its place takes; the operation's, none
-  // an operand's diagnostic sits on its own span, its `operand` obligation names its text
   const operandSite = (index: number): SourceSite => ownSpan(walk, c.arguments[index]!, c.site);
   const rule = (
     index: number | null,
@@ -342,8 +319,6 @@ function operatorUse(
     return operands[index]!.filter((item) => kinds.some((kind) => kind === item.tag));
   };
   const operandText = (index: number): string => program.textAt(operandSite(index));
-  // C9: external data at an operand is validated where it came in (host data at the operand); a domain's, what the
-  // operand's own warning owns, once it was asked for
   const sends = operands.map((items, index) =>
     walk.boundariesBefore(
       items,
@@ -424,11 +399,6 @@ function operatorUse(
       rule(index, pair),
       taken(index),
     );
-  // the kind obligations (§4: one per offending kind of an operand; every operand that may be null owes its own
-  // null-check below, S4). §3.4, §10.5: in each failing combination without a null, an operand whose kind no
-  // row takes at its place, or else the one operand whose kind no row takes beside the other operands' kinds, owes
-  // the obligation at its span; where no single operand offends (the pair has no row; a value predicate of the row
-  // decides) the operation owes it once, at its span, its text the target. An unknown operand owes its own
   const fitsBeside = (index: number, tag: ItemTag): boolean =>
     rows.some(
       (row) =>
