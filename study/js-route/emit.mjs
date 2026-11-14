@@ -211,6 +211,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
       });
     const vars = [...rootScope.values()];
     if (vars.length > 0) lines.push(`var ${vars.join(", ")};`);
+    if (chain) lines.push(`rt.rootVars[${index}] = () => [${vars.join(", ")}];`);
     lines.push(...functions, root, ...moduleBlocks.values());
     moduleBlocks.clear();
     // An activation of the file from instruction `at`: its start (the session's first file: its speakers' and globals'
@@ -1427,15 +1428,27 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     }
     // A resumable region: its argument evaluation before a call that waits runs only on a fresh entry of that call.
     const savedList = saved().join(", ");
+    // The chain form: a frame's own slots, and a root's file variables apart, which live at module level: re-entering a
+    // root after a call must not set them back to their values from before it; only a resume restores them.
+    const rootVars = isRoot ? [...rootScope.values()] : [];
+    const frameList = chain ? saved().filter((name) => !rootVars.includes(name)).join(", ") : savedList;
+    const rootList = rootVars.join(", ");
     const signature = definition === null ? `function file${fileIndex}(resume, at) {` : `function f${definition.id}(resume${params.map((p) => `, ${p}`).join("")}) {`;
     return [
       signature,
       ...header,
       `  let pc = ${definition === null ? "at" : start};`,
-      `  if (resume !== null) { pc = resume.pc; [${savedList}] = resume.v; }`,
-      // One list of the saved variables per region, not one per wait: it was most of a large program's text.
-      `  const SAVE = (at) => rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: at, v: [${savedList}] });`,
-      ...(chain ? [`  const CALLER = (at) => ({ fn: "${fnName}", file: ${fileIndex}, pc: at, v: [${savedList}], call: true });`] : []),
+      ...(chain
+        ? [
+            `  if (resume !== null) { pc = resume.pc; [${frameList}] = resume.v;${rootVars.length > 0 ? ` if (resume.r !== undefined) [${rootList}] = resume.r;` : ""} }`,
+            `  const SAVE = (at) => rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: at, v: [${frameList}]${rootVars.length > 0 ? `, r: [${rootList}]` : ""} });`,
+            `  const CALLER = (at) => ({ fn: "${fnName}", file: ${fileIndex}, pc: at, v: [${frameList}], call: true });`,
+          ]
+        : [
+            `  if (resume !== null) { pc = resume.pc; [${savedList}] = resume.v; }`,
+            // One list of the saved variables per region, not one per wait: it was most of a large program's text.
+            `  const SAVE = (at) => rt.frames.push({ fn: "${fnName}", file: ${fileIndex}, pc: at, v: [${savedList}] });`,
+          ]),
       "  D: for (;;) switch (pc) {",
       ...out,
       ...(definition === null ? [] : ["  return null;"]),

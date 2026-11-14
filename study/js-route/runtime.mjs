@@ -103,6 +103,8 @@ export class Runtime {
     /** The chain form (set by its program): every author call goes through `drive`; the functions by name; calls made. */
     this.chain = false;
     this.fns = null;
+    /** By file: its variables' current values, which a root's call record takes when the session suspends. */
+    this.rootVars = [];
     this.calls = 0;
     this.callee = null;
     this.callArgs = null;
@@ -576,7 +578,12 @@ export class Runtime {
         }
       }
     } catch (signal) {
-      if (signal === SUSPEND) for (let i = stack.length - 1; i > 0; i -= 2) this.frames.push(stack[i]);
+      if (signal === SUSPEND)
+        for (let i = stack.length - 1; i > 0; i -= 2) {
+          const rec = stack[i];
+          if (rec.fn.startsWith("file")) rec.r = this.rootVars[rec.file]();
+          this.frames.push(rec);
+        }
       throw signal;
     }
   }
