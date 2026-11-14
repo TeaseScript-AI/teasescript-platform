@@ -530,8 +530,7 @@ export class Consumers {
   }
 
   /**
-   * A demand of the solver, its work counted to the read that asked it, within `allowance` where one is given
-   * (a consumer's read; admission's decisions take the program's allowance alone).
+   * A demand of the solver, its work counted to the read that asked it, within `allowance` where one is given.
    */
   public solve<T>(work: Work<T>, allowance: number | null = null): T {
     const ledger = this.pass.program.work;

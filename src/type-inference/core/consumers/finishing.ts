@@ -211,7 +211,6 @@ function laterSources(
     const items = walk.run(work());
     return items.some(unsettledItem) ? null : items;
   };
-  // the value at the read: its own finished answer
   const exact = finishedAnswer(walk, value, node, rest);
   if (exact !== null) return exact;
   // a typed parse's or load's expected type is a domain like those below (a typed list may be empty), but external data
@@ -282,7 +281,6 @@ function laterSources(
       ? heldIngress(walk, value, rest)
       : [];
   if (tags.length === 0 || tags.includes("unknown")) return [...STOPPED, ...host];
-  // (one item per kind, with the domain's spelling)
   const spelled = spelling === undefined ? {} : { spelling };
   const items = [
     ...[...new Set(tags)].map((tag) => makeItem(tag, null, { cert: "pos", ...spelled })),
@@ -300,7 +298,6 @@ function laterSources(
  * boundary forms whatever its stores hold.
  */
 function markDomain(walk: Consumers, value: PlaceId, items: readonly Item[]): readonly Item[] {
-  // (each item looked at once, charged)
   walk.pass.program.work.charge("checks", items.length);
   if (!items.some(isExternal) || hostIngress(walk, value) !== null) return items;
   return items.map((item) => {
@@ -379,8 +376,7 @@ function keyDecided(
 
 /**
  * After a program stop, the kinds a label's step is spelled from where the key's contract asked then is unsettled, and
- * the proof they rest on (#1595). Never an open answer (`unknown`, every kind fitting) nor a path no decision retains
- * (a stopped one's): `null` there, and the label keeps its generic step.
+ * the proof they rest on (#1595), or `null`.
  */
 export function labelDomain(
   walk: Consumers,
