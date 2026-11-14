@@ -95,7 +95,56 @@ const FILL =
   "function fill(d) {\n  let out = []\n  for value in d {\n    out = [value]\n  }\n  return out\n}\n";
 
 /** Each way a value enters with a level, by where `levels.ts` or the routes read it; each row's sources set `a0`. */
-const ROWS: readonly { readonly row: string; readonly seeds: readonly string[] }[] = [
+/**
+ * The wrap cycle through a parameter of written type `type`, with the levels that type writes (`written`): a list's,
+ * a dict's or a set's, a kind's declared elements'; none for an unwritten element.
+ */
+function writtenWrap(
+  type: string,
+  written: number,
+): { readonly wrap: string; readonly written: number } {
+  return { wrap: `function wrap(x: ${type}) {\n  return [x]\n}\n`, written };
+}
+
+/** The values the written-parameter rows put into their cycle. */
+const INTO_WRITTEN = [
+  "let a0 = hostValue",
+  "let a0 = [[1]]",
+  "let a0 = [[[1]]]",
+  "let a0 = [1..3]",
+];
+
+const ROWS: readonly {
+  readonly row: string;
+  readonly seeds: readonly string[];
+  /** The cycle, when not `WRAP`, and the levels its parameter's written type writes. */
+  readonly through?: { readonly wrap: string; readonly written: number };
+}[] = [
+  ...(
+    [
+      ["integer[]", 1],
+      ["integer[][]", 2],
+      ["range[]", 2],
+      ["string dict", 1],
+      ["integer[][] | string", 2],
+    ] as const
+  ).map(([type, written]) => ({
+    row: `a written place in the cycle, closed (${type})`,
+    seeds: INTO_WRITTEN,
+    through: writtenWrap(type, written),
+  })),
+  ...(
+    [
+      ["list", 0],
+      ["list[]", 1],
+      ["dict", 0],
+      ["object", 0],
+    ] as const
+  ).map(([type, written]) => ({
+    row: `a written place in the cycle, with an open level (${type})`,
+    seeds: INTO_WRITTEN,
+    through: writtenWrap(type, written),
+  })),
   { row: "a written type", seeds: writtenTerms().flatMap((type) => writtenSeeds(type, (v) => v)) },
   {
     row: "a kind's declared elements, copied",
@@ -223,15 +272,15 @@ function known(items: readonly string[]): boolean {
   return items.some((item) => !item.startsWith("unknown/") && !item.startsWith("empty/"));
 }
 
-for (const { row, seeds } of ROWS)
+for (const { row, seeds, through } of ROWS)
   test(`the cut keeps every level the analysis knows of ${row}, in every order and sharing`, () => {
     for (const seed of seeds) {
-      const source = `${WRAP}${seed}\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n`;
-      // (what enters the cycle, `a0`, is known to `entering` levels without the cut; the cycle's values one level
-      // deeper, ADR 0021 rule 1.1: there, the cut's answer is the uncut one)
+      const source = `${through?.wrap ?? WRAP}${seed}\nlet a1 = wrap(a0)\nlet a2 = wrap(a1)\n`;
+      // (what enters the cycle, `a0`, is known to `entering` levels without the cut, a written parameter's levels
+      // among them; the cycle's values one level deeper, ADR 0021 rule 1.1: there, the cut's answer is the uncut one)
       const [a0, a1] = withoutNestingCut(() => levels(source, ["a0", "a1"]));
       const entering = Math.max(
-        0,
+        through?.written ?? 0,
         ...a0!.flatMap((items, at) => (known(items) ? [PATHS[at]!.level] : [])),
       );
       assert.ok(entering < DEEPEST, source);

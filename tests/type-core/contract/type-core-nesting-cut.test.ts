@@ -10,8 +10,8 @@ import { coreRequest } from "../../helpers/type-core-analysis.js";
 
 /*
  * #2764: the nesting cut. A cycle of copies, arguments, results and list literals that nests a value deeper on each
- * turn is followed one level deeper than what enters it (`M + 1`); a cycle that nests nothing deeper, and a place a
- * written type decides, are never cut.
+ * turn is followed one level deeper than what enters it (`M + 1`), a written place's levels among what enters; a
+ * cycle that nests nothing deeper is never cut.
  */
 
 const PART = `function part(value) {
@@ -199,8 +199,30 @@ test("a cycle that nests nothing deeper is never cut", () => {
   assert.equal(indexOf("let xs = [[1]]\nlet p = xs[0]\nxs = p\n").cut("xs"), null);
 });
 
-test("a place a written type decides takes no route into it, so its cycle is not cut", () => {
-  assert.equal(indexOf("let a: list[][] = [[]]\na = a + [a]\n").cut("a"), null);
+test("a written place in a growing cycle is cut just below its written levels, never inside them", () => {
+  // (its written levels are its own depth: a written list's, a kind's declared elements', none for an unwritten part)
+  for (const [base, own] of [
+    ["integer", 0],
+    ["list", 0],
+    ["range", 1],
+  ] as const)
+    for (let lists = 1; lists <= 3; lists += 1) {
+      const type = `${base}${"[]".repeat(lists)}`;
+      for (const grow of ["a = [a]", "a = a + [a]"])
+        assert.equal(
+          indexOf(`let a: ${type} = []\n${grow}\n`).cut("a"),
+          lists + own + 1,
+          `${type}: ${grow}`,
+        );
+    }
+  // a recursive loader that stores its own result into a closed written dict: the dict's text is its written level
+  const loader = (type: string): string =>
+    `function loadValue(key) {\n  let value = load key, default: null\n  if value == null {\n` +
+    `    let names: string[] = []\n    if names.length > 0 {\n      let a: ${type} = dict{}\n` +
+    `      for name in names {\n        a[name] = loadValue("\${key}.\${name}")\n      }\n      value = a\n` +
+    `    }\n  }\n  return value\n}\nlet r = loadValue("x")\n`;
+  assert.equal(indexOf(loader("string dict")).cut("a"), 2);
+  assert.equal(indexOf(loader("dict")).cut("a"), 1);
 });
 
 test("a cycle through a property is cut at that property", () => {

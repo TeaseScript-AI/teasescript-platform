@@ -326,18 +326,20 @@ parentheses read through; a test is no place slot), applied by #2493's pull requ
 routes of a pass's places, each weighted by the element levels a value gains along it: a list literal's element and an
 `add` +1; a copy, an argument, a return, a read and a call's result 0; a store through a path its element steps; a
 projection or an operation the element steps it stands below in its operand (`carriers.ts`'s carrier kinds, each given a
-route or none in one table; a choice's answer none). A strongly connected component holding a cycle of positive weight
-is cut at `M + 1`, `M` the deepest element level entering it from outside (a literal's levels, a written type's, the
-level a range's or a dict's `keys`' kind declares, an earlier component's known level, a growing one's at its cut).
-Property routes are followed by name: a component that grows with names ignored is solved again with one position per
-place and property, and only a cycle that grows there is cut; a route through two property steps or more has no position
-and is never cut. A place with a written type takes no route. A key below its place's cut depth answers an opaque
-unknown (rule 1.7) before any demand is made. The index is built on the first key with two element steps, once per pass,
-as a shared build.
+route or none in one table; a choice's answer none). The routes are the stores the contract reads: a store in code no
+run reaches is one, and a place with a written type takes its routes, its written levels its own depth, so no cut lands
+inside them. A strongly connected component holding a cycle of positive weight is cut at `M + 1`, `M` the deepest
+element level entering it from outside: the level a value brings by itself (a written or literal type's, a kind's
+declared elements', a dict's `keys`', at least 0 for an expression's value), an earlier component's known level, a
+growing one's at its cut. Property routes are followed by name: a component that grows with names ignored is solved
+again with one position per place and property, and only a cycle that grows there is cut; a route through two property
+steps or more has no position and is never cut. A key below its place's cut depth answers an opaque unknown (rule 1.7)
+before any demand is made. The index is built on the first key with two element steps, once per pass, as a shared build.
 
 **Reason.** Under F20 and F21 a function that wraps its argument in a list and is called on its own result has types
 without end: the candidate route asked ever deeper paths (1.35 million units at two calls) and ended with TSV076 or a
 slice refusal. The cut depends on the graph alone, never on the order anything is asked in.
 
 **Source.** The owner's decisions of 2026-11-14 on rule 1.1, and the lead's rulings on #2764's plan (rule B, the cut at
-`M + 1`, property routes by name, the carrier table's routes), applied by #2764's pull request.
+`M + 1`, property routes by name, the carrier table's routes) and of 2026-11-14 (the index routes the stores the contract
+reads), applied by #2764's pull request.
