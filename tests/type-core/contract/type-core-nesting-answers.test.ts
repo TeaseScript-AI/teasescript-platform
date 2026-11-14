@@ -71,6 +71,38 @@ test("a value put under one property and read from another keeps every level it 
 });
 
 /**
+ * A cut level meeting a decided level in a join (#1272): `v`, a growing component's result, is cut below its first
+ * element level; the literal decides the levels below. An operand a written type leaves open there (`list[]`, V30 §13)
+ * leaves the join open: it holds the literal's kinds and an unknown at each level, with no diagnostic and no check in
+ * the plan. The cut operand gets the same, whether the literal disagrees with what `v` holds when the script runs or
+ * agrees; only its unknown's context differs (the cut's `unmodelled`), which no diagnostic shows here.
+ */
+test("a join of a cut operand with a deeper literal answers as one with an open operand", () => {
+  const levels = ["element.element", "element.element.element", "element.element.element.element"];
+  const tags = (items: readonly { readonly tag: string }[]): string =>
+    items.map((item) => item.tag).join("|");
+  for (const literal of ['[[[["x"]]]]', "[[1]]"]) {
+    const forms = {
+      cut: `function wrap(x) {\n  return [x]\n}\nlet v = wrap(wrap(1))\nlet b = v + ${literal}\nsay "done"\nexit\n`,
+      open: `let v: list[] = [[1]]\nlet b = v + ${literal}\nsay "done"\nexit\n`,
+    };
+    const [cut, open] = Object.values(forms).map((source) => {
+      const compiled = withTestAllowance(300_000, () =>
+        compiledByLine([{ path: "main.tease", source }], MODES[0]!, [], "past"),
+      );
+      return { compiled, kinds: kindsAt(source, "b", levels).map(tags) };
+    });
+    assert.deepEqual(open!.compiled.diagnostics, [], literal);
+    assert.deepEqual(open!.compiled.checks, [], literal);
+    assert.ok(open!.compiled.run !== null, literal);
+    assert.deepEqual(cut!.compiled.diagnostics, open!.compiled.diagnostics, literal);
+    assert.deepEqual(cut!.compiled.checks, open!.compiled.checks, literal);
+    assert.ok(cut!.compiled.run !== null, literal);
+    assert.deepEqual(cut!.kinds, open!.kinds, literal);
+  }
+});
+
+/**
  * Each shape is a cycle that nests a value a level deeper on each turn: under F20 and F21 its types have no end, and the
  * base's solver restarts its component at every deeper key until the allowance runs out, so the script compiles with
  * TSV076 "too large to check completely". Under the cut each compiles to a plan with no diagnostic, alike in every order
