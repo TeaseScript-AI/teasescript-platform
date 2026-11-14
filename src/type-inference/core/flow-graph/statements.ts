@@ -174,7 +174,7 @@ function* statementTask(
               );
         builder.link(elseEnd, join, value === true);
       } else {
-        // the way past an `if` without `else` is a branch of its test too, so the code after a branch that always
+        // §3.2: the way past an `if` without `else` is a branch of its test too, so the code after a branch that always
         // leaves is under the test's negation (the way past dominates it).
         const skip = builder.node("branch", region, file, null, loops);
         branches.push(skip);
@@ -245,7 +245,7 @@ function* statementTask(
       }
       // The head is where a round ends: the body runs again from it, or the loop is left.
       if (rounds === "none") {
-        // the body never runs.
+        // P7: the body never runs.
         builder.link(counted, exit);
         builder.link(counted, head, true);
         builder.link(head, body);
@@ -256,7 +256,7 @@ function* statementTask(
         return exit;
       }
       if (rounds === "one") {
-        // the body runs once; a `continue` ends that round, and with it the loop.
+        // P7: the body runs once; a `continue` ends that round, and with it the loop.
         builder.link(counted, body);
         const bodyEnd = yield* compileChild(
           blockTask(builder, statement.body.statements, inner, body),
@@ -266,7 +266,7 @@ function* statementTask(
         builder.link(head, exit);
         return exit;
       }
-      // a literal count of one or more, or a non-empty literal collection, runs the body before the loop can be left.
+      // P7: a literal count of one or more, or a non-empty literal collection, runs the body before the loop can be left.
       builder.link(counted, rounds === "some" ? body : head);
       builder.link(head, exit);
       builder.link(head, body);
@@ -288,7 +288,7 @@ function* statementTask(
         branches,
       });
       const join = builder.node("join", region, file, null, loops);
-      // a literal subject with literal case values decides the case that runs.
+      // P7: a literal subject with literal case values decides the case that runs.
       const subject = caseValueKey(statement.subject);
       let decided = false;
       let allKnown = subject !== undefined;
@@ -461,7 +461,7 @@ function* functionRegion(
     const binding = builder.node("parameter", id, file, parameter.span, []);
     parameters.set(parameter.name.name, binding);
     if (parameter.defaultValue !== null) {
-      // an omitted argument takes the default, evaluated in the callee; a supplied one skips it.
+      // F21: an omitted argument takes the default, evaluated in the callee; a supplied one skips it.
       const own = builder.withOwn(inner);
       const value = yield* compileChild(
         expressionTask(builder, parameter.defaultValue, own, cursor),
