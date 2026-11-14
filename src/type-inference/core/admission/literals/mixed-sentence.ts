@@ -365,7 +365,6 @@ function viewRest(view: PathView): PathView {
   return at;
 }
 
-// (its first `count` steps, read once from the front)
 function viewSteps(admission: Admission, view: PathView, count: number): readonly string[] {
   const out: string[] = [];
   let at: PathView | null = view;
