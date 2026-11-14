@@ -90,26 +90,9 @@ const CASES: readonly [string, Files][] = [
       'function f(x: integer): integer? {\n  while true {\n    switch x {\n      case 1 {\n        return hostValue\n      }\n      default {\n        break\n      }\n    }\n  }\n  say "left"\n  return null\n}\nsay f(1)\nsay f(2)\nexit\n',
     ),
   ],
-  // (the order of a call, V30 §10, §11: every argument evaluated before any is checked, the supplied ones checked before
-  // an omitted default is evaluated, and the defaults evaluated in parameter order; each source's runs differ under
-  // another order, by what they say or where they fail)
   [
-    "an argument checked before an omitted default runs",
-    one(
-      "function f(a: integer = hostValue, b: integer = 1) {\n  say a\n  say b\n}\nf(b: hostValue)\nexit\n",
-    ),
-  ],
-  [
-    "every argument evaluated before the first is checked",
-    one(
-      'function later {\n  say "later"\n  return 1\n}\nfunction f(a: integer, b: integer) {\n  say a\n}\nf(hostValue, later())\nexit\n',
-    ),
-  ],
-  [
-    "omitted defaults evaluated in parameter order",
-    one(
-      "function mark(x: integer): integer {\n  say x\n  return x\n}\nfunction f(a: integer = mark(3), b: integer = mark(4), c: integer = mark(5)) {\n  say a\n  say b\n  say c\n}\nf()\nexit\n",
-    ),
+    "a load whose default reads a written parameter",
+    one('function f(n: integer) {\n  let x = load("x", default: n)\n  say x\n}\nf(1)\nexit\n'),
   ],
   [
     "a store into the file's variable from a function",
@@ -398,5 +381,88 @@ test("a parse or a load stored by a function reads its own scope's written type,
         runGlobals(today.plan, inputs),
         `${source} with ${JSON.stringify(inputs)}`,
       );
+  }
+});
+
+// The order of a call, enumerated (V30 §10, §11; `src/runtime/instructions/functions.ts`): every argument is evaluated in
+// source order before any is checked, the supplied ones are checked before an omitted default runs, and the defaults
+// run in parameter order, each checked as it runs. `f` takes three written parameters, each defaulting to a marker that
+// says its own number; every subset of them is supplied, by name in every order, each argument a marker with its own
+// number; and each call runs as it is and with one chosen parameter's argument or default failing its check (`pick`
+// gives text when the host value is `null`). The oracle's whole run, what it says and where it fails, equals the plan's
+// for every case and host value, so a run in any other order differs.
+const ORDER_MARKERS =
+  "function mark(x: integer): integer {\n  say x\n  return x\n}\n" +
+  'function pick(x: integer): integer | string {\n  say x\n  if hostValue == null {\n    return "no"\n  }\n  return x\n}\n';
+const PARAMETERS = ["a", "b", "c"] as const;
+const orders = (names: readonly string[]): string[][] =>
+  names.length === 0
+    ? [[]]
+    : names.flatMap((name, at) =>
+        orders(names.filter((_, other) => other !== at)).map((rest) => [name, ...rest]),
+      );
+for (let subset = 0; subset < 2 ** PARAMETERS.length; subset += 1) {
+  const supplied = PARAMETERS.filter((_, at) => (subset & (1 << at)) !== 0);
+  for (const order of orders(supplied))
+    test(`the derived oracle's call order: f(${order.join(", ")}), each argument or default failing in turn`, () => {
+      for (const failing of [null, ...PARAMETERS]) {
+        const marker = (parameter: string, number: number): string =>
+          `${parameter === failing ? "pick" : "mark"}(${number})`;
+        const defaults = PARAMETERS.map(
+          (parameter, at) =>
+            `${parameter}: integer = ${supplied.includes(parameter) ? `mark(${at + 1})` : marker(parameter, at + 1)}`,
+        );
+        const call = order.map(
+          (parameter) => `${parameter}: ${marker(parameter, PARAMETERS.indexOf(parameter) + 4)}`,
+        );
+        const source = `${ORDER_MARKERS}function f(${defaults.join(", ")}) {\n  say "body"\n}\nf(${call.join(", ")})\nsay "after"\nexit\n`;
+        const files = one(source);
+        const today = compileProject(files, OPTIONS);
+        assert.ok(today.plan !== null, source);
+        const request = coreRequest(files);
+        assert.ok(request !== null, source);
+        const syntax = syntaxOf(source);
+        const derived = {
+          path: "main.tease",
+          syntax,
+          ...derive(syntax, compactAnalysis(request), [syntax]),
+        };
+        for (const inputs of assignments(["hostValue"]))
+          assert.deepEqual(
+            evaluateProject([derived], inputs).run,
+            runGlobals(today.plan, inputs),
+            `${source} with ${JSON.stringify(inputs)}`,
+          );
+      }
+    });
+}
+
+test("the derived oracle declines a name its scope declares twice, and a default reading a parameter without a written type", () => {
+  // (sibling blocks may each declare a name, V30 §14; the oracle resolves no block scope, so it declines, in either order
+  // of the two types, for a parse and for a load)
+  const sibling = (first: string, second: string, parse: string): string =>
+    `function f {\n  if true {\n    let n: ${first}? = null\n  }\n  if true {\n    let n: ${second}? = null\n    n = ${parse}\n    say n\n  }\n}\nf()\nexit\n`;
+  for (const [source, why] of [
+    ...[
+      ["string", "integer"],
+      ["integer", "string"],
+    ].flatMap(([first, second]) =>
+      ['load("n", default: hostValue)', "fromJson(hostValue, default: null)"].map(
+        (parse) => [sibling(first!, second!, parse), /'n' declared more than once/u] as const,
+      ),
+    ),
+    [
+      'function f(n) {\n  let x = load("x", default: n)\n  say x\n}\nf(1)\nexit\n',
+      /a parameter without a written type/u,
+    ] as const,
+  ]) {
+    const request = coreRequest(one(source));
+    assert.ok(request !== null, source);
+    const syntax = syntaxOf(source);
+    assert.throws(
+      () => derive(syntax, compactAnalysis(request), [syntax]),
+      (error) => error instanceof Underivable && why.test(error.message),
+      source,
+    );
   }
 });

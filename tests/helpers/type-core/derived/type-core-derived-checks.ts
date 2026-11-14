@@ -177,7 +177,10 @@ function writtenAt(
       if (seen.has(at.name)) return false;
       // (the name's declaration in its scope, and only the stores into that one)
       const declared = declaredIn(statements, at, at.name);
-      if (declared?.kind === "letStatement" && declared.typeAnnotation !== null) return true;
+      if (declared !== null && declared !== undefined && declared.typeAnnotation !== null)
+        return true;
+      if (declared?.kind === "functionParameter")
+        throw new Underivable(`a read of '${at.name}', a parameter without a written type`);
       const values = statements.flatMap((statement) => {
         const store = storeOf(statement);
         return store?.name === at.name && declaredIn(statements, statement, at.name) === declared
@@ -390,7 +393,7 @@ export function derive(
         continue;
       }
       const store = storeOf(statement)!;
-      const placeName = storedPlaceName(statement, store.name, syntax);
+      const placeName = storedPlaceName(statement, store.name, statements);
       const prefix = `${placeName}.`;
       if (check.target !== placeName && !check.target.startsWith(prefix)) {
         const ingress = owners.find(
