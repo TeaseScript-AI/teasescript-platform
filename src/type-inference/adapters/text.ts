@@ -11,9 +11,7 @@ import type { OperationResult } from "./relation.js";
 import { typeResult, type MemberAnswer, type MemberRules } from "./views.js";
 
 /**
- * The members of text, as `memberPropertyType` and `memberMethodType` of the legacy checker give them:
- * `length` is an integer, and each method of `TEXT_METHODS` gives a new value of its result. What `TypeChecker` reports
- * about a method's arguments, their kinds, their number and the domains of their known values, is checking-only.
+ * The members of text: `length` is an integer, and each method of `TEXT_METHODS` gives a new value of its result.
  * `join` is a method of lists.
  */
 const TEXT_RESULTS: Readonly<Record<TextResult, StaticType>> = {

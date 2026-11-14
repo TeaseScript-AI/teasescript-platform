@@ -187,8 +187,6 @@ export function operationItems(
     );
     // (a computed row: never external data a test refined, `computedMarks`)
     const shared = { reasons, context, cert: "pos" as const, ...computedMarks(combination) };
-    // A2, A3: a result kind of a combination holding external data (an external unknown, or an operand item that is
-    // itself possible solely through external data)
     const external = combination.some(
       (item) =>
         item.extOnly === true || (item.tag === "unknown" && (item.reasons & REASON.external) !== 0),

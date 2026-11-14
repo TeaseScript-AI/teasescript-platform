@@ -102,7 +102,6 @@ export function operandsOf(program: CoreProgram, value: PlaceId): readonly Opera
       return [operand("iteration/collection", 0, owner, ["element"], false, "list or set")];
     const list = dictList(step);
     if (list === undefined) return [operand("projection/owner", 0, owner, [stepName(step)])];
-    // an object's own property of the name, or a dict's values (its keys hold text)
     return [
       operand("projection/record field", 0, owner, [step], false, "object"),
       ...(list === "values"

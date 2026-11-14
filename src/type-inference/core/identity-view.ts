@@ -234,7 +234,6 @@ function identityNames(
       }
     }
   });
-  // each name decided once: declared exactly once, as an identity function
   const identities = new Map<string, { declaration: FunctionDeclaration; file: number }>();
   for (const [name, same] of declared) {
     steps += 1;

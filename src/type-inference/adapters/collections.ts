@@ -36,11 +36,9 @@ import {
 } from "./views.js";
 
 /**
- * The members of lists, sets, dicts, objects and ranges, as `memberPropertyType` and
- * `memberMethodType` of the legacy checker give them, written as relations: a list's element properties are held
- * parts of the list, a set's are copies, a dict's `values` is a new list of copies, and a method that gives an
- * element gives a copy (`#collectionMethodType`, `#setOperationType`). `get` keeps its default off the receiver:
- * the result is the element or the default.
+ * The members of lists, sets, dicts, objects and ranges, written as relations: a list's element properties are held
+ * parts of the list, a set's are copies, a dict's `values` is a new list of copies, and a method that gives an element
+ * gives a copy. `get` keeps its default off the receiver: the result is the element or the default.
  */
 const LIST_RESULT: Record<string, OperationResult> = {
   null: typeResult(NULL_TYPE),
@@ -91,16 +89,15 @@ function property(kind: ValueKind, name: string, receiver: OperandView): MemberA
   }
 }
 
-/** Whether the receiver may be a handle whose `remove()` takes no argument (the legacy's `removable`). */
+/** Whether the receiver may be a handle whose `remove()` takes no argument. */
 function removable(receiver: OperandView): boolean {
   const handles: readonly string[] = kindsWithMethod("remove");
   return viewMembers(receiver).some((member) => handles.includes(resolved(member).kind));
 }
 
 /**
- * The legacy's shape problems of a list or set method (`shapeProblems`, `methodShapeProblems`): any named argument,
- * or a count outside the parameters, except `remove()` without an argument on a receiver that may be a handle. For
- * `get`, `getProblems`: one index and a `default:`, no other name.
+ * The shape problems of a list or set method: any named argument, or a count outside the parameters, except `remove()`
+ * without an argument on a receiver that may be a handle. For `get`: one index and a `default:`, no other name.
  */
 function listShapeFails(
   contract: ListMethod,
@@ -119,7 +116,7 @@ function listShapeFails(
 }
 
 /**
- * The legacy's argument-kind problems (`argumentKindProblems`), read once the shape fits: a count that may be null,
+ * The argument-kind problems, read once the shape fits: a count that may be null,
  * or that is no whole number; a list or collection argument with a known member that is no list (nor set, for a
  * collection). An argument the rule reads that is still bottom is waited for.
  */
@@ -161,9 +158,8 @@ function useOf(view: OperandView): readonly StaticType[] {
 }
 
 /**
- * The legacy's shape gate of a dict method (`#checkDictArguments`, `dictArgumentsProblem`), which takes the value
- * away only from a receiver that is a dict alone (`isDictReceiver`); beside other kinds the shape problem is reported
- * (`dictMethodProblems`) and the dict's value kept.
+ * The shape gate of a dict method, which takes the value away only from a receiver that is a dict alone; beside other
+ * kinds the shape problem is reported and the dict's value kept.
  */
 function dictShapeFails(contract: DictMethod, inputs: OperationInputs): boolean {
   if (contract.named !== undefined) {
@@ -196,7 +192,7 @@ function dictMethodResult(name: string, inputs: OperationInputs): OperationResul
 }
 
 /**
- * `intersection`, `union` and `difference`, as `#collectionMethodType` and `#setOperationType` decide them, per
+ * `intersection`, `union` and `difference`, per
  * member of the receiver's kind, the results unioned: the problems first (the shape, then the arguments' kinds); an
  * argument that may be null, when there is no problem, needs a check first and leaves the elements unknown; then a
  * new collection of the member's kind: for `union` with a first written argument (positional or named), the elements
@@ -248,9 +244,8 @@ function setOperation(
 }
 
 /**
- * A list's or set's methods, as `LIST_METHODS` names their results (`#collectionMethodType`): `get` has no value when
- * its shape is wrong or its default is missing (its index and default are `TypeChecker`'s checks); the other methods
- * keep their result beside a report of the shape or of an argument's kind.
+ * A list's or set's methods, as `LIST_METHODS` names their results: `get` has no value when its shape is wrong or its
+ * default is missing; the other methods keep their result beside a report of the shape or of an argument's kind.
  */
 function listMethodResult(
   kind: "list" | "set",
