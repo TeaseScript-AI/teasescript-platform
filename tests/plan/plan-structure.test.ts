@@ -23,13 +23,14 @@ function constructs(tree: readonly Construct[]): Construct[] {
   return all;
 }
 
-/** Each sequence covers its range in order, without a gap; returns the instructions it covers. */
+/** A sequence covers its range in order, without a gap, and no run stands next to another. */
 function covered(sequence: readonly Construct[], from: number, to: number): void {
   let at = from;
-  for (const construct of sequence) {
+  sequence.forEach((construct, index) => {
     assert.equal(construct.from, at);
+    if (construct.kind === "run") assert.notEqual(sequence[index - 1]?.kind, "run");
     at = construct.to;
-  }
+  });
   assert.equal(at, to);
 }
 
@@ -113,32 +114,38 @@ test("a lowered plan reads back as its source's constructs, each sequence coveri
 });
 
 test("plan validation accepts a lowered plan and refuses one whose jumps do not nest, naming the instruction", () => {
-  const plan = compileValidPlan("let a = true\nif a { if a { a = false } }\nexit");
-  assert.deepEqual(validateInstructionPlan(plan).errors, []);
-  const [outer, inner] = plan.instructions.flatMap((instruction, index) =>
-    instruction.kind === "jumpIfFalse" ? [{ index, target: instruction.target }] : [],
-  );
-  assert.ok(outer !== undefined && inner !== undefined && inner.target < outer.target);
-  // The inner if's false way now goes past the outer if's end, still inside the region.
-  const instructions = plan.instructions.map((instruction, index): Instruction =>
-    index === inner.index && instruction.kind === "jumpIfFalse"
-      ? { ...instruction, target: outer.target + 1 }
-      : instruction,
-  );
-  assert.deepEqual(
-    validateInstructionPlan({ ...plan, instructions }).errors.map(({ code, message, path }) => ({
-      code,
-      message,
-      path,
-    })),
-    [
-      {
-        code: "TSC002",
-        message: "Jumps must nest: this jumpIfFalse's target lies outside the construct around it.",
-        path: `$.instructions[${inner.index}]`,
-      },
-    ],
-  );
+  // The same nested ifs in a file's root region and in a function's.
+  for (const source of [
+    "let a = true\nif a { if a { a = false } }\nexit",
+    'function f(a) { if a { if a { say "f", instant } } }\nf(true)\nexit',
+  ]) {
+    const plan = compileValidPlan(source);
+    assert.deepEqual(validateInstructionPlan(plan).errors, []);
+    const [outer, inner] = plan.instructions.flatMap((instruction, index) =>
+      instruction.kind === "jumpIfFalse" ? [{ index, target: instruction.target }] : [],
+    );
+    assert.ok(outer !== undefined && inner !== undefined && inner.target < outer.target);
+    // The inner if's false way now goes past the outer if's end, still inside the region.
+    const instructions = plan.instructions.map((instruction, index): Instruction =>
+      index === inner.index && instruction.kind === "jumpIfFalse"
+        ? { ...instruction, target: outer.target + 1 }
+        : instruction,
+    );
+    assert.deepEqual(
+      validateInstructionPlan({ ...plan, instructions }).errors.map(({ code, message, path }) => ({
+        code,
+        message,
+        path,
+      })),
+      [
+        {
+          code: "TSC002",
+          message: "Jumps must nest: this jumpIfFalse's target lies outside the construct around it.",
+          path: `$.instructions[${inner.index}]`,
+        },
+      ],
+    );
+  }
 });
 
 test("a plan that fails an earlier check gets no nesting error on top", () => {
