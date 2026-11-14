@@ -1,4 +1,3 @@
-import type { StaticScalar } from "../static-evaluation.js";
 import type { ScalarValue } from "../static-types.js";
 import type { ValueKind } from "../value-kinds.js";
 
@@ -190,82 +189,17 @@ export interface ContractRef {
 }
 
 /**
- * What the source says about an operation beyond its operands' types: a written form descriptor is not a computed one,
- * a written `allowSkip: false` proves a photo is taken, an `askChoice` option with a label before `:` returns that
- * label. One entry per written element, each with the place of its expression, collected without reading any type.
+ * What the source says about an `askChoice` beyond its operands' types: an option with a label before `:` returns that
+ * label, and a written list, set or choice object names the places of its buttons. Collected without reading any type.
  */
-export type SyntaxEvidence =
-  | {
-      readonly kind: "form";
-      /** The written fields of an object or dict literal, or `"computed"` for any other `fields:`. */
-      readonly fields:
-        | { readonly shape: "object" | "dict"; readonly entries: readonly FormFieldEvidence[] }
-        | "computed";
-      readonly cancel: boolean;
-      readonly timeout: boolean;
-      readonly onTimeout: string | null;
-    }
-  | { readonly kind: "choice"; readonly options: readonly ChoiceOptionEvidence[] }
-  | { readonly kind: "booleans"; readonly cancel: boolean }
-  | { readonly kind: "image"; readonly allowSkip: boolean | "computed" | null }
-  | {
-      readonly kind: "tagQuery";
-      readonly catalog: "images" | "scripts";
-      readonly select: "random" | "list";
-    }
-  | { readonly kind: "timer"; readonly form: "short" | "named"; readonly async: boolean }
-  | { readonly kind: "media"; readonly media: string; readonly async: boolean }
-  /**
-   * The selectors of a list function or of `randomWeighted` (`by:`, `x:`, `y:`, `weight:`): the text each is written
-   * as, or `null` for one that is not written as text (a variable, even a known one).
-   */
-  | {
-      readonly kind: "selectors";
-      readonly written: readonly { readonly name: string; readonly text: string | null }[];
-    };
-
-/** A written form field: its name, the place of its descriptor, and the descriptor's written shape. */
-export interface FormFieldEvidence {
-  readonly name: string;
-  readonly place: PlaceId;
-  readonly written: FormDescriptorEvidence;
+export interface SyntaxEvidence {
+  readonly kind: "choice";
+  readonly options: readonly ChoiceOptionEvidence[];
 }
 
-/** The written shape of a field's descriptor; a computed one is known by its place alone. */
-export type FormDescriptorEvidence =
-  | { readonly kind: "null" }
-  | {
-      readonly kind: "object";
-      /** A written `type:` text, or `"computed"` for a `type:` that is not plain text. */
-      readonly type: string | "computed" | null;
-      /** A written `optional:` literal, or `"computed"` for any other `optional:`. */
-      readonly optional: boolean | "computed" | null;
-      readonly value: PlaceId | null;
-      readonly min: PlaceId | null;
-      readonly max: PlaceId | null;
-      readonly options: OptionsEvidence | null;
-    }
-  /** A list written as the field: the shorthand of a cycle's options. */
-  | { readonly kind: "list"; readonly elements: readonly ChoiceElementEvidence[] }
-  | { readonly kind: "other" };
-
-/** A written `options:`: its place, and its elements when it is a list literal. */
-export interface OptionsEvidence {
-  readonly place: PlaceId;
-  readonly elements: readonly ChoiceElementEvidence[] | null;
-}
-
-/** A written literal value, as the known-value fold sees a literal; `null` is the written `null`. */
-export type WrittenLiteral = { readonly value: StaticScalar | null } | null;
-
-/**
- * One written element of a choice: the place of its expression, its written literal when the button's value is one
- * (a literal, or a written choice object's literal `value`, else `text`), and a written choice object's `value` and
- * `text` places. A computed element keeps only its place.
- */
+/** One written element of a choice: the place of its expression, and a written choice object's `value` and `text`. */
 export interface ChoiceElementEvidence {
   readonly place: PlaceId;
-  readonly literal: WrittenLiteral;
   readonly object: ChoiceObjectEvidence | null;
 }
 
@@ -275,15 +209,10 @@ export interface ChoiceObjectEvidence {
   readonly text: PlaceId | null;
 }
 
-/** An `askChoice` option: its written label, its place, and what its expression is. */
+/** An `askChoice` option: the kind of its written label, and what its expression is. */
 export interface ChoiceOptionEvidence {
-  /** The label written before `:`, which the button returns: a name is text, a number keeps its written kind. */
-  readonly label: {
-    readonly kind: "string" | "integer" | "number";
-    readonly value: string | number;
-  } | null;
-  readonly place: PlaceId;
-  readonly literal: WrittenLiteral;
+  /** The kind of the label written before `:`, which the button returns: a name is text, a number keeps its kind. */
+  readonly label: "string" | "integer" | "number" | null;
   readonly content:
     | { readonly kind: "list" | "set"; readonly elements: readonly ChoiceElementEvidence[] }
     | { readonly kind: "object"; readonly object: ChoiceObjectEvidence }

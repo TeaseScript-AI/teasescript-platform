@@ -5,7 +5,7 @@ import test from "node:test";
 
 import { compareProjectPaths } from "../../src/project-paths.js";
 import { collectGraph } from "../../src/type-inference/collector.js";
-import type { ConstraintGraph, SyntaxEvidence } from "../../src/type-inference/graph.js";
+import type { ConstraintGraph } from "../../src/type-inference/graph.js";
 import { analyzeTypes } from "../../src/type-inference/index.js";
 import { graphText, referencesExist, request } from "../helpers/type-core/type-inference-graph.js";
 
@@ -175,7 +175,7 @@ test("speaker stores name the speaker, stores through a parameter project, and t
   expectLine(lines, /^has player\.petNames#\d+ list<string> /);
 });
 
-test("asks carry the evidence their result rules read, and handlers are regions of their own", () => {
+test("an askChoice carries the evidence its result rules read, and handlers are regions of their own", () => {
   const { graph, lines } = collect(
     [
       'let answer = askChoice back: "Back", "Lines"',
@@ -191,24 +191,18 @@ test("asks carry the evidence their result rules read, and handlers are regions 
   rejectLine(lines, /^read .* -> @23#\d+ /);
   expectLine(
     lines,
-    /^operation interaction\.choice\(@29#\d+, @37#\d+\) -> @\d+#\d+ \{"kind":"choice","options":\[\{"label":\{"kind":"string","value":"back"\},"place":\d+,"literal":\{"value":"Back"\},"content":\{"kind":"other"\}\},\{"label":null,"place":\d+,"literal":\{"value":"Lines"\},"content":\{"kind":"other"\}\}\]\} /,
+    /^operation interaction\.choice\(@29#\d+, @37#\d+\) -> @\d+#\d+ \{"kind":"choice","options":\[\{"label":"string","content":\{"kind":"other"\}\},\{"label":null,"content":\{"kind":"other"\}\}\]\} /,
   );
   expectLine(
     lines,
-    /^operation interaction\.askImage\(@\d+#\d+, allowSkip: @\d+#\d+\) -> @\d+#\d+ \{"kind":"image","allowSkip":false\} /,
+    /^operation interaction\.askImage\(@\d+#\d+, allowSkip: @\d+#\d+\) -> @\d+#\d+ @/,
   );
   expectLine(
     lines,
-    /^operation interaction\.booleans\(, message: @\d+#\d+, texts: @\d+#\d+, prefill: @\d+#\d+, cancel: @\d+#\d+\) -> @\d+#\d+ \{"kind":"booleans","cancel":true\} /,
+    /^operation interaction\.booleans\(, message: @\d+#\d+, texts: @\d+#\d+, prefill: @\d+#\d+, cancel: @\d+#\d+\) -> @\d+#\d+ @/,
   );
-  expectLine(
-    lines,
-    /^operation timer\.short\(@\d+#\d+\) -> @\d+#\d+ \{"kind":"timer","form":"short","async":true\} /,
-  );
-  expectLine(
-    lines,
-    /^operation media\.audio\(@\d+#\d+\) -> @\d+#\d+ \{"kind":"media","media":"audio","async":true\} /,
-  );
+  expectLine(lines, /^operation timer\.short\(@\d+#\d+\) -> @\d+#\d+ @/);
+  expectLine(lines, /^operation media\.audio\(@\d+#\d+\) -> @\d+#\d+ @/);
   assert.deepEqual(
     graph.handlers.map((handler) => ({ created: handler.created, selfHandle: handler.selfHandle })),
     [
@@ -230,57 +224,6 @@ test("asks carry the evidence their result rules read, and handlers are regions 
   );
   assert.equal(self.kind.kind === "binding" && self.kind.name === "m" && self.site, null);
   assert.ok(outer !== undefined && outer.id !== self.id);
-});
-
-test("form evidence keeps each written field and option element with its place", () => {
-  const { lines } = collect(
-    [
-      'let buttons = [{ text: "Low", value: 1 }]',
-      'let answers = askForm "Adjust", fields: {',
-      "    enabled: { value: false },",
-      '    intensity: [{ text: "Low" }, { text: "High" }],',
-      '    level: { options: [{ text: "Low", value: 1 }, buttons[0]], value: 3 },',
-      '    cycle: { options: buttons, type: "integer", optional: false, min: 1, max: 9 }',
-      '}, cancel: "Back"',
-      "exit",
-    ].join("\n"),
-  );
-  const form = lines.find((line) => line.startsWith("operation interaction.form("));
-  assert.notEqual(form, undefined);
-  // EVIDENCE: the dump prints a constraint's evidence as the JSON of its `SyntaxEvidence`.
-  const evidence = JSON.parse(
-    form!.slice(form!.indexOf("{"), form!.lastIndexOf("}") + 1),
-  ) as SyntaxEvidence;
-  if (evidence.kind !== "form" || evidence.fields === "computed") assert.fail("a written form");
-  // A toggle: its written `value:` by place. A shorthand list: its written elements, each with its text's place and
-  // its literal. Written objects beside a computed element keep their `value`/`text` places; the computed element
-  // keeps its place only. A computed `options:` keeps its place; `type:`, `optional:`, `min:`, `max:` are read.
-  assert.deepEqual(
-    evidence.fields.entries.map((entry) => [entry.name, entry.written.kind]),
-    [
-      ["enabled", "object"],
-      ["intensity", "list"],
-      ["level", "object"],
-      ["cycle", "object"],
-    ],
-  );
-  const level = evidence.fields.entries[2]!.written;
-  if (level.kind !== "object" || level.options === null || level.options.elements === null)
-    assert.fail("written options");
-  assert.deepEqual(
-    level.options.elements.map((element) => [element.literal, element.object !== null]),
-    [
-      [{ value: 1 }, true],
-      [null, false],
-    ],
-  );
-  const cycle = evidence.fields.entries[3]!.written;
-  if (cycle.kind !== "object" || cycle.options === null) assert.fail("a cycle with options");
-  assert.deepEqual(
-    [cycle.type, cycle.optional, cycle.min !== null, cycle.max !== null, cycle.options.elements],
-    ["integer", false, true, true, null],
-  );
-  assert.equal(evidence.cancel, true);
 });
 
 test("reads of unwritten variables link to their initializers; host globals and unknown callees are dynamic", () => {

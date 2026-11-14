@@ -426,7 +426,7 @@ test("a call in a place slot stays a call: no error its copy does not give, ever
  */
 const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   "collector.ts": [
-    11,
+    10,
     "places: parentheses' own place (`#expression`), stored into only as a store's receiver (P1, `#assignment`) or a changing method's (P2, `#call`); `#mutate` (P1, P2); `#speakerName` (P1, P2's `copyFrom`, else a speaker's read); `label` (P2's receiver, named); the rest values",
   ],
   "core/admission/classes.ts": [1, "an index's value"],
@@ -479,7 +479,7 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   "effects.ts": [3, "the legacy backend's, on the source"],
   "legacy-rounds.ts": [3, "the legacy backend's, on the source"],
   "narrowing-shapes.ts": [3, "values: a test's subject (`conditionShape`); its operand's literal"],
-  "syntax-evidence.ts": [7, "values: a selection's and an interaction's literal data"],
+  "syntax-evidence.ts": [2, "values: a choice option's and a written element's content"],
 };
 
 test('each type-inference file\'s count of "parenthesizedExpression" and of unwrap(, unwrapped( and peel( matches its inventory (#2493)', () => {
