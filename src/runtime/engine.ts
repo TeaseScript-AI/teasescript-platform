@@ -84,7 +84,7 @@ import {
 } from "./random/random-control.js";
 import { executeEnd, executeGoto, executeTransfer } from "./operations/transfers.js";
 import { contextRootId } from "./scopes/activations.js";
-import { loweredLogicalOperator } from "./evaluation/lowered-operands.js";
+import { loweredLogicalOperator } from "../operand-labels.js";
 import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "./debug/debug-trace.js";
 import {
   InstructionTraceCollector,

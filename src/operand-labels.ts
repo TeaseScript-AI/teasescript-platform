@@ -1,5 +1,7 @@
-import type { ExpressionPlan, InstructionPlan } from "../../plan/model.js";
-import { instructionKilledTemporaries } from "../../plan/temporary-uses.js";
+import type { ExpressionPlan, InstructionPlan } from "./plan/model.js";
+import { instructionKilledTemporaries } from "./plan/temporary-uses.js";
+import { quotedText } from "./runtime/values/value-text.js";
+import { messageText } from "./runtime/values/text-length.js";
 
 /**
  * What the plan says about the temporaries in which the lowering's instruction path keeps operands, so that a runtime
@@ -86,4 +88,37 @@ export function loweredLogicalOperator(
   temporaryId: number,
 ): "and" | "or" | null {
   return loweredOperands(program).logical.get(temporaryId) ?? null;
+}
+
+/**
+ * The source spelling of a variable, property path, or text literal plan, also one that the lowering kept in a
+ * temporary of `program`, or `null` for anything else.
+ */
+export function planLabel(plan: ExpressionPlan, program: InstructionPlan): string | null {
+  const names: string[] = [];
+  let current = loweredOperand(program, plan);
+  for (;;) {
+    if (current.kind === "group") current = current.expression;
+    else if (current.kind === "property") {
+      names.push(current.name);
+      current = current.object;
+    } else break;
+  }
+  if (current.kind === "literal" && typeof current.value === "string" && names.length === 0)
+    return quotedText(messageText(current.value));
+  if (current.kind !== "identifier") return null;
+  names.push(current.name);
+  return names.reverse().join(".");
+}
+
+/**
+ * How the source spells an arithmetic operand: a variable, a property path, or a number, or `null` for anything else. An
+ * operand that the lowering kept in a temporary is spelled as written.
+ */
+export function operandLabel(plan: ExpressionPlan, program: InstructionPlan): string | null {
+  let current = loweredOperand(program, plan);
+  while (current.kind === "group") current = current.expression;
+  if (current.kind === "literal")
+    return typeof current.value === "number" ? String(current.value) : null;
+  return planLabel(current, program);
 }

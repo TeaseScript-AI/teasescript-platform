@@ -31,7 +31,8 @@ import { numberFromText } from "../../conversions.js";
 import { isDict, isList, isRange, isSet } from "../values/value-predicates.js";
 import { advance, currentCallFrameId, currentFrame, fault } from "./support.js";
 import { notBoolean } from "../evaluation/operators.js";
-import { assertIntegerRange, planLabel } from "../evaluation/support.js";
+import { assertIntegerRange } from "../evaluation/support.js";
+import { planLabel } from "../../operand-labels.js";
 
 export function executeLoopStart(
   plan: InstructionPlan,
