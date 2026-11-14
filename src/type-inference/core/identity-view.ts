@@ -48,7 +48,7 @@ export interface IdentityView {
   readonly request: CoreAnalysisRequest;
   /** How many calls the view reads as their argument. */
   readonly calls: number;
-  /** The units of work the view took (`identitySteps`, `viewProgram`'s list): none without an identity function. */
+  /** The units of work the view took (`identitySteps`): none without an identity function. */
   readonly steps: number;
   /** The node of the source that a node of the view stands for: a call for the parentheses that read it. */
   sourceOf<T extends SyntaxNode>(node: T): T;
@@ -198,7 +198,6 @@ export function checkedOnSource(
   };
   const result = translated<Omit<TypeCheckResult, "known">>(checked, RESULT_ON_SOURCE, onSource);
   if (steps > 0) work.charge("identitySteps", steps);
-  // (`known` asks one node per question, a lookup)
   return { ...result, known: (expression) => checked.known(view.viewOf(expression)) };
 }
 

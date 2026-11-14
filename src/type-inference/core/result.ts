@@ -716,7 +716,6 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
     ...(check.boundary ? { boundary: true, reason: "external-data" } : {}),
   });
   const diagnostics = result.diagnostics.map((diagnostic): RecordDiagnostic =>
-    // (a stop's warning and marks, and a check that owes the runtime nothing, by their site alone)
     diagnostic.kind === "budget" || diagnostic.kind === "static"
       ? { class: diagnostic.class, kind: diagnostic.kind, site: site(diagnostic.site) }
       : diagnostic.class === "compile-error"
