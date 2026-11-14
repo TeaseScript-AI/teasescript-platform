@@ -197,7 +197,7 @@ function judge(sample: Case, record: DifferentialRecord, refusals: Set<string>):
   return failures;
 }
 
-test("each duration literal, unit and angle publishes as today's where today plans, and is refused or answered as today's where today gives no plan", (t) => {
+test("each duration literal, unit and angle publishes as today's where today plans, but for the listed under-offers, and is refused or answered as today's where today gives no plan", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "durations-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const cases = [...LITERAL_CASES, ...AMOUNT_CASES, ...PLACE_CASES];
