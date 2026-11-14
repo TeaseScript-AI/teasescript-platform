@@ -295,3 +295,41 @@ regressionCase(
     }
   },
 );
+
+/**
+ * #2800: a `+` over the result of a loader that fills a written `list` or `dict` with its own result settles far below
+ * the allowance in every mode, also where the function that holds the `+` is never called: the cut reads the stores
+ * there as the contract does.
+ */
+regressionCase(
+  "a join whose operand holds lists at every level by its own decision ends far below the allowance (#2800)",
+  {
+    pr: 2794,
+    atBase:
+      /a join over a recursive loader's levels: the level loop ends below the allowance in .+/,
+  },
+  () => {
+    const source =
+      "function loadValue(key, fallback = null) {\n  let value = load key, default: null\n" +
+      "  if value == null {\n    let names: string[] = []\n    let numbered = true\n" +
+      "    if names.length > 0 and numbered {\n      let items: list = []\n      value = items\n" +
+      "    } else if names.length > 0 {\n      let entries: dict = dict{}\n      for name in names {\n" +
+      '        entries[name] = loadValue("${key}.${name}")\n      }\n      value = entries\n    }\n  }\n' +
+      "  return value otherwise fallback\n}\n" +
+      'function getProp(name, f, d = null) {\n  let v = loadValue("p.${name}")\n  return v otherwise d\n}\n' +
+      "function setProp(name, v) {\n}\n" +
+      'function bump(name, amount = 1) {\n  setProp(name, getProp(name, "int", 0) + amount)\n}\nexit\n';
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const answers = withTestAllowance(300_000, () => analyseCore(request));
+        assert.equal(
+          answers.budget.exhausted,
+          null,
+          `a join over a recursive loader's levels: the level loop ends below the allowance in ${JSON.stringify(mode)}`,
+        );
+        assert.ok(answers.work.total < 30_000, `${answers.work.total} units`);
+      });
+  },
+);
