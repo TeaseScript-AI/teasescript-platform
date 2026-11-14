@@ -249,7 +249,6 @@ export function joinElements(
     ): { readonly place: PlaceId; readonly path: readonly string[] } | null => {
       if (stored(operand)) return target!;
       const key = contract.copiedKey(operand) ?? contract.resultKey(operand);
-      // (a cursor's steps through the charged boundary)
       // (a tree's target keeps an array: a cursor's steps copied out, `stepsArray`)
       return key === null
         ? null

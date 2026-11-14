@@ -1,4 +1,3 @@
-// Answers through copies' landings: whether copies land a path in a place, and the place a place inherits through.
 import type { PlaceId } from "../../../graph.js";
 import type { Admission } from "../../admission.js";
 import { joinParts, keep, keepText, keptParts, keptText } from "../../budget.js";
@@ -38,7 +37,6 @@ export function passThrough(admission: Admission, place: PlaceId, path: Steps): 
   const lists: (Storing | undefined)[] = [];
   for (let length = 1; length <= path.length; length += 1) {
     admission.pass.program.work.charge("indexSteps");
-    // (a record's prefix text through its record, `prefixText`; an array's made and charged)
     const text = isPathSteps(path)
       ? path.prefixText(length)
       : keptText(admission.work, path.slice(0, length));
@@ -230,7 +228,6 @@ function landedOwn(admission: Admission, place: PlaceId, path: Steps): boolean {
           (fed.has(at) && steps.length === 0) ||
           null;
     if (found !== null) memo.set(key, found);
-    // (its copies above the path, looked up by its prefixes)
     else
       frames.push({ key, path: steps, copies: copiesAlong(admission, at, steps, false), next: 0 });
     return found;

@@ -139,10 +139,10 @@ export interface LiveGroup {
 }
 
 /**
- * Written types inherited through copies' landings (`groups`): where copies of written types land in each place, and
- * the copies of inheriting places each place takes; a place's landed paths are its own, its copies' own paths and below
- * them its copies' sources' landed paths below their strips, asked of those sources, never made per copy. A cycle of
- * copies has its members' landed paths made once, as the landing within it brings them.
+ * Written types inherited through copies' landings: where copies of written types land in each place, and the copies
+ * of inheriting places each place takes; a place's landed paths are its own, its copies' own paths and below them its
+ * copies' sources' landed paths below their strips, asked of those sources, never made per copy. A cycle of copies has
+ * its members' landed paths made once, as the landing within it brings them.
  */
 export interface Inheritance {
   /** Per place, the paths copies of written types land at in it (their elements too), with each type at the path. */

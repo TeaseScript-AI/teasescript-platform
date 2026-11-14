@@ -1,15 +1,11 @@
 import type { WorkLedger } from "../budget.js";
 
 /*
- * The receiving closure's cells and frontier (#1526). The completion pass
- * (`Consumers.#completeFor`) is made from the settled pass's inputs without its frozen keys: a key an obligation's
- * proof reads is decided there, where it is first read, as a scoped decision from what is left of the total, in a fresh
- * `Admission`, so nothing is unfrozen and no cache holds a frozen key's answer. What the closure keeps is the cells
- * outside the solver whose outputs another read takes (a decision, a property listing, an assembled descriptor, a
- * capture request), the reads between them (a cache hit too), and the frontier that schedules them: a request or a
- * listing that needs a listing not yet made is parked with its stamp (those listings) and runs again once every one of
- * them is made, each listing taking the listings it reaches whole, so a chain of keys is listed once, not once
- * per key that reaches it.
+ * The receiving closure's cells and frontier (#1526). What the closure keeps is the cells outside the solver whose
+ * outputs another read takes (a decision, a property listing, an assembled descriptor, a capture request), the reads
+ * between them (a cache hit too), and the frontier that schedules them: a request or a listing that needs a listing
+ * not yet made is parked with its stamp (those listings) and runs again once every one of them is made, each listing
+ * taking the listings it reaches whole, so a chain of keys is listed once, not once per key that reaches it.
  *
  * The graph is the completion lease: kept from the completion pass's start until `close`. A transaction (`change`)
  * invalidates every cell that read a changed one, once, with one visited set, a cell it invalidates leaving the graph
@@ -125,7 +121,7 @@ export function closureCounts(): ClosureCounts {
 
 /**
  * A request whose contract reaches the slice's depth: the program has left the slice, where the lowering requests
- * nothing more, so the completion ends there (as the contract capture does).
+ * nothing more, so the completion ends there.
  */
 export class LeftSlice extends Error {
   public constructor() {

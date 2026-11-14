@@ -30,9 +30,6 @@ import type {
 } from "../model.js";
 import { levelsOf } from "../permitted.js";
 
-// Landings through copies: where copies of written types land in each place, the copy forest places answer through,
-// cycles of copies. `inheritance` and `landedBelow` call each other: one cycle of calls.
-
 const NO_PATHS: ByPath<never> = { under: new Map(), at: new Map() };
 
 /**
@@ -75,7 +72,6 @@ function cyclesOf(
   const low = new Map<PlaceId, number>();
   const stack: PlaceId[] = [];
   const onStack = new Set<PlaceId>();
-  // (each place's copies' places, once)
   const adjacency = new Map<PlaceId, readonly PlaceId[]>();
   for (const [place, copies] of edges) {
     work.charge("indexSteps", copies.length);
@@ -361,7 +357,6 @@ export function inheritance(admission: Admission): Inheritance {
   const fed = new Map<PlaceId, PlaceId>();
   const wholes = new Map<PlaceId, WholeCycle>();
   admission.inherits = { seeds, into, owned, cycleOf, cycles, fed, order, wholes };
-  // (whether a live store makes each copy)
   for (const copy of admission.inheritingCopyLandings) {
     const id = keptParts(admission.work, copy.place, copy.path, copy.from, copy.strip);
     if (

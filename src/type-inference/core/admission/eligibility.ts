@@ -28,9 +28,6 @@ import { addRest, aliasKeyAt, covers, grouped, tested } from "./classes.js";
 import { readNow, type Reads } from "../inherited/reads.js";
 import { wholeHolding } from "./holders.js";
 
-// Eligibility: a class's earliest member no test of its read's path holds, and the whole stores the decider's scan
-// reads.
-
 /**
  * A prefix's whole stores in source order (the decider's lazy scan, `scanAt`), returns, parameter defaults and
  * single-site arguments among them (a single-site parameter starts as its argument), or its adds. A read of a host
@@ -154,12 +151,8 @@ function eligibleAt(
 }
 
 /**
- * The eligibility index of a class, once per class and pass: the tested keys on the chains of its demanded paths as a
- * trie, walked depth first over a segment tree of its members in flow order (each leaf a guard count, each node its
- * least count and the earliest member with it): entering a key adds one to every member a test of that key holds (a
- * branch a range of the flow order, or each member asked where its callable holds more branches than members; an
- * operand region each member it holds, a range of the text order), leaving it undoes that. Each key's eligible member
- * is the earliest with no count.
+ * The eligibility index of a class, once per class and pass: for each tested key on the chains of its demanded paths,
+ * the earliest member (in the class's source order) that no test of that key or of a key above it on the chain holds.
  */
 function eligibility(
   admission: Admission,
@@ -382,7 +375,6 @@ function demandsOf(admission: Admission, asked: Key): readonly Demand[] {
     const demands = new Map<CanonicalKey, Demand[]>();
     const tries = new Map<PlaceId, PrefixNode>();
     for (const group of admission.groups()) {
-      // (a cursor's steps made through the charged boundary, its prefixes its ancestors)
       const path = admission.stepsAt(group);
       const walk = group.key === undefined ? null : keyWalk(admission.pass.contract, group.key);
       let node: PrefixNode = tries.get(group.root) ?? { key: null, below: new Map() };

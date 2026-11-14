@@ -15,8 +15,6 @@ import { landed } from "./landings/landed.js";
 import { permittedAt, unrestricted } from "./permitted.js";
 import { inputsAt, scanAt } from "./scan.js";
 
-// The admitted type at a path, the decision retained after a stop, and the deciding contribution's site.
-
 /**
  * A path copies land in a place that `groups` left out, decided where an answer asks for it (`decide`'s `lazily`):
  * its contents fit, so its decision owes nothing, and its answer is the one deciding it with the copy gives.
@@ -24,11 +22,9 @@ import { inputsAt, scanAt } from "./scan.js";
 function lazily(admission: Admission, place: PlaceId, path: readonly string[]): void {
   const key = keyAt(admission.pass.contract, place, path);
   if (admission.attempted.has(key) || !landed(admission, place, path)) return;
-  // (after a stop admission decides nothing more: such a path is answered from what it retained, `retainedSource`;
-  // nor below a decision that stopped)
+  // (after a stop admission decides nothing more, nor below a decision that stopped)
   if (admission.pass.program.work.stopped !== null || admission.decisionStopped(place, path))
     return;
-  // (in a completion pass a decision of the completion's own, recorded with its work, #1526)
   const closure = admission.pass.closure;
   const decide = (): void => void admission.decide({ root: place, path }, true);
   if (closure !== undefined && closure !== null && closure.open) closure.decide(key, decide);

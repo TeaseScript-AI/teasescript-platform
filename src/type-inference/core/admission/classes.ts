@@ -22,8 +22,6 @@ import { permittedAt } from "./permitted.js";
 import { writtenSourceRead } from "./walk.js";
 import type { Reads } from "../inherited/reads.js";
 
-// Alias classes: the class of a whole store or an add, by its stable source path and chain end.
-
 /**
  * For the tests: while `withoutChains` runs, no chain of copies is resolved, so a class is a read's own; the published
  * records, their writers included, are the same either way (the oracle sets a link's writer aside).
@@ -50,7 +48,6 @@ export function addRest(d: Definition, rest: Rest): Rest {
 
 /** The key an alias's read stands for at `rest` below its store; `null` beside or above its cell, where no read is. */
 export function aliasKeyAt(contract: Contract, alias: Alias, asked: Rest): Key | null {
-  // (a cursor's span read one step at a time below the alias's cell, its key a cursor's)
   const rest = restRef(contract, asked);
   if (rest.length < alias.at.length || alias.at.some((step, index) => rest.at(index) !== step))
     return null;
@@ -58,9 +55,8 @@ export function aliasKeyAt(contract: Contract, alias: Alias, asked: Rest): Key |
 }
 
 /**
- * A key's whole stores, or its adds, by alias class (`aliasKey`), once per pass, in the
- * key's own list (`wholeOf`): their earliest as the representative, the later ones its members (`members`); a scan
- * or a check reads the representative, and a member only where it owes something.
+ * A key's whole stores, or its adds, by alias class (`aliasKey`), once per pass, in the key's own list (`wholeOf`):
+ * their earliest as the representative, the later ones its members (`members`).
  */
 export function* grouped(admission: Admission, list: readonly Definition[]): Reads<Definition[]> {
   const out: Definition[] = [];

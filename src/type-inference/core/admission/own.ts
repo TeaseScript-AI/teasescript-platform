@@ -9,8 +9,6 @@ import type { HeldExtra, HeldOwn, OwnStructure } from "./model.js";
 import { fieldsOf, sourceOf } from "./structure.js";
 import { stopsOf } from "./walk.js";
 
-// A place's own contributions besides its copies: from every store, and from its live stores alone.
-
 /**
  * A place's own contributions besides its copies of inheriting places (`hotSets`, `OwnStructure`): each store's
  * literals and constants at their paths (another kind may stand there), its reads of other places' keys and calls'
@@ -52,9 +50,9 @@ export function ownStructure(admission: Admission, place: PlaceId): OwnStructure
 }
 
 /**
- * One store's value's own contributions standing at `base` in its place (`ownStructure`, `touchElements`), put in
- * `out`; `copied` hears of each copy the place's copies list (`copies`), which stands for its source's contents;
- * `out.held`, where given, takes what the held view (`held.ts`) takes beside them (`HeldExtra`).
+ * One store's value's own contributions standing at `base` in its place, put in `out`; `copied` hears of each copy
+ * the place's copies list (`copies`), which stands for its source's contents; `out.held`, where given, takes what the
+ * held view takes beside them (`HeldExtra`).
  */
 export function ownOf(
   admission: Admission,
@@ -111,9 +109,9 @@ export function ownOf(
 }
 
 /**
- * A value's own contribution where it stands in a store (`ownOf`, the held view): a read of its source key, below the
- * path its stop reads into it (`strip`), where it is no operand; else a point where its contract holds scalars or
- * `null` alone, read whole; else what lies below it, anything.
+ * A value's own contribution where it stands in a store: a read of its source key, below the path its stop reads into
+ * it (`strip`), where it is no operand; else a point where its contract holds scalars or `null` alone, read whole;
+ * else what lies below it, anything.
  */
 export function contributionOf(
   admission: Admission,
@@ -152,7 +150,7 @@ function deadCells(admission: Admission, value: PlaceId): ReadonlySet<PlaceId> {
   return out;
 }
 
-/** A place's own contributions from its live stores only (`ownStructure`'s walk), once. */
+/** A place's own contributions from its live stores only, once. */
 export function liveOwn(admission: Admission, place: PlaceId): HeldOwn | null {
   const known = admission.liveOwns.get(place);
   if (known !== undefined) return known;
@@ -165,7 +163,7 @@ export function liveOwn(admission: Admission, place: PlaceId): HeldOwn | null {
   const below: (readonly string[])[] = [];
   const reads: { readonly at: readonly string[]; readonly source: Key }[] = [];
   const held: HeldExtra = { points: [], reads: [] };
-  // (each live store's own slice of them, the held view's stores of a live group's member, `groupHeld`)
+  // (each live store's own slice of them)
   const stores: HeldOwn[] = [];
   const root = keyOf(place, []);
   let live = false;
